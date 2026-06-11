@@ -1,0 +1,55 @@
+# Maintenance Notes
+
+## Naming
+
+- Public types, methods, and free functions use `snake_case`.
+- Class member variables use Google Style trailing underscores, such as `ring_`
+  and `sqe_`.
+- Wrapper method names should align with the `liburing` C API and usually drop
+  the `io_uring_` prefix, such as `io_uring_submit` to `ring::submit()`.
+
+## liburing Baseline
+
+- The project depends on `liburing >= 2.2`.
+- Avoid adding wrappers for newer or niche helpers unless the version baseline is
+  intentionally raised.
+
+## Base Layer Rules
+
+- `bupp::base` is a thin C API to C++ object mapping.
+- Public wrapper headers declare API; method implementations live under
+  `src/base/` and are compiled into `bupp`.
+- Keep `liburing` return semantics: successful values are non-negative and
+  failures are negative `errno` values.
+- Do not throw exceptions from base wrapper calls.
+- Do not add executors, coroutines, schedulers, or higher-level async models to
+  the base layer.
+- The base layer does not own file descriptor, buffer, address, path, or message
+  lifetimes unless a type explicitly documents ownership.
+
+## Adding Wrappers
+
+- Prefer direct wrappers around stable `liburing >= 2.2` APIs.
+- Keep ownership explicit: `ring` and `probe` own resources, while SQE and CQE
+  wrappers are non-owning views.
+- Match existing method shape before introducing a new abstraction.
+- Add declarations to `include/bupp/base/` and definitions to `src/base/`.
+- Keep `bupp` buildable as both a static and shared library with
+  `BUILD_SHARED_LIBS`.
+
+## Doxygen
+
+- Every public method in a wrapper header should have a Doxygen comment.
+- Each wrapper method should include an `@see` reference to the corresponding C
+  API or C structure.
+- Run `scripts/check-doc.sh` before submitting documentation changes.
+
+## Tests
+
+- Keep base-layer tests under `tests/base/`.
+- Ensure each public base header can be included independently.
+- Cover runtime `ring + nop` behavior where the host supports `io_uring`.
+- Treat expected unavailable-host errors such as `-ENOSYS`, `-EPERM`, and
+  `-EACCES` as covered error paths.
+- Add compile coverage for new `prep_*` wrappers without submitting those SQEs
+  to the kernel.

@@ -1,0 +1,13 @@
+function(bupp_add_base_example name source)
+  add_executable(bupp_base_${name} ${source})
+  target_link_libraries(bupp_base_${name} PRIVATE bupp::bupp)
+  bupp_set_project_warnings(bupp_base_${name})
+endfunction()
+
+bupp_add_base_example(nop nop.cpp)
+bupp_add_base_example(probe probe.cpp)
+bupp_add_base_example(timeout timeout.cpp)
+bupp_add_base_example(file_io file_io.cpp)
+bupp_add_base_example(poll poll.cpp)
+bupp_add_base_example(provided_buffers provided_buffers.cpp)
+bupp_add_base_example(echo_server echo_server.cpp)

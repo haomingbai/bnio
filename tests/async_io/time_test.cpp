@@ -1,0 +1,28 @@
+#include <bupp/async_io/time.h>
+
+#include <chrono>
+#include <type_traits>
+
+namespace {
+
+void test_chrono_aliases() {
+  static_assert(
+      std::is_same_v<bupp::async_io::steady_clock, std::chrono::steady_clock>);
+  static_assert(
+      std::is_same_v<bupp::async_io::clock, bupp::async_io::steady_clock>);
+  static_assert(
+      std::is_same_v<bupp::async_io::system_clock, std::chrono::system_clock>);
+  static_assert(std::is_same_v<bupp::async_io::duration,
+                               bupp::async_io::clock::duration>);
+  static_assert(std::is_same_v<bupp::async_io::time_point,
+                               bupp::async_io::clock::time_point>);
+  static_assert(std::is_same_v<bupp::async_io::system_time_point,
+                               bupp::async_io::system_clock::time_point>);
+}
+
+}  // namespace
+
+int main() {
+  test_chrono_aliases();
+  return 0;
+}
