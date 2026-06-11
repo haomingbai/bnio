@@ -3,7 +3,7 @@
 #define BUPP_LINUX_DETAIL_IO_CONTEXT_NATIVE_IO_H_
 
 #include <bupp/async_io/linux/socket_address.h>
-#include <bupp/base/submission_queue_entry.h>
+#include <bupp/base/linux/submission_queue_entry.h>
 #include <bupp/buffer.h>
 #include <bupp/linux/io_context.h>
 #include <bupp/tcp.h>

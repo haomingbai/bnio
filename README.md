@@ -36,9 +36,9 @@ cmake -S . -B build-static -DBUILD_SHARED_LIBS=OFF
 
 ## Examples
 
-The `examples/base` directory builds several small executables covering probes,
-NOP completions, timers, file I/O, poll readiness, provided buffers, and a small
-echo server event loop.
+The `examples/base/linux` directory builds several small executables covering
+probes, NOP completions, timers, file I/O, poll readiness, provided buffers, and
+a small echo server event loop.
 
 ## Async I/O Layer
 

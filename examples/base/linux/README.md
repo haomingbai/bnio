@@ -30,18 +30,18 @@ cmake --build build
 ## Run
 
 ```sh
-./build/examples/base/bupp_base_probe
-./build/examples/base/bupp_base_nop
-./build/examples/base/bupp_base_timeout
-./build/examples/base/bupp_base_file_io
-./build/examples/base/bupp_base_poll
-./build/examples/base/bupp_base_provided_buffers
+./build/examples/base/linux/bupp_base_probe
+./build/examples/base/linux/bupp_base_nop
+./build/examples/base/linux/bupp_base_timeout
+./build/examples/base/linux/bupp_base_file_io
+./build/examples/base/linux/bupp_base_poll
+./build/examples/base/linux/bupp_base_provided_buffers
 ```
 
 Run the echo server in one terminal:
 
 ```sh
-./build/examples/base/bupp_base_echo_server
+./build/examples/base/linux/bupp_base_echo_server
 ```
 
 Then connect from another terminal:

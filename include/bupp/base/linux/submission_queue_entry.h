@@ -1,6 +1,6 @@
 #pragma once
-#ifndef BUPP_BASE_SUBMISSION_QUEUE_ENTRY_H_
-#define BUPP_BASE_SUBMISSION_QUEUE_ENTRY_H_
+#ifndef BUPP_BASE_LINUX_SUBMISSION_QUEUE_ENTRY_H_
+#define BUPP_BASE_LINUX_SUBMISSION_QUEUE_ENTRY_H_
 
 #include <bupp/export.h>
 #include <liburing.h>
@@ -325,4 +325,4 @@ class BUPP_EXPORT submission_queue_entry {
 
 }  // namespace bupp::base
 
-#endif  // BUPP_BASE_SUBMISSION_QUEUE_ENTRY_H_
+#endif  // BUPP_BASE_LINUX_SUBMISSION_QUEUE_ENTRY_H_

@@ -1,6 +1,6 @@
-#include <bupp/base/completion_queue_entry.h>
-#include <bupp/base/ring.h>
-#include <bupp/base/submission_queue_entry.h>
+#include <bupp/base/linux/completion_queue_entry.h>
+#include <bupp/base/linux/ring.h>
+#include <bupp/base/linux/submission_queue_entry.h>
 #include <liburing.h>
 
 #include <cerrno>

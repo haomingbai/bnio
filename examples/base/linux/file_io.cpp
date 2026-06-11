@@ -1,5 +1,5 @@
-#include <bupp/base/ring.h>
-#include <bupp/base/submission_queue_entry.h>
+#include <bupp/base/linux/ring.h>
+#include <bupp/base/linux/submission_queue_entry.h>
 #include <fcntl.h>
 #include <unistd.h>
 

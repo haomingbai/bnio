@@ -16,11 +16,11 @@ set(BUPP_PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/tcp_endpoint.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/time.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/completion_queue_entry.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/params.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/probe.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/ring.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/submission_queue_entry.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/completion_queue_entry.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/params.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/probe.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/ring.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/submission_queue_entry.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/buffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/bupp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/export.h

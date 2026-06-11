@@ -2,7 +2,7 @@ add_library(bupp)
 add_library(bupp::bupp ALIAS bupp)
 
 add_subdirectory(async_io)
-add_subdirectory(base)
+add_subdirectory(base/linux)
 
 target_compile_features(bupp PUBLIC cxx_std_20)
 target_link_libraries(bupp PUBLIC PkgConfig::LIBURING

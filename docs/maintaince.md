@@ -18,7 +18,7 @@
 
 - `bupp::base` is a thin C API to C++ object mapping.
 - Public wrapper headers declare API; method implementations live under
-  `src/base/` and are compiled into `bupp`.
+  `src/base/linux/` and are compiled into `bupp`.
 - Keep `liburing` return semantics: successful values are non-negative and
   failures are negative `errno` values.
 - Do not throw exceptions from base wrapper calls.
@@ -33,7 +33,7 @@
 - Keep ownership explicit: `ring` and `probe` own resources, while SQE and CQE
   wrappers are non-owning views.
 - Match existing method shape before introducing a new abstraction.
-- Add declarations to `include/bupp/base/` and definitions to `src/base/`.
+- Add declarations to `include/bupp/base/linux/` and definitions to `src/base/linux/`.
 - Keep `bupp` buildable as both a static and shared library with
   `BUILD_SHARED_LIBS`.
 
@@ -46,7 +46,7 @@
 
 ## Tests
 
-- Keep base-layer tests under `tests/base/`.
+- Keep base-layer tests under `tests/base/linux/`.
 - Ensure each public base header can be included independently.
 - Cover runtime `ring + nop` behavior where the host supports `io_uring`.
 - Treat expected unavailable-host errors such as `-ENOSYS`, `-EPERM`, and

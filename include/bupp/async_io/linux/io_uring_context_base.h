@@ -3,8 +3,8 @@
 #define BUPP_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_H_
 
 #include <bupp/async_io/time.h>
-#include <bupp/base/ring.h>
-#include <bupp/base/submission_queue_entry.h>
+#include <bupp/base/linux/ring.h>
+#include <bupp/base/linux/submission_queue_entry.h>
 #include <bupp/export.h>
 
 #include <atomic>

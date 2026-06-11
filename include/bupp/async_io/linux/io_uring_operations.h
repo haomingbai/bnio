@@ -9,7 +9,7 @@
 #include <bupp/async_io/linux/socket_address.h>
 #include <bupp/async_io/socket_view.h>
 #include <bupp/async_io/time.h>
-#include <bupp/base/submission_queue_entry.h>
+#include <bupp/base/linux/submission_queue_entry.h>
 #include <liburing.h>
 #include <sys/socket.h>
 #include <sys/uio.h>

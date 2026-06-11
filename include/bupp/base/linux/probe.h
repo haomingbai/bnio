@@ -1,8 +1,8 @@
 #pragma once
-#ifndef BUPP_BASE_PROBE_H_
-#define BUPP_BASE_PROBE_H_
+#ifndef BUPP_BASE_LINUX_PROBE_H_
+#define BUPP_BASE_LINUX_PROBE_H_
 
-#include <bupp/base/ring.h>
+#include <bupp/base/linux/ring.h>
 #include <bupp/export.h>
 #include <liburing.h>
 
@@ -108,4 +108,4 @@ class BUPP_EXPORT probe {
 
 }  // namespace bupp::base
 
-#endif  // BUPP_BASE_PROBE_H_
+#endif  // BUPP_BASE_LINUX_PROBE_H_

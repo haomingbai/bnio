@@ -1,15 +1,15 @@
 #if defined(BUPP_HEADER_TEST_BASE)
 #include <bupp/base.h>
 #elif defined(BUPP_HEADER_TEST_COMPLETION_QUEUE_ENTRY)
-#include <bupp/base/completion_queue_entry.h>
+#include <bupp/base/linux/completion_queue_entry.h>
 #elif defined(BUPP_HEADER_TEST_PARAMS)
-#include <bupp/base/params.h>
+#include <bupp/base/linux/params.h>
 #elif defined(BUPP_HEADER_TEST_PROBE)
-#include <bupp/base/probe.h>
+#include <bupp/base/linux/probe.h>
 #elif defined(BUPP_HEADER_TEST_RING)
-#include <bupp/base/ring.h>
+#include <bupp/base/linux/ring.h>
 #elif defined(BUPP_HEADER_TEST_SUBMISSION_QUEUE_ENTRY)
-#include <bupp/base/submission_queue_entry.h>
+#include <bupp/base/linux/submission_queue_entry.h>
 #elif defined(BUPP_HEADER_TEST_BUPP)
 #include <bupp/bupp.h>
 #else

@@ -1,6 +1,6 @@
 #pragma once
-#ifndef BUPP_BASE_PARAMS_H_
-#define BUPP_BASE_PARAMS_H_
+#ifndef BUPP_BASE_LINUX_PARAMS_H_
+#define BUPP_BASE_LINUX_PARAMS_H_
 
 #include <bupp/export.h>
 #include <liburing.h>
@@ -176,4 +176,4 @@ class BUPP_EXPORT params {
 
 }  // namespace bupp::base
 
-#endif  // BUPP_BASE_PARAMS_H_
+#endif  // BUPP_BASE_LINUX_PARAMS_H_
