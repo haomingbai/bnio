@@ -348,7 +348,7 @@ sequenceDiagram
 
     K-->>Ring: CQE ready
     UCtx->>Ring: collect_ready_cqes()
-    UCtx->>Op: result = res; execute()
+    UCtx->>Op: (result = res), execute()
     Op-->>User: set_value(receiver, bytes)
 ```
 
