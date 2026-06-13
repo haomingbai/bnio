@@ -1,0 +1,3 @@
+add_executable(bupp_io_context_http_echo_server http_echo_server.cpp)
+target_link_libraries(bupp_io_context_http_echo_server PRIVATE bupp::bupp)
+bupp_set_project_warnings(bupp_io_context_http_echo_server)

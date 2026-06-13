@@ -443,6 +443,9 @@ struct my_receiver {
 
 ## Examples
 
+For runnable commands and the optional benchmark setup, see
+[`examples.md`](examples.md).
+
 ### Base Layer — NOP Request
 
 Minimal ring → SQE → submit → CQE cycle:
@@ -516,6 +519,14 @@ Full echo server at the base layer, demonstrating the raw ring/SQE/CQE
 dispatch pattern with manual accept → recv → echo send loops:
 
 [`examples/base/linux/echo_server.cpp`](../examples/base/linux/echo_server.cpp)
+
+### io_context Layer — HTTP Echo Server
+
+Full HTTP echo server at the `io_context` layer, demonstrating repeated
+`async_accept`, per-connection `async_receive`/`async_send`, detached operation
+lifetime through a local holder, and `ctx.run()` as the server event loop:
+
+[`examples/io_context/http_echo_server`](../examples/io_context/http_echo_server)
 
 ### Choosing the Right Layer
 

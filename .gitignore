@@ -1,4 +1,4 @@
-build/
+build*/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
@@ -10,3 +10,4 @@ Testing/
 *.dylib
 *.dll
 *.exe
+.artifacts/
