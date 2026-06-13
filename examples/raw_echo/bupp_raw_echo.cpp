@@ -79,7 +79,7 @@ void do_accept(io_context& ctx, tcp_acceptor& a) {
 int main() {
   io_context_options opts;
   opts.platform.uring.entries = 1024;
-  opts.platform.uring.setup_flags = IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN;
+  opts.platform.uring.setup_flags = IORING_SETUP_COOP_TASKRUN;
   io_context ctx(opts);
   if (!ctx.is_open()) { std::cerr << "ctx unavailable\n"; return 1; }
 

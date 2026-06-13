@@ -655,7 +655,7 @@ int main(int argc, char** argv) {
   bupp::io_context_options opts;
   opts.platform.uring.entries = 1024;
   opts.platform.uring.setup_flags =
-      IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN;
+      IORING_SETUP_COOP_TASKRUN;
   bupp::io_context context(opts);
   if (!context.is_open()) {
     std::cerr << "http_echo_server: io_context is not available\n";
