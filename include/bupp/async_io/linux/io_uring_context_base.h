@@ -12,6 +12,7 @@
 #include <cerrno>
 #include <condition_variable>
 #include <cstdint>
+#include <linux/io_uring.h>
 #include <mutex>
 #include <utility>
 
@@ -31,9 +32,18 @@ struct io_uring_context_options {
   /**
    * io_uring setup flags passed to the kernel.
    *
+   * Defaults to SINGLE_ISSUER | COOP_TASKRUN — both are supported since
+   * Linux 5.19 and eliminate kernel-side locking / reduce context switches
+   * for single-threaded event loops.
+   *
+   * Set to 0 explicitly if you need compatibility with kernels older than
+   * 5.19 (the library will still fall back automatically on EINVAL).
+   *
    * @see io_uring_queue_init
+   * @see docs/design/io_uring-setup.md
    */
-  unsigned setup_flags = 0;
+  unsigned setup_flags =
+      IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN;
 
   /**
    * Maximum number of ready CQEs collected in one batch.
@@ -49,6 +59,33 @@ struct io_uring_context_options {
    * Maximum number of CQE completions kept on the local run queue.
    */
   unsigned cqe_inline_completion_threshold = 8;
+
+  /**
+   * When true, adds IORING_SETUP_SQPOLL to setup_flags.
+   *
+   * A kernel thread polls the SQ ring continuously, eliminating
+   * io_uring_enter syscalls for submission.  The trade-off is one
+   * dedicated CPU core consumed by the kernel poller thread.
+   *
+   * @see docs/design/io_uring-setup.md
+   */
+  bool enable_sqpoll = false;
+
+  /**
+   * CPU affinity hint for the SQPOLL kernel thread.
+   *
+   * 0 means no preference.
+   *
+   * @see io_uring_params::sq_thread_cpu
+   */
+  unsigned sqpoll_thread_cpu = 0;
+
+  /**
+   * SQPOLL idle timeout in milliseconds before the kernel thread parks.
+   *
+   * @see io_uring_params::sq_thread_idle
+   */
+  unsigned sqpoll_idle_ms = 1000;
 };
 
 /**
@@ -208,7 +245,7 @@ class BUPP_EXPORT io_uring_context {
   template <class Operation>
   int prepare(Operation& operation) noexcept {
     assert_running();
-    std::lock_guard lock(uring_mutex_);
+    auto lock = lock_uring();
     return prepare_locked(operation);
   }
 
@@ -228,7 +265,7 @@ class BUPP_EXPORT io_uring_context {
 
     int submit_result = 0;
     {
-      std::lock_guard lock(uring_mutex_);
+      auto lock = lock_uring();
       const int prepare_result = prepare_locked(operation);
       if (prepare_result < 0) {
         return prepare_result;
@@ -254,7 +291,7 @@ class BUPP_EXPORT io_uring_context {
 
     bool should_notify = false;
     {
-      std::lock_guard lock(uring_mutex_);
+      auto lock = lock_uring();
       auto prepare = [this](auto& operation) noexcept {
         return prepare_locked(operation);
       };
@@ -294,6 +331,18 @@ class BUPP_EXPORT io_uring_context {
    */
   [[nodiscard]] bool is_in_context() const noexcept;
 
+  /**
+   * Returns the kernel io_uring feature flags reported at ring creation.
+   *
+   * Use IORING_FEAT_* macros to test individual capabilities, e.g.:
+   *   if (ctx.kernel_features() & IORING_FEAT_RECVSEND_BUNDLE) { ... }
+   *
+   * @see io_uring_params::features
+   */
+  [[nodiscard]] unsigned kernel_features() const noexcept {
+    return kernel_features_;
+  }
+
  private:
   /**
    * Lifecycle state for the context run loop.
@@ -328,23 +377,27 @@ class BUPP_EXPORT io_uring_context {
   struct operation_queue;
 
   /**
-   * Prepares an operation while the uring mutex is already held.
+   * Acquires the uring mutex (or skips it when SINGLE_ISSUER is active).
+   *
+   * Returns a unique_lock that may be in an unlocked state when the kernel
+   * guarantees single-issuer semantics.
    */
-  template <class Operation>
-  int prepare_locked(Operation& operation) noexcept {
-    if (!ring_.is_open()) {
-      return -EINVAL;
+  [[nodiscard]] std::unique_lock<std::mutex> lock_uring() const noexcept {
+    std::unique_lock lock(uring_mutex_, std::defer_lock);
+    if (!single_issuer_) {
+      lock.lock();
     }
-
-    bupp::base::submission_queue_entry sqe = ring_.get_sqe();
-    if (sqe.raw() == nullptr) {
-      return -EAGAIN;
-    }
-
-    operation.prepare(sqe);
-    sqe.set_data(static_cast<io_uring_operation_base*>(&operation));
-    return 0;
+    return lock;
   }
+
+  /**
+   * Initialises the ring with the supplied flags, retrying without
+   * SINGLE_ISSUER / COOP_TASKRUN / SQPOLL on EINVAL.
+   *
+   * @return 0 on success, or a negative errno.
+   */
+  int init_ring_params(unsigned entries, unsigned flags,
+                       bupp::base::params& queue_params) noexcept;
 
   /**
    * Submits prepared SQEs while the uring mutex is already held.
@@ -465,6 +518,27 @@ class BUPP_EXPORT io_uring_context {
 
   bupp::base::ring ring_;
   mutable std::mutex uring_mutex_;
+  bool single_issuer_ = false;
+  unsigned kernel_features_ = 0;
+
+  /**
+   * Prepares an operation while the uring mutex is already held.
+   */
+  template <class Operation>
+  int prepare_locked(Operation& operation) noexcept {
+    if (!ring_.is_open()) {
+      return -EINVAL;
+    }
+
+    bupp::base::submission_queue_entry sqe = ring_.get_sqe();
+    if (sqe.raw() == nullptr) {
+      return -EAGAIN;
+    }
+
+    operation.prepare(sqe);
+    sqe.set_data(static_cast<io_uring_operation_base*>(&operation));
+    return 0;
+  }
   // Cross-thread task publication stack. run() workers drain it in one batch
   // and reverse the batch before moving work into their local operation_queue.
   std::atomic<io_uring_operation_base*> global_tasks_{nullptr};

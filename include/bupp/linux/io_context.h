@@ -494,6 +494,27 @@ class BUPP_EXPORT io_context {
                                        int flags = 0);
 
   /**
+   * Creates a queued composed sender that writes all bytes from a buffer.
+   *
+   * Unlike async_send, which may complete after a partial write, async_write
+   * loops internally and completes only when every byte has been handed to
+   * the kernel or an error / stop occurs.
+   *
+   * This is the equivalent of asio::async_write.
+   */
+  template <class Buffer>
+  [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
+                                  Buffer&& buffer, int flags = 0);
+
+  /**
+   * Creates a queued composed sender that writes all bytes to an owned TCP
+   * socket.
+   */
+  template <class Buffer>
+  [[nodiscard]] auto async_write(tcp_socket& socket, Buffer&& buffer,
+                                  int flags = 0);
+
+  /**
    * Creates a queued sender that accepts one connection from a non-owning
    * listening socket view.
    */
@@ -803,5 +824,6 @@ class BUPP_EXPORT io_context {
 
 #include <bupp/io_context_cpo.h>
 #include <bupp/linux/detail/io_context_native_io.h>
+#include <bupp/linux/detail/io_context_write_operation.h>
 
 #endif  // BUPP_LINUX_IO_CONTEXT_H_

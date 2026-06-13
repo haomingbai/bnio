@@ -167,12 +167,19 @@ struct parsed_request {
     body = request.method + " " + request.target + "\n";
   }
 
+  static constexpr std::string_view k_prefix =
+      "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ";
+
   std::string response;
-  response.reserve(128 + body.size());
-  response += "HTTP/1.1 200 OK\r\n";
-  response += "Content-Type: text/plain\r\n";
-  response += "Content-Length: ";
-  response += std::to_string(body.size());
+  response.reserve(k_prefix.size() + 32 +
+                   (request.keep_alive ? 24 : 16) + body.size());
+  response = k_prefix;
+
+  char len_buf[32];
+  const auto [ptr, _] =
+      std::to_chars(len_buf, len_buf + sizeof(len_buf), body.size());
+  response.append(len_buf, ptr - len_buf);
+
   response += "\r\nConnection: ";
   response += request.keep_alive ? "keep-alive" : "close";
   response += "\r\n\r\n";

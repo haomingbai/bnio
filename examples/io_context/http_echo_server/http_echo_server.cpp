@@ -2,6 +2,7 @@
 #include <sys/socket.h>
 
 #include <bexec/bexec.hpp>
+#include <linux/io_uring.h>
 #include <cctype>
 #include <charconv>
 #include <chrono>
@@ -141,16 +142,20 @@ struct parsed_request {
 
     const std::string_view name = trim(line.substr(0, colon));
     const std::string_view value = trim(line.substr(colon + 1));
-    if (iequals(name, "content-length")) {
-      const char* first = value.data();
-      const char* last = value.data() + value.size();
-      const auto [ptr, ec] = std::from_chars(first, last, content_length);
-      if (ec != std::errc{} || ptr != last) {
-        return parse_status::bad_request;
+
+    // Fast path: both headers we care about start with 'c'
+    if (!name.empty() && lower_ascii(name[0]) == 'c') {
+      if (name.size() == 14 && iequals(name, "content-length")) {
+        const char* first = value.data();
+        const char* last = value.data() + value.size();
+        const auto [ptr, ec] = std::from_chars(first, last, content_length);
+        if (ec != std::errc{} || ptr != last) {
+          return parse_status::bad_request;
+        }
+      } else if (name.size() == 10 && iequals(name, "connection")) {
+        saw_connection_close = token_contains(value, "close");
+        saw_connection_keep_alive = token_contains(value, "keep-alive");
       }
-    } else if (iequals(name, "connection")) {
-      saw_connection_close = token_contains(value, "close");
-      saw_connection_keep_alive = token_contains(value, "keep-alive");
     }
   }
 
@@ -178,12 +183,21 @@ struct parsed_request {
     body = request.method + " " + request.target + "\n";
   }
 
+  // Pre-built constant prefix to avoid repeated operator+= calls
+  static constexpr std::string_view k_prefix =
+      "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ";
+
   std::string response;
-  response.reserve(128 + body.size());
-  response += "HTTP/1.1 200 OK\r\n";
-  response += "Content-Type: text/plain\r\n";
-  response += "Content-Length: ";
-  response += std::to_string(body.size());
+  response.reserve(k_prefix.size() + 32 +
+                   (request.keep_alive ? 24 : 16) + body.size());
+  response = k_prefix;
+
+  // std::to_chars avoids the allocation that std::to_string would make
+  char len_buf[32];
+  const auto [ptr, _] =
+      std::to_chars(len_buf, len_buf + sizeof(len_buf), body.size());
+  response.append(len_buf, ptr - len_buf);
+
   response += "\r\nConnection: ";
   response += request.keep_alive ? "keep-alive" : "close";
   response += "\r\n\r\n";
@@ -227,7 +241,6 @@ class session : public std::enable_shared_from_this<session> {
   void start_read();
   void on_read(std::size_t bytes);
   void start_write();
-  void on_write(std::size_t bytes);
   void close() noexcept;
 
   template <class Error>
@@ -237,7 +250,6 @@ class session : public std::enable_shared_from_this<session> {
   bupp::tcp_socket socket_;
   std::string request_;
   std::string response_;
-  std::size_t write_offset_ = 0;
   bool close_after_write_ = false;
   bool closed_ = false;
 };
@@ -493,7 +505,13 @@ class server {
   bool stopping_ = false;
 };
 
-void session::start() { start_read(); }
+void session::start() {
+  // Pre-allocate buffers once per connection to avoid malloc/free on every
+  // keep-alive request.  clear() in libstdc++ preserves capacity.
+  request_.reserve(4096);
+  response_.reserve(512);
+  start_read();
+}
 
 void session::stop() noexcept { (void)socket_.close(); }
 
@@ -534,7 +552,6 @@ void session::on_read(std::size_t bytes) {
       break;
   }
 
-  write_offset_ = 0;
   start_write();
 }
 
@@ -543,37 +560,19 @@ void session::start_write() {
     return;
   }
 
-  const std::size_t remaining = response_.size() - write_offset_;
   auto self = shared_from_this();
   owner_.spawn(
-      owner_.context().async_send(
-          socket_, bupp::buffer(response_.data() + write_offset_, remaining),
-          MSG_NOSIGNAL),
-      [self](std::size_t bytes) { self->on_write(bytes); },
+      owner_.context().async_write(socket_, bupp::buffer(response_), MSG_NOSIGNAL),
+      [self](std::size_t /*bytes*/) {
+        if (self->close_after_write_) {
+          self->close();
+          return;
+        }
+        self->request_.clear();
+        self->response_.clear();
+        self->start_read();
+      },
       [self](const auto& error) { self->on_io_error(error); });
-}
-
-void session::on_write(std::size_t bytes) {
-  if (bytes == 0 || owner_.stopping()) {
-    close();
-    return;
-  }
-
-  write_offset_ += bytes;
-  if (write_offset_ < response_.size()) {
-    start_write();
-    return;
-  }
-
-  if (close_after_write_) {
-    close();
-    return;
-  }
-
-  request_.clear();
-  response_.clear();
-  write_offset_ = 0;
-  start_read();
 }
 
 void session::close() noexcept {
@@ -655,6 +654,8 @@ int main(int argc, char** argv) {
 
   bupp::io_context_options opts;
   opts.platform.uring.entries = 1024;
+  opts.platform.uring.setup_flags =
+      IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN;
   bupp::io_context context(opts);
   if (!context.is_open()) {
     std::cerr << "http_echo_server: io_context is not available\n";

@@ -81,7 +81,6 @@ io_uring_context::~io_uring_context() noexcept { queue_exit(); }
 int io_uring_context::queue_init(
     const io_uring_context_options& options) noexcept {
   global_tasks_.store(nullptr, std::memory_order_release);
-
   io_waiter_active_.store(false, std::memory_order_release);
 
   std::lock_guard lock(uring_mutex_);
@@ -94,9 +93,53 @@ int io_uring_context::queue_init(
   wait_spin_count_ = options.wait_spin_count;
   cqe_inline_completion_threshold_ = options.cqe_inline_completion_threshold;
   wake_task_pending_ = false;
-  const int result = ring_.queue_init(options.entries, options.setup_flags);
+  single_issuer_ = false;
+
+  unsigned flags = options.setup_flags;
+  if (options.enable_sqpoll) {
+    flags |= IORING_SETUP_SQPOLL;
+  }
+
+  bupp::base::params queue_params;
+  if (options.enable_sqpoll) {
+    queue_params.set_sq_thread_cpu(options.sqpoll_thread_cpu);
+    queue_params.set_sq_thread_idle(options.sqpoll_idle_ms);
+  }
+
+  const int result = init_ring_params(options.entries, flags, queue_params);
+
+  if (result >= 0) {
+    single_issuer_ =
+        (queue_params.flags() & IORING_SETUP_SINGLE_ISSUER) != 0;
+    kernel_features_ = queue_params.features();
+  } else {
+    kernel_features_ = 0;
+  }
+
   state_.store(result >= 0 ? context_state::running : context_state::finished,
                std::memory_order_release);
+  return result;
+}
+
+int io_uring_context::init_ring_params(unsigned entries, unsigned flags,
+                                       bupp::base::params& queue_params) noexcept {
+  queue_params.set_flags(flags);
+
+  int result = ring_.queue_init_params(entries, queue_params);
+  if (result >= 0) {
+    return result;
+  }
+
+  // Fallback: retry without new features (SINGLE_ISSUER, COOP_TASKRUN,
+  // SQPOLL) for compatibility with kernels older than 5.19.
+  if (flags != 0) {
+    queue_params.reset();
+    flags &= ~(IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN |
+               IORING_SETUP_SQPOLL);
+    queue_params.set_flags(flags);
+    result = ring_.queue_init_params(entries, queue_params);
+  }
+
   return result;
 }
 
@@ -121,7 +164,7 @@ int io_uring_context::submit() noexcept {
 
   int result = 0;
   {
-    std::lock_guard lock(uring_mutex_);
+    auto lock = lock_uring();
     result = submit_locked();
   }
 
@@ -363,7 +406,7 @@ void io_uring_context::notify_waiters() noexcept {
 }
 
 int io_uring_context::submit_wake_task() noexcept {
-  std::lock_guard lock(uring_mutex_);
+  auto lock = lock_uring();
   return submit_wake_task_locked();
 }
 
@@ -430,7 +473,7 @@ bool io_uring_context::collect_ready_cqes(
 
 unsigned io_uring_context::collect_cqe_tasks(
     operation_queue& cqe_tasks) noexcept {
-  std::lock_guard lock(uring_mutex_);
+  auto lock = lock_uring();
 
   if (!ring_.is_open()) {
     return 0;
