@@ -44,7 +44,7 @@ class async_write_operation : public io_context::operation_base {
 
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_send(socket_.native_handle(),
-                  holder_.data() + offset_,
+                  static_cast<const char*>(holder_.data()) + offset_,
                   total_ - offset_, flags_);
   }
 
