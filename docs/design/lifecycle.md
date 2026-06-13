@@ -18,7 +18,7 @@ graph TB
         O4["tcp_acceptor → socket fd"]
         O5["ssl_context → SSL_CTX*"]
         O6["ssl_stream → SSL* + BIO* + NextLayer"]
-        O7["io_context → io_uring_context + timer thread"]
+        O7["io_context → io_uring_context + timer heap"]
         O8["linux_native::io_uring_context → base::ring"]
     end
 
@@ -224,7 +224,7 @@ resources:
 | `tcp_acceptor` | socket file descriptor |
 | `ssl_context` | `SSL_CTX*` |
 | `ssl_stream<NextLayer>` | `SSL*` + `BIO*` + `NextLayer` |
-| `io_context` | `io_uring_context` + timer thread |
+| `io_context` | `io_uring_context` + timer heap |
 | `io_uring_context` | `base::ring` |
 
 ```cpp

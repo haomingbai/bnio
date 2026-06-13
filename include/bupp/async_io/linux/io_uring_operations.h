@@ -55,6 +55,51 @@ template <class Clock, class Duration>
   return to_kernel_timespec(value.time_since_epoch());
 }
 
+/**
+ * Timeout storage and SQE preparation helper.
+ */
+class timeout_request {
+ public:
+  /**
+   * Creates a zero-duration timeout request.
+   */
+  timeout_request() noexcept = default;
+
+  /**
+   * Creates a timeout request from a chrono duration.
+   */
+  explicit timeout_request(bupp::async_io::duration timeout) noexcept {
+    reset(timeout);
+  }
+
+  /**
+   * Replaces the stored relative timeout.
+   */
+  void reset(bupp::async_io::duration timeout) noexcept {
+    timeout_ = to_kernel_timespec(timeout);
+  }
+
+  /**
+   * Prepares a timeout SQE using the stored timeout.
+   */
+  void prepare_timeout(bupp::base::submission_queue_entry& sqe, unsigned count,
+                       unsigned flags) noexcept {
+    sqe.prep_timeout(&timeout_, count, flags);
+  }
+
+  /**
+   * Prepares a timeout update SQE using the stored timeout.
+   */
+  void prepare_timeout_update(bupp::base::submission_queue_entry& sqe,
+                              std::uint64_t user_data,
+                              unsigned flags) noexcept {
+    sqe.prep_timeout_update(&timeout_, user_data, flags);
+  }
+
+ private:
+  __kernel_timespec timeout_{};
+};
+
 }  // namespace detail
 
 /**

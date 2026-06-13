@@ -144,40 +144,6 @@ struct async_connect_direct_t {
 };
 
 /**
- * Customization point object for Provider::async_wait.
- */
-struct async_wait_t {
-  /**
-   * Invokes async_wait on a provider.
-   */
-  template <class Provider, class Duration>
-  constexpr decltype(auto) operator()(Provider&& provider,
-                                      Duration&& timeout) const
-      noexcept(noexcept(std::forward<Provider>(provider).async_wait(
-          std::forward<Duration>(timeout)))) {
-    return std::forward<Provider>(provider).async_wait(
-        std::forward<Duration>(timeout));
-  }
-};
-
-/**
- * Customization point object for Provider::async_wait_direct.
- */
-struct async_wait_direct_t {
-  /**
-   * Invokes async_wait_direct on a provider.
-   */
-  template <class Provider, class Duration>
-  constexpr decltype(auto) operator()(Provider&& provider,
-                                      Duration&& timeout) const
-      noexcept(noexcept(std::forward<Provider>(provider).async_wait_direct(
-          std::forward<Duration>(timeout)))) {
-    return std::forward<Provider>(provider).async_wait_direct(
-        std::forward<Duration>(timeout));
-  }
-};
-
-/**
  * Customization point object instance for async_receive.
  */
 inline constexpr async_receive_t async_receive{};
@@ -216,16 +182,6 @@ inline constexpr async_connect_t async_connect{};
  * Customization point object instance for async_connect_direct.
  */
 inline constexpr async_connect_direct_t async_connect_direct{};
-
-/**
- * Customization point object instance for async_wait.
- */
-inline constexpr async_wait_t async_wait{};
-
-/**
- * Customization point object instance for async_wait_direct.
- */
-inline constexpr async_wait_direct_t async_wait_direct{};
 
 /**
  * Concept satisfied when a provider returns a sender from async_receive.

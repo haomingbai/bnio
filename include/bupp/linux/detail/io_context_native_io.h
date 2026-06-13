@@ -12,9 +12,6 @@
 #include <bexec/completion_signatures.hpp>
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
-#include <cerrno>
-#include <chrono>
-#include <concepts>
 #include <cstddef>
 #include <system_error>
 #include <type_traits>
@@ -24,22 +21,6 @@ namespace bupp {
 
 /** @cond BUPP_DETAIL */
 namespace detail {
-
-[[nodiscard]] constexpr __kernel_timespec to_kernel_timespec(
-    async_io::duration value) noexcept {
-  auto seconds = std::chrono::duration_cast<std::chrono::seconds>(value);
-  auto nanoseconds =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(value - seconds);
-  if (nanoseconds.count() < 0) {
-    --seconds;
-    nanoseconds += std::chrono::seconds(1);
-  }
-
-  __kernel_timespec result{};
-  result.tv_sec = static_cast<decltype(result.tv_sec)>(seconds.count());
-  result.tv_nsec = static_cast<decltype(result.tv_nsec)>(nanoseconds.count());
-  return result;
-}
 
 [[nodiscard]] inline std::error_code errno_result(int result) noexcept {
   return std::error_code(-result, std::generic_category());
@@ -51,6 +32,63 @@ template <class Receiver>
   auto token = bexec::query(env, bexec::get_stop_token);
   return token.stop_requested();
 }
+
+template <class Receiver>
+class timer_wait_operation : public timer_operation_base {
+ public:
+  timer_wait_operation(steady_timer& timer, Receiver receiver)
+      : timer_operation_base(timer.context()),
+        timer_(&timer.timer_),
+        receiver_(std::move(receiver)) {}
+
+  void start() noexcept {
+    if (stop_requested(receiver_)) {
+      this->timer_completion_ = timer_completion_kind::stopped;
+      (void)this->timer_context_->native_context().post(*this);
+      return;
+    }
+
+    this->timer_context_->start_timer_wait(*this, *timer_);
+  }
+
+  void execute() noexcept override {
+    const timer_completion_kind completion = this->timer_completion();
+    if (completion == timer_completion_kind::stopped) {
+      bexec::set_stopped(std::move(receiver_));
+    } else {
+      bexec::set_value(std::move(receiver_));
+    }
+  }
+
+ private:
+  detail::timer_slot* timer_;
+  std::remove_cvref_t<Receiver> receiver_;
+};
+
+class timer_wait_sender {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  explicit timer_wait_sender(steady_timer& timer) noexcept : timer_(&timer) {}
+
+  template <class Receiver>
+  auto connect(Receiver receiver) && {
+    return timer_wait_operation<std::remove_cvref_t<Receiver>>(
+        *timer_, std::move(receiver));
+  }
+
+  template <class Receiver>
+  auto connect(Receiver receiver) const& {
+    return timer_wait_operation<std::remove_cvref_t<Receiver>>(
+        *timer_, std::move(receiver));
+  }
+
+ private:
+  steady_timer* timer_;
+};
 
 template <class Model, class Receiver>
 class native_io_operation : public io_context::operation_base {
@@ -292,37 +330,6 @@ class connect_model {
   async_io::linux_native::socket_address address_;
 };
 
-class wait_model {
- public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
-
-  explicit wait_model(async_io::duration timeout) noexcept
-      : timeout_(to_kernel_timespec(timeout)) {}
-
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
-    sqe.prep_timeout(&timeout_, 0, 0);
-  }
-
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0 && result != -ETIME;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
-  template <class Receiver>
-  void set_value(Receiver&& receiver, int, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver));
-  }
-
- private:
-  __kernel_timespec timeout_;
-};
-
 }  // namespace detail
 /** @endcond */
 
@@ -393,24 +400,6 @@ auto io_context::async_send_direct(tcp_socket& socket, Buffer&& buffer,
   return async_send_direct(socket.view(), std::forward<Buffer>(buffer), flags);
 }
 
-template <class Rep, class Period>
-auto io_context::async_wait(std::chrono::duration<Rep, Period> timeout) {
-  return detail::native_io_sender(
-      *this,
-      detail::wait_model(
-          std::chrono::duration_cast<async_io::duration>(timeout)),
-      submit_mode::queued);
-}
-
-template <class Rep, class Period>
-auto io_context::async_wait_direct(std::chrono::duration<Rep, Period> timeout) {
-  return detail::native_io_sender(
-      *this,
-      detail::wait_model(
-          std::chrono::duration_cast<async_io::duration>(timeout)),
-      submit_mode::direct);
-}
-
 inline auto io_context::async_accept(async_io::listening_socket_view socket,
                                      int flags) {
   return detail::native_io_sender(*this, detail::accept_model(socket, flags),
@@ -451,6 +440,10 @@ inline auto io_context::async_connect(tcp_socket& socket,
 inline auto io_context::async_connect_direct(tcp_socket& socket,
                                              const ip::endpoint& endpoint) {
   return async_connect_direct(socket.view(), endpoint);
+}
+
+inline auto steady_timer::async_wait() {
+  return detail::timer_wait_sender(*this);
 }
 
 }  // namespace bupp
