@@ -32,18 +32,21 @@ struct io_uring_context_options {
   /**
    * io_uring setup flags passed to the kernel.
    *
-   * Defaults to SINGLE_ISSUER | COOP_TASKRUN — both are supported since
-   * Linux 5.19 and eliminate kernel-side locking / reduce context switches
-   * for single-threaded event loops.
+   * Defaults to COOP_TASKRUN (supported since Linux 5.19) — lets the kernel
+   * defer task_work, reducing involuntary context switches.
    *
-   * Set to 0 explicitly if you need compatibility with kernels older than
-   * 5.19 (the library will still fall back automatically on EINVAL).
+   * Set IORING_SETUP_SINGLE_ISSUER explicitly when you guarantee that all
+   * submissions come from a single thread (benchmarks, dedicated event-loop
+   * threads).  Do NOT set it when multiple threads may call post() or
+   * timer::cancel() / timer::expires_at() — those paths submit SQEs that
+   * would race with the run thread.
+   *
+   * The library falls back automatically on EINVAL for kernels < 5.19.
    *
    * @see io_uring_queue_init
    * @see docs/design/io_uring-setup.md
    */
-  unsigned setup_flags =
-      IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN;
+  unsigned setup_flags = IORING_SETUP_COOP_TASKRUN;
 
   /**
    * Maximum number of ready CQEs collected in one batch.

@@ -130,12 +130,10 @@ int io_uring_context::init_ring_params(unsigned entries, unsigned flags,
     return result;
   }
 
-  // Fallback: retry without new features (SINGLE_ISSUER, COOP_TASKRUN,
-  // SQPOLL) for compatibility with kernels older than 5.19.
+  // Fallback: retry without COOP_TASKRUN / SQPOLL for kernels < 5.19.
   if (flags != 0) {
     queue_params.reset();
-    flags &= ~(IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN |
-               IORING_SETUP_SQPOLL);
+    flags &= ~(IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SQPOLL);
     queue_params.set_flags(flags);
     result = ring_.queue_init_params(entries, queue_params);
   }
