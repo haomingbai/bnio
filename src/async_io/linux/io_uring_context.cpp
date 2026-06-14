@@ -27,9 +27,8 @@ void execute_tasks(io_uring_operation_base* tasks) noexcept {
   }
 }
 
-unsigned prepare_queue_params(
-    const io_uring_context_options& options,
-    bupp::base::params& queue_params) noexcept {
+unsigned prepare_queue_params(const io_uring_context_options& options,
+                              bupp::base::params& queue_params) noexcept {
   unsigned flags = options.setup_flags;
   if (options.enable_sqpoll) {
     flags |= IORING_SETUP_SQPOLL;
@@ -92,9 +91,11 @@ io_uring_context::~io_uring_context() noexcept { queue_exit(); }
 
 void io_uring_context::apply_context_options(
     const io_uring_context_options& options) noexcept {
-  cqe_batch_window_ = options.cqe_batch_window == 0 ? 1 : options.cqe_batch_window;
+  cqe_batch_window_ =
+      options.cqe_batch_window == 0 ? 1 : options.cqe_batch_window;
   wait_spin_count_ = options.wait_spin_count;
   cqe_inline_completion_threshold_ = options.cqe_inline_completion_threshold;
+  local_queue_threshold_ = options.local_queue_threshold;
 }
 
 int io_uring_context::queue_init(
@@ -116,8 +117,7 @@ int io_uring_context::queue_init(
   const int result = init_ring_params(options.entries, flags, queue_params);
 
   if (result >= 0) {
-    single_issuer_ =
-        (queue_params.flags() & IORING_SETUP_SINGLE_ISSUER) != 0;
+    single_issuer_ = (queue_params.flags() & IORING_SETUP_SINGLE_ISSUER) != 0;
     kernel_features_ = queue_params.features();
   } else {
     kernel_features_ = 0;
@@ -128,8 +128,9 @@ int io_uring_context::queue_init(
   return result;
 }
 
-int io_uring_context::init_ring_params(unsigned entries, unsigned flags,
-                                       bupp::base::params& queue_params) noexcept {
+int io_uring_context::init_ring_params(
+    unsigned entries, unsigned flags,
+    bupp::base::params& queue_params) noexcept {
   queue_params.set_flags(flags);
 
   int result = ring_.queue_init_params(entries, queue_params);
@@ -268,6 +269,9 @@ void io_uring_context::assert_running() const noexcept {
 
 io_uring_context::run_phase io_uring_context::handle_run_ready_tasks(
     operation_queue& local_tasks) noexcept {
+  // Reset the local-queue budget for this pass through the run loop.
+  local_task_budget_ = local_queue_threshold_;
+
   if (io_uring_operation_base* operations =
           reverse_tasks(local_tasks.pop_all())) {
     execute_tasks(operations);
@@ -507,11 +511,26 @@ unsigned io_uring_context::collect_cqe_tasks(
 void io_uring_context::dispatch_cqe_tasks(
     operation_queue& cqe_tasks, unsigned task_count,
     operation_queue& local_tasks) noexcept {
+  // Tier 1 — inline: small batch, always push to the local queue.
   if (task_count <= cqe_inline_completion_threshold_) {
     local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
     return;
   }
 
+  // Tier 2 — local queue: within the per-iteration budget.
+  // When local_queue_threshold_ is 0 (default) this tier is unlimited and
+  // CQEs never spill to the global queue on this path.
+  if (local_queue_threshold_ == 0 ||
+      (local_task_budget_ > 0 && task_count <= local_task_budget_)) {
+    local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
+    if (local_queue_threshold_ > 0) {
+      local_task_budget_ -= task_count;
+    }
+    return;
+  }
+
+  // Tier 3 — global: local budget exhausted or batch exceeds remaining
+  // budget; publish to the global (cross-thread) queue.
   push_global_tasks(cqe_tasks);
 }
 

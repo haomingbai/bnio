@@ -141,9 +141,8 @@ void test_ssl_sender_concepts() {
   using shutdown_sender =
       decltype(std::declval<scheduler_type&>().async_shutdown(
           std::declval<stream_type&>()));
-  using receive_sender =
-      decltype(std::declval<scheduler_type&>().async_receive(
-          std::declval<stream_type&>(), std::declval<bupp::mutable_buffer>()));
+  using receive_sender = decltype(std::declval<scheduler_type&>().async_receive(
+      std::declval<stream_type&>(), std::declval<bupp::mutable_buffer>()));
   using send_sender = decltype(std::declval<scheduler_type&>().async_send(
       std::declval<stream_type&>(), std::declval<bupp::const_buffer>()));
 

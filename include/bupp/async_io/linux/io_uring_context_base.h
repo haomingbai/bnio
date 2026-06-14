@@ -6,13 +6,13 @@
 #include <bupp/base/linux/ring.h>
 #include <bupp/base/linux/submission_queue_entry.h>
 #include <bupp/export.h>
+#include <linux/io_uring.h>
 
 #include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <condition_variable>
 #include <cstdint>
-#include <linux/io_uring.h>
 #include <mutex>
 #include <utility>
 
@@ -60,8 +60,22 @@ struct io_uring_context_options {
 
   /**
    * Maximum number of CQE completions kept on the local run queue.
+   *
+   * CQE batches at or below this count are dispatched inline to the
+   * thread-local task queue.  Batches between this and
+   * local_queue_threshold go to the local queue with a budget check.
    */
-  unsigned cqe_inline_completion_threshold = 8;
+  unsigned cqe_inline_completion_threshold = 64;
+
+  /**
+   * Upper bound for CQE tasks dispatched to the local queue per run-loop
+   * iteration.  When the cumulative local-queue sink exceeds this value
+   * the remaining CQEs are published to the global (cross-thread) queue
+   * instead.
+   *
+   * 0 (the default) means no limit.
+   */
+  unsigned local_queue_threshold = 0;
 
   /**
    * When true, adds IORING_SETUP_SQPOLL to setup_flags.
@@ -289,7 +303,7 @@ class BUPP_EXPORT io_uring_context {
    * one SQE, and submit() submits all SQEs prepared so far.
    */
   template <class Function>
-  void submit_batch(Function&& function) noexcept {
+  void submit_batch(Function&& fn) noexcept {
     assert_running();
 
     bool should_notify = false;
@@ -306,7 +320,7 @@ class BUPP_EXPORT io_uring_context {
         return result;
       };
 
-      std::forward<Function>(function)(prepare, submit);
+      std::forward<Function>(fn)(prepare, submit);
     }
 
     if (should_notify) {
@@ -346,6 +360,36 @@ class BUPP_EXPORT io_uring_context {
     return kernel_features_;
   }
 
+  // --- manual batch submission (caller holds uring_mutex_) ---
+
+  [[nodiscard]] std::unique_lock<std::mutex> lock_uring() const noexcept {
+    std::unique_lock lock(uring_mutex_, std::defer_lock);
+    if (!single_issuer_) {
+      lock.lock();
+    }
+    return lock;
+  }
+
+  template <class Operation>
+  int prepare_locked(Operation& operation) noexcept {
+    if (!ring_.is_open()) {
+      return -EINVAL;
+    }
+
+    bupp::base::submission_queue_entry sqe = ring_.get_sqe();
+    if (sqe.raw() == nullptr) {
+      return -EAGAIN;
+    }
+
+    operation.prepare(sqe);
+    sqe.set_data(static_cast<io_uring_operation_base*>(&operation));
+    return 0;
+  }
+
+  int submit_locked() noexcept;
+
+  void notify_waiters() noexcept;
+
  private:
   /**
    * Lifecycle state for the context run loop.
@@ -380,20 +424,6 @@ class BUPP_EXPORT io_uring_context {
   struct operation_queue;
 
   /**
-   * Acquires the uring mutex (or skips it when SINGLE_ISSUER is active).
-   *
-   * Returns a unique_lock that may be in an unlocked state when the kernel
-   * guarantees single-issuer semantics.
-   */
-  [[nodiscard]] std::unique_lock<std::mutex> lock_uring() const noexcept {
-    std::unique_lock lock(uring_mutex_, std::defer_lock);
-    if (!single_issuer_) {
-      lock.lock();
-    }
-    return lock;
-  }
-
-  /**
    * Initialises the ring with the supplied flags, retrying without
    * SINGLE_ISSUER / COOP_TASKRUN / SQPOLL on EINVAL.
    *
@@ -405,13 +435,7 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Applies configuration from options to context member variables.
    */
-  void apply_context_options(
-      const io_uring_context_options& options) noexcept;
-
-  /**
-   * Submits prepared SQEs while the uring mutex is already held.
-   */
-  int submit_locked() noexcept;
+  void apply_context_options(const io_uring_context_options& options) noexcept;
 
   /**
    * Verifies in debug builds that the context is running.
@@ -467,11 +491,6 @@ class BUPP_EXPORT io_uring_context {
    * Moves globally published tasks into a local queue.
    */
   [[nodiscard]] bool move_global_tasks(operation_queue& local_tasks) noexcept;
-
-  /**
-   * Wakes threads waiting for context work.
-   */
-  void notify_waiters() noexcept;
 
   /**
    * Submits a wake-up SQE for an active io_uring waiter.
@@ -530,24 +549,6 @@ class BUPP_EXPORT io_uring_context {
   bool single_issuer_ = false;
   unsigned kernel_features_ = 0;
 
-  /**
-   * Prepares an operation while the uring mutex is already held.
-   */
-  template <class Operation>
-  int prepare_locked(Operation& operation) noexcept {
-    if (!ring_.is_open()) {
-      return -EINVAL;
-    }
-
-    bupp::base::submission_queue_entry sqe = ring_.get_sqe();
-    if (sqe.raw() == nullptr) {
-      return -EAGAIN;
-    }
-
-    operation.prepare(sqe);
-    sqe.set_data(static_cast<io_uring_operation_base*>(&operation));
-    return 0;
-  }
   // Cross-thread task publication stack. run() workers drain it in one batch
   // and reverse the batch before moving work into their local operation_queue.
   std::atomic<io_uring_operation_base*> global_tasks_{nullptr};
@@ -561,6 +562,9 @@ class BUPP_EXPORT io_uring_context {
   unsigned wait_spin_count_ = io_uring_context_options{}.wait_spin_count;
   unsigned cqe_inline_completion_threshold_ =
       io_uring_context_options{}.cqe_inline_completion_threshold;
+  unsigned local_queue_threshold_ =
+      io_uring_context_options{}.local_queue_threshold;
+  unsigned local_task_budget_ = 0;
 
   static thread_local io_uring_context* current_context_;
   static thread_local operation_queue* current_local_tasks_;

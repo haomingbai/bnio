@@ -137,28 +137,28 @@ io_context::post_scheduler io_context::get_post_scheduler() noexcept {
 }
 
 std::size_t io_context::queued_io_size() const noexcept {
-  std::lock_guard lock(queue_mutex_);
-  return pending_io_count_;
+  return pending_io_count_.load(std::memory_order_acquire);
 }
 
 void io_context::enqueue_io(operation_base& operation) noexcept {
-  bool should_arm_timer = false;
-  bool should_flush = false;
-  {
-    std::lock_guard lock(queue_mutex_);
-    operation.pending_next = pending_io_head_;
-    pending_io_head_ = &operation;
-    ++pending_io_count_;
+  // Lock-free push onto the pending-I/O stack (CAS, same pattern as
+  // push_timer_operation).  No allocation, no mutex.
+  operation_base* current_head =
+      pending_io_head_.load(std::memory_order_acquire);
+  do {
+    operation.pending_next = current_head;
+  } while (!pending_io_head_.compare_exchange_weak(current_head, &operation,
+                                                   std::memory_order_acq_rel,
+                                                   std::memory_order_acquire));
 
-    should_arm_timer = pending_io_count_ == 1;
-    should_flush = linux_options_.max_queued_io_operations == 0 ||
-                   pending_io_count_ >= linux_options_.max_queued_io_operations;
-  }
+  const std::size_t prev =
+      pending_io_count_.fetch_add(1, std::memory_order_acq_rel);
 
-  if (should_arm_timer) {
+  if (prev == 0) {
     arm_flush_timer();
   }
-  if (should_flush) {
+  if (linux_options_.max_queued_io_operations > 0 &&
+      prev + 1 >= linux_options_.max_queued_io_operations) {
     (void)flush_io_queue();
   }
 }
@@ -187,78 +187,83 @@ std::error_code io_context::flush_io_queue() noexcept {
   return flush_operations(operations);
 }
 
+// Fill SQEs from *chain into the io_uring ring until the ring is full or the
+// chain is exhausted.  Operations that fail preparation (non-EAGAIN errors)
+// are detached from the chain and appended to **failed_tail via a
+// double-pointer.
+//
+// Returns the first operation that could not be prepared (-EAGAIN), or nullptr
+// if the entire chain was consumed.
+static io_context::operation_base* try_prepare_batch(
+    io_context::operation_base* chain,
+    async_io::linux_native::io_uring_context& native_ctx,
+    io_context::operation_base** failed_tail, int& first_error) noexcept {
+  while (chain != nullptr) {
+    io_context::operation_base* next = chain->pending_next;
+    chain->pending_next = nullptr;
+
+    const int result = native_ctx.prepare_locked(*chain);
+
+    if (result == -EAGAIN) {
+      chain->pending_next = next;  // restore link, caller will retry
+      return chain;
+    }
+
+    if (result < 0) {
+      chain->complete_submit_error(result);
+      if (first_error == 0) first_error = result;
+      *failed_tail = chain;
+      failed_tail = &chain->pending_next;
+      chain = next;
+      continue;
+    }
+
+    // SQE prepared successfully — operation is now owned by the ring.
+    chain = next;
+  }
+
+  return nullptr;
+}
+
 std::error_code io_context::flush_operations(
     operation_base* operations) noexcept {
+  if (operations == nullptr) return {};
+
   int first_error = 0;
   operation_base* failed_head = nullptr;
-  operation_base* failed_tail = nullptr;
+  operation_base** failed_tail = &failed_head;
 
-  auto append_failed = [&](operation_base& operation) noexcept {
-    operation.pending_next = nullptr;
-    if (failed_tail == nullptr) {
-      failed_head = &operation;
-    } else {
-      failed_tail->pending_next = &operation;
+  {
+    auto lock = native_context_.lock_uring();
+
+    while (operations != nullptr) {
+      operations = try_prepare_batch(operations, native_context_, failed_tail,
+                                     first_error);
+      const int result = native_context_.submit_locked();
+      if (result < 0 && first_error == 0) first_error = result;
     }
-    failed_tail = &operation;
-  };
+  }
 
-  native_context_.submit_batch([&](auto& prepare, auto& submit) noexcept {
-    std::size_t prepared_count = 0;
-
-    for (operation_base* operation = operations; operation != nullptr;) {
-      operation_base* next = operation->pending_next;
-      operation->pending_next = nullptr;
-
-      int prepare_result = prepare(*operation);
-      if (prepare_result == -EAGAIN && prepared_count != 0) {
-        const int submit_result = submit();
-        if (submit_result < 0 && first_error == 0) {
-          first_error = submit_result;
-        }
-        prepared_count = 0;
-        prepare_result = prepare(*operation);
-      }
-
-      if (prepare_result < 0) {
-        operation->complete_submit_error(prepare_result);
-        append_failed(*operation);
-        if (first_error == 0) {
-          first_error = prepare_result;
-        }
-      } else {
-        ++prepared_count;
-      }
-
-      operation = next;
-    }
-
-    if (prepared_count != 0) {
-      const int submit_result = submit();
-      if (submit_result < 0 && first_error == 0) {
-        first_error = submit_result;
-      }
-    }
-  });
+  native_context_.notify_waiters();
 
   while (failed_head != nullptr) {
-    operation_base* operation = failed_head;
+    operation_base* op = failed_head;
     failed_head = failed_head->pending_next;
-    operation->pending_next = nullptr;
-    (void)native_context_.post(*operation);
+    op->pending_next = nullptr;
+    (void)native_context_.post(*op);
   }
 
-  if (first_error < 0) {
-    return make_submit_error(first_error);
-  }
+  if (first_error < 0) return make_submit_error(first_error);
   return {};
 }
 
 io_context::operation_base* io_context::take_pending_io() noexcept {
-  std::lock_guard lock(queue_mutex_);
-  operation_base* operations = reverse_operations(pending_io_head_);
-  pending_io_head_ = nullptr;
-  pending_io_count_ = 0;
+  operation_base* operations =
+      pending_io_head_.exchange(nullptr, std::memory_order_acq_rel);
+  pending_io_count_.store(0, std::memory_order_release);
+  if (operations != nullptr) {
+    operations = reverse_operations(operations);
+  }
   return operations;
 }
 

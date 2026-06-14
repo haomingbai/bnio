@@ -229,7 +229,7 @@ concept connects_stream =
       {
         async_connect(scheduler, stream, std::forward<Endpoint>(endpoint))
       } -> bexec::sender;
-};
+    };
 
 }  // namespace bupp
 

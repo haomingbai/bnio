@@ -219,9 +219,8 @@ void test_sender_concepts() {
                                   bupp::tcp_socket, bupp::const_buffer>);
   static_assert(bupp::sends_bytes<bupp::io_context::dispatch_scheduler,
                                   bupp::tcp_socket, bupp::const_buffer>);
-  static_assert(
-      bupp::accepts_connections<bupp::io_context::post_scheduler,
-                                bupp::tcp_acceptor>);
+  static_assert(bupp::accepts_connections<bupp::io_context::post_scheduler,
+                                          bupp::tcp_acceptor>);
   static_assert(
       bupp::connects_stream<bupp::io_context::post_scheduler, bupp::tcp_socket,
                             const bupp::ip::endpoint&>);
@@ -426,9 +425,9 @@ void test_dispatch_scheduler_schedule_runs_inline_in_context() {
   auto state = std::make_shared<schedule_state>();
   state->order.reserve(1);
 
-  auto operation = bexec::connect(
-      bexec::schedule(context.get_post_scheduler()),
-      dispatch_inline_outer_receiver{state, &context});
+  auto operation =
+      bexec::connect(bexec::schedule(context.get_post_scheduler()),
+                     dispatch_inline_outer_receiver{state, &context});
   bexec::start(operation);
   context.run();
 

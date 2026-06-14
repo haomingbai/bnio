@@ -1,7 +1,8 @@
 #include <bupp/bupp.h>
 #include <sys/socket.h>
-#include <bexec/bexec.hpp>
+
 #include <array>
+#include <bexec/bexec.hpp>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -20,26 +21,28 @@ constexpr std::size_t k_buffer_size = 4096;
 // For a benchmark we keep ops alive until shutdown.
 std::vector<std::unique_ptr<io_context::operation_base>> g_ops;
 
-template<class S, class R>
+template <class S, class R>
 void spawn(S&& snd, R&& recv) {
   using op_t = decltype(bexec::connect(std::declval<S>(), std::declval<R>()));
   struct holder : io_context::operation_base {
     op_t op;
-    holder(S&& s, R&& r) : op(bexec::connect(std::forward<S>(s), std::forward<R>(r))) {}
+    holder(S&& s, R&& r)
+        : op(bexec::connect(std::forward<S>(s), std::forward<R>(r))) {}
     void prepare(base::submission_queue_entry&) noexcept override {}
     int prepare_for_submit() noexcept override { return 0; }
     void complete_submit_error(int) noexcept override {}
     void execute() noexcept override {}
     void start() noexcept { bexec::start(op); }
   };
-  auto h = std::make_unique<holder>(std::forward<S>(snd), std::forward<R>(recv));
+  auto h =
+      std::make_unique<holder>(std::forward<S>(snd), std::forward<R>(recv));
   h->start();
   g_ops.push_back(std::move(h));
 }
 
 struct conn : std::enable_shared_from_this<conn> {
   io_context& ctx;
-  tcp_socket  sk;
+  tcp_socket sk;
   std::array<char, k_buffer_size> buf{};
 
   conn(io_context& c, tcp_socket s) : ctx(c), sk(std::move(s)) {}
@@ -47,21 +50,28 @@ struct conn : std::enable_shared_from_this<conn> {
   void close() noexcept { (void)sk.close(); }
 
   void recv() {
-    struct R { std::shared_ptr<conn> c;
-      void set_value(std::size_t m) noexcept { if(m){c->send(m);}else c->close(); }
+    struct R {
+      std::shared_ptr<conn> c;
+      void set_value(std::size_t m) noexcept {
+        if (m) {
+          c->send(m);
+        } else
+          c->close();
+      }
       void set_error(std::error_code) noexcept { c->close(); }
       void set_stopped() noexcept { c->close(); }
-	    };
+    };
     auto scheduler = ctx.get_post_scheduler();
     spawn(scheduler.async_receive(sk, buffer(buf), 0), R{shared_from_this()});
   }
 
   void send(std::size_t n) {
-    struct R { std::shared_ptr<conn> c;
+    struct R {
+      std::shared_ptr<conn> c;
       void set_value(std::size_t) noexcept { c->recv(); }
       void set_error(std::error_code) noexcept { c->close(); }
       void set_stopped() noexcept { c->close(); }
-	    };
+    };
     auto scheduler = ctx.get_post_scheduler();
     spawn(scheduler.async_write(sk, const_buffer(buf.data(), n)),
           R{shared_from_this()});
@@ -69,16 +79,21 @@ struct conn : std::enable_shared_from_this<conn> {
 };
 
 void do_accept(io_context& ctx, tcp_acceptor& a) {
-	  struct R { io_context& ctx; tcp_acceptor& a;
-	    void set_value(tcp_socket sk) noexcept { std::make_shared<conn>(ctx,std::move(sk))->go(); do_accept(ctx,a); }
-	    void set_error(std::error_code) noexcept {}
-	    void set_stopped() noexcept {}
-	  };
+  struct R {
+    io_context& ctx;
+    tcp_acceptor& a;
+    void set_value(tcp_socket sk) noexcept {
+      std::make_shared<conn>(ctx, std::move(sk))->go();
+      do_accept(ctx, a);
+    }
+    void set_error(std::error_code) noexcept {}
+    void set_stopped() noexcept {}
+  };
   auto scheduler = ctx.get_post_scheduler();
-  spawn(scheduler.async_accept(a, SOCK_CLOEXEC), R{ctx,a});
+  spawn(scheduler.async_accept(a, SOCK_CLOEXEC), R{ctx, a});
 }
 
-} // namespace
+}  // namespace
 
 int main(int argc, char** argv) {
   std::uint16_t port = k_port;
@@ -90,7 +105,10 @@ int main(int argc, char** argv) {
   opts.platform.uring.entries = 1024;
   opts.platform.uring.setup_flags = IORING_SETUP_COOP_TASKRUN;
   io_context ctx(opts);
-  if (!ctx.is_open()) { std::cerr << "ctx unavailable\n"; return 1; }
+  if (!ctx.is_open()) {
+    std::cerr << "ctx unavailable\n";
+    return 1;
+  }
 
   tcp_acceptor a;
   if (const std::error_code ec = a.open(ip::tcp::v4())) {

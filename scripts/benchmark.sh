@@ -12,7 +12,6 @@ DURATION="${DURATION:-10s}"
 MSG_SIZE="${MSG_SIZE:-1024}"
 BUPP_PORT_RAW="${BUPP_PORT_RAW:-8090}"
 ASIO_PORT_RAW="${ASIO_PORT_RAW:-8091}"
-BUPP_DIRECT_PORT_RAW="${BUPP_DIRECT_PORT_RAW:-8092}"
 
 FETCH_ASIO=false
 EXTRA_CMAKE_ARGS=()
@@ -76,7 +75,7 @@ echo "=== cmake configure ==="
 cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" "${CMAKE_ARGS[@]}"
 
 echo "=== build raw echo targets ==="
-cmake --build "${BUILD_DIR}" --target bupp_raw_echo bupp_raw_echo_direct asio_raw_echo raw_echo_client
+cmake --build "${BUILD_DIR}" --target bupp_raw_echo asio_raw_echo raw_echo_client
 
 if [[ "${PERF}" == "1" ]]; then
   mkdir -p "${ARTIFACTS}"
@@ -134,8 +133,6 @@ run_raw "bupp_raw" "${BUILD_DIR}/examples/raw_echo/bupp_raw_echo" \
   "${BUPP_PORT_RAW}" "raw-bupp"
 run_raw "asio_raw" "${BUILD_DIR}/examples/raw_echo/asio_raw_echo" \
   "${ASIO_PORT_RAW}" "raw-asio"
-run_raw "bupp_raw_direct" "${BUILD_DIR}/examples/raw_echo/bupp_raw_echo_direct" \
-  "${BUPP_DIRECT_PORT_RAW}" "raw-bupp-direct"
 
 if [[ "${PERF}" == "1" ]]; then
   echo "perf data: ${ARTIFACTS}/"

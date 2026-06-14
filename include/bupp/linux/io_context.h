@@ -317,7 +317,7 @@ class BUPP_EXPORT io_context {
     ~operation_base() override = default;
 
     /**
-     * Intrusive next pointer used by the queued submission list.
+     * Intrusive next pointer used by the lock-free pending-I/O stack.
      */
     operation_base* pending_next = nullptr;
 
@@ -468,9 +468,9 @@ class BUPP_EXPORT io_context {
                                      int flags = 0) const;
 
     template <class Buffer>
-    [[nodiscard]] auto async_receive_direct(
-        async_io::stream_socket_view socket, Buffer&& buffer,
-        int flags = 0) const;
+    [[nodiscard]] auto async_receive_direct(async_io::stream_socket_view socket,
+                                            Buffer&& buffer,
+                                            int flags = 0) const;
 
     template <class Buffer>
     [[nodiscard]] auto async_receive_direct(tcp_socket& socket, Buffer&& buffer,
@@ -518,11 +518,11 @@ class BUPP_EXPORT io_context {
     [[nodiscard]] auto async_connect(tcp_socket& socket,
                                      const ip::endpoint& endpoint) const;
 
-    [[nodiscard]] auto async_connect_direct(
-        async_io::stream_socket_view socket, const ip::endpoint& endpoint) const;
+    [[nodiscard]] auto async_connect_direct(async_io::stream_socket_view socket,
+                                            const ip::endpoint& endpoint) const;
 
-    [[nodiscard]] auto async_connect_direct(
-        tcp_socket& socket, const ip::endpoint& endpoint) const;
+    [[nodiscard]] auto async_connect_direct(tcp_socket& socket,
+                                            const ip::endpoint& endpoint) const;
 
     template <class NextLayer>
     [[nodiscard]] auto async_handshake(ssl_stream<NextLayer>& stream,
@@ -542,8 +542,8 @@ class BUPP_EXPORT io_context {
                                             int flags = 0) const;
 
     template <class NextLayer, class Buffer>
-    [[nodiscard]] auto async_send(ssl_stream<NextLayer>& stream, Buffer&& buffer,
-                                  int flags = 0) const;
+    [[nodiscard]] auto async_send(ssl_stream<NextLayer>& stream,
+                                  Buffer&& buffer, int flags = 0) const;
 
     template <class NextLayer, class Buffer>
     [[nodiscard]] auto async_send_direct(ssl_stream<NextLayer>& stream,
@@ -556,15 +556,15 @@ class BUPP_EXPORT io_context {
     [[nodiscard]] auto async_shutdown_direct(
         ssl_stream<NextLayer>& stream) const;
 
-    friend bool operator==(basic_scheduler lhs,
-                           basic_scheduler rhs) noexcept {
+    friend bool operator==(basic_scheduler lhs, basic_scheduler rhs) noexcept {
       return lhs.context_ == rhs.context_;
     }
 
    private:
     friend class io_context;
 
-    explicit basic_scheduler(io_context& context) noexcept : context_(&context) {}
+    explicit basic_scheduler(io_context& context) noexcept
+        : context_(&context) {}
 
     io_context* context_;
   };
@@ -760,7 +760,7 @@ class BUPP_EXPORT io_context {
    */
   template <class Buffer>
   [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
-                                  Buffer&& buffer, int flags = 0);
+                                 Buffer&& buffer, int flags = 0);
 
   /**
    * Creates a queued composed sender that writes all bytes to an owned TCP
@@ -768,7 +768,7 @@ class BUPP_EXPORT io_context {
    */
   template <class Buffer>
   [[nodiscard]] auto async_write(tcp_socket& socket, Buffer&& buffer,
-                                  int flags = 0);
+                                 int flags = 0);
 
   /**
    * Creates a queued sender that accepts one connection from a non-owning
@@ -890,7 +890,8 @@ class BUPP_EXPORT io_context {
   /**
    * Posts an operation for execution on the context run loop.
    */
-  void post(async_io::linux_native::io_uring_operation_base& operation) noexcept;
+  void post(
+      async_io::linux_native::io_uring_operation_base& operation) noexcept;
 
   class timer_wakeup_operation
       : public async_io::linux_native::io_uring_operation_base {
@@ -1062,9 +1063,8 @@ class BUPP_EXPORT io_context {
   timer_update_operation timer_update_operation_;
   timer_driver_operation timer_driver_operation_;
 
-  mutable std::mutex queue_mutex_;
-  operation_base* pending_io_head_ = nullptr;
-  std::size_t pending_io_count_ = 0;
+  std::atomic<operation_base*> pending_io_head_{nullptr};
+  std::atomic<std::size_t> pending_io_count_{0};
 
   timer_state_data timers_;
   steady_timer queued_io_flush_timer_;
@@ -1085,8 +1085,7 @@ std::error_code io_context::basic_scheduler<Kind>::flush_io_queue()
 }
 
 template <io_context::schedule_kind Kind>
-std::size_t io_context::basic_scheduler<Kind>::queued_io_size()
-    const noexcept {
+std::size_t io_context::basic_scheduler<Kind>::queued_io_size() const noexcept {
   return context_->queued_io_size();
 }
 
@@ -1248,9 +1247,8 @@ auto io_context::basic_scheduler<Kind>::async_receive_direct(
 
 template <io_context::schedule_kind Kind>
 template <class NextLayer, class Buffer>
-auto io_context::basic_scheduler<Kind>::async_send(ssl_stream<NextLayer>& stream,
-                                                   Buffer&& buffer,
-                                                   int flags) const {
+auto io_context::basic_scheduler<Kind>::async_send(
+    ssl_stream<NextLayer>& stream, Buffer&& buffer, int flags) const {
   return context_->async_send(stream, std::forward<Buffer>(buffer), flags);
 }
 

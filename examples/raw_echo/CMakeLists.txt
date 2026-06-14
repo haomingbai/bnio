@@ -3,11 +3,6 @@ add_executable(bupp_raw_echo bupp_raw_echo.cpp)
 target_link_libraries(bupp_raw_echo PRIVATE bupp::bupp)
 bupp_set_project_warnings(bupp_raw_echo)
 
-# ---- bupp raw echo server (direct submission) ----
-add_executable(bupp_raw_echo_direct bupp_raw_echo_direct.cpp)
-target_link_libraries(bupp_raw_echo_direct PRIVATE bupp::bupp)
-bupp_set_project_warnings(bupp_raw_echo_direct)
-
 if(BUPP_BUILD_ASIO_EXAMPLES)
   # ---- asio raw echo server (for comparison) ----
   add_executable(asio_raw_echo asio_raw_echo.cpp)

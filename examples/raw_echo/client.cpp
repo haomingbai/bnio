@@ -1,5 +1,4 @@
 #include <asio.hpp>
-
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -30,8 +29,7 @@ constexpr int k_default_duration_sec = 10;
 }
 
 int main(int argc, char** argv) {
-  const auto port =
-      static_cast<std::uint16_t>(parse_arg(argv, argc, 1, 8090));
+  const auto port = static_cast<std::uint16_t>(parse_arg(argv, argc, 1, 8090));
   const auto connections =
       static_cast<int>(parse_arg(argv, argc, 2, k_default_connections));
   const auto duration_sec =
@@ -99,9 +97,9 @@ int main(int argc, char** argv) {
   const double secs = std::chrono::duration<double>(end - start).count();
   const std::uint64_t n = total.load();
   const double rate = static_cast<double>(n) / secs;
-  const double throughput =
-      static_cast<double>(n) * static_cast<double>(message_size) / secs / 1024.0 /
-      1024.0;
+  const double throughput = static_cast<double>(n) *
+                            static_cast<double>(message_size) / secs / 1024.0 /
+                            1024.0;
   std::cout << "connections: " << connections << "\n"
             << "message_size: " << message_size << " bytes\n"
             << "duration: " << secs << " s\n"

@@ -56,9 +56,7 @@ class async_write_operation : public io_context::operation_base {
     bexec::set_error(std::move(receiver_), errno_result(result));
   }
 
-  void start() noexcept {
-    ctx_->enqueue_io(*this);
-  }
+  void start() noexcept { ctx_->enqueue_io(*this); }
 
   void execute() noexcept override {
     if (this->result < 0) {
@@ -130,7 +128,7 @@ class async_write_sender {
 
 template <class Buffer>
 auto io_context::async_write(async_io::stream_socket_view socket,
-                              Buffer&& buffer, int flags) {
+                             Buffer&& buffer, int flags) {
   auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
   return detail::async_write_sender(*this, socket, std::move(holder), flags);
 }
