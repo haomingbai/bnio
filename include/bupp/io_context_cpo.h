@@ -2,6 +2,8 @@
 #ifndef BUPP_IO_CONTEXT_CPO_H_
 #define BUPP_IO_CONTEXT_CPO_H_
 
+#include <bupp/async_io/dns.h>
+
 #include <bexec/scheduler.hpp>
 #include <bexec/sender.hpp>
 #include <type_traits>
@@ -146,6 +148,40 @@ struct async_connect_direct_t {
 };
 
 /**
+ * Customization point object for Provider::async_resolve.
+ */
+struct async_resolve_t {
+  /**
+   * Invokes async_resolve on a provider with an owned query object and result
+   * view.
+   */
+  template <class Provider, class Query, class ResultView>
+  constexpr decltype(auto) operator()(Provider&& provider, Query&& query,
+                                      ResultView&& result) const
+      noexcept(noexcept(std::forward<Provider>(provider).async_resolve(
+          std::forward<Query>(query), std::forward<ResultView>(result)))) {
+    return std::forward<Provider>(provider).async_resolve(
+        std::forward<Query>(query), std::forward<ResultView>(result));
+  }
+
+  /**
+   * Invokes async_resolve on a provider with host, service, and result view
+   * arguments.
+   */
+  template <class Provider, class Host, class Service, class ResultView>
+  constexpr decltype(auto) operator()(Provider&& provider, Host&& host,
+                                      Service&& service,
+                                      ResultView&& result) const
+      noexcept(noexcept(std::forward<Provider>(provider).async_resolve(
+          std::forward<Host>(host), std::forward<Service>(service),
+          std::forward<ResultView>(result)))) {
+    return std::forward<Provider>(provider).async_resolve(
+        std::forward<Host>(host), std::forward<Service>(service),
+        std::forward<ResultView>(result));
+  }
+};
+
+/**
  * Customization point object instance for async_receive.
  */
 inline constexpr async_receive_t async_receive{};
@@ -184,6 +220,11 @@ inline constexpr async_connect_t async_connect{};
  * Customization point object instance for async_connect_direct.
  */
 inline constexpr async_connect_direct_t async_connect_direct{};
+
+/**
+ * Customization point object instance for async_resolve.
+ */
+inline constexpr async_resolve_t async_resolve{};
 
 /**
  * Concept satisfied when a provider returns a sender from async_receive.
@@ -228,6 +269,19 @@ concept connects_stream =
     requires(Scheduler& scheduler, Stream& stream, Endpoint&& endpoint) {
       {
         async_connect(scheduler, stream, std::forward<Endpoint>(endpoint))
+      } -> bexec::sender;
+    };
+
+/**
+ * Concept satisfied when a scheduler returns a sender from async_resolve.
+ */
+template <class Scheduler, class Query>
+concept resolves_dns =
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Query&& query,
+             async_io::dns_result_view result) {
+      {
+        async_resolve(scheduler, std::forward<Query>(query), result)
       } -> bexec::sender;
     };
 

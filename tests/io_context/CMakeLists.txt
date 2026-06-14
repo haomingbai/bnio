@@ -7,6 +7,7 @@ function(bupp_add_io_context_test name source)
 endfunction()
 
 bupp_add_io_context_test(buffer buffer_test.cpp)
+bupp_add_io_context_test(dns dns_test.cpp)
 bupp_add_io_context_test(io_context io_context_test.cpp)
 bupp_add_io_context_test(ssl ssl_test.cpp)
 bupp_add_io_context_test(tcp tcp_test.cpp)

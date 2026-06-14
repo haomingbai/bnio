@@ -3,6 +3,7 @@ set(BUPP_PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/address.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/buffer_view.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/descriptor_view.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/dns.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/ip/address.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/ip/endpoint.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/ip/tcp.h

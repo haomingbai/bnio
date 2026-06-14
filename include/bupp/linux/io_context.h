@@ -17,6 +17,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <string_view>
 #include <system_error>
 #include <type_traits>
 #include <unordered_map>
@@ -524,6 +525,13 @@ class BUPP_EXPORT io_context {
     [[nodiscard]] auto async_connect_direct(tcp_socket& socket,
                                             const ip::endpoint& endpoint) const;
 
+    [[nodiscard]] auto async_resolve(async_io::dns_query query,
+                                     async_io::dns_result_view result) const;
+
+    [[nodiscard]] auto async_resolve(std::string_view host,
+                                     std::string_view service,
+                                     async_io::dns_result_view result) const;
+
     template <class NextLayer>
     [[nodiscard]] auto async_handshake(ssl_stream<NextLayer>& stream,
                                        ssl_handshake_type type) const;
@@ -820,6 +828,21 @@ class BUPP_EXPORT io_context {
    */
   [[nodiscard]] auto async_connect_direct(tcp_socket& socket,
                                           const ip::endpoint& endpoint);
+
+  /**
+   * Creates a sender that resolves a DNS query into caller-provided result
+   * storage on the context run loop.
+   */
+  [[nodiscard]] auto async_resolve(async_io::dns_query query,
+                                   async_io::dns_result_view result);
+
+  /**
+   * Creates a sender that resolves a host and service into caller-provided
+   * result storage on the context run loop.
+   */
+  [[nodiscard]] auto async_resolve(std::string_view host,
+                                   std::string_view service,
+                                   async_io::dns_result_view result);
 
   /**
    * Creates a sender that performs an SSL/TLS handshake on an SSL stream.
@@ -1214,6 +1237,19 @@ template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_connect_direct(
     tcp_socket& socket, const ip::endpoint& endpoint) const {
   return context_->async_connect_direct(socket, endpoint);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_resolve(
+    async_io::dns_query query, async_io::dns_result_view result) const {
+  return context_->async_resolve(std::move(query), result);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_resolve(
+    std::string_view host, std::string_view service,
+    async_io::dns_result_view result) const {
+  return context_->async_resolve(host, service, result);
 }
 
 template <io_context::schedule_kind Kind>

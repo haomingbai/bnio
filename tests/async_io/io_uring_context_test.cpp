@@ -5,6 +5,7 @@
 
 #include <array>
 #include <bexec/operation_state.hpp>
+#include <bexec/sender.hpp>
 #include <bexec/stop_token.hpp>
 #include <cassert>
 #include <cerrno>
@@ -35,6 +36,7 @@ using bupp::async_io::linux_native::io_uring_read_operation;
 using bupp::async_io::linux_native::io_uring_readv_operation;
 using bupp::async_io::linux_native::io_uring_recv_operation;
 using bupp::async_io::linux_native::io_uring_recvmsg_operation;
+using bupp::async_io::linux_native::io_uring_resolve_operation;
 using bupp::async_io::linux_native::io_uring_send_operation;
 using bupp::async_io::linux_native::io_uring_sendmsg_operation;
 using bupp::async_io::linux_native::io_uring_timeout_operation;
@@ -94,6 +96,50 @@ struct receiver {
     state->signal = signal_kind::stopped;
     state->in_context = context != nullptr && context->is_in_context();
     if (stop_on_completion && context != nullptr) {
+      (void)context->stop();
+    }
+  }
+};
+
+struct resolve_state {
+  signal_kind signal = signal_kind::none;
+  std::size_t endpoint_count = 0;
+  bool in_context = false;
+  std::error_code error;
+};
+
+struct resolve_receiver {
+  resolve_state* state = nullptr;
+  io_uring_context* context = nullptr;
+
+  void set_value(std::size_t count) noexcept {
+    if (state != nullptr) {
+      state->signal = signal_kind::value;
+      state->endpoint_count = count;
+      state->in_context = context != nullptr && context->is_in_context();
+    }
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_error(std::error_code error) noexcept {
+    if (state != nullptr) {
+      state->signal = signal_kind::error;
+      state->error = error;
+      state->in_context = context != nullptr && context->is_in_context();
+    }
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_stopped() noexcept {
+    if (state != nullptr) {
+      state->signal = signal_kind::stopped;
+      state->in_context = context != nullptr && context->is_in_context();
+    }
+    if (context != nullptr) {
       (void)context->stop();
     }
   }
@@ -264,6 +310,13 @@ void test_operation_state_concepts() {
   static_assert(bexec::operation_state<io_uring_write_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_readv_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_writev_operation<receiver>>);
+  static_assert(
+      bexec::operation_state<io_uring_resolve_operation<resolve_receiver>>);
+
+  using resolve_sender =
+      decltype(std::declval<io_uring_context&>().async_resolve(
+          bupp::async_io::dns_query{}, bupp::async_io::dns_result_view{}));
+  static_assert(bexec::sender<resolve_sender>);
 
   static_assert(
       !std::is_constructible_v<io_uring_accept_operation<receiver>,
@@ -328,6 +381,10 @@ void test_io_operations_accept_async_io_views() {
       context, descriptor, vectors, 0, receiver{});
   [[maybe_unused]] io_uring_writev_operation writev_operation(
       context, descriptor, vectors, 0, receiver{});
+  bupp::async_io::ip::endpoint resolved_endpoints[4]{};
+  [[maybe_unused]] io_uring_resolve_operation resolve_operation(
+      context, bupp::async_io::dns_query("127.0.0.1", "80"),
+      bupp::async_io::dns_result_view(resolved_endpoints), resolve_receiver{});
 }
 
 void test_timeout_operation_prepares_async_io_time() {
@@ -367,6 +424,35 @@ void test_post_operation_runs_on_context_thread() {
 
   assert(state->signal == signal_kind::value);
   assert(state->in_context);
+}
+
+void test_resolve_sender_runs_on_context_thread() {
+  io_uring_context context;
+  if (!queue_init_or_skip(context)) {
+    return;
+  }
+
+  bupp::async_io::dns_query query("127.0.0.1", "8080");
+  query.set_address_version(bupp::async_io::ip::address::version::v4);
+  std::array<bupp::async_io::ip::endpoint, 8> results{};
+
+  resolve_receiver recv;
+  resolve_state state;
+  recv.state = &state;
+  recv.context = &context;
+
+  auto sender = context.async_resolve(std::move(query),
+                                      bupp::async_io::dns_result_view(results));
+  auto operation = bexec::connect(std::move(sender), std::move(recv));
+  bexec::start(operation);
+  context.run();
+
+  assert(state.signal == signal_kind::value);
+  assert(state.endpoint_count > 0);
+  assert(results[0].port() == 8080);
+  assert(results[0].address().type() ==
+         bupp::async_io::ip::address::version::v4);
+  assert(state.in_context);
 }
 
 void test_nop_operation_completes_with_raw_cqe() {
@@ -591,6 +677,7 @@ int main() {
   test_io_operations_accept_async_io_views();
   test_timeout_operation_prepares_async_io_time();
   test_post_operation_runs_on_context_thread();
+  test_resolve_sender_runs_on_context_thread();
   test_nop_operation_completes_with_raw_cqe();
   test_stop_token_completes_stopped_before_submit();
   test_cpu_post_wakes_blocked_worker();

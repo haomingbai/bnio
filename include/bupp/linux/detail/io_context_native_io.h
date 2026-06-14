@@ -442,6 +442,17 @@ inline auto io_context::async_connect_direct(tcp_socket& socket,
   return async_connect_direct(socket.view(), endpoint);
 }
 
+inline auto io_context::async_resolve(async_io::dns_query query,
+                                      async_io::dns_result_view result) {
+  return native_context_.async_resolve(std::move(query), result);
+}
+
+inline auto io_context::async_resolve(std::string_view host,
+                                      std::string_view service,
+                                      async_io::dns_result_view result) {
+  return async_resolve(async_io::dns_query(host, service), result);
+}
+
 inline auto steady_timer::async_wait() {
   return detail::timer_wait_sender(*this);
 }

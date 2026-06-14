@@ -6,6 +6,8 @@
 #include <bupp/async_io/buffer_view.h>
 #elif defined(BUPP_HEADER_TEST_DESCRIPTOR_VIEW)
 #include <bupp/async_io/descriptor_view.h>
+#elif defined(BUPP_HEADER_TEST_DNS)
+#include <bupp/async_io/dns.h>
 #elif defined(BUPP_HEADER_TEST_IP_ADDRESS)
 #include <bupp/async_io/ip/address.h>
 #elif defined(BUPP_HEADER_TEST_IP_ENDPOINT)

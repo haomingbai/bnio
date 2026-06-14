@@ -5,6 +5,7 @@
 #include <bupp/async_io/address.h>
 #include <bupp/async_io/buffer_view.h>
 #include <bupp/async_io/descriptor_view.h>
+#include <bupp/async_io/dns.h>
 #include <bupp/async_io/ip/address.h>
 #include <bupp/async_io/ip/endpoint.h>
 #include <bupp/async_io/ip/tcp.h>

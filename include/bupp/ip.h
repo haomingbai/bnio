@@ -2,6 +2,7 @@
 #ifndef BUPP_IP_H_
 #define BUPP_IP_H_
 
+#include <bupp/async_io/dns.h>
 #include <bupp/async_io/ip/address.h>
 #include <bupp/async_io/ip/endpoint.h>
 #include <bupp/async_io/ip/tcp.h>
@@ -12,6 +13,26 @@ namespace bupp {
 
 class BUPP_EXPORT tcp_socket;
 class BUPP_EXPORT tcp_acceptor;
+
+/**
+ * DNS query object used by io_context resolver senders.
+ */
+using dns_query = async_io::dns_query;
+
+/**
+ * DNS result storage view used by io_context resolver senders.
+ */
+using dns_result_view = async_io::dns_result_view;
+
+/**
+ * DNS transport filter used by resolver queries.
+ */
+using dns_transport = async_io::dns_transport;
+
+/**
+ * DNS resolver query flags.
+ */
+using dns_query_flags = async_io::dns_query_flags;
 
 namespace ip {
 

@@ -8,6 +8,7 @@ endfunction()
 bupp_add_async_io_test(address address_test.cpp)
 bupp_add_async_io_test(buffer_view buffer_view_test.cpp)
 bupp_add_async_io_test(descriptor_view descriptor_view_test.cpp)
+bupp_add_async_io_test(dns dns_test.cpp)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   bupp_add_async_io_test(io_uring_context io_uring_context_test.cpp)
 endif()
@@ -35,6 +36,7 @@ bupp_add_async_io_header_self_contained_test(buffer_view
                                              BUPP_HEADER_TEST_BUFFER_VIEW)
 bupp_add_async_io_header_self_contained_test(
   descriptor_view BUPP_HEADER_TEST_DESCRIPTOR_VIEW)
+bupp_add_async_io_header_self_contained_test(dns BUPP_HEADER_TEST_DNS)
 bupp_add_async_io_header_self_contained_test(ip_address
                                              BUPP_HEADER_TEST_IP_ADDRESS)
 bupp_add_async_io_header_self_contained_test(ip_endpoint
