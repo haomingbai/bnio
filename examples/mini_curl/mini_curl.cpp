@@ -1,89 +1,26 @@
-#include <bupp/bupp.h>
-#include <sys/socket.h>
+#include "mini_curl_client.hpp"
 
-#include <array>
-#include <bexec/bexec.hpp>
-#include <cstddef>
 #include <iostream>
-#include <memory>
 #include <string>
 #include <string_view>
-#include <system_error>
-#include <utility>
-#include <vector>
 
-namespace {
+namespace mini_curl {
 
-constexpr std::size_t k_max_endpoints = 16;
-constexpr std::size_t k_receive_size = 16 * 1024;
+// ============================================================
+// URL / header helper implementations
+// ============================================================
 
-struct operation_holder_base {
-  virtual ~operation_holder_base() = default;
-  virtual void start() noexcept = 0;
-};
-
-std::vector<std::unique_ptr<operation_holder_base>> g_ops;
-
-template <class Sender, class Receiver>
-void spawn(Sender&& sender, Receiver&& receiver) {
-  using operation_type = decltype(bexec::connect(std::declval<Sender>(),
-                                                 std::declval<Receiver>()));
-
-  struct holder final : operation_holder_base {
-    operation_type operation;
-
-    holder(Sender&& s, Receiver&& r)
-        : operation(bexec::connect(std::forward<Sender>(s),
-                                   std::forward<Receiver>(r))) {}
-
-    void start() noexcept override { bexec::start(operation); }
-  };
-
-  auto op = std::make_unique<holder>(std::forward<Sender>(sender),
-                                     std::forward<Receiver>(receiver));
-  op->start();
-  g_ops.push_back(std::move(op));
-}
-
-struct request_options {
-  std::string method = "GET";
-  std::string host;
-  std::string service = "80";
-  std::string target = "/";
-  std::vector<std::string> headers;
-  bupp::ip::address::version address_version =
-      bupp::ip::address::version::unspecified;
-  bool help = false;
-  bool verbose = false;
-};
-
-void print_usage(const char* program) {
-  std::cerr << "usage: " << program
-            << " [options] http://host[:port]/path\n\n"
-               "options:\n"
-               "  -X, --request METHOD   HTTP method to send (default: GET)\n"
-               "  -I, --head             Send a HEAD request\n"
-               "  -H, --header HEADER    Add a request header\n"
-               "      --host HOST        Override host\n"
-               "      --port PORT        Override port/service\n"
-               "      --path PATH        Override request path\n"
-               "      --ipv4             Resolve only IPv4 addresses\n"
-               "      --ipv6             Resolve only IPv6 addresses\n"
-               "  -v, --verbose          Print progress to stderr\n";
-}
-
-[[nodiscard]] bool starts_with(std::string_view value,
-                               std::string_view prefix) noexcept {
+bool starts_with(std::string_view value, std::string_view prefix) noexcept {
   return value.size() >= prefix.size() &&
          value.substr(0, prefix.size()) == prefix;
 }
 
-[[nodiscard]] bool contains_crlf(std::string_view value) noexcept {
+bool contains_crlf(std::string_view value) noexcept {
   return value.find('\r') != std::string_view::npos ||
          value.find('\n') != std::string_view::npos;
 }
 
-[[nodiscard]] std::string normalized_target(std::string target) {
+std::string normalized_target(std::string target) {
   if (target.empty()) {
     return "/";
   }
@@ -96,7 +33,7 @@ void print_usage(const char* program) {
   return "/" + target;
 }
 
-[[nodiscard]] std::string remove_fragment(std::string_view target) {
+std::string remove_fragment(std::string_view target) {
   const std::size_t fragment = target.find('#');
   if (fragment == std::string_view::npos) {
     return std::string(target);
@@ -104,9 +41,8 @@ void print_usage(const char* program) {
   return std::string(target.substr(0, fragment));
 }
 
-[[nodiscard]] bool parse_authority(std::string_view authority,
-                                   request_options& options,
-                                   std::string& error) {
+bool parse_authority(std::string_view authority, request_options& options,
+                     std::string& error) {
   if (authority.empty()) {
     error = "missing host";
     return false;
@@ -159,17 +95,18 @@ void print_usage(const char* program) {
   return true;
 }
 
-[[nodiscard]] bool parse_url(std::string_view url, request_options& options,
-                             std::string& error) {
+bool parse_url(std::string_view url, request_options& options,
+               std::string& error) {
   const std::size_t scheme_end = url.find("://");
   if (scheme_end != std::string_view::npos) {
     const std::string_view scheme = url.substr(0, scheme_end);
-    if (scheme != "http") {
-      if (scheme == "https") {
-        error = "https:// is not supported by this tiny example yet";
-      } else {
-        error = "unsupported URL scheme: " + std::string(scheme);
+    if (scheme == "https") {
+      options.use_tls = true;
+      if (options.service == "80") {
+        options.service = "443";
       }
+    } else if (scheme != "http") {
+      error = "unsupported URL scheme: " + std::string(scheme);
       return false;
     }
     url.remove_prefix(scheme_end + 3);
@@ -193,6 +130,175 @@ void print_usage(const char* program) {
   return true;
 }
 
+bool header_contains(std::string_view header, std::string_view name) noexcept {
+  const std::size_t colon = header.find(':');
+  if (colon == std::string_view::npos) {
+    return false;
+  }
+  std::string_view header_name = header.substr(0, colon);
+  // Trim trailing whitespace
+  while (!header_name.empty() && header_name.back() == ' ') {
+    header_name.remove_suffix(1);
+  }
+  if (header_name.size() != name.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < header_name.size(); ++i) {
+    char a = header_name[i];
+    char b = name[i];
+    if (a >= 'A' && a <= 'Z') a = static_cast<char>(a + ('a' - 'A'));
+    if (b >= 'A' && b <= 'Z') b = static_cast<char>(b + ('a' - 'A'));
+    if (a != b) return false;
+  }
+  return true;
+}
+
+std::string host_header_value(const request_options& options) {
+  std::string host = options.host;
+  if (host.find(':') != std::string::npos && host.front() != '[') {
+    host = "[" + host + "]";
+  }
+  const bool is_default_port =
+      (options.use_tls &&
+       (options.service == "443" || options.service == "https")) ||
+      (!options.use_tls &&
+       (options.service == "80" || options.service == "http"));
+  if (!is_default_port) {
+    host += ":" + options.service;
+  }
+  return host;
+}
+
+std::string build_request(const request_options& options) {
+  std::string request;
+  request += options.method;
+  request += " ";
+  request += options.target;
+  request += " HTTP/1.1\r\nHost: ";
+  request += host_header_value(options);
+  request += "\r\nUser-Agent: bupp-mini-curl/0.2\r\nAccept: */*\r\n";
+
+  bool has_content_type = false;
+  bool has_content_length = false;
+  for (const std::string& header : options.headers) {
+    request += header;
+    request += "\r\n";
+    if (header_contains(header, "content-type")) {
+      has_content_type = true;
+    }
+    if (header_contains(header, "content-length")) {
+      has_content_length = true;
+    }
+  }
+
+  if (!options.post_data.empty()) {
+    if (!has_content_type) {
+      request += "Content-Type: application/x-www-form-urlencoded\r\n";
+    }
+    if (!has_content_length) {
+      request += "Content-Length: ";
+      request += std::to_string(options.post_data.size());
+      request += "\r\n";
+    }
+  }
+
+  request += "Connection: close\r\n\r\n";
+
+  if (!options.post_data.empty()) {
+    request += options.post_data;
+  }
+
+  return request;
+}
+
+int parse_status_code(std::string_view status_line) noexcept {
+  // Skip "HTTP/x.x "
+  const std::size_t first_space = status_line.find(' ');
+  if (first_space == std::string_view::npos) {
+    return 0;
+  }
+  std::string_view rest = status_line.substr(first_space + 1);
+  // Skip leading spaces
+  while (!rest.empty() && rest.front() == ' ') {
+    rest.remove_prefix(1);
+  }
+  const std::size_t second_space = rest.find(' ');
+  std::string_view code_str = rest.substr(0, second_space);
+  int code = 0;
+  for (char c : code_str) {
+    if (c < '0' || c > '9') return 0;
+    code = code * 10 + (c - '0');
+  }
+  return code;
+}
+
+std::string extract_location(std::string_view headers) {
+  // Search for "\nLocation:" or "\r\nLocation:" (case-insensitive)
+  std::string lower;
+  lower.reserve(headers.size());
+  for (char c : headers) {
+    lower.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A'))
+                                         : c);
+  }
+
+  const std::string needle = "\nlocation:";
+  std::size_t pos = lower.find(needle);
+
+  std::size_t value_start;
+  if (pos != std::string_view::npos) {
+    value_start = pos + 10;  // strlen("\nlocation:")
+  } else if (starts_with(lower, "location:")) {
+    value_start = 9;  // strlen("location:")
+  } else {
+    return {};
+  }
+
+  // Skip spaces after colon
+  while (value_start < headers.size() && headers[value_start] == ' ') {
+    ++value_start;
+  }
+
+  // Find end of line
+  std::size_t value_end = headers.find('\r', value_start);
+  if (value_end == std::string_view::npos) {
+    value_end = headers.find('\n', value_start);
+  }
+  if (value_end == std::string_view::npos) {
+    value_end = headers.size();
+  }
+
+  return std::string(headers.substr(value_start, value_end - value_start));
+}
+
+}  // namespace mini_curl
+
+// ============================================================
+// main
+// ============================================================
+
+namespace {
+
+void print_usage(const char* program) {
+  std::cerr
+      << "usage: " << program
+      << " [options] <url>\n\n"
+         "options:\n"
+         "  -X, --request METHOD   HTTP method to send (default: GET)\n"
+         "  -I, --head             Send a HEAD request\n"
+         "  -H, --header HEADER    Add a request header\n"
+         "  -d, --data DATA        Send POST data in the request body\n"
+         "  -L, --location         Follow redirects (3xx responses)\n"
+         "  -o, --output FILE      Write response body to FILE instead of "
+         "stdout\n"
+         "  -k, --insecure         Skip TLS certificate verification\n"
+         "      --host HOST        Override host\n"
+         "      --port PORT        Override port/service\n"
+         "      --path PATH        Override request path\n"
+         "      --ipv4             Resolve only IPv4 addresses\n"
+         "      --ipv6             Resolve only IPv6 addresses\n"
+         "  -v, --verbose          Print progress to stderr\n";
+}
+
 [[nodiscard]] bool take_value(int& index, int argc, char** argv,
                               std::string& value, std::string& error,
                               std::string_view option) {
@@ -205,7 +311,12 @@ void print_usage(const char* program) {
   return true;
 }
 
-[[nodiscard]] bool parse_args(int argc, char** argv, request_options& options) {
+[[nodiscard]] bool parse_args(int argc, char** argv,
+                              mini_curl::request_options& options) {
+  using mini_curl::contains_crlf;
+  using mini_curl::parse_url;
+  using mini_curl::starts_with;
+
   std::string url;
   std::string override_host;
   std::string override_service;
@@ -225,6 +336,14 @@ void print_usage(const char* program) {
     }
     if (arg == "-I" || arg == "--head") {
       options.method = "HEAD";
+      continue;
+    }
+    if (arg == "-k" || arg == "--insecure") {
+      options.insecure = true;
+      continue;
+    }
+    if (arg == "-L" || arg == "--location") {
+      options.follow_redirects = true;
       continue;
     }
     if (arg == "--ipv4") {
@@ -266,6 +385,28 @@ void print_usage(const char* program) {
         return false;
       }
       options.headers.push_back(std::move(header));
+      continue;
+    }
+    if (arg == "-d" || arg == "--data") {
+      if (!take_value(i, argc, argv, options.post_data, error, arg)) {
+        std::cerr << error << '\n';
+        return false;
+      }
+      continue;
+    }
+    if (starts_with(arg, "--data=")) {
+      options.post_data = std::string(arg.substr(7));
+      continue;
+    }
+    if (arg == "-o" || arg == "--output") {
+      if (!take_value(i, argc, argv, options.output_file, error, arg)) {
+        std::cerr << error << '\n';
+        return false;
+      }
+      continue;
+    }
+    if (starts_with(arg, "--output=")) {
+      options.output_file = std::string(arg.substr(9));
       continue;
     }
     if (arg == "--host") {
@@ -325,7 +466,7 @@ void print_usage(const char* program) {
     options.service = std::move(override_service);
   }
   if (!override_target.empty()) {
-    options.target = normalized_target(std::move(override_target));
+    options.target = mini_curl::normalized_target(std::move(override_target));
   }
 
   if (options.host.empty()) {
@@ -347,223 +488,10 @@ void print_usage(const char* program) {
   return true;
 }
 
-[[nodiscard]] std::string host_header_value(const request_options& options) {
-  std::string host = options.host;
-  if (host.find(':') != std::string::npos && host.front() != '[') {
-    host = "[" + host + "]";
-  }
-  if (options.service != "80" && options.service != "http") {
-    host += ":" + options.service;
-  }
-  return host;
-}
-
-[[nodiscard]] std::string build_request(const request_options& options) {
-  std::string request;
-  request += options.method;
-  request += " ";
-  request += options.target;
-  request += " HTTP/1.1\r\nHost: ";
-  request += host_header_value(options);
-  request += "\r\nUser-Agent: bupp-mini-curl/0.1\r\nAccept: */*\r\n";
-  for (const std::string& header : options.headers) {
-    request += header;
-    request += "\r\n";
-  }
-  request += "Connection: close\r\n\r\n";
-  return request;
-}
-
-class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
- public:
-  mini_curl_client(bupp::io_context& context, request_options options)
-      : context_(context), options_(std::move(options)) {}
-
-  void start() { resolve(); }
-
-  [[nodiscard]] int exit_code() const noexcept { return exit_code_; }
-
- private:
-  struct resolve_receiver {
-    std::shared_ptr<mini_curl_client> client;
-
-    void set_value(std::size_t count) noexcept { client->on_resolved(count); }
-    void set_error(std::error_code error) noexcept {
-      client->fail("resolve failed", error);
-    }
-    void set_stopped() noexcept { client->fail("resolve stopped"); }
-  };
-
-  struct connect_receiver {
-    std::shared_ptr<mini_curl_client> client;
-
-    void set_value() noexcept { client->on_connected(); }
-    void set_error(std::error_code error) noexcept {
-      client->on_connect_error(error);
-    }
-    void set_stopped() noexcept { client->fail("connect stopped"); }
-  };
-
-  struct write_receiver {
-    std::shared_ptr<mini_curl_client> client;
-
-    void set_value(std::size_t) noexcept { client->receive(); }
-    void set_error(std::error_code error) noexcept {
-      client->fail("write failed", error);
-    }
-    void set_stopped() noexcept { client->fail("write stopped"); }
-  };
-
-  struct receive_receiver {
-    std::shared_ptr<mini_curl_client> client;
-
-    void set_value(std::size_t count) noexcept { client->on_received(count); }
-    void set_error(std::error_code error) noexcept {
-      client->fail("receive failed", error);
-    }
-    void set_stopped() noexcept { client->fail("receive stopped"); }
-  };
-
-  void resolve() {
-    if (options_.verbose) {
-      std::cerr << "* Resolving " << options_.host << ":" << options_.service
-                << '\n';
-    }
-
-    bupp::dns_query query(options_.host, options_.service);
-    query.set_address_version(options_.address_version);
-    query.set_transport(bupp::dns_transport::tcp);
-
-    const auto scheduler = context_.get_post_scheduler();
-    spawn(scheduler.async_resolve(
-              std::move(query),
-              bupp::dns_result_view(endpoints_.data(), endpoints_.size())),
-          resolve_receiver{shared_from_this()});
-  }
-
-  void on_resolved(std::size_t count) noexcept {
-    endpoint_count_ = count;
-    endpoint_index_ = 0;
-    if (endpoint_count_ == 0) {
-      fail("resolve returned no endpoints");
-      return;
-    }
-    if (options_.verbose) {
-      std::cerr << "* Resolved " << endpoint_count_ << " endpoint(s)\n";
-    }
-    connect_next();
-  }
-
-  void connect_next() noexcept {
-    if (endpoint_index_ >= endpoint_count_) {
-      if (last_connect_error_) {
-        fail("connect failed", last_connect_error_);
-      } else {
-        fail("connect failed");
-      }
-      return;
-    }
-
-    (void)socket_.close();
-    const bupp::ip::endpoint endpoint = endpoints_[endpoint_index_];
-    ++endpoint_index_;
-
-    const bupp::ip::address::version version = endpoint.version();
-    std::error_code open_error;
-    if (version == bupp::ip::address::version::v4) {
-      open_error = socket_.open(bupp::ip::tcp::v4());
-    } else if (version == bupp::ip::address::version::v6) {
-      open_error = socket_.open(bupp::ip::tcp::v6());
-    } else {
-      connect_next();
-      return;
-    }
-
-    if (open_error) {
-      last_connect_error_ = open_error;
-      connect_next();
-      return;
-    }
-
-    if (options_.verbose) {
-      std::cerr << "* Connecting to endpoint " << endpoint_index_ << "/"
-                << endpoint_count_ << '\n';
-    }
-
-    const auto scheduler = context_.get_post_scheduler();
-    spawn(scheduler.async_connect(socket_, endpoint),
-          connect_receiver{shared_from_this()});
-  }
-
-  void on_connect_error(std::error_code error) noexcept {
-    last_connect_error_ = error;
-    connect_next();
-  }
-
-  void on_connected() noexcept {
-    if (options_.verbose) {
-      std::cerr << "* Connected; sending request\n";
-    }
-
-    request_ = build_request(options_);
-    const auto scheduler = context_.get_post_scheduler();
-    spawn(scheduler.async_write(socket_, bupp::buffer(request_), MSG_NOSIGNAL),
-          write_receiver{shared_from_this()});
-  }
-
-  void receive() noexcept {
-    const auto scheduler = context_.get_post_scheduler();
-    spawn(scheduler.async_receive(socket_, bupp::buffer(receive_buffer_)),
-          receive_receiver{shared_from_this()});
-  }
-
-  void on_received(std::size_t count) noexcept {
-    if (count == 0) {
-      finish(0);
-      return;
-    }
-
-    std::cout.write(receive_buffer_.data(),
-                    static_cast<std::streamsize>(count));
-    if (!std::cout) {
-      fail("stdout write failed");
-      return;
-    }
-    receive();
-  }
-
-  void fail(std::string_view message) noexcept {
-    std::cerr << message << '\n';
-    finish(1);
-  }
-
-  void fail(std::string_view message, std::error_code error) noexcept {
-    std::cerr << message << ": " << error.message() << '\n';
-    finish(1);
-  }
-
-  void finish(int code) noexcept {
-    exit_code_ = code;
-    (void)socket_.close();
-    (void)context_.stop();
-  }
-
-  bupp::io_context& context_;
-  request_options options_;
-  bupp::tcp_socket socket_;
-  std::array<bupp::ip::endpoint, k_max_endpoints> endpoints_{};
-  std::array<char, k_receive_size> receive_buffer_{};
-  std::size_t endpoint_count_ = 0;
-  std::size_t endpoint_index_ = 0;
-  std::string request_;
-  std::error_code last_connect_error_;
-  int exit_code_ = 0;
-};
-
 }  // namespace
 
 int main(int argc, char** argv) {
-  request_options options;
+  mini_curl::request_options options;
   if (!parse_args(argc, argv, options)) {
     return 2;
   }
@@ -577,10 +505,12 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  auto client = std::make_shared<mini_curl_client>(context, std::move(options));
+  mini_curl::operation_registry registry;
+  auto client = std::make_shared<mini_curl::mini_curl_client>(
+      context, std::move(options), registry);
   client->start();
   context.run();
   const int code = client->exit_code();
-  g_ops.clear();
+  registry.clear();
   return code;
 }
