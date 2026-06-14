@@ -134,16 +134,17 @@ struct test_certificate_files {
 
 void test_ssl_sender_concepts() {
   using stream_type = bupp::ssl_stream<bupp::tcp_socket>;
+  using scheduler_type = bupp::io_context::post_scheduler;
   using handshake_sender =
-      decltype(std::declval<bupp::io_context&>().async_handshake(
+      decltype(std::declval<scheduler_type&>().async_handshake(
           std::declval<stream_type&>(), bupp::ssl_handshake_type::client));
   using shutdown_sender =
-      decltype(std::declval<bupp::io_context&>().async_shutdown(
+      decltype(std::declval<scheduler_type&>().async_shutdown(
           std::declval<stream_type&>()));
   using receive_sender =
-      decltype(std::declval<bupp::io_context&>().async_receive(
+      decltype(std::declval<scheduler_type&>().async_receive(
           std::declval<stream_type&>(), std::declval<bupp::mutable_buffer>()));
-  using send_sender = decltype(std::declval<bupp::io_context&>().async_send(
+  using send_sender = decltype(std::declval<scheduler_type&>().async_send(
       std::declval<stream_type&>(), std::declval<bupp::const_buffer>()));
 
   static_assert(bexec::sender<handshake_sender>);
@@ -178,6 +179,7 @@ void test_socketpair_handshake_is_io_context_driven() {
   if (!context.is_open()) {
     return;
   }
+  auto scheduler = context.get_post_scheduler();
 
   test_certificate_files files;
 
@@ -204,9 +206,9 @@ void test_socketpair_handshake_is_io_context_driven() {
   handshake_receiver server_receiver{state, &context};
 
   auto client_sender =
-      context.async_handshake(client, bupp::ssl_handshake_type::client);
+      scheduler.async_handshake(client, bupp::ssl_handshake_type::client);
   auto server_sender =
-      context.async_handshake(server, bupp::ssl_handshake_type::server);
+      scheduler.async_handshake(server, bupp::ssl_handshake_type::server);
 
   auto client_operation =
       bexec::connect(std::move(client_sender), std::move(client_receiver));

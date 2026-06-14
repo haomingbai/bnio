@@ -2,6 +2,7 @@
 #include <array>
 #include <csignal>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 
@@ -37,9 +38,14 @@ struct session : std::enable_shared_from_this<session> {
   }
 };
 
-int main() {
+int main(int argc, char** argv) {
+  std::uint16_t port = k_port;
+  if (argc > 1) {
+    port = static_cast<std::uint16_t>(std::strtoul(argv[1], nullptr, 10));
+  }
+
   asio::io_context ctx;
-  tcp::acceptor a(ctx, tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"), k_port));
+  tcp::acceptor a(ctx, tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"), port));
   a.listen(k_backlog);
 
   asio::signal_set sigs(ctx, SIGINT, SIGTERM);
@@ -53,6 +59,6 @@ int main() {
   };
   do_accept(do_accept);
 
-  std::cout << "asio_raw_echo " << k_port << std::endl;
+  std::cout << "asio_raw_echo " << port << std::endl;
   ctx.run();
 }

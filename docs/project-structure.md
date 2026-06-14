@@ -29,9 +29,7 @@ This repository is a CMake-based C++ library for a small `liburing` wrapper.
 - `examples/base/linux/` owns base-layer example binaries.
 - `examples/base/linux/README.md` describes the base examples as runnable reference
   programs.
-- `examples/io_context/http_echo_server/` owns the `io_context` HTTP echo
-  server example.
-- `examples/benchmark/` owns optional benchmark-only targets enabled by
-  `BUPP_BUILD_BENCHMARKS=ON`.
-- `scripts/` contains project helper commands, including the optional
-  `scripts/benchmark_http_echo.sh` benchmark runner.
+- `examples/raw_echo/` owns the `io_context` raw TCP echo server, the optional
+  Asio comparison server, and the shared benchmark client.
+- `scripts/` contains project helper commands, including the raw echo benchmark
+  runner.

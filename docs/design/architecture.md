@@ -9,7 +9,7 @@ layers; lower layers never reference higher ones.
 ```mermaid
 graph TB
     subgraph L3["Layer 3 — bupp::io_context"]
-        C3_ctx["io_context<br/>(event loop + sender factory)"]
+        C3_ctx["io_context<br/>(event loop + scheduler factory)"]
         C3_tcp["tcp_socket / tcp_acceptor<br/>(RAII fd owners)"]
         C3_ssl["ssl_context / ssl_stream<br/>(RAII SSL owners)"]
         C3_buf["mutable_buffer / const_buffer<br/>dynamic_string_buffer<br/>(non-owning views / adapters)"]
@@ -251,12 +251,12 @@ public:
 
 Namespace `bupp`. Header `include/bupp/linux/io_context.h`.
 
-`io_context` is the top-level abstraction serving three roles:
+`io_context` is the event-loop owner and scheduler factory:
 
-1. **Sender factory** — creates senders for receive, send, accept, connect,
-   wait, handshake, and shutdown.
-2. **Event loop host** — `run()` drives the io_uring completion loop.
-3. **I/O batching scheduler** — manages queued vs. direct submission.
+1. **Event loop host** — `run()` drives the io_uring completion loop.
+2. **Scheduler factory** — produces dispatch and post schedulers.
+3. **I/O batching backend** — manages queued vs. direct submission for scheduler
+   I/O senders.
 
 ### Submission Modes
 
@@ -297,8 +297,9 @@ struct io_context_options {
 
 ### Sender Factories
 
-Each factory returns a sender. Connecting a sender to a receiver and calling
-`start()` begins the asynchronous I/O.
+The schedulers expose the async I/O factories. Each factory returns a sender.
+Connecting a sender to a receiver and calling `start()` begins the asynchronous
+I/O.
 
 #### Non-SSL
 
@@ -326,13 +327,16 @@ All senders also complete with `set_error(std::error_code)` or `set_stopped()`.
 sequenceDiagram
     participant User
     participant Ctx as io_context
+    participant S as scheduler
     participant Op as operation
     participant UCtx as io_uring_context
     participant Ring as base::ring
     participant K as Kernel
 
-    User->>Ctx: async_receive(socket, buffer, flags)
-    Ctx-->>User: sender
+    User->>Ctx: get_post_scheduler()
+    Ctx-->>User: scheduler
+    User->>S: async_receive(socket, buffer, flags)
+    S-->>User: sender
 
     User->>Op: connect(receiver) → start()
     Op->>Ctx: enqueue_io(*this)
@@ -358,10 +362,11 @@ sequenceDiagram
 
 ```cpp
 // Direct:
-auto s = ctx.async_receive(socket, buffer, 0);
+auto scheduler = ctx.get_post_scheduler();
+auto s = scheduler.async_receive(socket, buffer, 0);
 
 // Through CPO (generic):
-auto s = bupp::async_receive(ctx, socket, buffer);
+auto s = bupp::async_receive(scheduler, socket, buffer);
 ```
 
 | CPO | Invokes | Header |

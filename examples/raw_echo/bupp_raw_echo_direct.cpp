@@ -12,16 +12,15 @@
 using namespace bupp;
 namespace {
 
-constexpr std::uint16_t k_port = 8090;
+constexpr std::uint16_t k_port = 8092;
 constexpr int k_backlog = 512;
 constexpr std::size_t k_buffer_size = 4096;
 
 // Simple heap-allocated operation holder.
-// For a benchmark we keep ops alive until shutdown.
 std::vector<std::unique_ptr<io_context::operation_base>> g_ops;
 
 template<class S, class R>
-void spawn(S&& snd, R&& recv) {
+void spawn_direct(S&& snd, R&& recv) {
   using op_t = decltype(bexec::connect(std::declval<S>(), std::declval<R>()));
   struct holder : io_context::operation_base {
     op_t op;
@@ -51,9 +50,10 @@ struct conn : std::enable_shared_from_this<conn> {
       void set_value(std::size_t m) noexcept { if(m){c->send(m);}else c->close(); }
       void set_error(std::error_code) noexcept { c->close(); }
       void set_stopped() noexcept { c->close(); }
-	    };
+        };
     auto scheduler = ctx.get_post_scheduler();
-    spawn(scheduler.async_receive(sk, buffer(buf), 0), R{shared_from_this()});
+    // Use direct submission to bypass the queue mutex and timer
+    spawn_direct(scheduler.async_receive_direct(sk, buffer(buf), 0), R{shared_from_this()});
   }
 
   void send(std::size_t n) {
@@ -61,21 +61,23 @@ struct conn : std::enable_shared_from_this<conn> {
       void set_value(std::size_t) noexcept { c->recv(); }
       void set_error(std::error_code) noexcept { c->close(); }
       void set_stopped() noexcept { c->close(); }
-	    };
+        };
     auto scheduler = ctx.get_post_scheduler();
-    spawn(scheduler.async_write(sk, const_buffer(buf.data(), n)),
+    // Use direct send (single-shot — loopback buffers should fit in one send)
+    spawn_direct(scheduler.async_send_direct(sk, const_buffer(buf.data(), n)),
           R{shared_from_this()});
   }
 };
 
 void do_accept(io_context& ctx, tcp_acceptor& a) {
-	  struct R { io_context& ctx; tcp_acceptor& a;
-	    void set_value(tcp_socket sk) noexcept { std::make_shared<conn>(ctx,std::move(sk))->go(); do_accept(ctx,a); }
-	    void set_error(std::error_code) noexcept {}
-	    void set_stopped() noexcept {}
-	  };
+      struct R { io_context& ctx; tcp_acceptor& a;
+        void set_value(tcp_socket sk) noexcept { std::make_shared<conn>(ctx,std::move(sk))->go(); do_accept(ctx,a); }
+        void set_error(std::error_code) noexcept {}
+        void set_stopped() noexcept {}
+      };
   auto scheduler = ctx.get_post_scheduler();
-  spawn(scheduler.async_accept(a, SOCK_CLOEXEC), R{ctx,a});
+  // Use direct submission for accept
+  spawn_direct(scheduler.async_accept_direct(a, SOCK_CLOEXEC), R{ctx,a});
 }
 
 } // namespace
@@ -112,6 +114,6 @@ int main(int argc, char** argv) {
 
   do_accept(ctx, a);
 
-  std::cout << "bupp_raw_echo " << port << std::endl;
+  std::cout << "bupp_raw_echo_direct " << port << std::endl;
   ctx.run();
 }

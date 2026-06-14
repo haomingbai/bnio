@@ -9,7 +9,6 @@ include(CTest)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/bexec.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/cmake/wrk.cmake")
 
 find_package(PkgConfig REQUIRED)
 find_package(OpenSSL REQUIRED)
@@ -17,9 +16,7 @@ pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.2)
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(BUPP_BUILD_EXAMPLES "Build bupp examples" ON)
-option(BUPP_BUILD_BENCHMARKS "Build optional bupp benchmark examples" OFF)
 option(BUPP_BUILD_ASIO_EXAMPLES "Build standalone Asio echo server example (auto-fetches Asio)" OFF)
-option(BUPP_FETCH_WRK "Auto-fetch and build wrk benchmarking tool" OFF)
 option(BUPP_ENABLE_WARNINGS "Enable compiler warnings for bupp targets" ON)
 
 bupp_resolve_bexec_dependency()
@@ -85,10 +82,6 @@ add_subdirectory(src)
 
 if(BUPP_BUILD_EXAMPLES)
   add_subdirectory(examples)
-endif()
-
-if(BUPP_BUILD_BENCHMARKS)
-  add_subdirectory(examples/benchmark)
 endif()
 
 if(BUILD_TESTING)

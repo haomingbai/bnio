@@ -2,7 +2,9 @@
 #ifndef BUPP_IO_CONTEXT_CPO_H_
 #define BUPP_IO_CONTEXT_CPO_H_
 
+#include <bexec/scheduler.hpp>
 #include <bexec/sender.hpp>
+#include <type_traits>
 #include <utility>
 
 namespace bupp {
@@ -186,31 +188,47 @@ inline constexpr async_connect_direct_t async_connect_direct{};
 /**
  * Concept satisfied when a provider returns a sender from async_receive.
  */
-template <class Provider, class Stream, class Buffer>
+template <class Scheduler, class Stream, class Buffer>
 concept receives_bytes =
-    requires(Provider& provider, Stream& stream, Buffer&& buffer) {
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Stream& stream, Buffer&& buffer) {
       {
-        async_receive(provider, stream, std::forward<Buffer>(buffer))
+        async_receive(scheduler, stream, std::forward<Buffer>(buffer))
       } -> bexec::sender;
     };
 
 /**
  * Concept satisfied when a provider returns a sender from async_send.
  */
-template <class Provider, class Stream, class Buffer>
+template <class Scheduler, class Stream, class Buffer>
 concept sends_bytes =
-    requires(Provider& provider, Stream& stream, Buffer&& buffer) {
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Stream& stream, Buffer&& buffer) {
       {
-        async_send(provider, stream, std::forward<Buffer>(buffer))
+        async_send(scheduler, stream, std::forward<Buffer>(buffer))
       } -> bexec::sender;
     };
 
 /**
  * Concept satisfied when a provider returns a sender from async_accept.
  */
-template <class Provider, class Acceptor>
-concept accepts_connections = requires(Provider& provider, Acceptor& acceptor) {
-  { async_accept(provider, acceptor) } -> bexec::sender;
+template <class Scheduler, class Acceptor>
+concept accepts_connections =
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Acceptor& acceptor) {
+      { async_accept(scheduler, acceptor) } -> bexec::sender;
+    };
+
+/**
+ * Concept satisfied when a scheduler returns a sender from async_connect.
+ */
+template <class Scheduler, class Stream, class Endpoint>
+concept connects_stream =
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Stream& stream, Endpoint&& endpoint) {
+      {
+        async_connect(scheduler, stream, std::forward<Endpoint>(endpoint))
+      } -> bexec::sender;
 };
 
 }  // namespace bupp

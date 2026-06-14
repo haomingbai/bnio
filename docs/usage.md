@@ -217,16 +217,16 @@ auto v6 = bupp::ip::tcp::v6();
 graph TB
     A["create io_context"] --> B["create tcp_acceptor"]
     B --> C["acceptor.open() → bind() → listen()"]
-    C --> D["ctx.async_accept(acceptor)"]
+    C --> D["scheduler.async_accept(acceptor)"]
     D --> E["connect receiver + start()"]
     E --> F["ctx.run() — event loop"]
     F --> G{"completion"}
     G -->|"set_value(tcp_socket)"| H["handle new connection"]
-    H --> I["ctx.async_receive(client)"]
+    H --> I["scheduler.async_receive(client)"]
     H --> J["re-issue async_accept"]
     I --> K{"completion"}
     K -->|"set_value(bytes)"| L["process data"]
-    L --> M["ctx.async_send(client, echo)"]
+    L --> M["scheduler.async_send(client, echo)"]
     M --> I
 ```
 
@@ -354,16 +354,18 @@ sock.open(bupp::ip::tcp::v4());
 // 3. Wrap in ssl_stream (stream takes ownership of sock)
 bupp::ssl_stream<bupp::tcp_socket> stream(std::move(sock), ssl_ctx);
 
+auto scheduler = ctx.get_post_scheduler();
+
 // 4. Handshake
-auto hs = ctx.async_handshake(stream, bupp::ssl_handshake_type::client);
+auto hs = scheduler.async_handshake(stream, bupp::ssl_handshake_type::client);
 // ... connect receiver + start ...
 
 // 5. After handshake completes, send/receive over SSL
-auto recv = ctx.async_receive(stream, recv_buf, 0);
-auto send = ctx.async_send(stream, send_buf, 0);
+auto recv = scheduler.async_receive(stream, recv_buf, 0);
+auto send = scheduler.async_send(stream, send_buf, 0);
 
 // 6. Shutdown when done
-auto sd = ctx.async_shutdown(stream);
+auto sd = scheduler.async_shutdown(stream);
 ```
 
 ### Handshake Types
@@ -495,6 +497,7 @@ struct print_receiver {
 
 int main() {
     bupp::io_context ctx;
+    auto scheduler = ctx.get_post_scheduler();
 
     bupp::tcp_socket sock;
     sock.open(bupp::ip::tcp::v4());
@@ -504,7 +507,7 @@ int main() {
     sock.view().connect(ep);
 
     std::array<char, 4096> buf{};
-    auto sender = ctx.async_receive(sock, bupp::buffer(buf), 0);
+    auto sender = scheduler.async_receive(sock, bupp::buffer(buf), 0);
     auto op = std::move(sender).connect(print_receiver{});
     op.start();
 
@@ -520,13 +523,13 @@ dispatch pattern with manual accept → recv → echo send loops:
 
 [`examples/base/linux/echo_server.cpp`](../examples/base/linux/echo_server.cpp)
 
-### io_context Layer — HTTP Echo Server
+### io_context Layer — Raw Echo Server
 
-Full HTTP echo server at the `io_context` layer, demonstrating repeated
-`async_accept`, per-connection `async_receive`/`async_send`, detached operation
+Raw TCP echo server at the `io_context` layer, demonstrating repeated
+`async_accept`, per-connection `async_receive`/`async_write`, detached operation
 lifetime through a local holder, and `ctx.run()` as the server event loop:
 
-[`examples/io_context/http_echo_server`](../examples/io_context/http_echo_server)
+[`examples/raw_echo`](../examples/raw_echo)
 
 ### Choosing the Right Layer
 

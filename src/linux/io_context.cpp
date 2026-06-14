@@ -128,6 +128,14 @@ bool io_context::is_in_context() const noexcept {
   return native_context_.is_in_context();
 }
 
+io_context::dispatch_scheduler io_context::get_dispatch_scheduler() noexcept {
+  return dispatch_scheduler(*this);
+}
+
+io_context::post_scheduler io_context::get_post_scheduler() noexcept {
+  return post_scheduler(*this);
+}
+
 std::size_t io_context::queued_io_size() const noexcept {
   std::lock_guard lock(queue_mutex_);
   return pending_io_count_;
@@ -163,7 +171,8 @@ void io_context::submit_direct(operation_base& operation) noexcept {
   }
 }
 
-void io_context::post(operation_base& operation) noexcept {
+void io_context::post(
+    async_io::linux_native::io_uring_operation_base& operation) noexcept {
   (void)native_context_.post(operation);
 }
 

@@ -20,17 +20,19 @@ cmake -S . -B build -DBUPP_BUILD_EXAMPLES=OFF
 
 ## Running an `io_context` Event Loop
 
-`bupp::io_context` is a sender factory and an event loop. Calling an async
-factory creates a sender. Connecting the sender creates an operation state.
-Starting that operation queues or submits I/O. `ctx.run()` then waits for
-completion events and delivers receiver callbacks.
+`bupp::io_context` owns the event loop. Its schedulers expose the async I/O
+sender factories. Calling an async factory creates a sender. Connecting the
+sender creates an operation state. Starting that operation queues or submits
+I/O. `ctx.run()` then waits for completion events and delivers receiver
+callbacks.
 
 ```cpp
 bupp::io_context ctx;
+auto scheduler = ctx.get_post_scheduler();
 bupp::tcp_socket socket;
 std::array<char, 4096> bytes{};
 
-auto sender = ctx.async_receive(socket, bupp::buffer(bytes), 0);
+auto sender = scheduler.async_receive(socket, bupp::buffer(bytes), 0);
 auto op = bexec::connect(std::move(sender), my_receiver{});
 
 bexec::start(op);
@@ -39,18 +41,18 @@ ctx.run();
 
 The operation state must outlive the async operation. For a short program, a
 stack variable is enough. For a server, keep operation states in an owning
-object. The HTTP echo server example uses a small local holder for pending
-accept, receive, send, and timer operations.
+object. The raw echo server example uses a small local holder for pending
+accept, receive, and send operations.
 
-## `io_context` HTTP Echo Server
+## Raw TCP Echo Server
 
 The standalone example is in
-[`examples/io_context/http_echo_server`](../examples/io_context/http_echo_server).
+[`examples/raw_echo`](../examples/raw_echo).
 It demonstrates:
 
 - `tcp_acceptor` setup with `open`, `set_reuse_address`, `bind`, and `listen`
-- repeated `ctx.async_accept(...)`
-- per-connection `ctx.async_receive(...)` and `ctx.async_send(...)`
+- repeated `scheduler.async_accept(...)`
+- per-connection `scheduler.async_receive(...)` and `scheduler.async_write(...)`
 - `ctx.run()` as the server event loop
 - explicit operation lifetime management for a long-running server
 
@@ -58,20 +60,9 @@ Build and run it:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --target bupp_io_context_http_echo_server
-./build/examples/io_context/http_echo_server/bupp_io_context_http_echo_server 8080
+cmake --build build --target bupp_raw_echo
+./build/examples/raw_echo/bupp_raw_echo 8090
 ```
-
-Try a request:
-
-```sh
-curl -v http://127.0.0.1:8080/hello
-curl -v -d 'hello from bupp' http://127.0.0.1:8080/echo
-```
-
-Requests with a body receive the same body in the HTTP response. Requests
-without a body receive a small text body containing the request method and
-target.
 
 ## Base Linux Examples
 
@@ -79,49 +70,27 @@ The `examples/base/linux` directory demonstrates the low-level wrapper around
 `liburing`. These examples use raw SQE/CQE handling and are useful when you want
 to understand the layer under `io_context`.
 
-## Optional Benchmark
+## Raw Echo Benchmark
 
-Benchmark support is disabled by default. Enable the pieces you need:
+The benchmark helper builds the bupp raw echo server, the Asio raw echo server,
+and one shared Asio-based client. The same client runs against both servers with
+the same connection count, duration, and message size.
 
 | Option | What it does |
 |---|---|
-| `BUPP_BUILD_BENCHMARKS=ON` | Build the benchmark server executables |
-| `BUPP_BUILD_ASIO_EXAMPLES=ON` | Auto-fetch standalone Asio (if not installed) |
-| `BUPP_FETCH_WRK=ON` | Auto-fetch and build `wrk` from source |
-
-All-in-one build:
-
-```sh
-cmake -S . -B build-benchmark -DCMAKE_BUILD_TYPE=Release \
-  -DBUPP_BUILD_BENCHMARKS=ON \
-  -DBUPP_BUILD_ASIO_EXAMPLES=ON \
-  -DBUPP_FETCH_WRK=ON
-cmake --build build-benchmark
-```
+| `BUPP_BUILD_ASIO_EXAMPLES=ON` | Build the Asio comparison server and benchmark client |
 
 Run the helper script:
 
 ```sh
-scripts/benchmark_http_echo.sh
+scripts/benchmark.sh --fetch-asio
 ```
-
-The script starts the bupp server and the Asio server one at a time, then runs
-`wrk` against `http://127.0.0.1:<port>/echo`. It prefers the CMake-built wrk
-at `${BUILD_DIR}/wrk-install/bin/wrk`, falling back to `PATH`.
 
 Override defaults with environment variables:
 
 ```sh
-THREADS=4 CONNECTIONS=128 DURATION=30s scripts/benchmark_http_echo.sh
+CONNECTIONS=256 DURATION=30s MSG_SIZE=1024 scripts/benchmark.sh --fetch-asio
 ```
-
-### wrk auto-build notes
-
-Building wrk from source requires:
-
-- OpenSSL headers (already a bupp dependency)
-- LuaJIT development headers: `luajit-devel` (Fedora) or `libluajit-dev` (Debian/Ubuntu)
-- `make`
 
 ## Standalone Asio Echo Server
 

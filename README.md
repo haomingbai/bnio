@@ -40,8 +40,8 @@ The `examples/base/linux` directory builds several small executables covering
 probes, NOP completions, timers, file I/O, poll readiness, provided buffers, and
 a small echo server event loop.
 
-The `examples/io_context/http_echo_server` directory contains an HTTP/1.1 echo
-server built on `bupp::io_context`. It demonstrates the sender/receiver
+The `examples/raw_echo` directory contains a raw TCP echo server built on
+`bupp::io_context` and its scheduler layer. It demonstrates the sender/receiver
 operation lifecycle and uses `ctx.run()` as the application event loop.
 
 The `examples/asio_echo` directory contains an equivalent HTTP/1.1 echo server
@@ -53,20 +53,19 @@ cmake -S . -B build-asio -DBUPP_BUILD_ASIO_EXAMPLES=ON
 cmake --build build-asio --target bupp_asio_echo_server
 ```
 
-See [`docs/examples.md`](docs/examples.md) for runnable commands and the
-optional `wrk` benchmark setup. Benchmarks are disabled by default and can be
-enabled with:
+See [`docs/examples.md`](docs/examples.md) for runnable commands and the raw
+echo benchmark helper:
 
 ```sh
-cmake -S . -B build-benchmark -DCMAKE_BUILD_TYPE=Release -DBUPP_BUILD_BENCHMARKS=ON
-scripts/benchmark_http_echo.sh
+scripts/benchmark.sh --fetch-asio
 ```
 
 ## Async I/O Layer
 
 `bupp::async_io` provides the low-level non-owning descriptor and buffer views.
-The higher-level `bupp::io_context` layer provides sender factories, RAII TCP
-objects, queued io_uring submission on Linux, and OpenSSL-backed SSL streams.
+The higher-level `bupp::io_context` layer owns the event loop and produces
+schedulers with sender factories, RAII TCP objects, queued io_uring submission on
+Linux, and OpenSSL-backed SSL streams.
 
 ## Minimal Example
 

@@ -9,13 +9,18 @@
 #include <bupp/ip.h>
 
 #include <atomic>
+#include <bexec/completion_signatures.hpp>
 #include <bexec/detail/manual_lifetime.hpp>
+#include <bexec/query.hpp>
+#include <bexec/receiver.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <system_error>
+#include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace bupp {
@@ -39,6 +44,12 @@ class timer_operation_base;
 template <class Receiver>
 class timer_wait_operation;
 class timer_wait_sender;
+template <class Model, class Receiver>
+class native_io_operation;
+template <class Receiver>
+class async_write_operation;
+template <class Derived, class NextLayer, class Receiver>
+class ssl_async_operation_base;
 
 enum class timer_completion_kind {
   value,
@@ -347,6 +358,228 @@ class BUPP_EXPORT io_context {
   using time_point = async_io::time_point;
 
   /**
+   * Scheduling policy used by io_context scheduler handles.
+   */
+  enum class schedule_kind {
+    /**
+     * Complete schedule() inline when start() runs on the context thread.
+     */
+    dispatch,
+
+    /**
+     * Always post schedule() completion through the context run loop.
+     */
+    post,
+  };
+
+  /**
+   * Sender returned by io_context schedulers' schedule() member.
+   */
+  template <schedule_kind Kind>
+  class schedule_sender {
+   public:
+    using completion_signatures =
+        bexec::completion_signatures<bexec::set_value_t(),
+                                     bexec::set_stopped_t()>;
+
+    explicit schedule_sender(io_context& context) noexcept
+        : context_(&context) {}
+
+    template <class Receiver>
+    class operation : public async_io::linux_native::io_uring_operation_base {
+     public:
+      operation(io_context& context, Receiver receiver)
+          : context_(&context), receiver_(std::move(receiver)) {}
+
+      operation(const operation&) = delete;
+      operation& operator=(const operation&) = delete;
+      operation(operation&&) = delete;
+      operation& operator=(operation&&) = delete;
+
+      void start() noexcept {
+        if constexpr (Kind == schedule_kind::dispatch) {
+          if (context_->is_in_context()) {
+            complete();
+            return;
+          }
+        }
+
+        context_->post(*this);
+      }
+
+      void execute() noexcept override { complete(); }
+
+     private:
+      void complete() noexcept {
+        auto env = bexec::get_env(receiver_);
+        auto token = bexec::query(env, bexec::get_stop_token);
+        if (token.stop_requested()) {
+          bexec::set_stopped(std::move(receiver_));
+        } else {
+          bexec::set_value(std::move(receiver_));
+        }
+      }
+
+      io_context* context_;
+      Receiver receiver_;
+    };
+
+    template <class Receiver>
+    [[nodiscard]] auto connect(Receiver receiver) const {
+      return operation<std::remove_cvref_t<Receiver>>(*context_,
+                                                      std::move(receiver));
+    }
+
+   private:
+    io_context* context_;
+  };
+
+  /**
+   * Copyable scheduler handle produced by io_context.
+   */
+  template <schedule_kind Kind>
+  class basic_scheduler {
+   public:
+    using schedule_sender_type = schedule_sender<Kind>;
+
+    basic_scheduler(const basic_scheduler&) noexcept = default;
+    basic_scheduler& operator=(const basic_scheduler&) noexcept = default;
+
+    [[nodiscard]] schedule_sender_type schedule() const noexcept {
+      return schedule_sender_type(*context_);
+    }
+
+    /**
+     * Submits all operations currently waiting in the queued I/O list.
+     */
+    [[nodiscard]] std::error_code flush_io_queue() const noexcept;
+
+    /**
+     * Returns the number of operations waiting in the queued I/O list.
+     */
+    [[nodiscard]] std::size_t queued_io_size() const noexcept;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_receive(async_io::stream_socket_view socket,
+                                     Buffer&& buffer, int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_receive(tcp_socket& socket, Buffer&& buffer,
+                                     int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_receive_direct(
+        async_io::stream_socket_view socket, Buffer&& buffer,
+        int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_receive_direct(tcp_socket& socket, Buffer&& buffer,
+                                            int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_send(async_io::stream_socket_view socket,
+                                  Buffer&& buffer, int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_send(tcp_socket& socket, Buffer&& buffer,
+                                  int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_send_direct(async_io::stream_socket_view socket,
+                                         Buffer&& buffer, int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_send_direct(tcp_socket& socket, Buffer&& buffer,
+                                         int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
+                                   Buffer&& buffer, int flags = 0) const;
+
+    template <class Buffer>
+    [[nodiscard]] auto async_write(tcp_socket& socket, Buffer&& buffer,
+                                   int flags = 0) const;
+
+    [[nodiscard]] auto async_accept(async_io::listening_socket_view socket,
+                                    int flags = 0) const;
+
+    [[nodiscard]] auto async_accept(tcp_acceptor& acceptor,
+                                    int flags = 0) const;
+
+    [[nodiscard]] auto async_accept_direct(
+        async_io::listening_socket_view socket, int flags = 0) const;
+
+    [[nodiscard]] auto async_accept_direct(tcp_acceptor& acceptor,
+                                           int flags = 0) const;
+
+    [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
+                                     const ip::endpoint& endpoint) const;
+
+    [[nodiscard]] auto async_connect(tcp_socket& socket,
+                                     const ip::endpoint& endpoint) const;
+
+    [[nodiscard]] auto async_connect_direct(
+        async_io::stream_socket_view socket, const ip::endpoint& endpoint) const;
+
+    [[nodiscard]] auto async_connect_direct(
+        tcp_socket& socket, const ip::endpoint& endpoint) const;
+
+    template <class NextLayer>
+    [[nodiscard]] auto async_handshake(ssl_stream<NextLayer>& stream,
+                                       ssl_handshake_type type) const;
+
+    template <class NextLayer>
+    [[nodiscard]] auto async_handshake_direct(ssl_stream<NextLayer>& stream,
+                                              ssl_handshake_type type) const;
+
+    template <class NextLayer, class Buffer>
+    [[nodiscard]] auto async_receive(ssl_stream<NextLayer>& stream,
+                                     Buffer&& buffer, int flags = 0) const;
+
+    template <class NextLayer, class Buffer>
+    [[nodiscard]] auto async_receive_direct(ssl_stream<NextLayer>& stream,
+                                            Buffer&& buffer,
+                                            int flags = 0) const;
+
+    template <class NextLayer, class Buffer>
+    [[nodiscard]] auto async_send(ssl_stream<NextLayer>& stream, Buffer&& buffer,
+                                  int flags = 0) const;
+
+    template <class NextLayer, class Buffer>
+    [[nodiscard]] auto async_send_direct(ssl_stream<NextLayer>& stream,
+                                         Buffer&& buffer, int flags = 0) const;
+
+    template <class NextLayer>
+    [[nodiscard]] auto async_shutdown(ssl_stream<NextLayer>& stream) const;
+
+    template <class NextLayer>
+    [[nodiscard]] auto async_shutdown_direct(
+        ssl_stream<NextLayer>& stream) const;
+
+    friend bool operator==(basic_scheduler lhs,
+                           basic_scheduler rhs) noexcept {
+      return lhs.context_ == rhs.context_;
+    }
+
+   private:
+    friend class io_context;
+
+    explicit basic_scheduler(io_context& context) noexcept : context_(&context) {}
+
+    io_context* context_;
+  };
+
+  /**
+   * Scheduler with Asio dispatch-like schedule() semantics.
+   */
+  using dispatch_scheduler = basic_scheduler<schedule_kind::dispatch>;
+
+  /**
+   * Scheduler with Asio post-like schedule() semantics.
+   */
+  using post_scheduler = basic_scheduler<schedule_kind::post>;
+
+  /**
    * Creates a context with default options.
    */
   io_context() noexcept;
@@ -404,6 +637,29 @@ class BUPP_EXPORT io_context {
    * Returns whether the current thread is running this context.
    */
   [[nodiscard]] bool is_in_context() const noexcept;
+
+  /**
+   * Returns a scheduler whose schedule() may complete inline on the context
+   * thread.
+   */
+  [[nodiscard]] dispatch_scheduler get_dispatch_scheduler() noexcept;
+
+  /**
+   * Returns a scheduler whose schedule() always posts through the context loop.
+   */
+  [[nodiscard]] post_scheduler get_post_scheduler() noexcept;
+
+ private:
+  friend class steady_timer;
+  friend class detail::timer_operation_base;
+  template <class Receiver>
+  friend class detail::timer_wait_operation;
+  template <class Model, class Receiver>
+  friend class detail::native_io_operation;
+  template <class Receiver>
+  friend class detail::async_write_operation;
+  template <class Derived, class NextLayer, class Receiver>
+  friend class detail::ssl_async_operation_base;
 
   /**
    * Submits all operations currently waiting in the queued I/O list.
@@ -634,13 +890,7 @@ class BUPP_EXPORT io_context {
   /**
    * Posts an operation for execution on the context run loop.
    */
-  void post(operation_base& operation) noexcept;
-
- private:
-  friend class steady_timer;
-  friend class detail::timer_operation_base;
-  template <class Receiver>
-  friend class detail::timer_wait_operation;
+  void post(async_io::linux_native::io_uring_operation_base& operation) noexcept;
 
   class timer_wakeup_operation
       : public async_io::linux_native::io_uring_operation_base {
@@ -825,5 +1075,207 @@ class BUPP_EXPORT io_context {
 #include <bupp/io_context_cpo.h>
 #include <bupp/linux/detail/io_context_native_io.h>
 #include <bupp/linux/detail/io_context_write_operation.h>
+
+namespace bupp {
+
+template <io_context::schedule_kind Kind>
+std::error_code io_context::basic_scheduler<Kind>::flush_io_queue()
+    const noexcept {
+  return context_->flush_io_queue();
+}
+
+template <io_context::schedule_kind Kind>
+std::size_t io_context::basic_scheduler<Kind>::queued_io_size()
+    const noexcept {
+  return context_->queued_io_size();
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_receive(
+    async_io::stream_socket_view socket, Buffer&& buffer, int flags) const {
+  return context_->async_receive(socket, std::forward<Buffer>(buffer), flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_receive(tcp_socket& socket,
+                                                      Buffer&& buffer,
+                                                      int flags) const {
+  return context_->async_receive(socket, std::forward<Buffer>(buffer), flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_receive_direct(
+    async_io::stream_socket_view socket, Buffer&& buffer, int flags) const {
+  return context_->async_receive_direct(socket, std::forward<Buffer>(buffer),
+                                        flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_receive_direct(tcp_socket& socket,
+                                                             Buffer&& buffer,
+                                                             int flags) const {
+  return context_->async_receive_direct(socket, std::forward<Buffer>(buffer),
+                                        flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_send(
+    async_io::stream_socket_view socket, Buffer&& buffer, int flags) const {
+  return context_->async_send(socket, std::forward<Buffer>(buffer), flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_send(tcp_socket& socket,
+                                                   Buffer&& buffer,
+                                                   int flags) const {
+  return context_->async_send(socket, std::forward<Buffer>(buffer), flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_send_direct(
+    async_io::stream_socket_view socket, Buffer&& buffer, int flags) const {
+  return context_->async_send_direct(socket, std::forward<Buffer>(buffer),
+                                     flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_send_direct(tcp_socket& socket,
+                                                          Buffer&& buffer,
+                                                          int flags) const {
+  return context_->async_send_direct(socket, std::forward<Buffer>(buffer),
+                                     flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_write(
+    async_io::stream_socket_view socket, Buffer&& buffer, int flags) const {
+  return context_->async_write(socket, std::forward<Buffer>(buffer), flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class Buffer>
+auto io_context::basic_scheduler<Kind>::async_write(tcp_socket& socket,
+                                                    Buffer&& buffer,
+                                                    int flags) const {
+  return context_->async_write(socket, std::forward<Buffer>(buffer), flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_accept(
+    async_io::listening_socket_view socket, int flags) const {
+  return context_->async_accept(socket, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_accept(tcp_acceptor& acceptor,
+                                                     int flags) const {
+  return context_->async_accept(acceptor, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_accept_direct(
+    async_io::listening_socket_view socket, int flags) const {
+  return context_->async_accept_direct(socket, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_accept_direct(
+    tcp_acceptor& acceptor, int flags) const {
+  return context_->async_accept_direct(acceptor, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_connect(
+    async_io::stream_socket_view socket, const ip::endpoint& endpoint) const {
+  return context_->async_connect(socket, endpoint);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_connect(
+    tcp_socket& socket, const ip::endpoint& endpoint) const {
+  return context_->async_connect(socket, endpoint);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_connect_direct(
+    async_io::stream_socket_view socket, const ip::endpoint& endpoint) const {
+  return context_->async_connect_direct(socket, endpoint);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_connect_direct(
+    tcp_socket& socket, const ip::endpoint& endpoint) const {
+  return context_->async_connect_direct(socket, endpoint);
+}
+
+template <io_context::schedule_kind Kind>
+template <class NextLayer>
+auto io_context::basic_scheduler<Kind>::async_handshake(
+    ssl_stream<NextLayer>& stream, ssl_handshake_type type) const {
+  return context_->async_handshake(stream, type);
+}
+
+template <io_context::schedule_kind Kind>
+template <class NextLayer>
+auto io_context::basic_scheduler<Kind>::async_handshake_direct(
+    ssl_stream<NextLayer>& stream, ssl_handshake_type type) const {
+  return context_->async_handshake_direct(stream, type);
+}
+
+template <io_context::schedule_kind Kind>
+template <class NextLayer, class Buffer>
+auto io_context::basic_scheduler<Kind>::async_receive(
+    ssl_stream<NextLayer>& stream, Buffer&& buffer, int flags) const {
+  return context_->async_receive(stream, std::forward<Buffer>(buffer), flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class NextLayer, class Buffer>
+auto io_context::basic_scheduler<Kind>::async_receive_direct(
+    ssl_stream<NextLayer>& stream, Buffer&& buffer, int flags) const {
+  return context_->async_receive_direct(stream, std::forward<Buffer>(buffer),
+                                        flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class NextLayer, class Buffer>
+auto io_context::basic_scheduler<Kind>::async_send(ssl_stream<NextLayer>& stream,
+                                                   Buffer&& buffer,
+                                                   int flags) const {
+  return context_->async_send(stream, std::forward<Buffer>(buffer), flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class NextLayer, class Buffer>
+auto io_context::basic_scheduler<Kind>::async_send_direct(
+    ssl_stream<NextLayer>& stream, Buffer&& buffer, int flags) const {
+  return context_->async_send_direct(stream, std::forward<Buffer>(buffer),
+                                     flags);
+}
+
+template <io_context::schedule_kind Kind>
+template <class NextLayer>
+auto io_context::basic_scheduler<Kind>::async_shutdown(
+    ssl_stream<NextLayer>& stream) const {
+  return context_->async_shutdown(stream);
+}
+
+template <io_context::schedule_kind Kind>
+template <class NextLayer>
+auto io_context::basic_scheduler<Kind>::async_shutdown_direct(
+    ssl_stream<NextLayer>& stream) const {
+  return context_->async_shutdown_direct(stream);
+}
+
+}  // namespace bupp
 
 #endif  // BUPP_LINUX_IO_CONTEXT_H_

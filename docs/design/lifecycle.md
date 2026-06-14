@@ -96,15 +96,17 @@ pointed-to storage must remain valid until the I/O operation completes.
 ```cpp
 // WRONG — stack buffer dies before operation completes
 void bad(bupp::io_context& ctx, bupp::tcp_socket& sock) {
+    auto scheduler = ctx.get_post_scheduler();
     std::string msg = "hello";
-    auto sender = ctx.async_send(sock, bupp::buffer(msg), 0);
+    auto sender = scheduler.async_send(sock, bupp::buffer(msg), 0);
     // msg goes out of scope; the send reads freed memory
 }
 
 // RIGHT — keep buffer alive until completion
 void good(bupp::io_context& ctx, bupp::tcp_socket& sock) {
+    auto scheduler = ctx.get_post_scheduler();
     auto msg = std::make_shared<std::string>("hello");
-    auto sender = ctx.async_send(sock, bupp::buffer(*msg), 0);
+    auto sender = scheduler.async_send(sock, bupp::buffer(*msg), 0);
     // receiver captures msg via shared_ptr — alive until completion
 }
 ```
@@ -118,9 +120,10 @@ Destroying the context with operations still pending is undefined behavior.
 // WRONG — ctx destroyed before operation completes
 void bad() {
     bupp::io_context ctx;
+    auto scheduler = ctx.get_post_scheduler();
     bupp::tcp_socket sock;
     sock.open(bupp::ip::tcp::v4());
-    auto sender = ctx.async_receive(sock, some_buffer, 0);
+    auto sender = scheduler.async_receive(sock, some_buffer, 0);
     // ... connect, start ...
 }   // ctx destroyed; operation in pending_io list dangles
 ```
@@ -135,11 +138,11 @@ as the owner exists.
 // RIGHT — owner → view → API
 bupp::tcp_socket sock;                        // owner
 sock.open(bupp::ip::tcp::v4());
-ctx.async_receive(sock, buffer, 0);           // implicit view() — sock outlives op
+scheduler.async_receive(sock, buffer, 0);     // implicit view() — sock outlives op
 
 // Also right — explicit view, same lifetime
 auto view = sock.view();                      // non-owning
-ctx.async_receive(view, buffer, 0);           // fine: sock still alive
+scheduler.async_receive(view, buffer, 0);     // fine: sock still alive
 ```
 
 ### Rule 5: Read CQE fields before `cqe_seen()`, not after
@@ -193,7 +196,7 @@ constraints:
   completed operations.
 
 ```cpp
-auto sender = ctx.async_receive(socket, buffer, 0);
+auto sender = scheduler.async_receive(socket, buffer, 0);
 auto op = std::move(sender).connect(my_receiver);
 op.start();
 // op is now owned by ctx; it will be destroyed after completion
