@@ -403,6 +403,12 @@ class BUPP_EXPORT io_uring_context {
                        bupp::base::params& queue_params) noexcept;
 
   /**
+   * Applies configuration from options to context member variables.
+   */
+  void apply_context_options(
+      const io_uring_context_options& options) noexcept;
+
+  /**
    * Submits prepared SQEs while the uring mutex is already held.
    */
   int submit_locked() noexcept;

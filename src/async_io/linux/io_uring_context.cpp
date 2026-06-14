@@ -27,6 +27,18 @@ void execute_tasks(io_uring_operation_base* tasks) noexcept {
   }
 }
 
+unsigned prepare_queue_params(
+    const io_uring_context_options& options,
+    bupp::base::params& queue_params) noexcept {
+  unsigned flags = options.setup_flags;
+  if (options.enable_sqpoll) {
+    flags |= IORING_SETUP_SQPOLL;
+    queue_params.set_sq_thread_cpu(options.sqpoll_thread_cpu);
+    queue_params.set_sq_thread_idle(options.sqpoll_idle_ms);
+  }
+  return flags;
+}
+
 }  // namespace
 
 thread_local io_uring_context* io_uring_context::current_context_ = nullptr;
@@ -78,6 +90,13 @@ io_uring_context::io_uring_context(
 
 io_uring_context::~io_uring_context() noexcept { queue_exit(); }
 
+void io_uring_context::apply_context_options(
+    const io_uring_context_options& options) noexcept {
+  cqe_batch_window_ = options.cqe_batch_window == 0 ? 1 : options.cqe_batch_window;
+  wait_spin_count_ = options.wait_spin_count;
+  cqe_inline_completion_threshold_ = options.cqe_inline_completion_threshold;
+}
+
 int io_uring_context::queue_init(
     const io_uring_context_options& options) noexcept {
   global_tasks_.store(nullptr, std::memory_order_release);
@@ -88,24 +107,12 @@ int io_uring_context::queue_init(
     return -EALREADY;
   }
   queue_initialized_ = true;
-  cqe_batch_window_ =
-      options.cqe_batch_window == 0 ? 1 : options.cqe_batch_window;
-  wait_spin_count_ = options.wait_spin_count;
-  cqe_inline_completion_threshold_ = options.cqe_inline_completion_threshold;
+  apply_context_options(options);
   wake_task_pending_ = false;
   single_issuer_ = false;
 
-  unsigned flags = options.setup_flags;
-  if (options.enable_sqpoll) {
-    flags |= IORING_SETUP_SQPOLL;
-  }
-
   bupp::base::params queue_params;
-  if (options.enable_sqpoll) {
-    queue_params.set_sq_thread_cpu(options.sqpoll_thread_cpu);
-    queue_params.set_sq_thread_idle(options.sqpoll_idle_ms);
-  }
-
+  const unsigned flags = prepare_queue_params(options, queue_params);
   const int result = init_ring_params(options.entries, flags, queue_params);
 
   if (result >= 0) {
