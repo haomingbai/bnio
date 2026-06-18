@@ -1,5 +1,8 @@
 #include <bupp/io_context.h>
+#include <fcntl.h>
+#include <poll.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include <array>
 #include <bexec/operation_state.hpp>
@@ -106,6 +109,34 @@ struct void_receiver {
   }
 };
 
+struct poll_receiver {
+  std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
+  bupp::io_context* context = nullptr;
+
+  void set_value(unsigned events) noexcept {
+    state->signal = signal_kind::value;
+    state->size = events;
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_error(std::error_code error) noexcept {
+    state->signal = signal_kind::error;
+    state->error = error;
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_stopped() noexcept {
+    state->signal = signal_kind::stopped;
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+};
+
 struct stop_env {
   bexec::inplace_stop_token token;
 
@@ -202,11 +233,14 @@ void test_sender_concepts() {
       decltype(scheduler.async_receive(socket, bupp::buffer(bytes)));
   using send_sender =
       decltype(scheduler.async_send(socket, std::string_view("abc")));
+  using poll_sender = decltype(scheduler.async_poll(
+      bupp::async_io::descriptor_view(3), static_cast<unsigned>(POLLIN)));
   using schedule_sender = decltype(bexec::schedule(scheduler));
   using timer_wait_sender =
       decltype(std::declval<bupp::steady_timer&>().async_wait());
   static_assert(bexec::sender<receive_sender>);
   static_assert(bexec::sender<send_sender>);
+  static_assert(bexec::sender<poll_sender>);
   static_assert(bexec::sender<schedule_sender>);
   static_assert(bexec::sender<timer_wait_sender>);
   static_assert(bexec::scheduler<bupp::io_context::dispatch_scheduler>);
@@ -224,6 +258,8 @@ void test_sender_concepts() {
   static_assert(
       bupp::connects_stream<bupp::io_context::post_scheduler, bupp::tcp_socket,
                             const bupp::ip::endpoint&>);
+  static_assert(bupp::polls_descriptor<bupp::io_context::post_scheduler,
+                                       bupp::async_io::descriptor_view>);
 
   byte_receiver receiver;
   auto sender = scheduler.async_receive(socket, bupp::buffer(bytes));
@@ -231,6 +267,75 @@ void test_sender_concepts() {
   static_assert(bexec::operation_state<decltype(operation)>);
 
   (void)socket.release();
+}
+
+void test_queued_poll_observes_pipe_readiness() {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int descriptors[2] = {-1, -1};
+  assert(::pipe2(descriptors, O_CLOEXEC) == 0);
+
+  poll_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = bupp::async_poll(
+      scheduler, bupp::async_io::descriptor_view(descriptors[0]),
+      static_cast<unsigned>(POLLIN));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  assert(scheduler.queued_io_size() == 1);
+
+  constexpr char byte = 'q';
+  assert(::write(descriptors[1], &byte, sizeof(byte)) ==
+         static_cast<ssize_t>(sizeof(byte)));
+  assert(!scheduler.flush_io_queue());
+  context.run();
+
+  assert(state->signal == signal_kind::value);
+  assert((static_cast<unsigned>(state->size) & static_cast<unsigned>(POLLIN)) !=
+         0);
+
+  assert(::close(descriptors[0]) == 0);
+  assert(::close(descriptors[1]) == 0);
+}
+
+void test_direct_poll_submits_without_queue() {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int descriptors[2] = {-1, -1};
+  assert(::pipe2(descriptors, O_CLOEXEC) == 0);
+
+  poll_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = bupp::async_poll_direct(
+      scheduler, bupp::async_io::descriptor_view(descriptors[0]),
+      static_cast<unsigned>(POLLIN));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  assert(scheduler.queued_io_size() == 0);
+
+  constexpr char byte = 'd';
+  assert(::write(descriptors[1], &byte, sizeof(byte)) ==
+         static_cast<ssize_t>(sizeof(byte)));
+  context.run();
+
+  assert(state->signal == signal_kind::value);
+  assert((static_cast<unsigned>(state->size) & static_cast<unsigned>(POLLIN)) !=
+         0);
+
+  assert(::close(descriptors[0]) == 0);
+  assert(::close(descriptors[1]) == 0);
 }
 
 void test_manual_flush_receives_queued_io() {
@@ -631,6 +736,8 @@ void test_steady_timer_pre_stopped_token_stops_wait() {
 
 int main() {
   test_sender_concepts();
+  test_queued_poll_observes_pipe_readiness();
+  test_direct_poll_submits_without_queue();
   test_manual_flush_receives_queued_io();
   test_direct_receive_submits_without_queue();
   test_queued_io_auto_flush_timer_receives();

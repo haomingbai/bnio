@@ -148,6 +148,46 @@ struct async_connect_direct_t {
 };
 
 /**
+ * Customization point object for Provider::async_poll.
+ */
+struct async_poll_t {
+  /**
+   * Invokes async_poll on a provider.
+   */
+  template <class Provider, class Descriptor, class PollMask>
+  constexpr decltype(auto) operator()(Provider&& provider,
+                                      Descriptor&& descriptor,
+                                      PollMask&& poll_mask) const
+      noexcept(noexcept(std::forward<Provider>(provider).async_poll(
+          std::forward<Descriptor>(descriptor),
+          std::forward<PollMask>(poll_mask)))) {
+    return std::forward<Provider>(provider).async_poll(
+        std::forward<Descriptor>(descriptor),
+        std::forward<PollMask>(poll_mask));
+  }
+};
+
+/**
+ * Customization point object for Provider::async_poll_direct.
+ */
+struct async_poll_direct_t {
+  /**
+   * Invokes async_poll_direct on a provider.
+   */
+  template <class Provider, class Descriptor, class PollMask>
+  constexpr decltype(auto) operator()(Provider&& provider,
+                                      Descriptor&& descriptor,
+                                      PollMask&& poll_mask) const
+      noexcept(noexcept(std::forward<Provider>(provider).async_poll_direct(
+          std::forward<Descriptor>(descriptor),
+          std::forward<PollMask>(poll_mask)))) {
+    return std::forward<Provider>(provider).async_poll_direct(
+        std::forward<Descriptor>(descriptor),
+        std::forward<PollMask>(poll_mask));
+  }
+};
+
+/**
  * Customization point object for Provider::async_resolve.
  */
 struct async_resolve_t {
@@ -222,6 +262,16 @@ inline constexpr async_connect_t async_connect{};
 inline constexpr async_connect_direct_t async_connect_direct{};
 
 /**
+ * Customization point object instance for async_poll.
+ */
+inline constexpr async_poll_t async_poll{};
+
+/**
+ * Customization point object instance for async_poll_direct.
+ */
+inline constexpr async_poll_direct_t async_poll_direct{};
+
+/**
  * Customization point object instance for async_resolve.
  */
 inline constexpr async_resolve_t async_resolve{};
@@ -270,6 +320,16 @@ concept connects_stream =
       {
         async_connect(scheduler, stream, std::forward<Endpoint>(endpoint))
       } -> bexec::sender;
+    };
+
+/**
+ * Concept satisfied when a scheduler returns a sender from async_poll.
+ */
+template <class Scheduler, class Descriptor>
+concept polls_descriptor =
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Descriptor& descriptor, unsigned poll_mask) {
+      { async_poll(scheduler, descriptor, poll_mask) } -> bexec::sender;
     };
 
 /**

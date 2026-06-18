@@ -330,6 +330,38 @@ class connect_model {
   async_io::linux_native::socket_address address_;
 };
 
+class poll_model {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(unsigned),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  poll_model(async_io::descriptor_view descriptor, unsigned poll_mask) noexcept
+      : request_(descriptor, poll_mask) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    request_.prepare(sqe);
+  }
+
+  [[nodiscard]] bool is_error_result(int result) const noexcept {
+    return result < 0;
+  }
+
+  [[nodiscard]] std::error_code make_error(int result) const noexcept {
+    return errno_result(result);
+  }
+
+  template <class Receiver>
+  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver),
+                     static_cast<unsigned>(result));
+  }
+
+ private:
+  async_io::linux_native::io_uring_poll_request request_;
+};
+
 }  // namespace detail
 /** @endcond */
 
@@ -440,6 +472,18 @@ inline auto io_context::async_connect(tcp_socket& socket,
 inline auto io_context::async_connect_direct(tcp_socket& socket,
                                              const ip::endpoint& endpoint) {
   return async_connect_direct(socket.view(), endpoint);
+}
+
+inline auto io_context::async_poll(async_io::descriptor_view descriptor,
+                                   unsigned poll_mask) {
+  return detail::native_io_sender(
+      *this, detail::poll_model(descriptor, poll_mask), submit_mode::queued);
+}
+
+inline auto io_context::async_poll_direct(async_io::descriptor_view descriptor,
+                                          unsigned poll_mask) {
+  return detail::native_io_sender(
+      *this, detail::poll_model(descriptor, poll_mask), submit_mode::direct);
 }
 
 inline auto io_context::async_resolve(async_io::dns_query query,

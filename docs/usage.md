@@ -415,6 +415,7 @@ Every sender declares its completion channels:
 | `async_send` | `size_t` bytes | `std::error_code` | `()` |
 | `async_accept` | `tcp_socket` | `std::error_code` | `()` |
 | `async_connect` | `()` | `std::error_code` | `()` |
+| `async_poll` | `unsigned` ready-event mask | `std::error_code` | `()` |
 | `async_handshake` | `()` | `std::error_code` | `()` |
 | `async_shutdown` | `()` | `std::error_code` | `()` |
 

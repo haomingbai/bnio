@@ -525,6 +525,12 @@ class BUPP_EXPORT io_context {
     [[nodiscard]] auto async_connect_direct(tcp_socket& socket,
                                             const ip::endpoint& endpoint) const;
 
+    [[nodiscard]] auto async_poll(async_io::descriptor_view descriptor,
+                                  unsigned poll_mask) const;
+
+    [[nodiscard]] auto async_poll_direct(async_io::descriptor_view descriptor,
+                                         unsigned poll_mask) const;
+
     [[nodiscard]] auto async_resolve(async_io::dns_query query,
                                      async_io::dns_result_view result) const;
 
@@ -828,6 +834,18 @@ class BUPP_EXPORT io_context {
    */
   [[nodiscard]] auto async_connect_direct(tcp_socket& socket,
                                           const ip::endpoint& endpoint);
+
+  /**
+   * Creates a queued sender that waits for events on a file descriptor.
+   */
+  [[nodiscard]] auto async_poll(async_io::descriptor_view descriptor,
+                                unsigned poll_mask);
+
+  /**
+   * Creates a direct-submission sender that waits for descriptor events.
+   */
+  [[nodiscard]] auto async_poll_direct(async_io::descriptor_view descriptor,
+                                       unsigned poll_mask);
 
   /**
    * Creates a sender that resolves a DNS query into caller-provided result
@@ -1237,6 +1255,18 @@ template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_connect_direct(
     tcp_socket& socket, const ip::endpoint& endpoint) const {
   return context_->async_connect_direct(socket, endpoint);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_poll(
+    async_io::descriptor_view descriptor, unsigned poll_mask) const {
+  return context_->async_poll(descriptor, poll_mask);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_poll_direct(
+    async_io::descriptor_view descriptor, unsigned poll_mask) const {
+  return context_->async_poll_direct(descriptor, poll_mask);
 }
 
 template <io_context::schedule_kind Kind>

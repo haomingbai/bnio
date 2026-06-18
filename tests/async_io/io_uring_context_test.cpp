@@ -1,7 +1,10 @@
 #include <bupp/async_io/linux/io_uring_context.h>
+#include <fcntl.h>
 #include <liburing.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
+#include <unistd.h>
 
 #include <array>
 #include <bexec/operation_state.hpp>
@@ -96,6 +99,37 @@ struct receiver {
     state->signal = signal_kind::stopped;
     state->in_context = context != nullptr && context->is_in_context();
     if (stop_on_completion && context != nullptr) {
+      (void)context->stop();
+    }
+  }
+};
+
+struct poll_receiver {
+  std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
+  io_uring_context* context = nullptr;
+
+  void set_value(unsigned events) noexcept {
+    state->signal = signal_kind::value;
+    state->result = static_cast<int>(events);
+    state->in_context = context != nullptr && context->is_in_context();
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_error(std::error_code error) noexcept {
+    state->signal = signal_kind::error;
+    state->error = error;
+    state->in_context = context != nullptr && context->is_in_context();
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_stopped() noexcept {
+    state->signal = signal_kind::stopped;
+    state->in_context = context != nullptr && context->is_in_context();
+    if (context != nullptr) {
       (void)context->stop();
     }
   }
@@ -316,6 +350,9 @@ void test_operation_state_concepts() {
   using resolve_sender =
       decltype(std::declval<io_uring_context&>().async_resolve(
           bupp::async_io::dns_query{}, bupp::async_io::dns_result_view{}));
+  using poll_sender = decltype(std::declval<io_uring_context&>().async_poll(
+      descriptor_view{}, static_cast<unsigned>(POLLIN)));
+  static_assert(bexec::sender<poll_sender>);
   static_assert(bexec::sender<resolve_sender>);
 
   static_assert(
@@ -423,6 +460,59 @@ void test_post_operation_runs_on_context_thread() {
   context.run();
 
   assert(state->signal == signal_kind::value);
+  assert(state->in_context);
+}
+
+void test_poll_sender_observes_pipe_readiness() {
+  io_uring_context context;
+  if (!queue_init_or_skip(context)) {
+    return;
+  }
+
+  int descriptors[2] = {-1, -1};
+  assert(::pipe2(descriptors, O_CLOEXEC) == 0);
+
+  poll_receiver recv;
+  recv.context = &context;
+  auto state = recv.state;
+
+  auto sender = context.async_poll(descriptor_view(descriptors[0]),
+                                   static_cast<unsigned>(POLLIN));
+  auto operation = bexec::connect(std::move(sender), std::move(recv));
+  bexec::start(operation);
+
+  constexpr char byte = 'x';
+  assert(::write(descriptors[1], &byte, sizeof(byte)) ==
+         static_cast<ssize_t>(sizeof(byte)));
+  context.run();
+
+  assert(state->signal == signal_kind::value);
+  assert((static_cast<unsigned>(state->result) &
+          static_cast<unsigned>(POLLIN)) != 0);
+  assert(state->in_context);
+
+  assert(::close(descriptors[0]) == 0);
+  assert(::close(descriptors[1]) == 0);
+}
+
+void test_poll_sender_reports_bad_descriptor() {
+  io_uring_context context;
+  if (!queue_init_or_skip(context)) {
+    return;
+  }
+
+  poll_receiver recv;
+  recv.context = &context;
+  auto state = recv.state;
+
+  auto sender =
+      context.async_poll(descriptor_view(-1), static_cast<unsigned>(POLLIN));
+  auto operation = bexec::connect(std::move(sender), std::move(recv));
+  bexec::start(operation);
+  context.run();
+
+  assert(state->signal == signal_kind::error);
+  assert(state->error == std::error_code(EBADF, std::generic_category()));
   assert(state->in_context);
 }
 
@@ -677,6 +767,8 @@ int main() {
   test_io_operations_accept_async_io_views();
   test_timeout_operation_prepares_async_io_time();
   test_post_operation_runs_on_context_thread();
+  test_poll_sender_observes_pipe_readiness();
+  test_poll_sender_reports_bad_descriptor();
   test_resolve_sender_runs_on_context_thread();
   test_nop_operation_completes_with_raw_cqe();
   test_stop_token_completes_stopped_before_submit();

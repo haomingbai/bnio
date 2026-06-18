@@ -246,6 +246,7 @@ auto sched = ctx.get_post_scheduler();
 // Every async operation is a sender:
 //   scheduler.async_resolve(query, result)
 //   scheduler.async_connect(socket, endpoint)
+//   scheduler.async_poll(descriptor, poll_mask)
 //   scheduler.async_handshake(ssl_stream, type)
 //   scheduler.async_send(ssl_stream, buffer)
 //   scheduler.async_receive(ssl_stream, buffer)

@@ -309,6 +309,7 @@ I/O.
 | `async_send(socket, buffer, flags)` | `stream_socket_view` or `tcp_socket&` | `size_t` bytes sent |
 | `async_accept(acceptor, flags)` | `listening_socket_view` or `tcp_acceptor&` | `tcp_socket` new connection |
 | `async_connect(socket, endpoint)` | `stream_socket_view` or `tcp_socket&` | `()` |
+| `async_poll(descriptor, mask)` | `descriptor_view` | `unsigned` ready-event mask |
 
 #### SSL
 
@@ -375,6 +376,7 @@ auto s = bupp::async_receive(scheduler, socket, buffer);
 | `bupp::async_send` | `provider.async_send(stream, buf)` | `io_context_cpo.h` |
 | `bupp::async_accept` | `provider.async_accept(acceptor)` | `io_context_cpo.h` |
 | `bupp::async_connect` | `provider.async_connect(stream, ep)` | `io_context_cpo.h` |
+| `bupp::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
 | `bupp::async_handshake` | `provider.async_handshake(stream, type)` | `ssl.h` |
 | `bupp::async_shutdown` | `provider.async_shutdown(stream)` | `ssl.h` |
 
