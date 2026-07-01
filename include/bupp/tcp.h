@@ -3,11 +3,14 @@
 #define BUPP_TCP_H_
 
 #include <bupp/async_io/socket_view.h>
+#include <bupp/buffer.h>
 #include <bupp/export.h>
 #include <bupp/ip.h>
 #include <sys/socket.h>
 
 #include <system_error>
+#include <type_traits>
+#include <utility>
 
 namespace bupp {
 
@@ -86,6 +89,52 @@ class BUPP_EXPORT tcp_socket {
   [[nodiscard]] async_io::stream_socket_view view() const noexcept {
     return async_io::stream_socket_view(fd_);
   }
+
+  /**
+   * Returns this stream's next layer.
+   */
+  [[nodiscard]] tcp_socket& next_layer() noexcept { return *this; }
+
+  /**
+   * Returns this stream's next layer.
+   */
+  [[nodiscard]] const tcp_socket& next_layer() const noexcept { return *this; }
+
+  /**
+   * Returns this stream's lowest layer.
+   */
+  [[nodiscard]] tcp_socket& lowest_layer() noexcept { return *this; }
+
+  /**
+   * Returns this stream's lowest layer.
+   */
+  [[nodiscard]] const tcp_socket& lowest_layer() const noexcept {
+    return *this;
+  }
+
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_receive(Scheduler scheduler, Buffer&& buffer,
+                                   int flags = 0);
+
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_receive_direct(Scheduler scheduler, Buffer&& buffer,
+                                          int flags = 0);
+
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_send(Scheduler scheduler, Buffer&& buffer,
+                                int flags = 0);
+
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_send_direct(Scheduler scheduler, Buffer&& buffer,
+                                       int flags = 0);
+
+  template <class Scheduler>
+  [[nodiscard]] auto async_connect(Scheduler scheduler,
+                                   const ip::endpoint& endpoint);
+
+  template <class Scheduler>
+  [[nodiscard]] auto async_connect_direct(Scheduler scheduler,
+                                          const ip::endpoint& endpoint);
 
   /**
    * Opens a TCP stream socket for an address family.
@@ -205,6 +254,12 @@ class BUPP_EXPORT tcp_acceptor {
     return async_io::listening_socket_view(fd_);
   }
 
+  template <class Scheduler>
+  [[nodiscard]] auto async_accept(Scheduler scheduler, int flags = 0);
+
+  template <class Scheduler>
+  [[nodiscard]] auto async_accept_direct(Scheduler scheduler, int flags = 0);
+
   /**
    * Opens a TCP listening socket for an address family.
    */
@@ -255,6 +310,111 @@ class BUPP_EXPORT tcp_acceptor {
  private:
   native_handle_type fd_ = -1;
 };
+
+}  // namespace bupp
+
+#include <bupp/detail/tcp/async_operations.h>
+
+namespace bupp {
+
+/** @cond BUPP_DETAIL */
+namespace detail {
+
+template <class Scheduler, bool Direct, class Receiver>
+void tcp_accept_operation<
+    Scheduler, Direct, Receiver>::child_receiver::set_value(int fd) noexcept {
+  bexec::set_value(std::move(operation_->receiver_), tcp_socket(fd));
+}
+
+}  // namespace detail
+/** @endcond */
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_receive(Scheduler scheduler, Buffer&& buffer,
+                               int flags) {
+  auto holder =
+      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_receive_sender<scheduler_type, holder_type, false>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_receive_direct(Scheduler scheduler, Buffer&& buffer,
+                                      int flags) {
+  auto holder =
+      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_receive_sender<scheduler_type, holder_type, true>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_send(Scheduler scheduler, Buffer&& buffer, int flags) {
+  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_send_sender<scheduler_type, holder_type, false>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_send_direct(Scheduler scheduler, Buffer&& buffer,
+                                   int flags) {
+  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_send_sender<scheduler_type, holder_type, true>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler>
+auto tcp_socket::async_connect(Scheduler scheduler,
+                               const ip::endpoint& endpoint) {
+  return scheduler.async_connect(view(), endpoint);
+}
+
+template <class Scheduler>
+auto tcp_socket::async_connect_direct(Scheduler scheduler,
+                                      const ip::endpoint& endpoint) {
+  return scheduler.async_connect_direct(view(), endpoint);
+}
+
+template <class Scheduler>
+auto tcp_acceptor::async_accept(Scheduler scheduler, int flags) {
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  return detail::tcp_accept_sender<scheduler_type, false>(std::move(scheduler),
+                                                          view(), flags);
+}
+
+template <class Scheduler>
+auto tcp_acceptor::async_accept_direct(Scheduler scheduler, int flags) {
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  return detail::tcp_accept_sender<scheduler_type, true>(std::move(scheduler),
+                                                         view(), flags);
+}
+
+template <class Layer>
+[[nodiscard]] decltype(auto) get_next_layer(Layer& layer) noexcept {
+  return layer.next_layer();
+}
+
+template <class Layer>
+[[nodiscard]] decltype(auto) get_next_layer(const Layer& layer) noexcept {
+  return layer.next_layer();
+}
+
+template <class Layer>
+[[nodiscard]] decltype(auto) get_lowest_layer(Layer& layer) noexcept {
+  return layer.lowest_layer();
+}
+
+template <class Layer>
+[[nodiscard]] decltype(auto) get_lowest_layer(const Layer& layer) noexcept {
+  return layer.lowest_layer();
+}
 
 }  // namespace bupp
 

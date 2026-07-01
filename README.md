@@ -228,12 +228,11 @@ cmake --build build-asio --target bupp_asio_echo_server
   intentionally has no senders, no RAII owners, no event loop.
 - **`bupp::io_context`** — the high-level async runtime. Owns the event loop,
   produces schedulers (dispatch and post semantics), and provides sender
-  factories for TCP, TLS, DNS, and timers. Composed operations like
-  `async_write` (write-all loop) and `async_handshake` (full TLS handshake) are
-  built here.
+  factories for the lowest-layer socket views, file descriptors, DNS, polling,
+  and timers. Stream owners build their higher-level senders on top.
 - **`bupp::ssl_stream`** — an RAII TLS stream that layers over any next layer
   (default: `tcp_socket`). Owns the SSL object and memory BIOs. Senders for
-  handshake, send, receive, and shutdown are produced by `io_context`.
+  handshake, send, receive, and shutdown are produced by the stream.
 
 ### Scheduler model
 
@@ -245,14 +244,16 @@ auto sched = ctx.get_post_scheduler();
 
 // Every async operation is a sender:
 //   scheduler.async_resolve(query, result)
-//   scheduler.async_connect(socket, endpoint)
+//   socket.async_connect(scheduler, endpoint)
 //   scheduler.async_poll(descriptor, poll_mask)
-//   scheduler.async_handshake(ssl_stream, type)
-//   scheduler.async_send(ssl_stream, buffer)
-//   scheduler.async_receive(ssl_stream, buffer)
-//   scheduler.async_shutdown(ssl_stream)
+//   scheduler.async_read(descriptor, buffer, offset)
+//   scheduler.async_write(descriptor, buffer, offset)
+//   ssl_stream.async_handshake(scheduler, type)
+//   ssl_stream.async_send(scheduler, buffer)
+//   ssl_stream.async_receive(scheduler, buffer)
+//   ssl_stream.async_shutdown(scheduler)
 
-spawn(sched.async_connect(socket, endpoint), my_receiver{});
+spawn(socket.async_connect(sched, endpoint), my_receiver{});
 ctx.run();
 ```
 

@@ -217,16 +217,16 @@ auto v6 = bupp::ip::tcp::v6();
 graph TB
     A["create io_context"] --> B["create tcp_acceptor"]
     B --> C["acceptor.open() → bind() → listen()"]
-    C --> D["scheduler.async_accept(acceptor)"]
+    C --> D["acceptor.async_accept(scheduler)"]
     D --> E["connect receiver + start()"]
     E --> F["ctx.run() — event loop"]
     F --> G{"completion"}
     G -->|"set_value(tcp_socket)"| H["handle new connection"]
-    H --> I["scheduler.async_receive(client)"]
+    H --> I["client.async_receive(scheduler)"]
     H --> J["re-issue async_accept"]
     I --> K{"completion"}
     K -->|"set_value(bytes)"| L["process data"]
-    L --> M["scheduler.async_send(client, echo)"]
+    L --> M["client.async_send(scheduler, echo)"]
     M --> I
 ```
 
@@ -357,15 +357,15 @@ bupp::ssl_stream<bupp::tcp_socket> stream(std::move(sock), ssl_ctx);
 auto scheduler = ctx.get_post_scheduler();
 
 // 4. Handshake
-auto hs = scheduler.async_handshake(stream, bupp::ssl_handshake_type::client);
+auto hs = stream.async_handshake(scheduler, bupp::ssl_handshake_type::client);
 // ... connect receiver + start ...
 
 // 5. After handshake completes, send/receive over SSL
-auto recv = scheduler.async_receive(stream, recv_buf, 0);
-auto send = scheduler.async_send(stream, send_buf, 0);
+auto recv = stream.async_receive(scheduler, recv_buf, 0);
+auto send = stream.async_send(scheduler, send_buf, 0);
 
 // 6. Shutdown when done
-auto sd = scheduler.async_shutdown(stream);
+auto sd = stream.async_shutdown(scheduler);
 ```
 
 ### Handshake Types
@@ -390,12 +390,15 @@ sender → connect(receiver) → operation → start() → run loop → completi
 ```mermaid
 sequenceDiagram
     participant User
+    participant Stream as tcp_socket
     participant Sender
     participant Op as operation
     participant Ctx as io_context
 
-    User->>Ctx: async_receive(socket, buffer, flags)
-    Ctx-->>User: sender
+    User->>Ctx: get_post_scheduler()
+    Ctx-->>User: scheduler
+    User->>Stream: async_receive(scheduler, buffer, flags)
+    Stream-->>User: sender
     User->>Sender: connect(receiver)
     Sender-->>User: operation
     User->>Op: start()
@@ -413,6 +416,8 @@ Every sender declares its completion channels:
 |--------|------------|-------------|---------------|
 | `async_receive` | `size_t` bytes | `std::error_code` | `()` |
 | `async_send` | `size_t` bytes | `std::error_code` | `()` |
+| `async_read` | `size_t` bytes | `std::error_code` | `()` |
+| `async_write` | `size_t` bytes | `std::error_code` | `()` |
 | `async_accept` | `tcp_socket` | `std::error_code` | `()` |
 | `async_connect` | `()` | `std::error_code` | `()` |
 | `async_poll` | `unsigned` ready-event mask | `std::error_code` | `()` |
@@ -508,7 +513,7 @@ int main() {
     sock.view().connect(ep);
 
     std::array<char, 4096> buf{};
-    auto sender = scheduler.async_receive(sock, bupp::buffer(buf), 0);
+    auto sender = sock.async_receive(scheduler, bupp::buffer(buf), 0);
     auto op = std::move(sender).connect(print_receiver{});
     op.start();
 
@@ -527,7 +532,7 @@ dispatch pattern with manual accept → recv → echo send loops:
 ### io_context Layer — Raw Echo Server
 
 Raw TCP echo server at the `io_context` layer, demonstrating repeated
-`async_accept`, per-connection `async_receive`/`async_write`, detached operation
+`async_accept`, per-connection `async_receive`/`async_send`, detached operation
 lifetime through a local holder, and `ctx.run()` as the server event loop:
 
 [`examples/raw_echo`](../examples/raw_echo)

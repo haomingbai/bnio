@@ -52,7 +52,8 @@ struct request_options {
 [[nodiscard]] std::string remove_fragment(std::string_view target);
 
 [[nodiscard]] bool parse_authority(std::string_view authority,
-                                   request_options& options, std::string& error);
+                                   request_options& options,
+                                   std::string& error);
 
 [[nodiscard]] bool parse_url(std::string_view url, request_options& options,
                              std::string& error);
@@ -110,8 +111,7 @@ class operation_registry {
 
 // ---- mini_curl_client ----
 
-class mini_curl_client
-    : public std::enable_shared_from_this<mini_curl_client> {
+class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
  public:
   mini_curl_client(bupp::io_context& context, request_options options,
                    operation_registry& registry);
@@ -146,6 +146,7 @@ class mini_curl_client
 
   // HTTP
   void send_request() noexcept;
+  void send_socket_chunk();
   void send_ssl_chunk();
   void on_request_sent(std::size_t bytes_sent) noexcept;
 
@@ -256,9 +257,7 @@ struct mini_curl_client::shutdown_receiver {
 inline mini_curl_client::mini_curl_client(bupp::io_context& context,
                                           request_options options,
                                           operation_registry& registry)
-    : context_(context),
-      registry_(registry),
-      options_(std::move(options)) {
+    : context_(context), registry_(registry), options_(std::move(options)) {
   if (options_.insecure) {
     ssl_context_.set_verify_mode(SSL_VERIFY_NONE);
   }
@@ -280,10 +279,11 @@ inline void mini_curl_client::resolve() {
   query.set_transport(bupp::dns_transport::tcp);
 
   const auto scheduler = context_.get_post_scheduler();
-  registry_.spawn(scheduler.async_resolve(
-                      std::move(query),
-                      bupp::dns_result_view(endpoints_.data(), endpoints_.size())),
-                  resolve_receiver{shared_from_this()});
+  registry_.spawn(
+      scheduler.async_resolve(
+          std::move(query),
+          bupp::dns_result_view(endpoints_.data(), endpoints_.size())),
+      resolve_receiver{shared_from_this()});
 }
 
 inline void mini_curl_client::on_resolved(std::size_t count) noexcept {
@@ -344,7 +344,7 @@ inline void mini_curl_client::connect_next() noexcept {
   }
 
   const auto scheduler = context_.get_post_scheduler();
-  registry_.spawn(scheduler.async_connect(socket_, endpoint),
+  registry_.spawn(socket_.async_connect(scheduler, endpoint),
                   connect_receiver{shared_from_this()});
 }
 
@@ -374,9 +374,9 @@ inline void mini_curl_client::do_handshake() noexcept {
       std::move(socket_), ssl_context_);
 
   const auto scheduler = context_.get_post_scheduler();
-  registry_.spawn(scheduler.async_handshake(*ssl_stream_,
-                                            bupp::ssl_handshake_type::client),
-                  handshake_receiver{shared_from_this()});
+  registry_.spawn(
+      ssl_stream_->async_handshake(scheduler, bupp::ssl_handshake_type::client),
+      handshake_receiver{shared_from_this()});
 }
 
 inline void mini_curl_client::on_handshake_complete() noexcept {
@@ -393,18 +393,23 @@ inline void mini_curl_client::send_request() noexcept {
   }
 
   request_ = build_request(options_);
-  const auto scheduler = context_.get_post_scheduler();
+  send_offset_ = 0;
 
   if (options_.use_tls) {
-    // For SSL, track partial writes with a write-all loop via send_offset_
-    send_offset_ = 0;
     send_ssl_chunk();
   } else {
-    // async_write is already a write-all composed operation
-    registry_.spawn(
-        scheduler.async_write(socket_, bupp::buffer(request_), MSG_NOSIGNAL),
-        send_receiver{shared_from_this()});
+    send_socket_chunk();
   }
+}
+
+inline void mini_curl_client::send_socket_chunk() {
+  const auto scheduler = context_.get_post_scheduler();
+  const std::string_view remaining(request_);
+  const std::string_view chunk = remaining.substr(send_offset_);
+  registry_.spawn(
+      socket_.async_send(scheduler, bupp::buffer(chunk.data(), chunk.size()),
+                         MSG_NOSIGNAL),
+      send_receiver{shared_from_this()});
 }
 
 inline void mini_curl_client::send_ssl_chunk() {
@@ -412,19 +417,25 @@ inline void mini_curl_client::send_ssl_chunk() {
   const std::string_view remaining(request_);
   const std::string_view chunk = remaining.substr(send_offset_);
   registry_.spawn(
-      scheduler.async_send(*ssl_stream_,
-                           bupp::buffer(chunk.data(), chunk.size()), MSG_NOSIGNAL),
+      ssl_stream_->async_send(
+          scheduler, bupp::buffer(chunk.data(), chunk.size()), MSG_NOSIGNAL),
       send_receiver{shared_from_this()});
 }
 
 inline void mini_curl_client::on_request_sent(std::size_t bytes_sent) noexcept {
-  if (options_.use_tls) {
-    send_offset_ += bytes_sent;
-    if (send_offset_ < request_.size()) {
-      // Partial write — send the remaining bytes
+  if (bytes_sent == 0) {
+    fail("send returned zero bytes");
+    return;
+  }
+
+  send_offset_ += bytes_sent;
+  if (send_offset_ < request_.size()) {
+    if (options_.use_tls) {
       send_ssl_chunk();
-      return;
+    } else {
+      send_socket_chunk();
     }
+    return;
   }
 
   // Request fully sent; start receiving the response
@@ -437,12 +448,13 @@ inline void mini_curl_client::receive() noexcept {
   const auto scheduler = context_.get_post_scheduler();
 
   if (options_.use_tls) {
-    registry_.spawn(scheduler.async_receive(*ssl_stream_,
-                                            bupp::buffer(receive_buffer_)),
-                    receive_receiver{shared_from_this()});
+    registry_.spawn(
+        ssl_stream_->async_receive(scheduler, bupp::buffer(receive_buffer_)),
+        receive_receiver{shared_from_this()});
   } else {
-    registry_.spawn(scheduler.async_receive(socket_, bupp::buffer(receive_buffer_)),
-                    receive_receiver{shared_from_this()});
+    registry_.spawn(
+        socket_.async_receive(scheduler, bupp::buffer(receive_buffer_)),
+        receive_receiver{shared_from_this()});
   }
 }
 
@@ -466,14 +478,12 @@ inline void mini_curl_client::on_received(std::size_t count) noexcept {
 
       // Parse status line (first line of headers)
       const std::size_t first_nl = header_section.find("\r\n");
-      std::string_view status_line =
-          first_nl == std::string_view::npos
-              ? header_section
-              : header_section.substr(0, first_nl);
+      std::string_view status_line = first_nl == std::string_view::npos
+                                         ? header_section
+                                         : header_section.substr(0, first_nl);
       int status = parse_status_code(status_line);
 
-      if (status >= 300 && status < 400 &&
-          redirect_count_ < k_max_redirects) {
+      if (status >= 300 && status < 400 && redirect_count_ < k_max_redirects) {
         std::string location = extract_location(header_section);
         if (!location.empty()) {
           if (options_.verbose) {
@@ -500,8 +510,7 @@ inline void mini_curl_client::on_received(std::size_t count) noexcept {
   receive();
 }
 
-inline void mini_curl_client::on_receive_error(
-    std::error_code error) noexcept {
+inline void mini_curl_client::on_receive_error(std::error_code error) noexcept {
   // SSL_ERROR_ZERO_RETURN (clean TLS close) and TCP ECONNRESET after data
   // are both reported as connection_reset.  If we already received response
   // data, treat it as a clean server-initiated close.
@@ -575,7 +584,7 @@ inline void mini_curl_client::do_shutdown() noexcept {
       std::cerr << "* Shutting down TLS\n";
     }
     const auto scheduler = context_.get_post_scheduler();
-    registry_.spawn(scheduler.async_shutdown(*ssl_stream_),
+    registry_.spawn(ssl_stream_->async_shutdown(scheduler),
                     shutdown_receiver{shared_from_this()});
   } else {
     finish(0);
@@ -631,7 +640,7 @@ inline void mini_curl_client::finish(int code) noexcept {
     // ssl_stream_ holds the socket; destroying it closes the fd
     ssl_stream_.reset();
   }
-  socket_.close();
+  (void)socket_.close();
   if (output_stream_.is_open()) {
     output_stream_.close();
   }

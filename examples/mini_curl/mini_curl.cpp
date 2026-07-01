@@ -1,8 +1,8 @@
-#include "mini_curl_client.hpp"
-
 #include <iostream>
 #include <string>
 #include <string_view>
+
+#include "mini_curl_client.hpp"
 
 namespace mini_curl {
 

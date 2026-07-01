@@ -98,7 +98,7 @@ pointed-to storage must remain valid until the I/O operation completes.
 void bad(bupp::io_context& ctx, bupp::tcp_socket& sock) {
     auto scheduler = ctx.get_post_scheduler();
     std::string msg = "hello";
-    auto sender = scheduler.async_send(sock, bupp::buffer(msg), 0);
+    auto sender = sock.async_send(scheduler, bupp::buffer(msg), 0);
     // msg goes out of scope; the send reads freed memory
 }
 
@@ -106,7 +106,7 @@ void bad(bupp::io_context& ctx, bupp::tcp_socket& sock) {
 void good(bupp::io_context& ctx, bupp::tcp_socket& sock) {
     auto scheduler = ctx.get_post_scheduler();
     auto msg = std::make_shared<std::string>("hello");
-    auto sender = scheduler.async_send(sock, bupp::buffer(*msg), 0);
+    auto sender = sock.async_send(scheduler, bupp::buffer(*msg), 0);
     // receiver captures msg via shared_ptr — alive until completion
 }
 ```
@@ -123,7 +123,7 @@ void bad() {
     auto scheduler = ctx.get_post_scheduler();
     bupp::tcp_socket sock;
     sock.open(bupp::ip::tcp::v4());
-    auto sender = scheduler.async_receive(sock, some_buffer, 0);
+    auto sender = sock.async_receive(scheduler, some_buffer, 0);
     // ... connect, start ...
 }   // ctx destroyed; operation in pending_io list dangles
 ```
@@ -135,12 +135,12 @@ non-owning views holding the owner's fd value. The view is valid only as long
 as the owner exists.
 
 ```cpp
-// RIGHT — owner → view → API
+// RIGHT — high-level stream API keeps the owner explicit
 bupp::tcp_socket sock;                        // owner
 sock.open(bupp::ip::tcp::v4());
-scheduler.async_receive(sock, buffer, 0);     // implicit view() — sock outlives op
+sock.async_receive(scheduler, buffer, 0);     // sock outlives op
 
-// Also right — explicit view, same lifetime
+// Also right — explicit low-level view, same lifetime
 auto view = sock.view();                      // non-owning
 scheduler.async_receive(view, buffer, 0);     // fine: sock still alive
 ```
@@ -196,7 +196,7 @@ constraints:
   completed operations.
 
 ```cpp
-auto sender = scheduler.async_receive(socket, buffer, 0);
+auto sender = socket.async_receive(scheduler, buffer, 0);
 auto op = std::move(sender).connect(my_receiver);
 op.start();
 // op is now owned by ctx; it will be destroyed after completion

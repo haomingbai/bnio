@@ -297,28 +297,35 @@ struct io_context_options {
 
 ### Sender Factories
 
-The schedulers expose the async I/O factories. Each factory returns a sender.
-Connecting a sender to a receiver and calling `start()` begins the asynchronous
-I/O.
+Streams expose the high-level async I/O factories. Schedulers expose the
+lowest-layer factories for socket views, file descriptors, polling, DNS, and
+timers. Each factory returns a sender. Connecting a sender to a receiver and
+calling `start()` begins the asynchronous I/O.
 
-#### Non-SSL
+#### Stream Level
 
-| Factory | Socket Parameter | `set_value` |
-|---------|-----------------|-------------|
-| `async_receive(socket, buffer, flags)` | `stream_socket_view` or `tcp_socket&` | `size_t` bytes received |
-| `async_send(socket, buffer, flags)` | `stream_socket_view` or `tcp_socket&` | `size_t` bytes sent |
-| `async_accept(acceptor, flags)` | `listening_socket_view` or `tcp_acceptor&` | `tcp_socket` new connection |
-| `async_connect(socket, endpoint)` | `stream_socket_view` or `tcp_socket&` | `()` |
-| `async_poll(descriptor, mask)` | `descriptor_view` | `unsigned` ready-event mask |
+| Factory | Owner | `set_value` |
+|---------|-------|-------------|
+| `socket.async_receive(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes received |
+| `socket.async_send(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes sent |
+| `acceptor.async_accept(scheduler, flags)` | `tcp_acceptor` | `tcp_socket` new connection |
+| `socket.async_connect(scheduler, endpoint)` | `tcp_socket` | `()` |
+| `stream.async_handshake(scheduler, type)` | `ssl_stream` | `()` |
+| `stream.async_receive(scheduler, buffer, flags)` | `ssl_stream` | `size_t` |
+| `stream.async_send(scheduler, buffer, flags)` | `ssl_stream` | `size_t` |
+| `stream.async_shutdown(scheduler)` | `ssl_stream` | `()` |
 
-#### SSL
+#### Scheduler Level
 
-| Factory | `set_value` |
-|---------|-------------|
-| `async_handshake(ssl_stream, type)` | `()` |
-| `async_receive(ssl_stream, buffer, flags)` | `size_t` |
-| `async_send(ssl_stream, buffer, flags)` | `size_t` |
-| `async_shutdown(ssl_stream)` | `()` |
+| Factory | Lowest-Layer Parameter | `set_value` |
+|---------|------------------------|-------------|
+| `scheduler.async_receive(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes received |
+| `scheduler.async_send(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes sent |
+| `scheduler.async_accept(view, flags)` | `listening_socket_view` | native fd |
+| `scheduler.async_connect(view, endpoint)` | `stream_socket_view` | `()` |
+| `scheduler.async_read(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read |
+| `scheduler.async_write(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes written |
+| `scheduler.async_poll(descriptor, mask)` | `descriptor_view` | `unsigned` ready-event mask |
 
 All senders also complete with `set_error(std::error_code)` or `set_stopped()`.
 
@@ -329,6 +336,7 @@ sequenceDiagram
     participant User
     participant Ctx as io_context
     participant S as scheduler
+    participant Stream as tcp_socket
     participant Op as operation
     participant UCtx as io_uring_context
     participant Ring as base::ring
@@ -336,8 +344,8 @@ sequenceDiagram
 
     User->>Ctx: get_post_scheduler()
     Ctx-->>User: scheduler
-    User->>S: async_receive(socket, buffer, flags)
-    S-->>User: sender
+    User->>Stream: async_receive(scheduler, buffer, flags)
+    Stream-->>User: sender
 
     User->>Op: connect(receiver) → start()
     Op->>Ctx: enqueue_io(*this)
@@ -362,9 +370,12 @@ sequenceDiagram
 (CPOs) enable generic code to call async operations on any provider:
 
 ```cpp
-// Direct:
+// Direct stream call:
 auto scheduler = ctx.get_post_scheduler();
-auto s = scheduler.async_receive(socket, buffer, 0);
+auto s = socket.async_receive(scheduler, buffer, 0);
+
+// Direct lowest-layer call:
+auto low = scheduler.async_receive(socket.view(), buffer, 0);
 
 // Through CPO (generic):
 auto s = bupp::async_receive(scheduler, socket, buffer);
@@ -372,13 +383,15 @@ auto s = bupp::async_receive(scheduler, socket, buffer);
 
 | CPO | Invokes | Header |
 |-----|---------|--------|
-| `bupp::async_receive` | `provider.async_receive(stream, buf)` | `io_context_cpo.h` |
-| `bupp::async_send` | `provider.async_send(stream, buf)` | `io_context_cpo.h` |
-| `bupp::async_accept` | `provider.async_accept(acceptor)` | `io_context_cpo.h` |
-| `bupp::async_connect` | `provider.async_connect(stream, ep)` | `io_context_cpo.h` |
+| `bupp::async_receive` | `stream.async_receive(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bupp::async_send` | `stream.async_send(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bupp::async_accept` | `acceptor.async_accept(provider)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bupp::async_connect` | `stream.async_connect(provider, ep)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bupp::async_read` | `provider.async_read(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bupp::async_write` | `provider.async_write(descriptor, buf, offset)` | `io_context_cpo.h` |
 | `bupp::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
-| `bupp::async_handshake` | `provider.async_handshake(stream, type)` | `ssl.h` |
-| `bupp::async_shutdown` | `provider.async_shutdown(stream)` | `ssl.h` |
+| `bupp::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
+| `bupp::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
 
 Each also has a `*_direct` variant (e.g. `async_receive_direct`).
 
@@ -396,6 +409,12 @@ concept sends_bytes = /* ... */;
 
 template <class Provider, class Acceptor>
 concept accepts_connections = /* ... */;
+
+template <class Provider, class Descriptor, class Buffer>
+concept reads_descriptor = /* ... */;
+
+template <class Provider, class Descriptor, class Buffer>
+concept writes_descriptor = /* ... */;
 ```
 
 ---

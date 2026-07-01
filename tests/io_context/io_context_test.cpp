@@ -1,5 +1,7 @@
+#include <arpa/inet.h>
 #include <bupp/io_context.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -13,6 +15,7 @@
 #include <chrono>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -30,6 +33,7 @@ enum class signal_kind {
 struct shared_state {
   signal_kind signal = signal_kind::none;
   std::size_t size = 0;
+  int fd = -1;
   std::error_code error;
 };
 
@@ -62,6 +66,48 @@ struct byte_receiver {
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+};
+
+struct socket_receiver {
+  std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
+  bupp::io_context* context = nullptr;
+  unsigned* completions = nullptr;
+  unsigned target = 1;
+
+  void set_value(bupp::tcp_socket socket) noexcept {
+    state->signal = signal_kind::value;
+    state->fd = socket.release();
+    if (completions != nullptr) {
+      ++*completions;
+      if (*completions != target) {
+        return;
+      }
+    }
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_error(std::error_code error) noexcept {
+    state->signal = signal_kind::error;
+    state->error = error;
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_stopped() noexcept {
+    state->signal = signal_kind::stopped;
+    if (completions != nullptr) {
+      ++*completions;
+      if (*completions != target) {
+        return;
+      }
+    }
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -219,8 +265,32 @@ struct dispatch_inline_outer_receiver {
   }
 };
 
+template <class Scheduler, class Stream, class Buffer>
+concept scheduler_can_receive_stream =
+    requires(Scheduler scheduler, Stream stream, Buffer buffer) {
+      scheduler.async_receive(stream, buffer);
+    };
+
+template <class Scheduler, class Stream, class Buffer>
+concept scheduler_can_send_stream =
+    requires(Scheduler scheduler, Stream stream, Buffer buffer) {
+      scheduler.async_send(stream, buffer);
+    };
+
 [[nodiscard]] bool context_available(const bupp::io_context& context) {
   return context.is_open();
+}
+
+[[nodiscard]] bupp::ip::endpoint bound_loopback_endpoint(
+    const bupp::tcp_acceptor& acceptor) {
+  sockaddr_in address{};
+  socklen_t address_size = sizeof(address);
+  assert(::getsockname(acceptor.native_handle(),
+                       reinterpret_cast<sockaddr*>(&address),
+                       &address_size) == 0);
+  assert(address.sin_family == AF_INET);
+  return bupp::ip::endpoint(bupp::ip::address::loopback_v4(),
+                            ntohs(address.sin_port));
 }
 
 void test_sender_concepts() {
@@ -228,23 +298,68 @@ void test_sender_concepts() {
   auto scheduler = context.get_post_scheduler();
   bupp::tcp_socket socket(3);
   std::array<char, 8> bytes{};
+  constexpr std::string_view text = "abc";
 
   using receive_sender =
-      decltype(scheduler.async_receive(socket, bupp::buffer(bytes)));
-  using send_sender =
-      decltype(scheduler.async_send(socket, std::string_view("abc")));
+      decltype(socket.async_receive(scheduler, bupp::buffer(bytes)));
+  using receive_direct_sender =
+      decltype(socket.async_receive_direct(scheduler, bupp::buffer(bytes)));
+  using low_receive_sender =
+      decltype(scheduler.async_receive(socket.view(), bupp::buffer(bytes)));
+  using low_send_sender =
+      decltype(scheduler.async_send(socket.view(), bupp::buffer(text)));
+  using send_sender = decltype(socket.async_send(scheduler, text));
+  using send_direct_sender =
+      decltype(socket.async_send_direct(scheduler, text));
+  using accept_sender =
+      decltype(std::declval<bupp::tcp_acceptor&>().async_accept(scheduler));
+  using accept_direct_sender =
+      decltype(std::declval<bupp::tcp_acceptor&>().async_accept_direct(
+          scheduler));
+  using connect_sender =
+      decltype(std::declval<bupp::tcp_socket&>().async_connect(
+          scheduler, std::declval<const bupp::ip::endpoint&>()));
+  using connect_direct_sender =
+      decltype(std::declval<bupp::tcp_socket&>().async_connect_direct(
+          scheduler, std::declval<const bupp::ip::endpoint&>()));
+  using read_sender = decltype(scheduler.async_read(
+      bupp::async_io::descriptor_view(3), bupp::buffer(bytes)));
+  using read_direct_sender = decltype(scheduler.async_read_direct(
+      bupp::async_io::descriptor_view(3), bupp::buffer(bytes)));
+  using write_sender = decltype(scheduler.async_write(
+      bupp::async_io::descriptor_view(3), bupp::buffer(text)));
+  using write_direct_sender = decltype(scheduler.async_write_direct(
+      bupp::async_io::descriptor_view(3), bupp::buffer(text)));
   using poll_sender = decltype(scheduler.async_poll(
       bupp::async_io::descriptor_view(3), static_cast<unsigned>(POLLIN)));
   using schedule_sender = decltype(bexec::schedule(scheduler));
   using timer_wait_sender =
       decltype(std::declval<bupp::steady_timer&>().async_wait());
   static_assert(bexec::sender<receive_sender>);
+  static_assert(bexec::sender<receive_direct_sender>);
+  static_assert(bexec::sender<low_receive_sender>);
+  static_assert(bexec::sender<low_send_sender>);
   static_assert(bexec::sender<send_sender>);
+  static_assert(bexec::sender<send_direct_sender>);
+  static_assert(bexec::sender<accept_sender>);
+  static_assert(bexec::sender<accept_direct_sender>);
+  static_assert(bexec::sender<connect_sender>);
+  static_assert(bexec::sender<connect_direct_sender>);
+  static_assert(bexec::sender<read_sender>);
+  static_assert(bexec::sender<read_direct_sender>);
+  static_assert(bexec::sender<write_sender>);
+  static_assert(bexec::sender<write_direct_sender>);
   static_assert(bexec::sender<poll_sender>);
   static_assert(bexec::sender<schedule_sender>);
   static_assert(bexec::sender<timer_wait_sender>);
   static_assert(bexec::scheduler<bupp::io_context::dispatch_scheduler>);
   static_assert(bexec::scheduler<bupp::io_context::post_scheduler>);
+  static_assert(
+      !scheduler_can_receive_stream<bupp::io_context::post_scheduler,
+                                    bupp::tcp_socket, bupp::mutable_buffer>);
+  static_assert(
+      !scheduler_can_send_stream<bupp::io_context::post_scheduler,
+                                 bupp::tcp_socket, bupp::const_buffer>);
   static_assert(bupp::receives_bytes<bupp::io_context::post_scheduler,
                                      bupp::tcp_socket, bupp::mutable_buffer>);
   static_assert(bupp::receives_bytes<bupp::io_context::dispatch_scheduler,
@@ -258,11 +373,17 @@ void test_sender_concepts() {
   static_assert(
       bupp::connects_stream<bupp::io_context::post_scheduler, bupp::tcp_socket,
                             const bupp::ip::endpoint&>);
+  static_assert(bupp::reads_descriptor<bupp::io_context::post_scheduler,
+                                       bupp::async_io::descriptor_view,
+                                       bupp::mutable_buffer>);
+  static_assert(bupp::writes_descriptor<bupp::io_context::post_scheduler,
+                                        bupp::async_io::descriptor_view,
+                                        bupp::const_buffer>);
   static_assert(bupp::polls_descriptor<bupp::io_context::post_scheduler,
                                        bupp::async_io::descriptor_view>);
 
   byte_receiver receiver;
-  auto sender = scheduler.async_receive(socket, bupp::buffer(bytes));
+  auto sender = socket.async_receive(scheduler, bupp::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   static_assert(bexec::operation_state<decltype(operation)>);
 
@@ -358,7 +479,7 @@ void test_manual_flush_receives_queued_io() {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_receive(receiver_socket, bupp::buffer(bytes));
+  auto sender = receiver_socket.async_receive(scheduler, bupp::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   assert(scheduler.queued_io_size() == 1);
@@ -393,7 +514,7 @@ void test_direct_receive_submits_without_queue() {
   auto state = receiver.state;
 
   auto sender =
-      scheduler.async_receive_direct(receiver_socket, bupp::buffer(bytes));
+      receiver_socket.async_receive_direct(scheduler, bupp::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   assert(scheduler.queued_io_size() == 0);
@@ -407,6 +528,159 @@ void test_direct_receive_submits_without_queue() {
   assert(state->signal == signal_kind::value);
   assert(state->size == payload.size());
   assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+}
+
+void test_queued_send_writes_to_peer() {
+  bupp::io_context_options options;
+  options.platform.max_queued_io_operations = 64;
+  options.platform.queued_io_flush_after = std::chrono::seconds(30);
+  bupp::io_context context(options);
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  assert(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+  bupp::tcp_socket sender_socket(sockets[0]);
+  bupp::tcp_socket receiver_socket(sockets[1]);
+
+  constexpr std::string_view payload = "queued send";
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender =
+      sender_socket.async_send(scheduler, bupp::buffer(payload), MSG_NOSIGNAL);
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  assert(scheduler.queued_io_size() == 1);
+  assert(!scheduler.flush_io_queue());
+  context.run();
+
+  assert(state->signal == signal_kind::value);
+  assert(state->size == payload.size());
+
+  std::array<char, 32> bytes{};
+  assert(::recv(receiver_socket.native_handle(), bytes.data(), bytes.size(),
+                0) == static_cast<ssize_t>(payload.size()));
+  assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+}
+
+void test_direct_send_submits_without_queue() {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  assert(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+  bupp::tcp_socket sender_socket(sockets[0]);
+  bupp::tcp_socket receiver_socket(sockets[1]);
+
+  constexpr std::string_view payload = "direct send";
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = sender_socket.async_send_direct(
+      scheduler, bupp::buffer(payload), MSG_NOSIGNAL);
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  assert(scheduler.queued_io_size() == 0);
+  context.run();
+
+  assert(state->signal == signal_kind::value);
+  assert(state->size == payload.size());
+
+  std::array<char, 32> bytes{};
+  assert(::recv(receiver_socket.native_handle(), bytes.data(), bytes.size(),
+                0) == static_cast<ssize_t>(payload.size()));
+  assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+}
+
+template <bool Direct>
+void test_accept_connect_loopback() {
+  bupp::io_context_options options;
+  options.platform.max_queued_io_operations = 64;
+  options.platform.queued_io_flush_after = std::chrono::seconds(30);
+  bupp::io_context context(options);
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  bupp::tcp_acceptor acceptor;
+  assert(!acceptor.open(bupp::ip::tcp::v4()));
+  assert(!acceptor.set_reuse_address(true));
+  assert(!acceptor.bind(bupp::ip::endpoint::loopback_v4(0)));
+  assert(!acceptor.listen(4));
+  const bupp::ip::endpoint endpoint = bound_loopback_endpoint(acceptor);
+
+  bupp::tcp_socket client;
+  assert(!client.open(bupp::ip::tcp::v4()));
+
+  unsigned completions = 0;
+
+  socket_receiver accept_receiver;
+  accept_receiver.context = &context;
+  accept_receiver.completions = &completions;
+  accept_receiver.target = 2;
+  auto accept_state = accept_receiver.state;
+
+  void_receiver connect_receiver;
+  connect_receiver.context = &context;
+  connect_receiver.completions = &completions;
+  connect_receiver.target = 2;
+  auto connect_state = connect_receiver.state;
+
+  auto accept_sender = [&] {
+    if constexpr (Direct) {
+      return acceptor.async_accept_direct(scheduler, SOCK_CLOEXEC);
+    } else {
+      return acceptor.async_accept(scheduler, SOCK_CLOEXEC);
+    }
+  }();
+  auto connect_sender = [&] {
+    if constexpr (Direct) {
+      return client.async_connect_direct(scheduler, endpoint);
+    } else {
+      return client.async_connect(scheduler, endpoint);
+    }
+  }();
+
+  auto accept_operation =
+      bexec::connect(std::move(accept_sender), std::move(accept_receiver));
+  auto connect_operation =
+      bexec::connect(std::move(connect_sender), std::move(connect_receiver));
+
+  bexec::start(accept_operation);
+  bexec::start(connect_operation);
+  if constexpr (Direct) {
+    assert(scheduler.queued_io_size() == 0);
+  } else {
+    assert(scheduler.queued_io_size() == 2);
+    assert(!scheduler.flush_io_queue());
+  }
+  context.run();
+
+  assert(completions == 2);
+  assert(accept_state->signal == signal_kind::value);
+  assert(accept_state->fd >= 0);
+  assert(connect_state->signal == signal_kind::value);
+  assert(client.is_open());
+
+  assert(::close(accept_state->fd) == 0);
+  accept_state->fd = -1;
+}
+
+void test_queued_accept_connect_loopback() {
+  test_accept_connect_loopback<false>();
+}
+
+void test_direct_accept_connect_loopback() {
+  test_accept_connect_loopback<true>();
 }
 
 void test_queued_io_auto_flush_timer_receives() {
@@ -429,7 +703,7 @@ void test_queued_io_auto_flush_timer_receives() {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_receive(receiver_socket, bupp::buffer(bytes));
+  auto sender = receiver_socket.async_receive(scheduler, bupp::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   assert(scheduler.queued_io_size() == 1);
@@ -443,6 +717,131 @@ void test_queued_io_auto_flush_timer_receives() {
   assert(state->signal == signal_kind::value);
   assert(state->size == payload.size());
   assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+}
+
+void test_queued_file_write_and_direct_read() {
+  std::string path = "/tmp/bupp-io-context-file-XXXXXX";
+  const int fd = ::mkstemp(path.data());
+  assert(fd >= 0);
+  assert(::unlink(path.c_str()) == 0);
+
+  constexpr std::string_view payload = "file through io_uring";
+
+  {
+    bupp::io_context context;
+    if (!context_available(context)) {
+      assert(::close(fd) == 0);
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+
+    byte_receiver receiver;
+    receiver.context = &context;
+    auto state = receiver.state;
+
+    auto sender =
+        bupp::async_write(scheduler, bupp::async_io::descriptor_view(fd),
+                          bupp::buffer(payload), 0);
+    auto operation = bexec::connect(std::move(sender), std::move(receiver));
+    bexec::start(operation);
+    assert(scheduler.queued_io_size() == 1);
+    assert(!scheduler.flush_io_queue());
+    context.run();
+
+    assert(state->signal == signal_kind::value);
+    assert(state->size == payload.size());
+  }
+
+  {
+    bupp::io_context context;
+    if (!context_available(context)) {
+      assert(::close(fd) == 0);
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+    std::array<char, 64> bytes{};
+
+    byte_receiver receiver;
+    receiver.context = &context;
+    auto state = receiver.state;
+
+    auto sender = bupp::async_read_direct(
+        scheduler, bupp::async_io::descriptor_view(fd), bupp::buffer(bytes), 0);
+    auto operation = bexec::connect(std::move(sender), std::move(receiver));
+    bexec::start(operation);
+    assert(scheduler.queued_io_size() == 0);
+    context.run();
+
+    assert(state->signal == signal_kind::value);
+    assert(state->size == payload.size());
+    assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+  }
+
+  assert(::close(fd) == 0);
+}
+
+void test_direct_file_write_and_queued_read() {
+  std::string path = "/tmp/bupp-io-context-file-XXXXXX";
+  const int fd = ::mkstemp(path.data());
+  assert(fd >= 0);
+  assert(::unlink(path.c_str()) == 0);
+
+  constexpr std::string_view payload = "direct file write";
+
+  {
+    bupp::io_context context;
+    if (!context_available(context)) {
+      assert(::close(fd) == 0);
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+
+    byte_receiver receiver;
+    receiver.context = &context;
+    auto state = receiver.state;
+
+    auto sender =
+        bupp::async_write_direct(scheduler, bupp::async_io::descriptor_view(fd),
+                                 bupp::buffer(payload), 0);
+    auto operation = bexec::connect(std::move(sender), std::move(receiver));
+    bexec::start(operation);
+    assert(scheduler.queued_io_size() == 0);
+    context.run();
+
+    assert(state->signal == signal_kind::value);
+    assert(state->size == payload.size());
+  }
+
+  {
+    bupp::io_context_options options;
+    options.platform.max_queued_io_operations = 64;
+    options.platform.queued_io_flush_after = std::chrono::seconds(30);
+    bupp::io_context context(options);
+    if (!context_available(context)) {
+      assert(::close(fd) == 0);
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+    std::array<char, 64> bytes{};
+
+    byte_receiver receiver;
+    receiver.context = &context;
+    auto state = receiver.state;
+
+    auto sender = bupp::async_read(
+        scheduler, bupp::async_io::descriptor_view(fd), bupp::buffer(bytes), 0);
+    auto operation = bexec::connect(std::move(sender), std::move(receiver));
+    bexec::start(operation);
+    assert(scheduler.queued_io_size() == 1);
+    assert(!scheduler.flush_io_queue());
+    context.run();
+
+    assert(state->signal == signal_kind::value);
+    assert(state->size == payload.size());
+    assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+  }
+
+  assert(::close(fd) == 0);
 }
 
 void test_post_scheduler_schedule_posts_fifo() {
@@ -740,7 +1139,13 @@ int main() {
   test_direct_poll_submits_without_queue();
   test_manual_flush_receives_queued_io();
   test_direct_receive_submits_without_queue();
+  test_queued_send_writes_to_peer();
+  test_direct_send_submits_without_queue();
+  test_queued_accept_connect_loopback();
+  test_direct_accept_connect_loopback();
   test_queued_io_auto_flush_timer_receives();
+  test_queued_file_write_and_direct_read();
+  test_direct_file_write_and_queued_read();
   test_post_scheduler_schedule_posts_fifo();
   test_dispatch_scheduler_schedule_posts_outside_context();
   test_dispatch_scheduler_schedule_runs_inline_in_context();

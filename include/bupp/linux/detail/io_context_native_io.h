@@ -13,6 +13,7 @@
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -190,7 +191,6 @@ class native_io_sender {
   submit_mode mode_;
 };
 
-template <class Holder>
 class receive_model {
  public:
   using completion_signatures =
@@ -198,9 +198,9 @@ class receive_model {
                                    bexec::set_error_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  receive_model(async_io::stream_socket_view socket, Holder buffer,
+  receive_model(async_io::stream_socket_view socket, mutable_buffer buffer,
                 int flags) noexcept
-      : socket_(socket), buffer_(std::move(buffer)), flags_(flags) {}
+      : socket_(socket), buffer_(buffer), flags_(flags) {}
 
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
     const async_io::buffer_view view = buffer_.view();
@@ -217,18 +217,16 @@ class receive_model {
 
   template <class Receiver>
   void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    const auto size = static_cast<std::size_t>(result);
-    buffer_.commit(size);
-    bexec::set_value(std::forward<Receiver>(receiver), size);
+    bexec::set_value(std::forward<Receiver>(receiver),
+                     static_cast<std::size_t>(result));
   }
 
  private:
   async_io::stream_socket_view socket_;
-  Holder buffer_;
+  mutable_buffer buffer_;
   int flags_;
 };
 
-template <class Holder>
 class send_model {
  public:
   using completion_signatures =
@@ -236,9 +234,9 @@ class send_model {
                                    bexec::set_error_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  send_model(async_io::stream_socket_view socket, Holder buffer,
+  send_model(async_io::stream_socket_view socket, const_buffer buffer,
              int flags) noexcept
-      : socket_(socket), buffer_(std::move(buffer)), flags_(flags) {}
+      : socket_(socket), buffer_(buffer), flags_(flags) {}
 
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
     sqe.prep_send(socket_.native_handle(), buffer_.data(), buffer_.size(),
@@ -261,14 +259,14 @@ class send_model {
 
  private:
   async_io::stream_socket_view socket_;
-  Holder buffer_;
+  const_buffer buffer_;
   int flags_;
 };
 
 class accept_model {
  public:
   using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(tcp_socket),
+      bexec::completion_signatures<bexec::set_value_t(int),
                                    bexec::set_error_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
@@ -289,12 +287,84 @@ class accept_model {
 
   template <class Receiver>
   void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver), tcp_socket(result));
+    bexec::set_value(std::forward<Receiver>(receiver), result);
   }
 
  private:
   async_io::listening_socket_view socket_;
   int flags_;
+};
+
+class read_model {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  read_model(async_io::descriptor_view descriptor, mutable_buffer buffer,
+             std::uint64_t offset) noexcept
+      : descriptor_(descriptor), buffer_(buffer), offset_(offset) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    sqe.prep_read(descriptor_.native_handle(), buffer_.data(),
+                  static_cast<unsigned>(buffer_.size()), offset_);
+  }
+
+  [[nodiscard]] bool is_error_result(int result) const noexcept {
+    return result < 0;
+  }
+
+  [[nodiscard]] std::error_code make_error(int result) const noexcept {
+    return errno_result(result);
+  }
+
+  template <class Receiver>
+  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver),
+                     static_cast<std::size_t>(result));
+  }
+
+ private:
+  async_io::descriptor_view descriptor_;
+  mutable_buffer buffer_;
+  std::uint64_t offset_;
+};
+
+class write_model {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  write_model(async_io::descriptor_view descriptor, const_buffer buffer,
+              std::uint64_t offset) noexcept
+      : descriptor_(descriptor), buffer_(buffer), offset_(offset) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    sqe.prep_write(descriptor_.native_handle(), buffer_.data(),
+                   static_cast<unsigned>(buffer_.size()), offset_);
+  }
+
+  [[nodiscard]] bool is_error_result(int result) const noexcept {
+    return result < 0;
+  }
+
+  [[nodiscard]] std::error_code make_error(int result) const noexcept {
+    return errno_result(result);
+  }
+
+  template <class Receiver>
+  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver),
+                     static_cast<std::size_t>(result));
+  }
+
+ private:
+  async_io::descriptor_view descriptor_;
+  const_buffer buffer_;
+  std::uint64_t offset_;
 };
 
 class connect_model {
@@ -365,71 +435,59 @@ class poll_model {
 }  // namespace detail
 /** @endcond */
 
-template <class Buffer>
-auto io_context::async_receive(async_io::stream_socket_view socket,
-                               Buffer&& buffer, int flags) {
-  auto holder =
-      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
-  using holder_type = decltype(holder);
+inline auto io_context::async_receive(async_io::stream_socket_view socket,
+                                      mutable_buffer buffer, int flags) {
   return detail::native_io_sender(
-      *this,
-      detail::receive_model<holder_type>(socket, std::move(holder), flags),
+      *this, detail::receive_model(socket, buffer, flags), submit_mode::queued);
+}
+
+inline auto io_context::async_receive_direct(
+    async_io::stream_socket_view socket, mutable_buffer buffer, int flags) {
+  return detail::native_io_sender(
+      *this, detail::receive_model(socket, buffer, flags), submit_mode::direct);
+}
+
+inline auto io_context::async_send(async_io::stream_socket_view socket,
+                                   const_buffer buffer, int flags) {
+  return detail::native_io_sender(
+      *this, detail::send_model(socket, buffer, flags), submit_mode::queued);
+}
+
+inline auto io_context::async_send_direct(async_io::stream_socket_view socket,
+                                          const_buffer buffer, int flags) {
+  return detail::native_io_sender(
+      *this, detail::send_model(socket, buffer, flags), submit_mode::direct);
+}
+
+inline auto io_context::async_read(async_io::descriptor_view descriptor,
+                                   mutable_buffer buffer,
+                                   std::uint64_t offset) {
+  return detail::native_io_sender(
+      *this, detail::read_model(descriptor, buffer, offset),
       submit_mode::queued);
 }
 
-template <class Buffer>
-auto io_context::async_receive(tcp_socket& socket, Buffer&& buffer, int flags) {
-  return async_receive(socket.view(), std::forward<Buffer>(buffer), flags);
-}
-
-template <class Buffer>
-auto io_context::async_receive_direct(async_io::stream_socket_view socket,
-                                      Buffer&& buffer, int flags) {
-  auto holder =
-      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
-  using holder_type = decltype(holder);
+inline auto io_context::async_read_direct(async_io::descriptor_view descriptor,
+                                          mutable_buffer buffer,
+                                          std::uint64_t offset) {
   return detail::native_io_sender(
-      *this,
-      detail::receive_model<holder_type>(socket, std::move(holder), flags),
+      *this, detail::read_model(descriptor, buffer, offset),
       submit_mode::direct);
 }
 
-template <class Buffer>
-auto io_context::async_receive_direct(tcp_socket& socket, Buffer&& buffer,
-                                      int flags) {
-  return async_receive_direct(socket.view(), std::forward<Buffer>(buffer),
-                              flags);
-}
-
-template <class Buffer>
-auto io_context::async_send(async_io::stream_socket_view socket,
-                            Buffer&& buffer, int flags) {
-  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
-  using holder_type = decltype(holder);
+inline auto io_context::async_write(async_io::descriptor_view descriptor,
+                                    const_buffer buffer, std::uint64_t offset) {
   return detail::native_io_sender(
-      *this, detail::send_model<holder_type>(socket, std::move(holder), flags),
+      *this, detail::write_model(descriptor, buffer, offset),
       submit_mode::queued);
 }
 
-template <class Buffer>
-auto io_context::async_send(tcp_socket& socket, Buffer&& buffer, int flags) {
-  return async_send(socket.view(), std::forward<Buffer>(buffer), flags);
-}
-
-template <class Buffer>
-auto io_context::async_send_direct(async_io::stream_socket_view socket,
-                                   Buffer&& buffer, int flags) {
-  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
-  using holder_type = decltype(holder);
+inline auto io_context::async_write_direct(async_io::descriptor_view descriptor,
+                                           const_buffer buffer,
+                                           std::uint64_t offset) {
   return detail::native_io_sender(
-      *this, detail::send_model<holder_type>(socket, std::move(holder), flags),
+      *this, detail::write_model(descriptor, buffer, offset),
       submit_mode::direct);
-}
-
-template <class Buffer>
-auto io_context::async_send_direct(tcp_socket& socket, Buffer&& buffer,
-                                   int flags) {
-  return async_send_direct(socket.view(), std::forward<Buffer>(buffer), flags);
 }
 
 inline auto io_context::async_accept(async_io::listening_socket_view socket,
@@ -444,14 +502,6 @@ inline auto io_context::async_accept_direct(
                                   submit_mode::direct);
 }
 
-inline auto io_context::async_accept(tcp_acceptor& acceptor, int flags) {
-  return async_accept(acceptor.view(), flags);
-}
-
-inline auto io_context::async_accept_direct(tcp_acceptor& acceptor, int flags) {
-  return async_accept_direct(acceptor.view(), flags);
-}
-
 inline auto io_context::async_connect(async_io::stream_socket_view socket,
                                       const ip::endpoint& endpoint) {
   return detail::native_io_sender(
@@ -462,16 +512,6 @@ inline auto io_context::async_connect_direct(
     async_io::stream_socket_view socket, const ip::endpoint& endpoint) {
   return detail::native_io_sender(
       *this, detail::connect_model(socket, endpoint), submit_mode::direct);
-}
-
-inline auto io_context::async_connect(tcp_socket& socket,
-                                      const ip::endpoint& endpoint) {
-  return async_connect(socket.view(), endpoint);
-}
-
-inline auto io_context::async_connect_direct(tcp_socket& socket,
-                                             const ip::endpoint& endpoint) {
-  return async_connect_direct(socket.view(), endpoint);
 }
 
 inline auto io_context::async_poll(async_io::descriptor_view descriptor,

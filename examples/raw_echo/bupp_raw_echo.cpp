@@ -44,6 +44,8 @@ struct conn : std::enable_shared_from_this<conn> {
   io_context& ctx;
   tcp_socket sk;
   std::array<char, k_buffer_size> buf{};
+  std::size_t send_offset = 0;
+  std::size_t send_size = 0;
 
   conn(io_context& c, tcp_socket s) : ctx(c), sk(std::move(s)) {}
   void go() { recv(); }
@@ -62,18 +64,38 @@ struct conn : std::enable_shared_from_this<conn> {
       void set_stopped() noexcept { c->close(); }
     };
     auto scheduler = ctx.get_post_scheduler();
-    spawn(scheduler.async_receive(sk, buffer(buf), 0), R{shared_from_this()});
+    spawn(sk.async_receive(scheduler, buffer(buf), 0), R{shared_from_this()});
   }
 
   void send(std::size_t n) {
+    send_offset = 0;
+    send_size = n;
+    send_next();
+  }
+
+  void send_next() {
     struct R {
       std::shared_ptr<conn> c;
-      void set_value(std::size_t) noexcept { c->recv(); }
+      void set_value(std::size_t n) noexcept {
+        if (n == 0) {
+          c->close();
+          return;
+        }
+        c->send_offset += n;
+        if (c->send_offset < c->send_size) {
+          c->send_next();
+        } else {
+          c->recv();
+        }
+      }
       void set_error(std::error_code) noexcept { c->close(); }
       void set_stopped() noexcept { c->close(); }
     };
     auto scheduler = ctx.get_post_scheduler();
-    spawn(scheduler.async_write(sk, const_buffer(buf.data(), n)),
+    spawn(sk.async_send(
+              scheduler,
+              const_buffer(buf.data() + send_offset, send_size - send_offset),
+              MSG_NOSIGNAL),
           R{shared_from_this()});
   }
 };
@@ -90,7 +112,7 @@ void do_accept(io_context& ctx, tcp_acceptor& a) {
     void set_stopped() noexcept {}
   };
   auto scheduler = ctx.get_post_scheduler();
-  spawn(scheduler.async_accept(a, SOCK_CLOEXEC), R{ctx, a});
+  spawn(a.async_accept(scheduler, SOCK_CLOEXEC), R{ctx, a});
 }
 
 }  // namespace

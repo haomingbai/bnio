@@ -20,11 +20,13 @@ cmake -S . -B build -DBUPP_BUILD_EXAMPLES=OFF
 
 ## Running an `io_context` Event Loop
 
-`bupp::io_context` owns the event loop. Its schedulers expose the async I/O
-sender factories. Calling an async factory creates a sender. Connecting the
-sender creates an operation state. Starting that operation queues or submits
-I/O. `ctx.run()` then waits for completion events and delivers receiver
-callbacks.
+`bupp::io_context` owns the event loop. Streams such as `tcp_socket`,
+`tcp_acceptor`, and `ssl_stream` expose the high-level async I/O sender
+factories. The scheduler provides the low-level ability to operate on socket
+views and file descriptors. Calling an async factory creates a sender.
+Connecting the sender creates an operation state. Starting that operation
+queues or submits I/O. `ctx.run()` then waits for completion events and
+delivers receiver callbacks.
 
 ```cpp
 bupp::io_context ctx;
@@ -32,7 +34,7 @@ auto scheduler = ctx.get_post_scheduler();
 bupp::tcp_socket socket;
 std::array<char, 4096> bytes{};
 
-auto sender = scheduler.async_receive(socket, bupp::buffer(bytes), 0);
+auto sender = socket.async_receive(scheduler, bupp::buffer(bytes), 0);
 auto op = bexec::connect(std::move(sender), my_receiver{});
 
 bexec::start(op);
@@ -51,8 +53,8 @@ The standalone example is in
 It demonstrates:
 
 - `tcp_acceptor` setup with `open`, `set_reuse_address`, `bind`, and `listen`
-- repeated `scheduler.async_accept(...)`
-- per-connection `scheduler.async_receive(...)` and `scheduler.async_write(...)`
+- repeated `acceptor.async_accept(...)`
+- per-connection `socket.async_receive(...)` and `socket.async_send(...)`
 - `ctx.run()` as the server event loop
 - explicit operation lifetime management for a long-running server
 
