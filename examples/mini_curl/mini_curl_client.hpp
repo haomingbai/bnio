@@ -407,8 +407,8 @@ inline void mini_curl_client::send_socket_chunk() {
   const std::string_view remaining(request_);
   const std::string_view chunk = remaining.substr(send_offset_);
   registry_.spawn(
-      socket_.async_send(scheduler, bupp::buffer(chunk.data(), chunk.size()),
-                         MSG_NOSIGNAL),
+      socket_.async_write(scheduler, bupp::buffer(chunk.data(), chunk.size()),
+                          MSG_NOSIGNAL),
       send_receiver{shared_from_this()});
 }
 
@@ -417,7 +417,7 @@ inline void mini_curl_client::send_ssl_chunk() {
   const std::string_view remaining(request_);
   const std::string_view chunk = remaining.substr(send_offset_);
   registry_.spawn(
-      ssl_stream_->async_send(
+      ssl_stream_->async_write(
           scheduler, bupp::buffer(chunk.data(), chunk.size()), MSG_NOSIGNAL),
       send_receiver{shared_from_this()});
 }
@@ -449,11 +449,11 @@ inline void mini_curl_client::receive() noexcept {
 
   if (options_.use_tls) {
     registry_.spawn(
-        ssl_stream_->async_receive(scheduler, bupp::buffer(receive_buffer_)),
+        ssl_stream_->async_read(scheduler, bupp::buffer(receive_buffer_)),
         receive_receiver{shared_from_this()});
   } else {
     registry_.spawn(
-        socket_.async_receive(scheduler, bupp::buffer(receive_buffer_)),
+        socket_.async_read(scheduler, bupp::buffer(receive_buffer_)),
         receive_receiver{shared_from_this()});
   }
 }

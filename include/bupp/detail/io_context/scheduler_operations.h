@@ -22,29 +22,29 @@ std::size_t io_context::basic_scheduler<Kind>::queued_io_size() const noexcept {
 }
 
 template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_receive(
+auto io_context::basic_scheduler<Kind>::async_read(
     async_io::stream_socket_view socket, mutable_buffer buffer,
     int flags) const {
-  return context_->async_receive(socket, buffer, flags);
+  return context_->async_read(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_receive_direct(
+auto io_context::basic_scheduler<Kind>::async_read_direct(
     async_io::stream_socket_view socket, mutable_buffer buffer,
     int flags) const {
-  return context_->async_receive_direct(socket, buffer, flags);
+  return context_->async_read_direct(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_send(
+auto io_context::basic_scheduler<Kind>::async_write(
     async_io::stream_socket_view socket, const_buffer buffer, int flags) const {
-  return context_->async_send(socket, buffer, flags);
+  return context_->async_write(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_send_direct(
+auto io_context::basic_scheduler<Kind>::async_write_direct(
     async_io::stream_socket_view socket, const_buffer buffer, int flags) const {
-  return context_->async_send_direct(socket, buffer, flags);
+  return context_->async_write_direct(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>

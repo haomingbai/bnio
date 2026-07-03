@@ -253,29 +253,45 @@ class ssl_stream {
   [[nodiscard]] auto async_handshake(Scheduler scheduler,
                                      ssl_handshake_type type);
 
+  /**
+   * Creates a handshake sender whose transport I/O is submitted immediately
+   * instead of being placed in the scheduler's queued I/O batch.
+   */
   template <class Scheduler>
   [[nodiscard]] auto async_handshake_direct(Scheduler scheduler,
                                             ssl_handshake_type type);
 
   template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_receive(Scheduler scheduler, Buffer&& buffer,
-                                   int flags = 0);
-
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_receive_direct(Scheduler scheduler, Buffer&& buffer,
-                                          int flags = 0);
-
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_send(Scheduler scheduler, Buffer&& buffer,
+  [[nodiscard]] auto async_read(Scheduler scheduler, Buffer&& buffer,
                                 int flags = 0);
 
+  /**
+   * Creates a read sender whose transport I/O is submitted immediately instead
+   * of being placed in the scheduler's queued I/O batch.
+   */
   template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_send_direct(Scheduler scheduler, Buffer&& buffer,
+  [[nodiscard]] auto async_read_direct(Scheduler scheduler, Buffer&& buffer,
                                        int flags = 0);
+
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_write(Scheduler scheduler, Buffer&& buffer,
+                                 int flags = 0);
+
+  /**
+   * Creates a write sender whose transport I/O is submitted immediately instead
+   * of being placed in the scheduler's queued I/O batch.
+   */
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_write_direct(Scheduler scheduler, Buffer&& buffer,
+                                        int flags = 0);
 
   template <class Scheduler>
   [[nodiscard]] auto async_shutdown(Scheduler scheduler);
 
+  /**
+   * Creates a shutdown sender whose transport I/O is submitted immediately
+   * instead of being placed in the scheduler's queued I/O batch.
+   */
   template <class Scheduler>
   [[nodiscard]] auto async_shutdown_direct(Scheduler scheduler);
 
@@ -325,7 +341,7 @@ template <class Scheduler>
 auto ssl_stream<NextLayer>::async_handshake(Scheduler scheduler,
                                             ssl_handshake_type type) {
   using scheduler_type = std::remove_cvref_t<Scheduler>;
-  return detail::ssl_handshake_sender<scheduler_type, NextLayer>(
+  return detail::ssl_handshake_sender<scheduler_type, NextLayer, false>(
       std::move(scheduler), *this, type);
 }
 
@@ -333,59 +349,72 @@ template <class NextLayer>
 template <class Scheduler>
 auto ssl_stream<NextLayer>::async_handshake_direct(Scheduler scheduler,
                                                    ssl_handshake_type type) {
-  return async_handshake(std::move(scheduler), type);
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  return detail::ssl_handshake_sender<scheduler_type, NextLayer, true>(
+      std::move(scheduler), *this, type);
 }
 
 template <class NextLayer>
 template <class Scheduler, class Buffer>
-auto ssl_stream<NextLayer>::async_receive(Scheduler scheduler, Buffer&& buffer,
-                                          int) {
+auto ssl_stream<NextLayer>::async_read(Scheduler scheduler, Buffer&& buffer,
+                                       int) {
   auto holder =
       detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::ssl_receive_sender<scheduler_type, NextLayer, holder_type>(
+  return detail::ssl_read_sender<scheduler_type, NextLayer, holder_type, false>(
       std::move(scheduler), *this, std::move(holder));
 }
 
 template <class NextLayer>
 template <class Scheduler, class Buffer>
-auto ssl_stream<NextLayer>::async_receive_direct(Scheduler scheduler,
-                                                 Buffer&& buffer, int flags) {
-  return async_receive(std::move(scheduler), std::forward<Buffer>(buffer),
-                       flags);
+auto ssl_stream<NextLayer>::async_read_direct(Scheduler scheduler,
+                                              Buffer&& buffer, int) {
+  auto holder =
+      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::ssl_read_sender<scheduler_type, NextLayer, holder_type, true>(
+      std::move(scheduler), *this, std::move(holder));
 }
 
 template <class NextLayer>
 template <class Scheduler, class Buffer>
-auto ssl_stream<NextLayer>::async_send(Scheduler scheduler, Buffer&& buffer,
-                                       int) {
+auto ssl_stream<NextLayer>::async_write(Scheduler scheduler, Buffer&& buffer,
+                                        int) {
   auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::ssl_send_sender<scheduler_type, NextLayer, holder_type>(
-      std::move(scheduler), *this, std::move(holder));
+  return detail::ssl_write_sender<scheduler_type, NextLayer, holder_type,
+                                  false>(std::move(scheduler), *this,
+                                         std::move(holder));
 }
 
 template <class NextLayer>
 template <class Scheduler, class Buffer>
-auto ssl_stream<NextLayer>::async_send_direct(Scheduler scheduler,
-                                              Buffer&& buffer, int flags) {
-  return async_send(std::move(scheduler), std::forward<Buffer>(buffer), flags);
+auto ssl_stream<NextLayer>::async_write_direct(Scheduler scheduler,
+                                               Buffer&& buffer, int) {
+  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::ssl_write_sender<scheduler_type, NextLayer, holder_type, true>(
+      std::move(scheduler), *this, std::move(holder));
 }
 
 template <class NextLayer>
 template <class Scheduler>
 auto ssl_stream<NextLayer>::async_shutdown(Scheduler scheduler) {
   using scheduler_type = std::remove_cvref_t<Scheduler>;
-  return detail::ssl_shutdown_sender<scheduler_type, NextLayer>(
+  return detail::ssl_shutdown_sender<scheduler_type, NextLayer, false>(
       std::move(scheduler), *this);
 }
 
 template <class NextLayer>
 template <class Scheduler>
 auto ssl_stream<NextLayer>::async_shutdown_direct(Scheduler scheduler) {
-  return async_shutdown(std::move(scheduler));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  return detail::ssl_shutdown_sender<scheduler_type, NextLayer, true>(
+      std::move(scheduler), *this);
 }
 
 /**
@@ -404,7 +433,7 @@ struct async_handshake_t {
 };
 
 /**
- * Customization point object for Provider::async_handshake_direct.
+ * Customization point object for direct-submission SSL handshake.
  */
 struct async_handshake_direct_t {
   /**
@@ -434,7 +463,7 @@ struct async_shutdown_t {
 };
 
 /**
- * Customization point object for Provider::async_shutdown_direct.
+ * Customization point object for direct-submission SSL shutdown.
  */
 struct async_shutdown_direct_t {
   /**

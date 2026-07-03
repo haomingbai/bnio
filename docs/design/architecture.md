@@ -277,8 +277,8 @@ graph LR
 
 | Mode | API Suffix | Trigger | Use Case |
 |------|-----------|---------|----------|
-| **queued** | `async_receive()`, etc. | Count (64), timer (1 ms), or manual `flush_io_queue()` | High throughput |
-| **direct** | `async_receive_direct()`, etc. | Immediate | Low latency |
+| **queued** | `async_read()`, etc. | Count (64), timer (1 ms), or manual `flush_io_queue()` | High throughput |
+| **direct-submission** | `async_read_direct()`, etc. | Immediate submission, bypassing the queued I/O batch | Low latency |
 
 ### Configuration
 
@@ -306,21 +306,21 @@ calling `start()` begins the asynchronous I/O.
 
 | Factory | Owner | `set_value` |
 |---------|-------|-------------|
-| `socket.async_receive(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes received |
-| `socket.async_send(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes sent |
+| `socket.async_read(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes transferred |
+| `socket.async_write(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes transferred |
 | `acceptor.async_accept(scheduler, flags)` | `tcp_acceptor` | `tcp_socket` new connection |
 | `socket.async_connect(scheduler, endpoint)` | `tcp_socket` | `()` |
 | `stream.async_handshake(scheduler, type)` | `ssl_stream` | `()` |
-| `stream.async_receive(scheduler, buffer, flags)` | `ssl_stream` | `size_t` |
-| `stream.async_send(scheduler, buffer, flags)` | `ssl_stream` | `size_t` |
+| `stream.async_read(scheduler, buffer, flags)` | `ssl_stream` | `size_t` |
+| `stream.async_write(scheduler, buffer, flags)` | `ssl_stream` | `size_t` |
 | `stream.async_shutdown(scheduler)` | `ssl_stream` | `()` |
 
 #### Scheduler Level
 
 | Factory | Lowest-Layer Parameter | `set_value` |
 |---------|------------------------|-------------|
-| `scheduler.async_receive(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes received |
-| `scheduler.async_send(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes sent |
+| `scheduler.async_read(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes transferred |
+| `scheduler.async_write(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes transferred |
 | `scheduler.async_accept(view, flags)` | `listening_socket_view` | native fd |
 | `scheduler.async_connect(view, endpoint)` | `stream_socket_view` | `()` |
 | `scheduler.async_read(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read |
@@ -344,7 +344,7 @@ sequenceDiagram
 
     User->>Ctx: get_post_scheduler()
     Ctx-->>User: scheduler
-    User->>Stream: async_receive(scheduler, buffer, flags)
+    User->>Stream: async_read(scheduler, buffer, flags)
     Stream-->>User: sender
 
     User->>Op: connect(receiver) → start()
@@ -370,51 +370,50 @@ sequenceDiagram
 (CPOs) enable generic code to call async operations on any provider:
 
 ```cpp
-// Direct stream call:
+// Stream call:
 auto scheduler = ctx.get_post_scheduler();
-auto s = socket.async_receive(scheduler, buffer, 0);
+auto s = socket.async_read(scheduler, buffer, 0);
 
-// Direct lowest-layer call:
-auto low = scheduler.async_receive(socket.view(), buffer, 0);
+// Lowest-layer call:
+auto low = scheduler.async_read(socket.view(), buffer, 0);
 
 // Through CPO (generic):
-auto s = bupp::async_receive(scheduler, socket, buffer);
+auto s = bupp::async_read(scheduler, socket, buffer);
 ```
 
 | CPO | Invokes | Header |
 |-----|---------|--------|
-| `bupp::async_receive` | `stream.async_receive(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bupp::async_send` | `stream.async_send(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bupp::async_read(provider, stream, buf)` | `stream.async_read(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bupp::async_write(provider, stream, buf)` | `stream.async_write(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
 | `bupp::async_accept` | `acceptor.async_accept(provider)` or lowest-layer fallback | `io_context_cpo.h` |
 | `bupp::async_connect` | `stream.async_connect(provider, ep)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bupp::async_read` | `provider.async_read(descriptor, buf, offset)` | `io_context_cpo.h` |
-| `bupp::async_write` | `provider.async_write(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bupp::async_read(provider, descriptor, buf, offset)` | `provider.async_read(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bupp::async_write(provider, descriptor, buf, offset)` | `provider.async_write(descriptor, buf, offset)` | `io_context_cpo.h` |
 | `bupp::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
 | `bupp::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
 | `bupp::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
 
-Each also has a `*_direct` variant (e.g. `async_receive_direct`).
+The `*_direct` suffix is reserved for direct-submission variants that bypass the
+queued I/O batch. It is not an alternate read/write semantic; stream types
+should only expose it when the suffix changes lowest-layer submission behavior.
 
 Provider concepts:
 
 ```cpp
-template <class Provider, class Stream, class Buffer>
-concept receives_bytes =
-    requires(Provider& p, Stream& s, Buffer&& b) {
-        { async_receive(p, s, std::forward<Buffer>(b)) } -> bexec::sender;
+template <class Provider, class Source, class Buffer>
+concept reads_bytes =
+    requires(Provider& p, Source& s, Buffer&& b) {
+        { async_read(p, s, std::forward<Buffer>(b)) } -> bexec::sender;
     };
 
-template <class Provider, class Stream, class Buffer>
-concept sends_bytes = /* ... */;
+template <class Provider, class Sink, class Buffer>
+concept writes_bytes = /* ... */;
 
 template <class Provider, class Acceptor>
 concept accepts_connections = /* ... */;
 
-template <class Provider, class Descriptor, class Buffer>
-concept reads_descriptor = /* ... */;
-
-template <class Provider, class Descriptor, class Buffer>
-concept writes_descriptor = /* ... */;
+// Descriptor I/O uses the same reads_bytes/writes_bytes concepts with
+// async_io::descriptor_view as the source/sink type.
 ```
 
 ---

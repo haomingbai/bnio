@@ -6,110 +6,107 @@
 
 #include <bexec/scheduler.hpp>
 #include <bexec/sender.hpp>
-#include <cstdint>
 #include <type_traits>
 #include <utility>
 
 namespace bupp {
 
 /**
- * Customization point object for Provider::async_receive.
+ * Customization point object for a single asynchronous read operation.
  */
-struct async_receive_t {
+struct async_read_t {
   /**
-   * Invokes async_receive on a stream when available, otherwise on a provider.
+   * Invokes async_read on a stream when available, otherwise on a provider.
    */
-  template <class Provider, class Stream, class Buffer>
-  constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
-                                      Buffer&& buffer, int flags = 0) const {
+  template <class Provider, class Source, class Buffer, class Mode = int>
+  constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
+                                      Buffer&& buffer, Mode mode = 0) const {
     if constexpr (requires {
-                    std::forward<Stream>(stream).async_receive(
+                    std::forward<Source>(source).async_read(
                         std::forward<Provider>(provider),
-                        std::forward<Buffer>(buffer), flags);
+                        std::forward<Buffer>(buffer), mode);
                   }) {
-      return std::forward<Stream>(stream).async_receive(
-          std::forward<Provider>(provider), std::forward<Buffer>(buffer),
-          flags);
+      return std::forward<Source>(source).async_read(
+          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
-      return std::forward<Provider>(provider).async_receive(
-          std::forward<Stream>(stream), std::forward<Buffer>(buffer), flags);
+      return std::forward<Provider>(provider).async_read(
+          std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
     }
   }
 };
 
 /**
- * Customization point object for Provider::async_receive_direct.
+ * Customization point object for an asynchronous read that bypasses the
+ * scheduler's queued I/O batch and submits immediately.
  */
-struct async_receive_direct_t {
+struct async_read_direct_t {
   /**
-   * Invokes async_receive_direct on a stream when available, otherwise on a
-   * provider.
+   * Invokes async_read_direct on a stream when that direct-submission
+   * customization exists, otherwise on a provider.
    */
-  template <class Provider, class Stream, class Buffer>
-  constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
-                                      Buffer&& buffer, int flags = 0) const {
+  template <class Provider, class Source, class Buffer, class Mode = int>
+  constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
+                                      Buffer&& buffer, Mode mode = 0) const {
     if constexpr (requires {
-                    std::forward<Stream>(stream).async_receive_direct(
+                    std::forward<Source>(source).async_read_direct(
                         std::forward<Provider>(provider),
-                        std::forward<Buffer>(buffer), flags);
+                        std::forward<Buffer>(buffer), mode);
                   }) {
-      return std::forward<Stream>(stream).async_receive_direct(
-          std::forward<Provider>(provider), std::forward<Buffer>(buffer),
-          flags);
+      return std::forward<Source>(source).async_read_direct(
+          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
-      return std::forward<Provider>(provider).async_receive_direct(
-          std::forward<Stream>(stream), std::forward<Buffer>(buffer), flags);
+      return std::forward<Provider>(provider).async_read_direct(
+          std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
     }
   }
 };
 
 /**
- * Customization point object for Provider::async_send.
+ * Customization point object for a single asynchronous write operation.
  */
-struct async_send_t {
+struct async_write_t {
   /**
-   * Invokes async_send on a stream when available, otherwise on a provider.
+   * Invokes async_write on a stream when available, otherwise on a provider.
    */
-  template <class Provider, class Stream, class Buffer>
-  constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
-                                      Buffer&& buffer, int flags = 0) const {
+  template <class Provider, class Sink, class Buffer, class Mode = int>
+  constexpr decltype(auto) operator()(Provider&& provider, Sink&& sink,
+                                      Buffer&& buffer, Mode mode = 0) const {
     if constexpr (requires {
-                    std::forward<Stream>(stream).async_send(
+                    std::forward<Sink>(sink).async_write(
                         std::forward<Provider>(provider),
-                        std::forward<Buffer>(buffer), flags);
+                        std::forward<Buffer>(buffer), mode);
                   }) {
-      return std::forward<Stream>(stream).async_send(
-          std::forward<Provider>(provider), std::forward<Buffer>(buffer),
-          flags);
+      return std::forward<Sink>(sink).async_write(
+          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
-      return std::forward<Provider>(provider).async_send(
-          std::forward<Stream>(stream), std::forward<Buffer>(buffer), flags);
+      return std::forward<Provider>(provider).async_write(
+          std::forward<Sink>(sink), std::forward<Buffer>(buffer), mode);
     }
   }
 };
 
 /**
- * Customization point object for Provider::async_send_direct.
+ * Customization point object for an asynchronous write that bypasses the
+ * scheduler's queued I/O batch and submits immediately.
  */
-struct async_send_direct_t {
+struct async_write_direct_t {
   /**
-   * Invokes async_send_direct on a stream when available, otherwise on a
-   * provider.
+   * Invokes async_write_direct on a stream when that direct-submission
+   * customization exists, otherwise on a provider.
    */
-  template <class Provider, class Stream, class Buffer>
-  constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
-                                      Buffer&& buffer, int flags = 0) const {
+  template <class Provider, class Sink, class Buffer, class Mode = int>
+  constexpr decltype(auto) operator()(Provider&& provider, Sink&& sink,
+                                      Buffer&& buffer, Mode mode = 0) const {
     if constexpr (requires {
-                    std::forward<Stream>(stream).async_send_direct(
+                    std::forward<Sink>(sink).async_write_direct(
                         std::forward<Provider>(provider),
-                        std::forward<Buffer>(buffer), flags);
+                        std::forward<Buffer>(buffer), mode);
                   }) {
-      return std::forward<Stream>(stream).async_send_direct(
-          std::forward<Provider>(provider), std::forward<Buffer>(buffer),
-          flags);
+      return std::forward<Sink>(sink).async_write_direct(
+          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
-      return std::forward<Provider>(provider).async_send_direct(
-          std::forward<Stream>(stream), std::forward<Buffer>(buffer), flags);
+      return std::forward<Provider>(provider).async_write_direct(
+          std::forward<Sink>(sink), std::forward<Buffer>(buffer), mode);
     }
   }
 };
@@ -139,12 +136,12 @@ struct async_accept_t {
 };
 
 /**
- * Customization point object for Provider::async_accept_direct.
+ * Customization point object for direct-submission accept.
  */
 struct async_accept_direct_t {
   /**
-   * Invokes async_accept_direct on an acceptor when available, otherwise on a
-   * provider.
+   * Invokes async_accept_direct on an acceptor when that direct-submission
+   * customization exists, otherwise on a provider.
    */
   template <class Provider, class Acceptor>
   constexpr decltype(auto) operator()(Provider&& provider, Acceptor&& acceptor,
@@ -187,12 +184,12 @@ struct async_connect_t {
 };
 
 /**
- * Customization point object for Provider::async_connect_direct.
+ * Customization point object for direct-submission connect.
  */
 struct async_connect_direct_t {
   /**
-   * Invokes async_connect_direct on a stream when available, otherwise on a
-   * provider.
+   * Invokes async_connect_direct on a stream when that direct-submission
+   * customization exists, otherwise on a provider.
    */
   template <class Provider, class Stream, class Endpoint>
   constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
@@ -208,74 +205,6 @@ struct async_connect_direct_t {
       return std::forward<Provider>(provider).async_connect_direct(
           std::forward<Stream>(stream), std::forward<Endpoint>(endpoint));
     }
-  }
-};
-
-/**
- * Customization point object for Provider::async_read.
- */
-struct async_read_t {
-  /**
-   * Invokes async_read on a provider.
-   */
-  template <class Provider, class Descriptor, class Buffer>
-  constexpr decltype(auto) operator()(Provider&& provider,
-                                      Descriptor&& descriptor, Buffer&& buffer,
-                                      std::uint64_t offset = 0) const {
-    return std::forward<Provider>(provider).async_read(
-        std::forward<Descriptor>(descriptor), std::forward<Buffer>(buffer),
-        offset);
-  }
-};
-
-/**
- * Customization point object for Provider::async_read_direct.
- */
-struct async_read_direct_t {
-  /**
-   * Invokes async_read_direct on a provider.
-   */
-  template <class Provider, class Descriptor, class Buffer>
-  constexpr decltype(auto) operator()(Provider&& provider,
-                                      Descriptor&& descriptor, Buffer&& buffer,
-                                      std::uint64_t offset = 0) const {
-    return std::forward<Provider>(provider).async_read_direct(
-        std::forward<Descriptor>(descriptor), std::forward<Buffer>(buffer),
-        offset);
-  }
-};
-
-/**
- * Customization point object for Provider::async_write.
- */
-struct async_write_t {
-  /**
-   * Invokes async_write on a provider.
-   */
-  template <class Provider, class Descriptor, class Buffer>
-  constexpr decltype(auto) operator()(Provider&& provider,
-                                      Descriptor&& descriptor, Buffer&& buffer,
-                                      std::uint64_t offset = 0) const {
-    return std::forward<Provider>(provider).async_write(
-        std::forward<Descriptor>(descriptor), std::forward<Buffer>(buffer),
-        offset);
-  }
-};
-
-/**
- * Customization point object for Provider::async_write_direct.
- */
-struct async_write_direct_t {
-  /**
-   * Invokes async_write_direct on a provider.
-   */
-  template <class Provider, class Descriptor, class Buffer>
-  constexpr decltype(auto) operator()(Provider&& provider,
-                                      Descriptor&& descriptor, Buffer&& buffer,
-                                      std::uint64_t offset = 0) const {
-    return std::forward<Provider>(provider).async_write_direct(
-        std::forward<Descriptor>(descriptor), std::forward<Buffer>(buffer),
-        offset);
   }
 };
 
@@ -353,102 +282,39 @@ struct async_resolve_t {
   }
 };
 
-/**
- * Customization point object instance for async_receive.
- */
-inline constexpr async_receive_t async_receive{};
-
-/**
- * Customization point object instance for async_receive_direct.
- */
-inline constexpr async_receive_direct_t async_receive_direct{};
-
-/**
- * Customization point object instance for async_send.
- */
-inline constexpr async_send_t async_send{};
-
-/**
- * Customization point object instance for async_send_direct.
- */
-inline constexpr async_send_direct_t async_send_direct{};
-
-/**
- * Customization point object instance for async_accept.
- */
-inline constexpr async_accept_t async_accept{};
-
-/**
- * Customization point object instance for async_accept_direct.
- */
-inline constexpr async_accept_direct_t async_accept_direct{};
-
-/**
- * Customization point object instance for async_connect.
- */
-inline constexpr async_connect_t async_connect{};
-
-/**
- * Customization point object instance for async_connect_direct.
- */
-inline constexpr async_connect_direct_t async_connect_direct{};
-
-/**
- * Customization point object instance for async_read.
- */
 inline constexpr async_read_t async_read{};
-
-/**
- * Customization point object instance for async_read_direct.
- */
 inline constexpr async_read_direct_t async_read_direct{};
-
-/**
- * Customization point object instance for async_write.
- */
 inline constexpr async_write_t async_write{};
-
-/**
- * Customization point object instance for async_write_direct.
- */
 inline constexpr async_write_direct_t async_write_direct{};
-
-/**
- * Customization point object instance for async_poll.
- */
+inline constexpr async_accept_t async_accept{};
+inline constexpr async_accept_direct_t async_accept_direct{};
+inline constexpr async_connect_t async_connect{};
+inline constexpr async_connect_direct_t async_connect_direct{};
 inline constexpr async_poll_t async_poll{};
-
-/**
- * Customization point object instance for async_poll_direct.
- */
 inline constexpr async_poll_direct_t async_poll_direct{};
-
-/**
- * Customization point object instance for async_resolve.
- */
 inline constexpr async_resolve_t async_resolve{};
 
 /**
- * Concept satisfied when a provider returns a sender from async_receive.
+ * Concept satisfied when a scheduler returns a sender from async_read.
  */
-template <class Scheduler, class Stream, class Buffer>
-concept receives_bytes =
+template <class Scheduler, class Source, class Buffer>
+concept reads_bytes =
     bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
-    requires(Scheduler& scheduler, Stream& stream, Buffer&& buffer) {
+    requires(Scheduler& scheduler, Source& source, Buffer&& buffer) {
       {
-        async_receive(scheduler, stream, std::forward<Buffer>(buffer))
+        async_read(scheduler, source, std::forward<Buffer>(buffer))
       } -> bexec::sender;
     };
 
 /**
- * Concept satisfied when a provider returns a sender from async_send.
+ * Concept satisfied when a scheduler returns a sender from async_write.
  */
-template <class Scheduler, class Stream, class Buffer>
-concept sends_bytes =
+template <class Scheduler, class Sink, class Buffer>
+concept writes_bytes =
     bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
-    requires(Scheduler& scheduler, Stream& stream, Buffer&& buffer) {
+    requires(Scheduler& scheduler, Sink& sink, Buffer&& buffer) {
       {
-        async_send(scheduler, stream, std::forward<Buffer>(buffer))
+        async_write(scheduler, sink, std::forward<Buffer>(buffer))
       } -> bexec::sender;
     };
 
@@ -471,30 +337,6 @@ concept connects_stream =
     requires(Scheduler& scheduler, Stream& stream, Endpoint&& endpoint) {
       {
         async_connect(scheduler, stream, std::forward<Endpoint>(endpoint))
-      } -> bexec::sender;
-    };
-
-/**
- * Concept satisfied when a scheduler returns a sender from async_read.
- */
-template <class Scheduler, class Descriptor, class Buffer>
-concept reads_descriptor =
-    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
-    requires(Scheduler& scheduler, Descriptor& descriptor, Buffer&& buffer) {
-      {
-        async_read(scheduler, descriptor, std::forward<Buffer>(buffer))
-      } -> bexec::sender;
-    };
-
-/**
- * Concept satisfied when a scheduler returns a sender from async_write.
- */
-template <class Scheduler, class Descriptor, class Buffer>
-concept writes_descriptor =
-    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
-    requires(Scheduler& scheduler, Descriptor& descriptor, Buffer&& buffer) {
-      {
-        async_write(scheduler, descriptor, std::forward<Buffer>(buffer))
       } -> bexec::sender;
     };
 

@@ -64,7 +64,7 @@ struct conn : std::enable_shared_from_this<conn> {
       void set_stopped() noexcept { c->close(); }
     };
     auto scheduler = ctx.get_post_scheduler();
-    spawn(sk.async_receive(scheduler, buffer(buf), 0), R{shared_from_this()});
+    spawn(sk.async_read(scheduler, buffer(buf), 0), R{shared_from_this()});
   }
 
   void send(std::size_t n) {
@@ -92,7 +92,7 @@ struct conn : std::enable_shared_from_this<conn> {
       void set_stopped() noexcept { c->close(); }
     };
     auto scheduler = ctx.get_post_scheduler();
-    spawn(sk.async_send(
+    spawn(sk.async_write(
               scheduler,
               const_buffer(buf.data() + send_offset, send_size - send_offset),
               MSG_NOSIGNAL),

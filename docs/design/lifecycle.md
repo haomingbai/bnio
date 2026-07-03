@@ -98,15 +98,15 @@ pointed-to storage must remain valid until the I/O operation completes.
 void bad(bupp::io_context& ctx, bupp::tcp_socket& sock) {
     auto scheduler = ctx.get_post_scheduler();
     std::string msg = "hello";
-    auto sender = sock.async_send(scheduler, bupp::buffer(msg), 0);
-    // msg goes out of scope; the send reads freed memory
+    auto sender = sock.async_write(scheduler, bupp::buffer(msg), 0);
+    // msg goes out of scope; the write reads freed memory
 }
 
 // RIGHT — keep buffer alive until completion
 void good(bupp::io_context& ctx, bupp::tcp_socket& sock) {
     auto scheduler = ctx.get_post_scheduler();
     auto msg = std::make_shared<std::string>("hello");
-    auto sender = sock.async_send(scheduler, bupp::buffer(*msg), 0);
+    auto sender = sock.async_write(scheduler, bupp::buffer(*msg), 0);
     // receiver captures msg via shared_ptr — alive until completion
 }
 ```
@@ -123,7 +123,7 @@ void bad() {
     auto scheduler = ctx.get_post_scheduler();
     bupp::tcp_socket sock;
     sock.open(bupp::ip::tcp::v4());
-    auto sender = sock.async_receive(scheduler, some_buffer, 0);
+    auto sender = sock.async_read(scheduler, some_buffer, 0);
     // ... connect, start ...
 }   // ctx destroyed; operation in pending_io list dangles
 ```
@@ -138,11 +138,11 @@ as the owner exists.
 // RIGHT — high-level stream API keeps the owner explicit
 bupp::tcp_socket sock;                        // owner
 sock.open(bupp::ip::tcp::v4());
-sock.async_receive(scheduler, buffer, 0);     // sock outlives op
+sock.async_read(scheduler, buffer, 0);     // sock outlives op
 
 // Also right — explicit low-level view, same lifetime
 auto view = sock.view();                      // non-owning
-scheduler.async_receive(view, buffer, 0);     // fine: sock still alive
+scheduler.async_read(view, buffer, 0);     // fine: sock still alive
 ```
 
 ### Rule 5: Read CQE fields before `cqe_seen()`, not after
@@ -196,7 +196,7 @@ constraints:
   completed operations.
 
 ```cpp
-auto sender = socket.async_receive(scheduler, buffer, 0);
+auto sender = socket.async_read(scheduler, buffer, 0);
 auto op = std::move(sender).connect(my_receiver);
 op.start();
 // op is now owned by ctx; it will be destroyed after completion
@@ -207,9 +207,9 @@ op.start();
 ```
 async_io::linux_native::io_uring_operation_base   (intrusive node, result/flags)
     └── io_context::operation_base                (queued-I/O list link, prepare hooks)
-        ├── detail::native_io_operation<Model,R>  (receive/send/accept/connect/wait)
+        ├── detail::native_io_operation<Model,R>  (read/write/accept/connect/wait)
         └── detail::ssl_completion_base           (SSL state machine base)
-            └── detail::ssl_async_operation_base<D,NL,R>  (SSL handshake/recv/send/shutdown)
+            └── detail::ssl_async_operation_base<D,NL,R>  (SSL handshake/read/write/shutdown)
 ```
 
 Both base classes disable copy and move because they are intrusive list nodes.

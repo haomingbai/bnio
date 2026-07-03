@@ -138,26 +138,52 @@ void test_ssl_sender_concepts() {
   using handshake_sender =
       decltype(std::declval<stream_type&>().async_handshake(
           std::declval<scheduler_type>(), bupp::ssl_handshake_type::client));
+  using handshake_direct_sender =
+      decltype(std::declval<stream_type&>().async_handshake_direct(
+          std::declval<scheduler_type>(), bupp::ssl_handshake_type::client));
   using shutdown_sender = decltype(std::declval<stream_type&>().async_shutdown(
       std::declval<scheduler_type>()));
-  using receive_sender = decltype(std::declval<stream_type&>().async_receive(
+  using shutdown_direct_sender =
+      decltype(std::declval<stream_type&>().async_shutdown_direct(
+          std::declval<scheduler_type>()));
+  using read_sender = decltype(std::declval<stream_type&>().async_read(
       std::declval<scheduler_type>(), std::declval<bupp::mutable_buffer>()));
-  using send_sender = decltype(std::declval<stream_type&>().async_send(
+  using read_direct_sender =
+      decltype(std::declval<stream_type&>().async_read_direct(
+          std::declval<scheduler_type>(),
+          std::declval<bupp::mutable_buffer>()));
+  using write_sender = decltype(std::declval<stream_type&>().async_write(
       std::declval<scheduler_type>(), std::declval<bupp::const_buffer>()));
+  using write_direct_sender =
+      decltype(std::declval<stream_type&>().async_write_direct(
+          std::declval<scheduler_type>(), std::declval<bupp::const_buffer>()));
 
   static_assert(bexec::sender<handshake_sender>);
+  static_assert(bexec::sender<handshake_direct_sender>);
   static_assert(bexec::sender<shutdown_sender>);
-  static_assert(bexec::sender<receive_sender>);
-  static_assert(bexec::sender<send_sender>);
+  static_assert(bexec::sender<shutdown_direct_sender>);
+  static_assert(bexec::sender<read_sender>);
+  static_assert(bexec::sender<read_direct_sender>);
+  static_assert(bexec::sender<write_sender>);
+  static_assert(bexec::sender<write_direct_sender>);
 
   static_assert(bexec::operation_state<decltype(bexec::connect(
                     std::declval<handshake_sender>(), void_receiver{}))>);
+  static_assert(
+      bexec::operation_state<decltype(bexec::connect(
+          std::declval<handshake_direct_sender>(), void_receiver{}))>);
   static_assert(bexec::operation_state<decltype(bexec::connect(
                     std::declval<shutdown_sender>(), void_receiver{}))>);
   static_assert(bexec::operation_state<decltype(bexec::connect(
-                    std::declval<receive_sender>(), byte_receiver{}))>);
+                    std::declval<shutdown_direct_sender>(), void_receiver{}))>);
   static_assert(bexec::operation_state<decltype(bexec::connect(
-                    std::declval<send_sender>(), byte_receiver{}))>);
+                    std::declval<read_sender>(), byte_receiver{}))>);
+  static_assert(bexec::operation_state<decltype(bexec::connect(
+                    std::declval<read_direct_sender>(), byte_receiver{}))>);
+  static_assert(bexec::operation_state<decltype(bexec::connect(
+                    std::declval<write_sender>(), byte_receiver{}))>);
+  static_assert(bexec::operation_state<decltype(bexec::connect(
+                    std::declval<write_direct_sender>(), byte_receiver{}))>);
 }
 
 void test_ssl_raii_objects_construct() {
@@ -172,6 +198,7 @@ void test_ssl_raii_objects_construct() {
   assert(stream.lowest_layer().get_native_handle() == -1);
 }
 
+template <bool DirectSubmit>
 void test_socketpair_handshake_is_io_context_driven() {
   bupp::io_context context;
   if (!context.is_open()) {
@@ -203,10 +230,24 @@ void test_socketpair_handshake_is_io_context_driven() {
   handshake_receiver client_receiver{state, &context};
   handshake_receiver server_receiver{state, &context};
 
-  auto client_sender =
-      client.async_handshake(scheduler, bupp::ssl_handshake_type::client);
-  auto server_sender =
-      server.async_handshake(scheduler, bupp::ssl_handshake_type::server);
+  auto client_sender = [&] {
+    if constexpr (DirectSubmit) {
+      return client.async_handshake_direct(scheduler,
+                                           bupp::ssl_handshake_type::client);
+    } else {
+      return client.async_handshake(scheduler,
+                                    bupp::ssl_handshake_type::client);
+    }
+  }();
+  auto server_sender = [&] {
+    if constexpr (DirectSubmit) {
+      return server.async_handshake_direct(scheduler,
+                                           bupp::ssl_handshake_type::server);
+    } else {
+      return server.async_handshake(scheduler,
+                                    bupp::ssl_handshake_type::server);
+    }
+  }();
 
   auto client_operation =
       bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -215,6 +256,11 @@ void test_socketpair_handshake_is_io_context_driven() {
 
   bexec::start(client_operation);
   bexec::start(server_operation);
+  if constexpr (DirectSubmit) {
+    assert(scheduler.queued_io_size() == 0);
+  } else {
+    assert(scheduler.queued_io_size() != 0);
+  }
   context.run();
 
   assert(state->values == 2);
@@ -227,6 +273,7 @@ void test_socketpair_handshake_is_io_context_driven() {
 int main() {
   test_ssl_sender_concepts();
   test_ssl_raii_objects_construct();
-  test_socketpair_handshake_is_io_context_driven();
+  test_socketpair_handshake_is_io_context_driven<false>();
+  test_socketpair_handshake_is_io_context_driven<true>();
   return 0;
 }

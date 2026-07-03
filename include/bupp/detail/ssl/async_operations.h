@@ -74,10 +74,10 @@ enum class ssl_child_io {
 
 enum class ssl_resume_action {
   handshake,
-  receive,
-  send,
+  application_read,
+  application_write,
   shutdown,
-  read,
+  transport_read,
   finish,
 };
 
@@ -87,7 +87,8 @@ enum class ssl_output_chunk_state {
   error,
 };
 
-template <class Derived, class Scheduler, class NextLayer, class Receiver>
+template <class Derived, class Scheduler, class NextLayer, class Receiver,
+          bool DirectSubmit>
 class ssl_async_operation_base : public ssl_completion_base {
  public:
   ssl_async_operation_base(Scheduler scheduler, ssl_stream<NextLayer>& stream,
@@ -180,7 +181,7 @@ class ssl_async_operation_base : public ssl_completion_base {
 
   void wait_read_then(ssl_resume_action action) noexcept {
     after_read_ = action;
-    flush_then(ssl_resume_action::read);
+    flush_then(ssl_resume_action::transport_read);
   }
 
   void wait_write_then(ssl_resume_action action) noexcept {
@@ -232,7 +233,11 @@ class ssl_async_operation_base : public ssl_completion_base {
  private:
   void submit_child(ssl_child_io child) noexcept {
     child_ = child;
-    scheduler_.submit_direct(*this);
+    if constexpr (DirectSubmit) {
+      scheduler_.submit_direct(*this);
+    } else {
+      scheduler_.enqueue_io(*this);
+    }
   }
 
   [[nodiscard]] ssl_output_chunk_state load_output_chunk() noexcept {
@@ -296,7 +301,7 @@ class ssl_async_operation_base : public ssl_completion_base {
 
   void resume_after_flush() noexcept {
     const ssl_resume_action action = after_flush_;
-    if (action == ssl_resume_action::read) {
+    if (action == ssl_resume_action::transport_read) {
       submit_child(ssl_child_io::read);
       return;
     }
@@ -349,15 +354,15 @@ class ssl_async_operation_base : public ssl_completion_base {
   ssl_resume_action after_flush_ = ssl_resume_action::handshake;
 };
 
-template <class Scheduler, class NextLayer, class Receiver>
+template <class Scheduler, class NextLayer, bool DirectSubmit, class Receiver>
 class ssl_handshake_operation
     : public ssl_async_operation_base<
-          ssl_handshake_operation<Scheduler, NextLayer, Receiver>, Scheduler,
-          NextLayer, Receiver> {
+          ssl_handshake_operation<Scheduler, NextLayer, DirectSubmit, Receiver>,
+          Scheduler, NextLayer, Receiver, DirectSubmit> {
  public:
   using base = ssl_async_operation_base<
-      ssl_handshake_operation<Scheduler, NextLayer, Receiver>, Scheduler,
-      NextLayer, Receiver>;
+      ssl_handshake_operation<Scheduler, NextLayer, DirectSubmit, Receiver>,
+      Scheduler, NextLayer, Receiver, DirectSubmit>;
 
   ssl_handshake_operation(Scheduler scheduler, ssl_stream<NextLayer>& stream,
                           ssl_handshake_type type, Receiver receiver)
@@ -402,18 +407,19 @@ class ssl_handshake_operation
   ssl_handshake_type type_;
 };
 
-template <class Scheduler, class NextLayer, class Holder, class Receiver>
-class ssl_receive_operation
-    : public ssl_async_operation_base<
-          ssl_receive_operation<Scheduler, NextLayer, Holder, Receiver>,
-          Scheduler, NextLayer, Receiver> {
+template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
+          class Receiver>
+class ssl_read_operation : public ssl_async_operation_base<
+                               ssl_read_operation<Scheduler, NextLayer, Holder,
+                                                  DirectSubmit, Receiver>,
+                               Scheduler, NextLayer, Receiver, DirectSubmit> {
  public:
   using base = ssl_async_operation_base<
-      ssl_receive_operation<Scheduler, NextLayer, Holder, Receiver>, Scheduler,
-      NextLayer, Receiver>;
+      ssl_read_operation<Scheduler, NextLayer, Holder, DirectSubmit, Receiver>,
+      Scheduler, NextLayer, Receiver, DirectSubmit>;
 
-  ssl_receive_operation(Scheduler scheduler, ssl_stream<NextLayer>& stream,
-                        Holder buffer, Receiver receiver)
+  ssl_read_operation(Scheduler scheduler, ssl_stream<NextLayer>& stream,
+                     Holder buffer, Receiver receiver)
       : base(std::move(scheduler), stream, std::move(receiver)),
         buffer_(std::move(buffer)) {}
 
@@ -442,25 +448,27 @@ class ssl_receive_operation
       this->flush_then(ssl_resume_action::finish);
       return;
     }
-    this->handle_ssl_error(result, ssl_resume_action::receive);
+    this->handle_ssl_error(result, ssl_resume_action::application_read);
   }
 
   Holder buffer_;
   std::size_t bytes_ = 0;
 };
 
-template <class Scheduler, class NextLayer, class Holder, class Receiver>
-class ssl_send_operation
+template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
+          class Receiver>
+class ssl_write_operation
     : public ssl_async_operation_base<
-          ssl_send_operation<Scheduler, NextLayer, Holder, Receiver>, Scheduler,
-          NextLayer, Receiver> {
+          ssl_write_operation<Scheduler, NextLayer, Holder, DirectSubmit,
+                              Receiver>,
+          Scheduler, NextLayer, Receiver, DirectSubmit> {
  public:
   using base = ssl_async_operation_base<
-      ssl_send_operation<Scheduler, NextLayer, Holder, Receiver>, Scheduler,
-      NextLayer, Receiver>;
+      ssl_write_operation<Scheduler, NextLayer, Holder, DirectSubmit, Receiver>,
+      Scheduler, NextLayer, Receiver, DirectSubmit>;
 
-  ssl_send_operation(Scheduler scheduler, ssl_stream<NextLayer>& stream,
-                     Holder buffer, Receiver receiver)
+  ssl_write_operation(Scheduler scheduler, ssl_stream<NextLayer>& stream,
+                      Holder buffer, Receiver receiver)
       : base(std::move(scheduler), stream, std::move(receiver)),
         buffer_(std::move(buffer)) {}
 
@@ -487,22 +495,22 @@ class ssl_send_operation
       this->flush_then(ssl_resume_action::finish);
       return;
     }
-    this->handle_ssl_error(result, ssl_resume_action::send);
+    this->handle_ssl_error(result, ssl_resume_action::application_write);
   }
 
   Holder buffer_;
   std::size_t bytes_ = 0;
 };
 
-template <class Scheduler, class NextLayer, class Receiver>
+template <class Scheduler, class NextLayer, bool DirectSubmit, class Receiver>
 class ssl_shutdown_operation
     : public ssl_async_operation_base<
-          ssl_shutdown_operation<Scheduler, NextLayer, Receiver>, Scheduler,
-          NextLayer, Receiver> {
+          ssl_shutdown_operation<Scheduler, NextLayer, DirectSubmit, Receiver>,
+          Scheduler, NextLayer, Receiver, DirectSubmit> {
  public:
   using base = ssl_async_operation_base<
-      ssl_shutdown_operation<Scheduler, NextLayer, Receiver>, Scheduler,
-      NextLayer, Receiver>;
+      ssl_shutdown_operation<Scheduler, NextLayer, DirectSubmit, Receiver>,
+      Scheduler, NextLayer, Receiver, DirectSubmit>;
 
   ssl_shutdown_operation(Scheduler scheduler, ssl_stream<NextLayer>& stream,
                          Receiver receiver)
@@ -537,7 +545,7 @@ class ssl_shutdown_operation
   }
 };
 
-template <class Scheduler, class NextLayer>
+template <class Scheduler, class NextLayer, bool DirectSubmit>
 class ssl_handshake_sender {
  public:
   using completion_signatures =
@@ -551,7 +559,7 @@ class ssl_handshake_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) const {
-    return ssl_handshake_operation<Scheduler, NextLayer,
+    return ssl_handshake_operation<Scheduler, NextLayer, DirectSubmit,
                                    std::remove_cvref_t<Receiver>>(
         scheduler_, *stream_, type_, std::move(receiver));
   }
@@ -562,43 +570,15 @@ class ssl_handshake_sender {
   ssl_handshake_type type_;
 };
 
-template <class Scheduler, class NextLayer, class Holder>
-class ssl_receive_sender {
+template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit>
+class ssl_read_sender {
  public:
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::size_t),
                                    bexec::set_error_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  ssl_receive_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
-                     Holder buffer)
-      : scheduler_(std::move(scheduler)),
-        stream_(&stream),
-        buffer_(std::move(buffer)) {}
-
-  template <class Receiver>
-  auto connect(Receiver receiver) && {
-    return ssl_receive_operation<Scheduler, NextLayer, Holder,
-                                 std::remove_cvref_t<Receiver>>(
-        std::move(scheduler_), *stream_, std::move(buffer_),
-        std::move(receiver));
-  }
-
- private:
-  Scheduler scheduler_;
-  ssl_stream<NextLayer>* stream_;
-  Holder buffer_;
-};
-
-template <class Scheduler, class NextLayer, class Holder>
-class ssl_send_sender {
- public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
-
-  ssl_send_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
+  ssl_read_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
                   Holder buffer)
       : scheduler_(std::move(scheduler)),
         stream_(&stream),
@@ -606,7 +586,7 @@ class ssl_send_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return ssl_send_operation<Scheduler, NextLayer, Holder,
+    return ssl_read_operation<Scheduler, NextLayer, Holder, DirectSubmit,
                               std::remove_cvref_t<Receiver>>(
         std::move(scheduler_), *stream_, std::move(buffer_),
         std::move(receiver));
@@ -618,7 +598,35 @@ class ssl_send_sender {
   Holder buffer_;
 };
 
-template <class Scheduler, class NextLayer>
+template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit>
+class ssl_write_sender {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  ssl_write_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
+                   Holder buffer)
+      : scheduler_(std::move(scheduler)),
+        stream_(&stream),
+        buffer_(std::move(buffer)) {}
+
+  template <class Receiver>
+  auto connect(Receiver receiver) && {
+    return ssl_write_operation<Scheduler, NextLayer, Holder, DirectSubmit,
+                               std::remove_cvref_t<Receiver>>(
+        std::move(scheduler_), *stream_, std::move(buffer_),
+        std::move(receiver));
+  }
+
+ private:
+  Scheduler scheduler_;
+  ssl_stream<NextLayer>* stream_;
+  Holder buffer_;
+};
+
+template <class Scheduler, class NextLayer, bool DirectSubmit>
 class ssl_shutdown_sender {
  public:
   using completion_signatures =
@@ -631,7 +639,7 @@ class ssl_shutdown_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) const {
-    return ssl_shutdown_operation<Scheduler, NextLayer,
+    return ssl_shutdown_operation<Scheduler, NextLayer, DirectSubmit,
                                   std::remove_cvref_t<Receiver>>(
         scheduler_, *stream_, std::move(receiver));
   }

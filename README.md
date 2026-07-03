@@ -144,12 +144,12 @@ The client is split into two files:
 Key patterns demonstrated:
 
 - **Sender/receiver operation lifecycle** — every async step (resolve, connect,
-  handshake, send, receive, shutdown) is a sender connected to a receiver,
+  handshake, write, read, shutdown) is a sender connected to a receiver,
   managed by an `operation_registry`.
 - **Endpoint fallback** — resolved endpoints are tried sequentially;
   connection failures advance to the next endpoint.
 - **TLS handshake integration** — after TCP connect, the socket is moved into
-  an `ssl_stream`; handshake, encrypted send/receive, and shutdown all flow
+  an `ssl_stream`; handshake, encrypted read/write, and shutdown all flow
   through the same scheduler API.
 - **SSL partial-write loop** — `SSL_write` may produce short writes; the client
   retries until the entire request is sent.
@@ -232,7 +232,7 @@ cmake --build build-asio --target bupp_asio_echo_server
   and timers. Stream owners build their higher-level senders on top.
 - **`bupp::ssl_stream`** — an RAII TLS stream that layers over any next layer
   (default: `tcp_socket`). Owns the SSL object and memory BIOs. Senders for
-  handshake, send, receive, and shutdown are produced by the stream.
+  handshake, read, write, and shutdown are produced by the stream.
 
 ### Scheduler model
 
@@ -249,8 +249,8 @@ auto sched = ctx.get_post_scheduler();
 //   scheduler.async_read(descriptor, buffer, offset)
 //   scheduler.async_write(descriptor, buffer, offset)
 //   ssl_stream.async_handshake(scheduler, type)
-//   ssl_stream.async_send(scheduler, buffer)
-//   ssl_stream.async_receive(scheduler, buffer)
+//   ssl_stream.async_write(scheduler, buffer)
+//   ssl_stream.async_read(scheduler, buffer)
 //   ssl_stream.async_shutdown(scheduler)
 
 spawn(socket.async_connect(sched, endpoint), my_receiver{});

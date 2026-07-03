@@ -474,6 +474,13 @@ class BUPP_EXPORT io_context {
     }
 
     /**
+     * Queues one operation for batched io_uring submission.
+     */
+    void enqueue_io(operation_base& operation) const noexcept {
+      context_->enqueue_io(operation);
+    }
+
+    /**
      * Posts one operation onto the owning context run loop.
      */
     void post(async_io::linux_native::io_uring_operation_base& operation)
@@ -481,20 +488,19 @@ class BUPP_EXPORT io_context {
       context_->post(operation);
     }
 
-    [[nodiscard]] auto async_receive(async_io::stream_socket_view socket,
-                                     mutable_buffer buffer,
-                                     int flags = 0) const;
+    [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
+                                  mutable_buffer buffer, int flags = 0) const;
 
-    [[nodiscard]] auto async_receive_direct(async_io::stream_socket_view socket,
-                                            mutable_buffer buffer,
-                                            int flags = 0) const;
-
-    [[nodiscard]] auto async_send(async_io::stream_socket_view socket,
-                                  const_buffer buffer, int flags = 0) const;
-
-    [[nodiscard]] auto async_send_direct(async_io::stream_socket_view socket,
-                                         const_buffer buffer,
+    [[nodiscard]] auto async_read_direct(async_io::stream_socket_view socket,
+                                         mutable_buffer buffer,
                                          int flags = 0) const;
+
+    [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
+                                   const_buffer buffer, int flags = 0) const;
+
+    [[nodiscard]] auto async_write_direct(async_io::stream_socket_view socket,
+                                          const_buffer buffer,
+                                          int flags = 0) const;
 
     [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
                                   mutable_buffer buffer,
@@ -665,32 +671,32 @@ class BUPP_EXPORT io_context {
   }
 
   /**
-   * Creates a queued sender that receives bytes from a non-owning stream socket
-   * view.
+   * Creates a queued sender that reads bytes from a non-owning stream socket
+   * view and completes with bytes transferred.
    */
-  [[nodiscard]] auto async_receive(async_io::stream_socket_view socket,
-                                   mutable_buffer buffer, int flags = 0);
+  [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
+                                mutable_buffer buffer, int flags = 0);
 
   /**
-   * Creates a direct-submission sender that receives bytes from a non-owning
-   * stream socket view.
+   * Creates a direct-submission sender that reads bytes from a non-owning
+   * stream socket view and completes with bytes transferred.
    */
-  [[nodiscard]] auto async_receive_direct(async_io::stream_socket_view socket,
-                                          mutable_buffer buffer, int flags = 0);
+  [[nodiscard]] auto async_read_direct(async_io::stream_socket_view socket,
+                                       mutable_buffer buffer, int flags = 0);
 
   /**
-   * Creates a queued sender that sends bytes through a non-owning stream socket
-   * view.
+   * Creates a queued sender that writes bytes through a non-owning stream
+   * socket view and completes with bytes transferred.
    */
-  [[nodiscard]] auto async_send(async_io::stream_socket_view socket,
-                                const_buffer buffer, int flags = 0);
+  [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
+                                 const_buffer buffer, int flags = 0);
 
   /**
-   * Creates a direct-submission sender that sends bytes through a non-owning
-   * stream socket view.
+   * Creates a direct-submission sender that writes bytes through a non-owning
+   * stream socket view and completes with bytes transferred.
    */
-  [[nodiscard]] auto async_send_direct(async_io::stream_socket_view socket,
-                                       const_buffer buffer, int flags = 0);
+  [[nodiscard]] auto async_write_direct(async_io::stream_socket_view socket,
+                                        const_buffer buffer, int flags = 0);
 
   /**
    * Creates a queued sender that reads bytes from a file descriptor.
@@ -968,8 +974,10 @@ class BUPP_EXPORT io_context {
 
 }  // namespace bupp
 
-#include <bupp/detail/io_context/scheduler_operations.h>
+// clang-format off
 #include <bupp/io_context_cpo.h>
 #include <bupp/linux/detail/io_context_native_io.h>
+#include <bupp/detail/io_context/scheduler_operations.h>
+// clang-format on
 
 #endif  // BUPP_LINUX_IO_CONTEXT_H_

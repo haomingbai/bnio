@@ -191,15 +191,15 @@ class native_io_sender {
   submit_mode mode_;
 };
 
-class receive_model {
+class socket_read_model {
  public:
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::size_t),
                                    bexec::set_error_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  receive_model(async_io::stream_socket_view socket, mutable_buffer buffer,
-                int flags) noexcept
+  socket_read_model(async_io::stream_socket_view socket, mutable_buffer buffer,
+                    int flags) noexcept
       : socket_(socket), buffer_(buffer), flags_(flags) {}
 
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
@@ -227,15 +227,15 @@ class receive_model {
   int flags_;
 };
 
-class send_model {
+class socket_write_model {
  public:
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::size_t),
                                    bexec::set_error_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  send_model(async_io::stream_socket_view socket, const_buffer buffer,
-             int flags) noexcept
+  socket_write_model(async_io::stream_socket_view socket, const_buffer buffer,
+                     int flags) noexcept
       : socket_(socket), buffer_(buffer), flags_(flags) {}
 
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
@@ -435,28 +435,32 @@ class poll_model {
 }  // namespace detail
 /** @endcond */
 
-inline auto io_context::async_receive(async_io::stream_socket_view socket,
-                                      mutable_buffer buffer, int flags) {
+inline auto io_context::async_read(async_io::stream_socket_view socket,
+                                   mutable_buffer buffer, int flags) {
   return detail::native_io_sender(
-      *this, detail::receive_model(socket, buffer, flags), submit_mode::queued);
+      *this, detail::socket_read_model(socket, buffer, flags),
+      submit_mode::queued);
 }
 
-inline auto io_context::async_receive_direct(
-    async_io::stream_socket_view socket, mutable_buffer buffer, int flags) {
+inline auto io_context::async_read_direct(async_io::stream_socket_view socket,
+                                          mutable_buffer buffer, int flags) {
   return detail::native_io_sender(
-      *this, detail::receive_model(socket, buffer, flags), submit_mode::direct);
+      *this, detail::socket_read_model(socket, buffer, flags),
+      submit_mode::direct);
 }
 
-inline auto io_context::async_send(async_io::stream_socket_view socket,
-                                   const_buffer buffer, int flags) {
+inline auto io_context::async_write(async_io::stream_socket_view socket,
+                                    const_buffer buffer, int flags) {
   return detail::native_io_sender(
-      *this, detail::send_model(socket, buffer, flags), submit_mode::queued);
+      *this, detail::socket_write_model(socket, buffer, flags),
+      submit_mode::queued);
 }
 
-inline auto io_context::async_send_direct(async_io::stream_socket_view socket,
-                                          const_buffer buffer, int flags) {
+inline auto io_context::async_write_direct(async_io::stream_socket_view socket,
+                                           const_buffer buffer, int flags) {
   return detail::native_io_sender(
-      *this, detail::send_model(socket, buffer, flags), submit_mode::direct);
+      *this, detail::socket_write_model(socket, buffer, flags),
+      submit_mode::direct);
 }
 
 inline auto io_context::async_read(async_io::descriptor_view descriptor,

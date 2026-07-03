@@ -113,20 +113,28 @@ class BUPP_EXPORT tcp_socket {
   }
 
   template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_receive(Scheduler scheduler, Buffer&& buffer,
-                                   int flags = 0);
-
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_receive_direct(Scheduler scheduler, Buffer&& buffer,
-                                          int flags = 0);
-
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_send(Scheduler scheduler, Buffer&& buffer,
+  [[nodiscard]] auto async_read(Scheduler scheduler, Buffer&& buffer,
                                 int flags = 0);
 
+  /**
+   * Creates a sender for one read operation and submits it immediately instead
+   * of placing it in the scheduler's queued I/O batch.
+   */
   template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_send_direct(Scheduler scheduler, Buffer&& buffer,
+  [[nodiscard]] auto async_read_direct(Scheduler scheduler, Buffer&& buffer,
                                        int flags = 0);
+
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_write(Scheduler scheduler, Buffer&& buffer,
+                                 int flags = 0);
+
+  /**
+   * Creates a sender for one write operation and submits it immediately instead
+   * of placing it in the scheduler's queued I/O batch.
+   */
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_write_direct(Scheduler scheduler, Buffer&& buffer,
+                                        int flags = 0);
 
   template <class Scheduler>
   [[nodiscard]] auto async_connect(Scheduler scheduler,
@@ -320,9 +328,9 @@ namespace bupp {
 /** @cond BUPP_DETAIL */
 namespace detail {
 
-template <class Scheduler, bool Direct, class Receiver>
-void tcp_accept_operation<
-    Scheduler, Direct, Receiver>::child_receiver::set_value(int fd) noexcept {
+template <class Scheduler, bool DirectSubmit, class Receiver>
+void tcp_accept_operation<Scheduler, DirectSubmit, Receiver>::child_receiver::
+    set_value(int fd) noexcept {
   bexec::set_value(std::move(operation_->receiver_), tcp_socket(fd));
 }
 
@@ -330,43 +338,42 @@ void tcp_accept_operation<
 /** @endcond */
 
 template <class Scheduler, class Buffer>
-auto tcp_socket::async_receive(Scheduler scheduler, Buffer&& buffer,
-                               int flags) {
+auto tcp_socket::async_read(Scheduler scheduler, Buffer&& buffer, int flags) {
   auto holder =
       detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::tcp_receive_sender<scheduler_type, holder_type, false>(
+  return detail::tcp_read_sender<scheduler_type, holder_type, false>(
       std::move(scheduler), view(), std::move(holder), flags);
 }
 
 template <class Scheduler, class Buffer>
-auto tcp_socket::async_receive_direct(Scheduler scheduler, Buffer&& buffer,
-                                      int flags) {
-  auto holder =
-      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
-  using scheduler_type = std::remove_cvref_t<Scheduler>;
-  using holder_type = decltype(holder);
-  return detail::tcp_receive_sender<scheduler_type, holder_type, true>(
-      std::move(scheduler), view(), std::move(holder), flags);
-}
-
-template <class Scheduler, class Buffer>
-auto tcp_socket::async_send(Scheduler scheduler, Buffer&& buffer, int flags) {
-  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
-  using scheduler_type = std::remove_cvref_t<Scheduler>;
-  using holder_type = decltype(holder);
-  return detail::tcp_send_sender<scheduler_type, holder_type, false>(
-      std::move(scheduler), view(), std::move(holder), flags);
-}
-
-template <class Scheduler, class Buffer>
-auto tcp_socket::async_send_direct(Scheduler scheduler, Buffer&& buffer,
+auto tcp_socket::async_read_direct(Scheduler scheduler, Buffer&& buffer,
                                    int flags) {
+  auto holder =
+      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_read_sender<scheduler_type, holder_type, true>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_write(Scheduler scheduler, Buffer&& buffer, int flags) {
   auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::tcp_send_sender<scheduler_type, holder_type, true>(
+  return detail::tcp_write_sender<scheduler_type, holder_type, false>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_write_direct(Scheduler scheduler, Buffer&& buffer,
+                                    int flags) {
+  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_write_sender<scheduler_type, holder_type, true>(
       std::move(scheduler), view(), std::move(holder), flags);
 }
 

@@ -96,7 +96,7 @@ sequenceDiagram
     DB->>S: resize(15)
     DB-->>User: mutable_buffer{data=&S[5], size=10}
 
-    Note over User: pass buffer to async_receive
+    Note over User: pass buffer to async_read
 
     User->>DB: commit(7)
     DB->>S: resize(12)
@@ -114,7 +114,7 @@ bupp::dynamic_string_buffer dyn(storage);
 // Prepare writable region
 auto region = dyn.prepare(4096);
 
-// Use region in async_receive ...
+// Use region in async_read ...
 // After I/O completes:
 
 dyn.commit(actual_bytes);   // shrink to actual received size
@@ -222,11 +222,11 @@ graph TB
     E --> F["ctx.run() — event loop"]
     F --> G{"completion"}
     G -->|"set_value(tcp_socket)"| H["handle new connection"]
-    H --> I["client.async_receive(scheduler)"]
+    H --> I["client.async_read(scheduler)"]
     H --> J["re-issue async_accept"]
     I --> K{"completion"}
     K -->|"set_value(bytes)"| L["process data"]
-    L --> M["client.async_send(scheduler, echo)"]
+    L --> M["client.async_write(scheduler, echo)"]
     M --> I
 ```
 
@@ -308,7 +308,7 @@ as BIO buffers are drained and refilled:
 
 ```mermaid
 sequenceDiagram
-    participant Op as ssl_receive_operation
+    participant Op as ssl_read_operation
     participant SSL as SSL*
     participant BIO_R as read_bio_
     participant BIO_W as write_bio_
@@ -320,8 +320,8 @@ sequenceDiagram
 
     Note over Op,BIO_W: flush pending output first
     Op->>BIO_W: BIO_read(encrypted_chunk)
-    Op->>TCP: send(encrypted_chunk)
-    K-->>Op: send done
+    Op->>TCP: async_write(encrypted_chunk)
+    K-->>Op: write done
 
     Note over Op,BIO_R: now satisfy WANT_READ
     Op->>TCP: recv(encrypted_chunk)
@@ -360,9 +360,9 @@ auto scheduler = ctx.get_post_scheduler();
 auto hs = stream.async_handshake(scheduler, bupp::ssl_handshake_type::client);
 // ... connect receiver + start ...
 
-// 5. After handshake completes, send/receive over SSL
-auto recv = stream.async_receive(scheduler, recv_buf, 0);
-auto send = stream.async_send(scheduler, send_buf, 0);
+// 5. After handshake completes, read/write over SSL
+auto read_op = stream.async_read(scheduler, read_buf, 0);
+auto write_op = stream.async_write(scheduler, write_buf, 0);
 
 // 6. Shutdown when done
 auto sd = stream.async_shutdown(scheduler);
@@ -397,7 +397,7 @@ sequenceDiagram
 
     User->>Ctx: get_post_scheduler()
     Ctx-->>User: scheduler
-    User->>Stream: async_receive(scheduler, buffer, flags)
+    User->>Stream: async_read(scheduler, buffer, flags)
     Stream-->>User: sender
     User->>Sender: connect(receiver)
     Sender-->>User: operation
@@ -414,10 +414,10 @@ Every sender declares its completion channels:
 
 | Sender | `set_value` | `set_error` | `set_stopped` |
 |--------|------------|-------------|---------------|
-| `async_receive` | `size_t` bytes | `std::error_code` | `()` |
-| `async_send` | `size_t` bytes | `std::error_code` | `()` |
-| `async_read` | `size_t` bytes | `std::error_code` | `()` |
-| `async_write` | `size_t` bytes | `std::error_code` | `()` |
+| `async_read(stream_socket_view, ...)` | `size_t` bytes transferred | `std::error_code` | `()` |
+| `async_write(stream_socket_view, ...)` | `size_t` bytes transferred | `std::error_code` | `()` |
+| `async_read(descriptor_view, ...)` | `size_t` bytes transferred | `std::error_code` | `()` |
+| `async_write(descriptor_view, ...)` | `size_t` bytes transferred | `std::error_code` | `()` |
 | `async_accept` | `tcp_socket` | `std::error_code` | `()` |
 | `async_connect` | `()` | `std::error_code` | `()` |
 | `async_poll` | `unsigned` ready-event mask | `std::error_code` | `()` |
@@ -444,8 +444,12 @@ struct my_receiver {
 
 | Mode | API | When to Use |
 |------|-----|-------------|
-| **queued** | `async_receive()`, `async_send()`, etc. | High throughput; leverages io_uring batching |
-| **direct** | `async_receive_direct()`, `async_send_direct()`, etc. | Low latency; submits immediately |
+| **queued** | `async_read()`, `async_write()`, etc. | High throughput; leverages io_uring batching |
+| **direct-submission** | `async_read_direct()`, `async_write_direct()`, etc. | Low latency; bypasses the queued I/O batch and submits immediately |
+
+The `_direct` suffix is only a submission-mode suffix. It does not mean a
+different read/write semantic. Stream types only expose `_direct` operations
+when they can actually change how the lowest-layer I/O is submitted.
 
 ---
 
@@ -482,7 +486,7 @@ int main() {
 }
 ```
 
-### io_context Layer — Async Receive
+### io_context Layer — Async Read
 
 ```cpp
 #include <bupp/bupp.h>
@@ -491,7 +495,7 @@ int main() {
 
 struct print_receiver {
     void set_value(std::size_t n) {
-        std::cout << "received " << n << " bytes\n";
+        std::cout << "transferred " << n << " bytes\n";
     }
     void set_error(std::error_code ec) {
         std::cerr << "error: " << ec.message() << '\n';
@@ -513,7 +517,7 @@ int main() {
     sock.view().connect(ep);
 
     std::array<char, 4096> buf{};
-    auto sender = sock.async_receive(scheduler, bupp::buffer(buf), 0);
+    auto sender = sock.async_read(scheduler, bupp::buffer(buf), 0);
     auto op = std::move(sender).connect(print_receiver{});
     op.start();
 
@@ -532,7 +536,7 @@ dispatch pattern with manual accept → recv → echo send loops:
 ### io_context Layer — Raw Echo Server
 
 Raw TCP echo server at the `io_context` layer, demonstrating repeated
-`async_accept`, per-connection `async_receive`/`async_send`, detached operation
+`async_accept`, per-connection `async_read`/`async_write`, detached operation
 lifetime through a local holder, and `ctx.run()` as the server event loop:
 
 [`examples/raw_echo`](../examples/raw_echo)

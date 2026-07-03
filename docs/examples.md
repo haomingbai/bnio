@@ -34,7 +34,7 @@ auto scheduler = ctx.get_post_scheduler();
 bupp::tcp_socket socket;
 std::array<char, 4096> bytes{};
 
-auto sender = socket.async_receive(scheduler, bupp::buffer(bytes), 0);
+auto sender = socket.async_read(scheduler, bupp::buffer(bytes), 0);
 auto op = bexec::connect(std::move(sender), my_receiver{});
 
 bexec::start(op);
@@ -44,7 +44,7 @@ ctx.run();
 The operation state must outlive the async operation. For a short program, a
 stack variable is enough. For a server, keep operation states in an owning
 object. The raw echo server example uses a small local holder for pending
-accept, receive, and send operations.
+accept, read, and write operations.
 
 ## Raw TCP Echo Server
 
@@ -54,7 +54,7 @@ It demonstrates:
 
 - `tcp_acceptor` setup with `open`, `set_reuse_address`, `bind`, and `listen`
 - repeated `acceptor.async_accept(...)`
-- per-connection `socket.async_receive(...)` and `socket.async_send(...)`
+- per-connection `socket.async_read(...)` and `socket.async_write(...)`
 - `ctx.run()` as the server event loop
 - explicit operation lifetime management for a long-running server
 
