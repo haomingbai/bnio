@@ -49,7 +49,8 @@ graph TB
     Ctx["io_context"] -->|"owns"| UCtx["io_uring_context"]
     UCtx -->|"owns"| Ring["base::ring"]
 
-    Ctx -->|"must outlive"| Ops["all pending operations"]
+    OpOwner["operation owner<br/>(caller / combinator / coroutine frame / registry)"] -->|"must outlive"| Ops["all pending operations"]
+    Ctx -->|"must outlive"| Ops
 
     Ring -->|"must outlive"| SQE["submission_queue_entry"]
     Ring -->|"must outlive (until cqe_seen)"| CQE["completion_queue_entry"]
@@ -111,10 +112,13 @@ void good(bupp::io_context& ctx, bupp::tcp_socket& sock) {
 }
 ```
 
-### Rule 3: `io_context` must outlive all operations submitted on it
+### Rule 3: `io_context` and operation storage must both remain alive
 
-Operations are stored on an intrusive linked list inside `io_context`.
-Destroying the context with operations still pending is undefined behavior.
+Operations are borrowed by `io_context`: it stores operation addresses in
+intrusive queues and in io_uring `user_data`, then calls `execute()` when work is
+ready to complete. It does not own, move, or destroy operations. The operation's
+external owner must keep the operation object alive until a terminal completion
+has run, and `io_context` must also outlive all operations submitted on it.
 
 ```cpp
 // WRONG — ctx destroyed before operation completes
@@ -185,21 +189,23 @@ bupp::ssl_stream stream(std::move(sock), ctx); // ctx outlives stream
 
 ## Operation Lifecycle
 
-Operations use **intrusive linked lists** for queuing. This imposes hard
-constraints:
+Operations use **intrusive linked lists** and io_uring `user_data` for queuing.
+This imposes hard constraints:
 
 - **Non-copyable, non-movable** — `operation_base` and all derived types
   disable copy and move. Moving would break the intrusive list pointers.
-- **Heap-allocated and managed by the sender/receiver machinery** — users
-  normally do not allocate or free operations directly.
-- **Owned by `io_context` after `start()`** — the run loop drains and destroys
-  completed operations.
+- **Externally owned** — operation storage is supplied by the caller or by a
+  higher-level lifetime container such as a sender adaptor, operation registry,
+  coroutine frame, session object, or heap allocation.
+- **Borrowed by `io_context` after `start()`** — the run loop observes the
+  operation pointer, fills result fields, and calls `execute()`. Completion does
+  not destroy the operation object.
 
 ```cpp
 auto sender = socket.async_read(scheduler, buffer, 0);
 auto op = std::move(sender).connect(my_receiver);
 op.start();
-// op is now owned by ctx; it will be destroyed after completion
+// op must remain alive until the receiver gets set_value/set_error/set_stopped.
 ```
 
 ### `operation_base` Inheritance Chain
@@ -247,6 +253,7 @@ bupp::tcp_socket b = std::move(a);  // ok; a is now closed
 Before writing bupp code, verify:
 
 - [ ] `ring` / `io_context` outlives all submitted operations.
+- [ ] Operation storage outlives each operation's terminal completion.
 - [ ] Every buffer outlives the I/O operation that uses it.
 - [ ] All CQE fields are read **before** `cqe_seen()`.
 - [ ] All SQE fields are set **before** `ring::submit()`.
