@@ -2,17 +2,21 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <array>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
 #include <cassert>
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -107,6 +111,46 @@ struct handshake_receiver {
     ++state->stopped;
     if (context != nullptr) {
       (void)context->stop();
+    }
+  }
+};
+
+struct transfer_state {
+  unsigned values = 0;
+  unsigned errors = 0;
+  unsigned stopped = 0;
+  std::size_t bytes = 0;
+};
+
+struct transfer_receiver {
+  std::shared_ptr<transfer_state> state;
+  bupp::io_context* context = nullptr;
+  unsigned* completions = nullptr;
+  unsigned target = 0;
+
+  void set_value(std::size_t bytes) noexcept {
+    ++state->values;
+    state->bytes = bytes;
+    complete();
+  }
+
+  void set_error(std::error_code) noexcept {
+    ++state->errors;
+    complete();
+  }
+
+  void set_stopped() noexcept {
+    ++state->stopped;
+    complete();
+  }
+
+ private:
+  void complete() noexcept {
+    if (completions != nullptr) {
+      ++*completions;
+      if (*completions == target && context != nullptr) {
+        (void)context->stop();
+      }
     }
   }
 };
@@ -268,6 +312,146 @@ void test_socketpair_handshake_is_io_context_driven() {
   assert(state->stopped == 0);
 }
 
+template <bool DirectSubmit>
+void test_socketpair_read_write_transfers_plaintext() {
+  test_certificate_files files;
+
+  bupp::ssl_context server_context(bupp::ssl_context_method::tls_server);
+  assert(server_context.valid());
+  assert(!server_context.use_certificate_chain_file(
+      files.certificate.string().c_str()));
+  assert(
+      !server_context.use_private_key_file(files.private_key.string().c_str()));
+  assert(!server_context.check_private_key());
+
+  bupp::ssl_context client_context(bupp::ssl_context_method::tls_client);
+  assert(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+
+  int sockets[2] = {-1, -1};
+  assert(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+
+  bupp::ssl_stream client{bupp::tcp_socket(sockets[0]), client_context};
+  bupp::ssl_stream server{bupp::tcp_socket(sockets[1]), server_context};
+
+  {
+    bupp::io_context context;
+    if (!context.is_open()) {
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+
+    auto state = std::make_shared<handshake_state>();
+    handshake_receiver client_receiver{state, &context};
+    handshake_receiver server_receiver{state, &context};
+
+    auto client_sender = [&] {
+      if constexpr (DirectSubmit) {
+        return client.async_handshake_direct(scheduler,
+                                             bupp::ssl_handshake_type::client);
+      } else {
+        return client.async_handshake(scheduler,
+                                      bupp::ssl_handshake_type::client);
+      }
+    }();
+    auto server_sender = [&] {
+      if constexpr (DirectSubmit) {
+        return server.async_handshake_direct(scheduler,
+                                             bupp::ssl_handshake_type::server);
+      } else {
+        return server.async_handshake(scheduler,
+                                      bupp::ssl_handshake_type::server);
+      }
+    }();
+
+    auto client_operation =
+        bexec::connect(std::move(client_sender), std::move(client_receiver));
+    auto server_operation =
+        bexec::connect(std::move(server_sender), std::move(server_receiver));
+
+    bexec::start(client_operation);
+    bexec::start(server_operation);
+    context.run();
+
+    assert(state->values == 2);
+    assert(state->errors == 0);
+    assert(state->stopped == 0);
+  }
+
+  std::vector<unsigned char> payload(70 * 1024);
+  for (std::size_t index = 0; index < payload.size(); ++index) {
+    payload[index] = static_cast<unsigned char>((index * 17U + 29U) & 0xffU);
+  }
+  std::vector<unsigned char> received(payload.size());
+
+  std::size_t sent = 0;
+  std::size_t received_size = 0;
+  while (sent < payload.size()) {
+    bupp::io_context context;
+    if (!context.is_open()) {
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+
+    unsigned completions = 0;
+    auto read_state = std::make_shared<transfer_state>();
+    auto write_state = std::make_shared<transfer_state>();
+    transfer_receiver read_receiver{read_state, &context, &completions, 2};
+    transfer_receiver write_receiver{write_state, &context, &completions, 2};
+
+    auto read_buffer = bupp::buffer(received.data() + received_size,
+                                    received.size() - received_size);
+    auto write_buffer =
+        bupp::buffer(payload.data() + sent, payload.size() - sent);
+
+    auto read_sender = [&] {
+      if constexpr (DirectSubmit) {
+        return server.async_read_direct(scheduler, read_buffer);
+      } else {
+        return server.async_read(scheduler, read_buffer);
+      }
+    }();
+    auto write_sender = [&] {
+      if constexpr (DirectSubmit) {
+        return client.async_write_direct(scheduler, write_buffer, MSG_NOSIGNAL);
+      } else {
+        return client.async_write(scheduler, write_buffer, MSG_NOSIGNAL);
+      }
+    }();
+
+    auto read_operation =
+        bexec::connect(std::move(read_sender), std::move(read_receiver));
+    auto write_operation =
+        bexec::connect(std::move(write_sender), std::move(write_receiver));
+
+    bexec::start(read_operation);
+    bexec::start(write_operation);
+    if constexpr (DirectSubmit) {
+      assert(scheduler.queued_io_size() == 0);
+    } else {
+      assert(scheduler.queued_io_size() != 0);
+    }
+    context.run();
+
+    assert(completions == 2);
+    assert(read_state->values == 1);
+    assert(read_state->errors == 0);
+    assert(read_state->stopped == 0);
+    assert(write_state->values == 1);
+    assert(write_state->errors == 0);
+    assert(write_state->stopped == 0);
+    assert(read_state->bytes != 0);
+    assert(write_state->bytes != 0);
+    assert(read_state->bytes == write_state->bytes);
+
+    sent += write_state->bytes;
+    received_size += read_state->bytes;
+  }
+
+  assert(received_size == payload.size());
+  assert(std::memcmp(received.data(), payload.data(), payload.size()) == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -275,5 +459,7 @@ int main() {
   test_ssl_raii_objects_construct();
   test_socketpair_handshake_is_io_context_driven<false>();
   test_socketpair_handshake_is_io_context_driven<true>();
+  test_socketpair_read_write_transfers_plaintext<false>();
+  test_socketpair_read_write_transfers_plaintext<true>();
   return 0;
 }

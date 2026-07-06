@@ -245,8 +245,8 @@ graph TB
 
     subgraph INTERNAL["ssl_stream internals"]
         SSL["SSL*"]
-        RBIO["read_bio_ (BIO*) — decrypts inbound data"]
-        WBIO["write_bio_ (BIO*) — encrypts outbound data"]
+        RBIO["read_bio_ (BIO*) — transport input half"]
+        WBIO["write_bio_ (BIO*) — transport output half"]
         TCP["next_layer_ (tcp_socket) — raw transport"]
     end
 
@@ -319,14 +319,16 @@ sequenceDiagram
     SSL-->>Op: SSL_ERROR_WANT_READ
 
     Note over Op,BIO_W: flush pending output first
-    Op->>BIO_W: BIO_read(encrypted_chunk)
+    Op->>BIO_W: BIO_nread0(encrypted_chunk)
     Op->>TCP: async_write(encrypted_chunk)
     K-->>Op: write done
+    Op->>BIO_W: BIO_nread(consumed)
 
     Note over Op,BIO_R: now satisfy WANT_READ
+    Op->>BIO_R: BIO_nwrite0(recv target)
     Op->>TCP: recv(encrypted_chunk)
     K-->>Op: recv done
-    Op->>BIO_R: BIO_write(encrypted_chunk)
+    Op->>BIO_R: BIO_nwrite(committed)
 
     Op->>SSL: SSL_read(plaintext_buf) — retry
     SSL-->>Op: success → plaintext bytes
@@ -334,8 +336,8 @@ sequenceDiagram
     Op-->>User: set_value(bytes)
 ```
 
-Two 16 KB internal buffers (`input_`, `output_`) serve as staging areas
-between the BIO and the TCP socket.
+SSL transport I/O uses BIO pair non-copying access so the lower layer reads
+from or writes to BIO-owned memory directly.
 
 ### SSL Usage Pattern
 

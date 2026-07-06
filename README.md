@@ -231,8 +231,8 @@ cmake --build build-asio --target bupp_asio_echo_server
   factories for the lowest-layer socket views, file descriptors, DNS, polling,
   and timers. Stream owners build their higher-level senders on top.
 - **`bupp::ssl_stream`** — an RAII TLS stream that layers over any next layer
-  (default: `tcp_socket`). Owns the SSL object and memory BIOs. Senders for
-  handshake, read, write, and shutdown are produced by the stream.
+  (default: `tcp_socket`). Owns the SSL object and transport BIO pairs. Senders
+  for handshake, read, write, and shutdown are produced by the stream.
 
 ### Scheduler model
 

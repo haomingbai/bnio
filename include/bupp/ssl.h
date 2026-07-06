@@ -137,9 +137,9 @@ class BUPP_EXPORT ssl_context {
 /**
  * RAII owner for an OpenSSL SSL object layered over a next stream.
  *
- * ssl_stream owns the SSL object and its memory BIOs. It also owns or stores
- * the supplied next layer by value. The stream is move-only because SSL
- * ownership is unique.
+ * ssl_stream owns the SSL object and the transport halves of its BIO pairs. It
+ * also owns or stores the supplied next layer by value. The stream is move-only
+ * because SSL ownership is unique.
  */
 template <class NextLayer = tcp_socket>
 class ssl_stream {
@@ -155,11 +155,7 @@ class ssl_stream {
   /**
    * Frees the owned SSL object and its BIOs.
    */
-  ~ssl_stream() noexcept {
-    if (ssl_ != nullptr) {
-      SSL_free(ssl_);
-    }
-  }
+  ~ssl_stream() noexcept { release(); }
 
   /**
    * Copy construction is disabled because the stream owns an SSL object.
@@ -185,9 +181,7 @@ class ssl_stream {
    */
   ssl_stream& operator=(ssl_stream&& other) noexcept {
     if (this != &other) {
-      if (ssl_ != nullptr) {
-        SSL_free(ssl_);
-      }
+      release();
       next_layer_ = std::move(other.next_layer_);
       ssl_ = std::exchange(other.ssl_, nullptr);
       read_bio_ = std::exchange(other.read_bio_, nullptr);
@@ -240,12 +234,12 @@ class ssl_stream {
   [[nodiscard]] bool valid() const noexcept { return ssl_ != nullptr; }
 
   /**
-   * Returns the memory BIO used for encrypted input.
+   * Returns the transport BIO used for encrypted input.
    */
   [[nodiscard]] BIO* native_read_bio() const noexcept { return read_bio_; }
 
   /**
-   * Returns the memory BIO used for encrypted output.
+   * Returns the transport BIO used for encrypted output.
    */
   [[nodiscard]] BIO* native_write_bio() const noexcept { return write_bio_; }
 
@@ -296,21 +290,37 @@ class ssl_stream {
   [[nodiscard]] auto async_shutdown_direct(Scheduler scheduler);
 
  private:
+  void release() noexcept {
+    if (ssl_ != nullptr) {
+      SSL_free(ssl_);
+      ssl_ = nullptr;
+    }
+    if (read_bio_ != nullptr) {
+      BIO_free(read_bio_);
+      read_bio_ = nullptr;
+    }
+    if (write_bio_ != nullptr) {
+      BIO_free(write_bio_);
+      write_bio_ = nullptr;
+    }
+  }
+
   void reset(ssl_context& context) noexcept {
     ssl_ = SSL_new(context.native_handle());
     if (ssl_ == nullptr) {
       return;
     }
 
-    read_bio_ = BIO_new(BIO_s_mem());
-    write_bio_ = BIO_new(BIO_s_mem());
-    if (read_bio_ == nullptr || write_bio_ == nullptr) {
-      if (read_bio_ != nullptr) {
-        BIO_free(read_bio_);
-      }
-      if (write_bio_ != nullptr) {
-        BIO_free(write_bio_);
-      }
+    constexpr std::size_t bio_buffer_size = 64 * 1024;
+    BIO* ssl_read_bio = nullptr;
+    BIO* ssl_write_bio = nullptr;
+    if (BIO_new_bio_pair(&ssl_read_bio, 0, &read_bio_, bio_buffer_size) != 1 ||
+        BIO_new_bio_pair(&ssl_write_bio, bio_buffer_size, &write_bio_, 0) !=
+            1) {
+      BIO_free(ssl_read_bio);
+      BIO_free(ssl_write_bio);
+      BIO_free(read_bio_);
+      BIO_free(write_bio_);
       SSL_free(ssl_);
       ssl_ = nullptr;
       read_bio_ = nullptr;
@@ -318,8 +328,7 @@ class ssl_stream {
       return;
     }
 
-    BIO_set_mem_eof_return(read_bio_, -1);
-    SSL_set_bio(ssl_, read_bio_, write_bio_);
+    SSL_set_bio(ssl_, ssl_read_bio, ssl_write_bio);
     SSL_set_mode(ssl_, SSL_MODE_ENABLE_PARTIAL_WRITE |
                            SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
   }

@@ -24,6 +24,13 @@ set(BUPP_PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/submission_queue_entry.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/buffer.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/bupp.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/common.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/handshake.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/read_write.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/senders.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/shutdown.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/state_machine.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/export.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo.h
