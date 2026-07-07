@@ -64,9 +64,9 @@ auto ssl_make_transport_read_sender(Scheduler& scheduler,
                                     std::size_t size) {
   auto buffer = bupp::buffer(data, size);
   if constexpr (DirectSubmit) {
-    return stream.lowest_layer().async_read_direct(scheduler, buffer);
+    return stream.lowest_layer().async_read_some_direct(scheduler, buffer);
   } else {
-    return stream.lowest_layer().async_read(scheduler, buffer);
+    return stream.lowest_layer().async_read_some(scheduler, buffer);
   }
 }
 
@@ -76,10 +76,11 @@ auto ssl_make_transport_write_sender(Scheduler& scheduler,
                                      const void* data, std::size_t size) {
   auto buffer = bupp::buffer(data, size);
   if constexpr (DirectSubmit) {
-    return stream.lowest_layer().async_write_direct(scheduler, buffer,
-                                                    MSG_NOSIGNAL);
+    return stream.lowest_layer().async_write_some_direct(scheduler, buffer,
+                                                         MSG_NOSIGNAL);
   } else {
-    return stream.lowest_layer().async_write(scheduler, buffer, MSG_NOSIGNAL);
+    return stream.lowest_layer().async_write_some(scheduler, buffer,
+                                                  MSG_NOSIGNAL);
   }
 }
 

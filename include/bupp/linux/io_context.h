@@ -372,24 +372,56 @@ class BUPP_EXPORT io_context {
   template <schedule_kind Kind>
   class schedule_sender {
    public:
+    /**
+     * Completion signatures produced by the scheduler sender.
+     */
     using completion_signatures =
         bexec::completion_signatures<bexec::set_value_t(),
                                      bexec::set_stopped_t()>;
 
+    /**
+     * Creates a schedule sender bound to context.
+     */
     explicit schedule_sender(io_context& context) noexcept
         : context_(&context) {}
 
+    /**
+     * Operation state for a scheduler schedule() sender.
+     */
     template <class Receiver>
     class operation : public async_io::linux_native::io_uring_operation_base {
      public:
+      /**
+       * Creates an operation bound to the context and receiver.
+       */
       operation(io_context& context, Receiver receiver)
           : context_(&context), receiver_(std::move(receiver)) {}
 
+      /**
+       * Copy construction is disabled because operations are queued
+       * intrusively.
+       */
       operation(const operation&) = delete;
+
+      /**
+       * Copy assignment is disabled because operations are queued intrusively.
+       */
       operation& operator=(const operation&) = delete;
+
+      /**
+       * Move construction is disabled because operations are queued
+       * intrusively.
+       */
       operation(operation&&) = delete;
+
+      /**
+       * Move assignment is disabled because operations are queued intrusively.
+       */
       operation& operator=(operation&&) = delete;
 
+      /**
+       * Starts the schedule operation.
+       */
       void start() noexcept {
         if constexpr (Kind == schedule_kind::dispatch) {
           if (context_->is_in_context()) {
@@ -401,6 +433,9 @@ class BUPP_EXPORT io_context {
         context_->post(*this);
       }
 
+      /**
+       * Delivers the schedule completion.
+       */
       void execute() noexcept override { complete(); }
 
      private:
@@ -419,6 +454,9 @@ class BUPP_EXPORT io_context {
     };
 
     template <class Receiver>
+    /**
+     * Connects the schedule sender to a receiver.
+     */
     [[nodiscard]] auto connect(Receiver receiver) const {
       return operation<std::remove_cvref_t<Receiver>>(*context_,
                                                       std::move(receiver));
@@ -434,11 +472,24 @@ class BUPP_EXPORT io_context {
   template <schedule_kind Kind>
   class basic_scheduler {
    public:
+    /**
+     * Concrete sender type returned by schedule().
+     */
     using schedule_sender_type = schedule_sender<Kind>;
 
+    /**
+     * Copies a scheduler handle.
+     */
     basic_scheduler(const basic_scheduler&) noexcept = default;
+
+    /**
+     * Assigns a scheduler handle.
+     */
     basic_scheduler& operator=(const basic_scheduler&) noexcept = default;
 
+    /**
+     * Returns a sender that completes according to this scheduler's policy.
+     */
     [[nodiscard]] schedule_sender_type schedule() const noexcept {
       return schedule_sender_type(*context_);
     }
@@ -488,61 +539,177 @@ class BUPP_EXPORT io_context {
       context_->post(operation);
     }
 
+    /**
+     * Creates a queued sender for one socket read operation.
+     */
     [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
                                   mutable_buffer buffer, int flags = 0) const;
 
+    /**
+     * Creates a sender for one socket read operation.
+     */
+    [[nodiscard]] auto async_read_some(async_io::stream_socket_view socket,
+                                       mutable_buffer buffer,
+                                       int flags = 0) const;
+
+    /**
+     * Creates a direct-submission sender for one socket read operation.
+     */
     [[nodiscard]] auto async_read_direct(async_io::stream_socket_view socket,
                                          mutable_buffer buffer,
                                          int flags = 0) const;
 
+    /**
+     * Creates a sender for one direct-submission socket read operation.
+     */
+    [[nodiscard]] auto async_read_some_direct(
+        async_io::stream_socket_view socket, mutable_buffer buffer,
+        int flags = 0) const;
+
+    /**
+     * Creates a queued sender that writes the whole buffer to a socket.
+     */
     [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
                                    const_buffer buffer, int flags = 0) const;
 
+    /**
+     * Creates a sender for one socket write operation without retrying short
+     * writes.
+     */
+    [[nodiscard]] auto async_write_some(async_io::stream_socket_view socket,
+                                        const_buffer buffer,
+                                        int flags = 0) const;
+
+    /**
+     * Creates a direct-submission sender that writes the whole buffer to a
+     * socket.
+     */
     [[nodiscard]] auto async_write_direct(async_io::stream_socket_view socket,
                                           const_buffer buffer,
                                           int flags = 0) const;
 
+    /**
+     * Creates a sender for one direct-submission socket write operation without
+     * retrying short writes.
+     */
+    [[nodiscard]] auto async_write_some_direct(
+        async_io::stream_socket_view socket, const_buffer buffer,
+        int flags = 0) const;
+
+    /**
+     * Creates a queued sender for one descriptor read operation at an offset.
+     */
     [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
                                   mutable_buffer buffer,
                                   std::uint64_t offset = 0) const;
 
+    /**
+     * Creates a sender for one descriptor read operation at an offset.
+     */
+    [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
+                                       mutable_buffer buffer,
+                                       std::uint64_t offset = 0) const;
+
+    /**
+     * Creates a direct-submission sender for one descriptor read operation at
+     * an offset.
+     */
     [[nodiscard]] auto async_read_direct(async_io::descriptor_view descriptor,
                                          mutable_buffer buffer,
                                          std::uint64_t offset = 0) const;
 
+    /**
+     * Creates a sender for one direct-submission descriptor read operation at
+     * an offset.
+     */
+    [[nodiscard]] auto async_read_some_direct(
+        async_io::descriptor_view descriptor, mutable_buffer buffer,
+        std::uint64_t offset = 0) const;
+
+    /**
+     * Creates a queued sender that writes the whole buffer to a descriptor.
+     */
     [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
                                    const_buffer buffer,
                                    std::uint64_t offset = 0) const;
 
+    /**
+     * Creates a sender for one descriptor write operation at an offset without
+     * retrying short writes.
+     */
+    [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
+                                        const_buffer buffer,
+                                        std::uint64_t offset = 0) const;
+
+    /**
+     * Creates a direct-submission sender that writes the whole buffer to a
+     * descriptor.
+     */
     [[nodiscard]] auto async_write_direct(async_io::descriptor_view descriptor,
                                           const_buffer buffer,
                                           std::uint64_t offset = 0) const;
 
+    /**
+     * Creates a sender for one direct-submission descriptor write operation at
+     * an offset without retrying short writes.
+     */
+    [[nodiscard]] auto async_write_some_direct(
+        async_io::descriptor_view descriptor, const_buffer buffer,
+        std::uint64_t offset = 0) const;
+
+    /**
+     * Creates a queued sender that accepts one connection.
+     */
     [[nodiscard]] auto async_accept(async_io::listening_socket_view socket,
                                     int flags = 0) const;
 
+    /**
+     * Creates a direct-submission sender that accepts one connection.
+     */
     [[nodiscard]] auto async_accept_direct(
         async_io::listening_socket_view socket, int flags = 0) const;
 
+    /**
+     * Creates a queued sender that connects a socket to an endpoint.
+     */
     [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                      const ip::endpoint& endpoint) const;
 
+    /**
+     * Creates a direct-submission sender that connects a socket to an endpoint.
+     */
     [[nodiscard]] auto async_connect_direct(async_io::stream_socket_view socket,
                                             const ip::endpoint& endpoint) const;
 
+    /**
+     * Creates a queued sender that waits for descriptor events.
+     */
     [[nodiscard]] auto async_poll(async_io::descriptor_view descriptor,
                                   unsigned poll_mask) const;
 
+    /**
+     * Creates a direct-submission sender that waits for descriptor events.
+     */
     [[nodiscard]] auto async_poll_direct(async_io::descriptor_view descriptor,
                                          unsigned poll_mask) const;
 
+    /**
+     * Creates a sender that resolves a DNS query into caller-provided storage.
+     */
     [[nodiscard]] auto async_resolve(async_io::dns_query query,
                                      async_io::dns_result_view result) const;
 
+    /**
+     * Creates a sender that resolves a host and service into caller-provided
+     * storage.
+     */
     [[nodiscard]] auto async_resolve(std::string_view host,
                                      std::string_view service,
                                      async_io::dns_result_view result) const;
 
+    /**
+     * Compares whether two scheduler handles refer to the same context.
+     */
     friend bool operator==(basic_scheduler lhs, basic_scheduler rhs) noexcept {
       return lhs.context_ == rhs.context_;
     }
@@ -677,6 +844,9 @@ class BUPP_EXPORT io_context {
   [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
                                 mutable_buffer buffer, int flags = 0);
 
+  [[nodiscard]] auto async_read_some(async_io::stream_socket_view socket,
+                                     mutable_buffer buffer, int flags = 0);
+
   /**
    * Creates a direct-submission sender that reads bytes from a non-owning
    * stream socket view and completes with bytes transferred.
@@ -684,19 +854,37 @@ class BUPP_EXPORT io_context {
   [[nodiscard]] auto async_read_direct(async_io::stream_socket_view socket,
                                        mutable_buffer buffer, int flags = 0);
 
+  [[nodiscard]] auto async_read_some_direct(async_io::stream_socket_view socket,
+                                            mutable_buffer buffer,
+                                            int flags = 0);
+
   /**
-   * Creates a queued sender that writes bytes through a non-owning stream
-   * socket view and completes with bytes transferred.
+   * Creates a queued sender that writes the whole buffer through a non-owning
+   * stream socket view.
    */
   [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
                                  const_buffer buffer, int flags = 0);
 
   /**
-   * Creates a direct-submission sender that writes bytes through a non-owning
-   * stream socket view and completes with bytes transferred.
+   * Creates a queued sender for one write operation through a non-owning stream
+   * socket view.
+   */
+  [[nodiscard]] auto async_write_some(async_io::stream_socket_view socket,
+                                      const_buffer buffer, int flags = 0);
+
+  /**
+   * Creates a direct-submission sender that writes the whole buffer through a
+   * non-owning stream socket view.
    */
   [[nodiscard]] auto async_write_direct(async_io::stream_socket_view socket,
                                         const_buffer buffer, int flags = 0);
+
+  /**
+   * Creates a direct-submission sender for one write operation through a
+   * non-owning stream socket view.
+   */
+  [[nodiscard]] auto async_write_some_direct(
+      async_io::stream_socket_view socket, const_buffer buffer, int flags = 0);
 
   /**
    * Creates a queued sender that reads bytes from a file descriptor.
@@ -705,6 +893,10 @@ class BUPP_EXPORT io_context {
                                 mutable_buffer buffer,
                                 std::uint64_t offset = 0);
 
+  [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
+                                     mutable_buffer buffer,
+                                     std::uint64_t offset = 0);
+
   /**
    * Creates a direct-submission sender that reads bytes from a file descriptor.
    */
@@ -712,18 +904,38 @@ class BUPP_EXPORT io_context {
                                        mutable_buffer buffer,
                                        std::uint64_t offset = 0);
 
+  [[nodiscard]] auto async_read_some_direct(
+      async_io::descriptor_view descriptor, mutable_buffer buffer,
+      std::uint64_t offset = 0);
+
   /**
-   * Creates a queued sender that writes bytes to a file descriptor.
+   * Creates a queued sender that writes the whole buffer to a file descriptor.
    */
   [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
                                  const_buffer buffer, std::uint64_t offset = 0);
 
   /**
-   * Creates a direct-submission sender that writes bytes to a file descriptor.
+   * Creates a queued sender for one write operation to a file descriptor.
+   */
+  [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
+                                      const_buffer buffer,
+                                      std::uint64_t offset = 0);
+
+  /**
+   * Creates a direct-submission sender that writes the whole buffer to a file
+   * descriptor.
    */
   [[nodiscard]] auto async_write_direct(async_io::descriptor_view descriptor,
                                         const_buffer buffer,
                                         std::uint64_t offset = 0);
+
+  /**
+   * Creates a direct-submission sender for one write operation to a file
+   * descriptor.
+   */
+  [[nodiscard]] auto async_write_some_direct(
+      async_io::descriptor_view descriptor, const_buffer buffer,
+      std::uint64_t offset = 0);
 
   /**
    * Creates a queued sender that accepts one connection from a non-owning

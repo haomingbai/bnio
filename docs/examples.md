@@ -46,6 +46,10 @@ stack variable is enough. For a server, keep operation states in an owning
 object. The raw echo server example uses a small local holder for pending
 accept, read, and write operations.
 
+Read operations return one available chunk. Write operations send the whole
+provided buffer before completing; use `async_write_some(...)` when an example
+or application needs to observe and retry short writes manually.
+
 ## Raw TCP Echo Server
 
 The standalone example is in
@@ -54,7 +58,8 @@ It demonstrates:
 
 - `tcp_acceptor` setup with `open`, `set_reuse_address`, `bind`, and `listen`
 - repeated `acceptor.async_accept(...)`
-- per-connection `socket.async_read(...)` and `socket.async_write(...)`
+- per-connection chunk reads with `socket.async_read(...)`
+- whole-buffer responses with `socket.async_write(...)`
 - `ctx.run()` as the server event loop
 - explicit operation lifetime management for a long-running server
 

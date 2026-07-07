@@ -277,8 +277,12 @@ graph LR
 
 | Mode | API Suffix | Trigger | Use Case |
 |------|-----------|---------|----------|
-| **queued** | `async_read()`, etc. | Count (64), timer (1 ms), or manual `flush_io_queue()` | High throughput |
-| **direct-submission** | `async_read_direct()`, etc. | Immediate submission, bypassing the queued I/O batch | Low latency |
+| **queued** | `async_read()`, `async_write_some()`, etc. | Count (64), timer (1 ms), or manual `flush_io_queue()` | High throughput |
+| **direct-submission** | `async_read_direct()`, `async_write_some_direct()`, etc. | Immediate submission, bypassing the queued I/O batch | Low latency |
+
+The submission suffix is orthogonal to the read/write semantic. For example,
+`async_write_direct()` is still a write-all operation; it only submits each
+lower-level write directly instead of going through the queued I/O batch.
 
 ### Configuration
 
@@ -306,28 +310,112 @@ calling `start()` begins the asynchronous I/O.
 
 | Factory | Owner | `set_value` |
 |---------|-------|-------------|
-| `socket.async_read(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes transferred |
-| `socket.async_write(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes transferred |
+| `socket.async_read(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes read by one operation |
+| `socket.async_read_some(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes read by one operation |
+| `socket.async_write(scheduler, buffer, flags)` | `tcp_socket` | `size_t` total bytes written |
+| `socket.async_write_some(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes written by one operation |
 | `acceptor.async_accept(scheduler, flags)` | `tcp_acceptor` | `tcp_socket` new connection |
 | `socket.async_connect(scheduler, endpoint)` | `tcp_socket` | `()` |
 | `stream.async_handshake(scheduler, type)` | `ssl_stream` | `()` |
-| `stream.async_read(scheduler, buffer, flags)` | `ssl_stream` | `size_t` |
-| `stream.async_write(scheduler, buffer, flags)` | `ssl_stream` | `size_t` |
+| `stream.async_read(scheduler, buffer, flags)` | `ssl_stream` | `size_t` plaintext bytes read by one operation |
+| `stream.async_read_some(scheduler, buffer, flags)` | `ssl_stream` | `size_t` plaintext bytes read by one operation |
+| `stream.async_write(scheduler, buffer, flags)` | `ssl_stream` | `size_t` total plaintext bytes written |
+| `stream.async_write_some(scheduler, buffer, flags)` | `ssl_stream` | `size_t` plaintext bytes accepted by one SSL write step |
 | `stream.async_shutdown(scheduler)` | `ssl_stream` | `()` |
 
 #### Scheduler Level
 
 | Factory | Lowest-Layer Parameter | `set_value` |
 |---------|------------------------|-------------|
-| `scheduler.async_read(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes transferred |
-| `scheduler.async_write(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes transferred |
+| `scheduler.async_read(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes read by one operation |
+| `scheduler.async_read_some(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes read by one operation |
+| `scheduler.async_write(view, buffer, flags)` | `stream_socket_view` | `size_t` total bytes written |
+| `scheduler.async_write_some(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes written by one operation |
 | `scheduler.async_accept(view, flags)` | `listening_socket_view` | native fd |
 | `scheduler.async_connect(view, endpoint)` | `stream_socket_view` | `()` |
-| `scheduler.async_read(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read |
-| `scheduler.async_write(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes written |
+| `scheduler.async_read(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read by one operation |
+| `scheduler.async_read_some(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read by one operation |
+| `scheduler.async_write(descriptor, buffer, offset)` | `descriptor_view` | `size_t` total bytes written |
+| `scheduler.async_write_some(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes written by one operation |
 | `scheduler.async_poll(descriptor, mask)` | `descriptor_view` | `unsigned` ready-event mask |
 
 All senders also complete with `set_error(std::error_code)` or `set_stopped()`.
+
+### Read/Write Semantic Split
+
+The I/O API intentionally separates a native-attempt operation from a composed
+full-write operation:
+
+- `async_read()` and `async_read_some()` both mean "one read attempt". They
+  complete after one bounded kernel receive/read or one SSL plaintext read step.
+  Callers that need an exact byte count build their own parser/state loop.
+- `async_write_some()` means "one write attempt". It preserves native short
+  write behavior and reports the bytes accepted by that attempt.
+- `async_write()` means "write the whole supplied buffer". It composes
+  `async_write_some()` in a loop and reports the total bytes written.
+
+The split exists because io_uring SQEs carry a kernel-sized length field while
+public buffers are `std::size_t`. Every one-attempt operation bounds the native
+request length before preparing the SQE. Write-all operations then repeat those
+bounded attempts until the public buffer is exhausted.
+
+#### Write-All as `state + repeat_until`
+
+Write-all is implemented as a sender adaptor, not as a special io_uring
+operation. The operation owns a small state object plus a `repeat_until`
+operation. Each repeat iteration creates a fresh child sender for the current
+slice:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Start
+    Start --> Done: buffer.size == 0
+    Start --> SubmitSome: remaining > 0
+    SubmitSome --> Advance: async_write_some set_value(n > 0)
+    Advance --> Done: transferred == buffer.size
+    Advance --> SubmitSome: transferred < buffer.size
+    SubmitSome --> Error: set_error(ec)
+    SubmitSome --> Stopped: set_stopped()
+    SubmitSome --> Error: set_value(0)
+    Done --> [*]: set_value(total)
+    Error --> [*]: set_error(ec)
+    Stopped --> [*]: set_stopped()
+```
+
+The state contains:
+
+| Field | Purpose |
+|-------|---------|
+| scheduler/context pointer | Creates each next child sender against the same provider. |
+| sink handle | `stream_socket_view` or `descriptor_view`. |
+| buffer | Original non-owning `const_buffer`; caller storage must outlive the composed operation. |
+| flags or offset | Socket flags, or descriptor starting offset. |
+| transferred | Number of bytes successfully written so far. |
+| done | Predicate observed by `repeat_until` after each child completion. |
+
+For descriptor writes, each child uses `offset + transferred`, so retries write
+the next file range. For socket writes, each child advances the buffer pointer
+by `transferred`. A child result of zero before completion is treated as an
+error to avoid an infinite repeat loop.
+
+This design keeps each native I/O operation simple and single-purpose while
+making full-write behavior explicit, testable, and reusable. It also preserves
+the scheduler's queued/direct policy: the write-all state chooses either
+`async_write_some()` or `async_write_some_direct()` for every child attempt.
+
+#### SSL Use of the Same Pattern
+
+`ssl_stream` already drives OpenSSL through a state machine. The transport side
+now always uses the lower layer's `async_read_some*` and `async_write_some*`
+because BIO flush/refill operations need native-attempt semantics. Plaintext
+`ssl_stream::async_write()` uses the same repeat idea at the SSL layer: it
+tracks plaintext bytes accepted by `SSL_write`, flushes encrypted BIO output,
+and repeats until the whole plaintext buffer is accepted and flushed.
+
+`ssl_stream::async_write_some()` is the escape hatch for callers that want one
+SSL write step and their own retry policy. `ssl_stream::async_read()` remains a
+read-some operation because TLS records and application protocol frames do not
+map cleanly to a caller's buffer size.
 
 ### Operation Flow Through Layers
 
@@ -384,18 +472,23 @@ auto s = bupp::async_read(scheduler, socket, buffer);
 | CPO | Invokes | Header |
 |-----|---------|--------|
 | `bupp::async_read(provider, stream, buf)` | `stream.async_read(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bupp::async_read_some(provider, stream, buf)` | `stream.async_read_some(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
 | `bupp::async_write(provider, stream, buf)` | `stream.async_write(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bupp::async_write_some(provider, stream, buf)` | `stream.async_write_some(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
 | `bupp::async_accept` | `acceptor.async_accept(provider)` or lowest-layer fallback | `io_context_cpo.h` |
 | `bupp::async_connect` | `stream.async_connect(provider, ep)` or lowest-layer fallback | `io_context_cpo.h` |
 | `bupp::async_read(provider, descriptor, buf, offset)` | `provider.async_read(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bupp::async_read_some(provider, descriptor, buf, offset)` | `provider.async_read_some(descriptor, buf, offset)` | `io_context_cpo.h` |
 | `bupp::async_write(provider, descriptor, buf, offset)` | `provider.async_write(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bupp::async_write_some(provider, descriptor, buf, offset)` | `provider.async_write_some(descriptor, buf, offset)` | `io_context_cpo.h` |
 | `bupp::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
 | `bupp::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
 | `bupp::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
 
 The `*_direct` suffix is reserved for direct-submission variants that bypass the
-queued I/O batch. It is not an alternate read/write semantic; stream types
-should only expose it when the suffix changes lowest-layer submission behavior.
+queued I/O batch. It combines with the semantic suffix: `async_write_direct()`
+is full-write/direct-submit, while `async_write_some_direct()` is
+one-attempt/direct-submit.
 
 Provider concepts:
 

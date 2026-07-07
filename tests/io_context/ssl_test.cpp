@@ -192,14 +192,28 @@ void test_ssl_sender_concepts() {
           std::declval<scheduler_type>()));
   using read_sender = decltype(std::declval<stream_type&>().async_read(
       std::declval<scheduler_type>(), std::declval<bupp::mutable_buffer>()));
+  using read_some_sender =
+      decltype(std::declval<stream_type&>().async_read_some(
+          std::declval<scheduler_type>(),
+          std::declval<bupp::mutable_buffer>()));
   using read_direct_sender =
       decltype(std::declval<stream_type&>().async_read_direct(
           std::declval<scheduler_type>(),
           std::declval<bupp::mutable_buffer>()));
+  using read_some_direct_sender =
+      decltype(std::declval<stream_type&>().async_read_some_direct(
+          std::declval<scheduler_type>(),
+          std::declval<bupp::mutable_buffer>()));
   using write_sender = decltype(std::declval<stream_type&>().async_write(
       std::declval<scheduler_type>(), std::declval<bupp::const_buffer>()));
+  using write_some_sender =
+      decltype(std::declval<stream_type&>().async_write_some(
+          std::declval<scheduler_type>(), std::declval<bupp::const_buffer>()));
   using write_direct_sender =
       decltype(std::declval<stream_type&>().async_write_direct(
+          std::declval<scheduler_type>(), std::declval<bupp::const_buffer>()));
+  using write_some_direct_sender =
+      decltype(std::declval<stream_type&>().async_write_some_direct(
           std::declval<scheduler_type>(), std::declval<bupp::const_buffer>()));
 
   static_assert(bexec::sender<handshake_sender>);
@@ -207,9 +221,13 @@ void test_ssl_sender_concepts() {
   static_assert(bexec::sender<shutdown_sender>);
   static_assert(bexec::sender<shutdown_direct_sender>);
   static_assert(bexec::sender<read_sender>);
+  static_assert(bexec::sender<read_some_sender>);
   static_assert(bexec::sender<read_direct_sender>);
+  static_assert(bexec::sender<read_some_direct_sender>);
   static_assert(bexec::sender<write_sender>);
+  static_assert(bexec::sender<write_some_sender>);
   static_assert(bexec::sender<write_direct_sender>);
+  static_assert(bexec::sender<write_some_direct_sender>);
 
   static_assert(bexec::operation_state<decltype(bexec::connect(
                     std::declval<handshake_sender>(), void_receiver{}))>);
@@ -223,11 +241,21 @@ void test_ssl_sender_concepts() {
   static_assert(bexec::operation_state<decltype(bexec::connect(
                     std::declval<read_sender>(), byte_receiver{}))>);
   static_assert(bexec::operation_state<decltype(bexec::connect(
+                    std::declval<read_some_sender>(), byte_receiver{}))>);
+  static_assert(bexec::operation_state<decltype(bexec::connect(
                     std::declval<read_direct_sender>(), byte_receiver{}))>);
+  static_assert(
+      bexec::operation_state<decltype(bexec::connect(
+          std::declval<read_some_direct_sender>(), byte_receiver{}))>);
   static_assert(bexec::operation_state<decltype(bexec::connect(
                     std::declval<write_sender>(), byte_receiver{}))>);
   static_assert(bexec::operation_state<decltype(bexec::connect(
+                    std::declval<write_some_sender>(), byte_receiver{}))>);
+  static_assert(bexec::operation_state<decltype(bexec::connect(
                     std::declval<write_direct_sender>(), byte_receiver{}))>);
+  static_assert(
+      bexec::operation_state<decltype(bexec::connect(
+          std::declval<write_some_direct_sender>(), byte_receiver{}))>);
 }
 
 void test_ssl_raii_objects_construct() {
@@ -386,7 +414,7 @@ void test_socketpair_read_write_transfers_plaintext() {
 
   std::size_t sent = 0;
   std::size_t received_size = 0;
-  while (sent < payload.size()) {
+  while (received_size < payload.size()) {
     bupp::io_context context;
     if (!context.is_open()) {
       return;
@@ -396,14 +424,13 @@ void test_socketpair_read_write_transfers_plaintext() {
     unsigned completions = 0;
     auto read_state = std::make_shared<transfer_state>();
     auto write_state = std::make_shared<transfer_state>();
-    transfer_receiver read_receiver{read_state, &context, &completions, 2};
-    transfer_receiver write_receiver{write_state, &context, &completions, 2};
+    const unsigned target = sent < payload.size() ? 2U : 1U;
+    transfer_receiver read_receiver{read_state, &context, &completions, target};
+    transfer_receiver write_receiver{write_state, &context, &completions,
+                                     target};
 
     auto read_buffer = bupp::buffer(received.data() + received_size,
                                     received.size() - received_size);
-    auto write_buffer =
-        bupp::buffer(payload.data() + sent, payload.size() - sent);
-
     auto read_sender = [&] {
       if constexpr (DirectSubmit) {
         return server.async_read_direct(scheduler, read_buffer);
@@ -411,43 +438,63 @@ void test_socketpair_read_write_transfers_plaintext() {
         return server.async_read(scheduler, read_buffer);
       }
     }();
-    auto write_sender = [&] {
+
+    if (sent < payload.size()) {
+      auto write_buffer =
+          bupp::buffer(payload.data() + sent, payload.size() - sent);
+      auto write_sender = [&] {
+        if constexpr (DirectSubmit) {
+          return client.async_write_direct(scheduler, write_buffer,
+                                           MSG_NOSIGNAL);
+        } else {
+          return client.async_write(scheduler, write_buffer, MSG_NOSIGNAL);
+        }
+      }();
+
+      auto read_operation =
+          bexec::connect(std::move(read_sender), std::move(read_receiver));
+      auto write_operation =
+          bexec::connect(std::move(write_sender), std::move(write_receiver));
+
+      bexec::start(read_operation);
+      bexec::start(write_operation);
       if constexpr (DirectSubmit) {
-        return client.async_write_direct(scheduler, write_buffer, MSG_NOSIGNAL);
+        assert(scheduler.queued_io_size() == 0);
       } else {
-        return client.async_write(scheduler, write_buffer, MSG_NOSIGNAL);
+        assert(scheduler.queued_io_size() != 0);
       }
-    }();
+      if (completions != target) {
+        context.run();
+      }
 
-    auto read_operation =
-        bexec::connect(std::move(read_sender), std::move(read_receiver));
-    auto write_operation =
-        bexec::connect(std::move(write_sender), std::move(write_receiver));
-
-    bexec::start(read_operation);
-    bexec::start(write_operation);
-    if constexpr (DirectSubmit) {
-      assert(scheduler.queued_io_size() == 0);
+      assert(write_state->values == 1);
+      assert(write_state->errors == 0);
+      assert(write_state->stopped == 0);
+      assert(write_state->bytes == payload.size() - sent);
+      sent += write_state->bytes;
     } else {
-      assert(scheduler.queued_io_size() != 0);
-    }
-    context.run();
+      auto read_operation =
+          bexec::connect(std::move(read_sender), std::move(read_receiver));
 
-    assert(completions == 2);
+      bexec::start(read_operation);
+      if constexpr (DirectSubmit) {
+        assert(scheduler.queued_io_size() == 0);
+      }
+      if (completions != target) {
+        context.run();
+      }
+    }
+
+    assert(completions == target);
     assert(read_state->values == 1);
     assert(read_state->errors == 0);
     assert(read_state->stopped == 0);
-    assert(write_state->values == 1);
-    assert(write_state->errors == 0);
-    assert(write_state->stopped == 0);
     assert(read_state->bytes != 0);
-    assert(write_state->bytes != 0);
-    assert(read_state->bytes == write_state->bytes);
 
-    sent += write_state->bytes;
     received_size += read_state->bytes;
   }
 
+  assert(sent == payload.size());
   assert(received_size == payload.size());
   assert(std::memcmp(received.data(), payload.data(), payload.size()) == 0);
 }

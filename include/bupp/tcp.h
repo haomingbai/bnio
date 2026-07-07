@@ -112,9 +112,21 @@ class BUPP_EXPORT tcp_socket {
     return *this;
   }
 
+  /**
+   * Creates a sender for one read operation. The operation may complete with
+   * fewer bytes than the buffer size.
+   */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_read(Scheduler scheduler, Buffer&& buffer,
                                 int flags = 0);
+
+  /**
+   * Creates a sender for one read operation. This is the explicit read-some
+   * spelling of async_read.
+   */
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_read_some(Scheduler scheduler, Buffer&& buffer,
+                                     int flags = 0);
 
   /**
    * Creates a sender for one read operation and submits it immediately instead
@@ -124,22 +136,57 @@ class BUPP_EXPORT tcp_socket {
   [[nodiscard]] auto async_read_direct(Scheduler scheduler, Buffer&& buffer,
                                        int flags = 0);
 
+  /**
+   * Creates a sender for one direct-submission read operation.
+   */
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_read_some_direct(Scheduler scheduler,
+                                            Buffer&& buffer, int flags = 0);
+
+  /**
+   * Creates a sender that writes the whole buffer, retrying short writes until
+   * the buffer is fully transferred or an error/stopped signal occurs.
+   */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_write(Scheduler scheduler, Buffer&& buffer,
                                  int flags = 0);
 
   /**
-   * Creates a sender for one write operation and submits it immediately instead
-   * of placing it in the scheduler's queued I/O batch.
+   * Creates a sender for one write operation without retrying short writes.
+   */
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_write_some(Scheduler scheduler, Buffer&& buffer,
+                                      int flags = 0);
+
+  /**
+   * Creates a sender that writes the whole buffer and submits each lower-level
+   * write immediately instead of placing it in the scheduler's queued I/O
+   * batch.
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_write_direct(Scheduler scheduler, Buffer&& buffer,
                                         int flags = 0);
 
+  /**
+   * Creates a sender for one direct-submission write operation without retrying
+   * short writes.
+   */
+  template <class Scheduler, class Buffer>
+  [[nodiscard]] auto async_write_some_direct(Scheduler scheduler,
+                                             Buffer&& buffer, int flags = 0);
+
+  /**
+   * Creates a sender that connects this socket to an endpoint through the
+   * scheduler's queued submission path.
+   */
   template <class Scheduler>
   [[nodiscard]] auto async_connect(Scheduler scheduler,
                                    const ip::endpoint& endpoint);
 
+  /**
+   * Creates a sender that connects this socket to an endpoint through direct
+   * submission.
+   */
   template <class Scheduler>
   [[nodiscard]] auto async_connect_direct(Scheduler scheduler,
                                           const ip::endpoint& endpoint);
@@ -262,9 +309,17 @@ class BUPP_EXPORT tcp_acceptor {
     return async_io::listening_socket_view(fd_);
   }
 
+  /**
+   * Creates a sender that accepts one TCP connection through the scheduler's
+   * queued submission path.
+   */
   template <class Scheduler>
   [[nodiscard]] auto async_accept(Scheduler scheduler, int flags = 0);
 
+  /**
+   * Creates a sender that accepts one TCP connection through direct
+   * submission.
+   */
   template <class Scheduler>
   [[nodiscard]] auto async_accept_direct(Scheduler scheduler, int flags = 0);
 
@@ -343,7 +398,18 @@ auto tcp_socket::async_read(Scheduler scheduler, Buffer&& buffer, int flags) {
       detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::tcp_read_sender<scheduler_type, holder_type, false>(
+  return detail::tcp_read_sender<scheduler_type, holder_type, false, false>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_read_some(Scheduler scheduler, Buffer&& buffer,
+                                 int flags) {
+  auto holder =
+      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_read_sender<scheduler_type, holder_type, false, true>(
       std::move(scheduler), view(), std::move(holder), flags);
 }
 
@@ -354,7 +420,18 @@ auto tcp_socket::async_read_direct(Scheduler scheduler, Buffer&& buffer,
       detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::tcp_read_sender<scheduler_type, holder_type, true>(
+  return detail::tcp_read_sender<scheduler_type, holder_type, true, false>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_read_some_direct(Scheduler scheduler, Buffer&& buffer,
+                                        int flags) {
+  auto holder =
+      detail::make_mutable_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_read_sender<scheduler_type, holder_type, true, true>(
       std::move(scheduler), view(), std::move(holder), flags);
 }
 
@@ -363,7 +440,17 @@ auto tcp_socket::async_write(Scheduler scheduler, Buffer&& buffer, int flags) {
   auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::tcp_write_sender<scheduler_type, holder_type, false>(
+  return detail::tcp_write_sender<scheduler_type, holder_type, false, false>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_write_some(Scheduler scheduler, Buffer&& buffer,
+                                  int flags) {
+  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_write_sender<scheduler_type, holder_type, false, true>(
       std::move(scheduler), view(), std::move(holder), flags);
 }
 
@@ -373,7 +460,17 @@ auto tcp_socket::async_write_direct(Scheduler scheduler, Buffer&& buffer,
   auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::tcp_write_sender<scheduler_type, holder_type, true>(
+  return detail::tcp_write_sender<scheduler_type, holder_type, true, false>(
+      std::move(scheduler), view(), std::move(holder), flags);
+}
+
+template <class Scheduler, class Buffer>
+auto tcp_socket::async_write_some_direct(Scheduler scheduler, Buffer&& buffer,
+                                         int flags) {
+  auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using holder_type = decltype(holder);
+  return detail::tcp_write_sender<scheduler_type, holder_type, true, true>(
       std::move(scheduler), view(), std::move(holder), flags);
 }
 
@@ -403,21 +500,33 @@ auto tcp_acceptor::async_accept_direct(Scheduler scheduler, int flags) {
                                                          view(), flags);
 }
 
+/**
+ * Returns the next protocol layer for a stream-like object.
+ */
 template <class Layer>
 [[nodiscard]] decltype(auto) get_next_layer(Layer& layer) noexcept {
   return layer.next_layer();
 }
 
+/**
+ * Returns the next protocol layer for a const stream-like object.
+ */
 template <class Layer>
 [[nodiscard]] decltype(auto) get_next_layer(const Layer& layer) noexcept {
   return layer.next_layer();
 }
 
+/**
+ * Returns the lowest protocol layer for a stream-like object.
+ */
 template <class Layer>
 [[nodiscard]] decltype(auto) get_lowest_layer(Layer& layer) noexcept {
   return layer.lowest_layer();
 }
 
+/**
+ * Returns the lowest protocol layer for a const stream-like object.
+ */
 template <class Layer>
 [[nodiscard]] decltype(auto) get_lowest_layer(const Layer& layer) noexcept {
   return layer.lowest_layer();

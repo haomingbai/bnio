@@ -36,6 +36,31 @@ struct async_read_t {
 };
 
 /**
+ * Customization point object for one asynchronous read operation.
+ */
+struct async_read_some_t {
+  /**
+   * Invokes async_read_some on a stream when available, otherwise on a
+   * provider.
+   */
+  template <class Provider, class Source, class Buffer, class Mode = int>
+  constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
+                                      Buffer&& buffer, Mode mode = 0) const {
+    if constexpr (requires {
+                    std::forward<Source>(source).async_read_some(
+                        std::forward<Provider>(provider),
+                        std::forward<Buffer>(buffer), mode);
+                  }) {
+      return std::forward<Source>(source).async_read_some(
+          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
+    } else {
+      return std::forward<Provider>(provider).async_read_some(
+          std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
+    }
+  }
+};
+
+/**
  * Customization point object for an asynchronous read that bypasses the
  * scheduler's queued I/O batch and submits immediately.
  */
@@ -56,6 +81,32 @@ struct async_read_direct_t {
           std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
       return std::forward<Provider>(provider).async_read_direct(
+          std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
+    }
+  }
+};
+
+/**
+ * Customization point object for one direct-submission asynchronous read
+ * operation.
+ */
+struct async_read_some_direct_t {
+  /**
+   * Invokes async_read_some_direct on a stream when available, otherwise on a
+   * provider.
+   */
+  template <class Provider, class Source, class Buffer, class Mode = int>
+  constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
+                                      Buffer&& buffer, Mode mode = 0) const {
+    if constexpr (requires {
+                    std::forward<Source>(source).async_read_some_direct(
+                        std::forward<Provider>(provider),
+                        std::forward<Buffer>(buffer), mode);
+                  }) {
+      return std::forward<Source>(source).async_read_some_direct(
+          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
+    } else {
+      return std::forward<Provider>(provider).async_read_some_direct(
           std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
     }
   }
@@ -86,6 +137,31 @@ struct async_write_t {
 };
 
 /**
+ * Customization point object for one asynchronous write operation.
+ */
+struct async_write_some_t {
+  /**
+   * Invokes async_write_some on a stream when available, otherwise on a
+   * provider.
+   */
+  template <class Provider, class Sink, class Buffer, class Mode = int>
+  constexpr decltype(auto) operator()(Provider&& provider, Sink&& sink,
+                                      Buffer&& buffer, Mode mode = 0) const {
+    if constexpr (requires {
+                    std::forward<Sink>(sink).async_write_some(
+                        std::forward<Provider>(provider),
+                        std::forward<Buffer>(buffer), mode);
+                  }) {
+      return std::forward<Sink>(sink).async_write_some(
+          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
+    } else {
+      return std::forward<Provider>(provider).async_write_some(
+          std::forward<Sink>(sink), std::forward<Buffer>(buffer), mode);
+    }
+  }
+};
+
+/**
  * Customization point object for an asynchronous write that bypasses the
  * scheduler's queued I/O batch and submits immediately.
  */
@@ -106,6 +182,32 @@ struct async_write_direct_t {
           std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
       return std::forward<Provider>(provider).async_write_direct(
+          std::forward<Sink>(sink), std::forward<Buffer>(buffer), mode);
+    }
+  }
+};
+
+/**
+ * Customization point object for one direct-submission asynchronous write
+ * operation.
+ */
+struct async_write_some_direct_t {
+  /**
+   * Invokes async_write_some_direct on a stream when available, otherwise on a
+   * provider.
+   */
+  template <class Provider, class Sink, class Buffer, class Mode = int>
+  constexpr decltype(auto) operator()(Provider&& provider, Sink&& sink,
+                                      Buffer&& buffer, Mode mode = 0) const {
+    if constexpr (requires {
+                    std::forward<Sink>(sink).async_write_some_direct(
+                        std::forward<Provider>(provider),
+                        std::forward<Buffer>(buffer), mode);
+                  }) {
+      return std::forward<Sink>(sink).async_write_some_direct(
+          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
+    } else {
+      return std::forward<Provider>(provider).async_write_some_direct(
           std::forward<Sink>(sink), std::forward<Buffer>(buffer), mode);
     }
   }
@@ -283,9 +385,13 @@ struct async_resolve_t {
 };
 
 inline constexpr async_read_t async_read{};
+inline constexpr async_read_some_t async_read_some{};
 inline constexpr async_read_direct_t async_read_direct{};
+inline constexpr async_read_some_direct_t async_read_some_direct{};
 inline constexpr async_write_t async_write{};
+inline constexpr async_write_some_t async_write_some{};
 inline constexpr async_write_direct_t async_write_direct{};
+inline constexpr async_write_some_direct_t async_write_some_direct{};
 inline constexpr async_accept_t async_accept{};
 inline constexpr async_accept_direct_t async_accept_direct{};
 inline constexpr async_connect_t async_connect{};

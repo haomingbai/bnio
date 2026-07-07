@@ -302,15 +302,27 @@ void test_sender_concepts() {
 
   using stream_read_sender =
       decltype(socket.async_read(scheduler, bupp::buffer(bytes)));
+  using stream_read_some_sender =
+      decltype(socket.async_read_some(scheduler, bupp::buffer(bytes)));
   using stream_read_direct_sender =
       decltype(socket.async_read_direct(scheduler, bupp::buffer(bytes)));
+  using stream_read_some_direct_sender =
+      decltype(socket.async_read_some_direct(scheduler, bupp::buffer(bytes)));
   using low_read_sender =
       decltype(scheduler.async_read(socket.view(), bupp::buffer(bytes)));
+  using low_read_some_sender =
+      decltype(scheduler.async_read_some(socket.view(), bupp::buffer(bytes)));
   using low_write_sender =
       decltype(scheduler.async_write(socket.view(), bupp::buffer(text)));
+  using low_write_some_sender =
+      decltype(scheduler.async_write_some(socket.view(), bupp::buffer(text)));
   using stream_write_sender = decltype(socket.async_write(scheduler, text));
+  using stream_write_some_sender =
+      decltype(socket.async_write_some(scheduler, text));
   using stream_write_direct_sender =
       decltype(socket.async_write_direct(scheduler, text));
+  using stream_write_some_direct_sender =
+      decltype(socket.async_write_some_direct(scheduler, text));
   using accept_sender =
       decltype(std::declval<bupp::tcp_acceptor&>().async_accept(scheduler));
   using accept_direct_sender =
@@ -324,31 +336,51 @@ void test_sender_concepts() {
           scheduler, std::declval<const bupp::ip::endpoint&>()));
   using descriptor_read_sender = decltype(scheduler.async_read(
       bupp::async_io::descriptor_view(3), bupp::buffer(bytes)));
+  using descriptor_read_some_sender = decltype(scheduler.async_read_some(
+      bupp::async_io::descriptor_view(3), bupp::buffer(bytes)));
   using descriptor_read_direct_sender = decltype(scheduler.async_read_direct(
       bupp::async_io::descriptor_view(3), bupp::buffer(bytes)));
+  using descriptor_read_some_direct_sender =
+      decltype(scheduler.async_read_some_direct(
+          bupp::async_io::descriptor_view(3), bupp::buffer(bytes)));
   using descriptor_write_sender = decltype(scheduler.async_write(
+      bupp::async_io::descriptor_view(3), bupp::buffer(text)));
+  using descriptor_write_some_sender = decltype(scheduler.async_write_some(
       bupp::async_io::descriptor_view(3), bupp::buffer(text)));
   using descriptor_write_direct_sender = decltype(scheduler.async_write_direct(
       bupp::async_io::descriptor_view(3), bupp::buffer(text)));
+  using descriptor_write_some_direct_sender =
+      decltype(scheduler.async_write_some_direct(
+          bupp::async_io::descriptor_view(3), bupp::buffer(text)));
   using poll_sender = decltype(scheduler.async_poll(
       bupp::async_io::descriptor_view(3), static_cast<unsigned>(POLLIN)));
   using schedule_sender = decltype(bexec::schedule(scheduler));
   using timer_wait_sender =
       decltype(std::declval<bupp::steady_timer&>().async_wait());
   static_assert(bexec::sender<stream_read_sender>);
+  static_assert(bexec::sender<stream_read_some_sender>);
   static_assert(bexec::sender<stream_read_direct_sender>);
+  static_assert(bexec::sender<stream_read_some_direct_sender>);
   static_assert(bexec::sender<low_read_sender>);
+  static_assert(bexec::sender<low_read_some_sender>);
   static_assert(bexec::sender<low_write_sender>);
+  static_assert(bexec::sender<low_write_some_sender>);
   static_assert(bexec::sender<stream_write_sender>);
+  static_assert(bexec::sender<stream_write_some_sender>);
   static_assert(bexec::sender<stream_write_direct_sender>);
+  static_assert(bexec::sender<stream_write_some_direct_sender>);
   static_assert(bexec::sender<accept_sender>);
   static_assert(bexec::sender<accept_direct_sender>);
   static_assert(bexec::sender<connect_sender>);
   static_assert(bexec::sender<connect_direct_sender>);
   static_assert(bexec::sender<descriptor_read_sender>);
+  static_assert(bexec::sender<descriptor_read_some_sender>);
   static_assert(bexec::sender<descriptor_read_direct_sender>);
+  static_assert(bexec::sender<descriptor_read_some_direct_sender>);
   static_assert(bexec::sender<descriptor_write_sender>);
+  static_assert(bexec::sender<descriptor_write_some_sender>);
   static_assert(bexec::sender<descriptor_write_direct_sender>);
+  static_assert(bexec::sender<descriptor_write_some_direct_sender>);
   static_assert(bexec::sender<poll_sender>);
   static_assert(bexec::sender<schedule_sender>);
   static_assert(bexec::sender<timer_wait_sender>);

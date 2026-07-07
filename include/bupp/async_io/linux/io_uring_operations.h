@@ -19,6 +19,7 @@
 #include <bexec/receiver.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 #include <system_error>
 #include <type_traits>
@@ -102,6 +103,12 @@ class timeout_request {
  private:
   __kernel_timespec timeout_{};
 };
+
+[[nodiscard]] constexpr unsigned bounded_io_size(std::size_t size) noexcept {
+  constexpr auto max_size =
+      static_cast<std::size_t>(std::numeric_limits<unsigned>::max());
+  return static_cast<unsigned>(size > max_size ? max_size : size);
+}
 
 }  // namespace detail
 
@@ -611,6 +618,9 @@ class io_uring_poll_sender_operation : public io_uring_operation_base {
  */
 class io_uring_poll_sender {
  public:
+  /**
+   * Completion signatures produced by a poll sender.
+   */
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(unsigned),
                                    bexec::set_error_t(std::error_code),
@@ -623,6 +633,9 @@ class io_uring_poll_sender {
                        unsigned poll_mask) noexcept
       : context_(&context), descriptor_(descriptor), poll_mask_(poll_mask) {}
 
+  /**
+   * Connects the poll sender to a receiver.
+   */
   template <class Receiver>
   auto connect(Receiver receiver) const {
     return io_uring_poll_sender_operation<std::remove_cvref_t<Receiver>>(
@@ -777,8 +790,8 @@ class io_uring_recv_operation
    * @see io_uring_prep_recv
    */
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
-    sqe.prep_recv(socket_.native_handle(), buffer_.data, buffer_.size,
-                  recv_flags_);
+    sqe.prep_recv(socket_.native_handle(), buffer_.data,
+                  detail::bounded_io_size(buffer_.size), recv_flags_);
   }
 
   /**
@@ -817,8 +830,8 @@ class io_uring_send_operation
    * @see io_uring_prep_send
    */
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
-    sqe.prep_send(socket_.native_handle(), buffer_.data, buffer_.size,
-                  send_flags_);
+    sqe.prep_send(socket_.native_handle(), buffer_.data,
+                  detail::bounded_io_size(buffer_.size), send_flags_);
   }
 
   /**
@@ -940,7 +953,7 @@ class io_uring_read_operation
    */
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
     sqe.prep_read(descriptor_.native_handle(), buffer_.data,
-                  static_cast<unsigned>(buffer_.size), offset_);
+                  detail::bounded_io_size(buffer_.size), offset_);
   }
 
   /**
@@ -981,7 +994,7 @@ class io_uring_write_operation
    */
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
     sqe.prep_write(descriptor_.native_handle(), buffer_.data,
-                   static_cast<unsigned>(buffer_.size), offset_);
+                   detail::bounded_io_size(buffer_.size), offset_);
   }
 
   /**
@@ -1222,6 +1235,9 @@ class io_uring_resolve_operation : public io_uring_operation_base {
  */
 class io_uring_resolve_sender {
  public:
+  /**
+   * Completion signatures produced by a DNS resolution sender.
+   */
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::size_t),
                                    bexec::set_error_t(std::error_code),
@@ -1235,12 +1251,18 @@ class io_uring_resolve_sender {
                           bupp::async_io::dns_result_view result)
       : context_(&context), query_(std::move(query)), result_(result) {}
 
+  /**
+   * Connects an rvalue DNS sender to a receiver, moving the query.
+   */
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return io_uring_resolve_operation<std::remove_cvref_t<Receiver>>(
         *context_, std::move(query_), result_, std::move(receiver));
   }
 
+  /**
+   * Connects an lvalue DNS sender to a receiver, copying the query.
+   */
   template <class Receiver>
   auto connect(Receiver receiver) const& {
     return io_uring_resolve_operation<std::remove_cvref_t<Receiver>>(

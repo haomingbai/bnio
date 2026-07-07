@@ -70,7 +70,8 @@ class ssl_read_sender {
   Holder buffer_;
 };
 
-template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit>
+template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
+          bool CompleteBuffer>
 class ssl_write_sender {
  public:
   using completion_signatures =
@@ -86,8 +87,9 @@ class ssl_write_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return ssl_write_operation<Scheduler, NextLayer, Holder, DirectSubmit,
-                               std::remove_cvref_t<Receiver>>(
+    return ssl_io_operation<Scheduler, NextLayer, Holder, DirectSubmit,
+                            std::remove_cvref_t<Receiver>,
+                            ssl_application_io::write, CompleteBuffer>(
         std::move(scheduler_), *stream_, std::move(buffer_),
         std::move(receiver));
   }

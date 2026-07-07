@@ -139,7 +139,7 @@ The client is split into two files:
   parsing, URL parsing, and HTTP protocol helpers.
 - [`mini_curl_client.hpp`](examples/mini_curl/mini_curl_client.hpp) — the
   async client class with sender/receiver plumbing, DNS→connect→TLS→HTTP
-  pipeline, redirect following, and SSL write-all loop.
+  pipeline, redirect following, and write completion handling.
 
 Key patterns demonstrated:
 
@@ -151,8 +151,9 @@ Key patterns demonstrated:
 - **TLS handshake integration** — after TCP connect, the socket is moved into
   an `ssl_stream`; handshake, encrypted read/write, and shutdown all flow
   through the same scheduler API.
-- **SSL partial-write loop** — `SSL_write` may produce short writes; the client
-  retries until the entire request is sent.
+- **Write-all semantics** — `async_write()` retries short writes until the
+  whole buffer is accepted; `async_write_some()` is available when callers want
+  one native write attempt.
 - **Redirect following** — response headers are buffered until `\r\n\r\n`;
   3xx responses with a `Location` header trigger a new request (method changed
   to GET per RFC 7231).
@@ -247,15 +248,31 @@ auto sched = ctx.get_post_scheduler();
 //   socket.async_connect(scheduler, endpoint)
 //   scheduler.async_poll(descriptor, poll_mask)
 //   scheduler.async_read(descriptor, buffer, offset)
+//   scheduler.async_read_some(descriptor, buffer, offset)
 //   scheduler.async_write(descriptor, buffer, offset)
+//   scheduler.async_write_some(descriptor, buffer, offset)
 //   ssl_stream.async_handshake(scheduler, type)
 //   ssl_stream.async_write(scheduler, buffer)
+//   ssl_stream.async_write_some(scheduler, buffer)
 //   ssl_stream.async_read(scheduler, buffer)
+//   ssl_stream.async_read_some(scheduler, buffer)
 //   ssl_stream.async_shutdown(scheduler)
 
 spawn(socket.async_connect(sched, endpoint), my_receiver{});
 ctx.run();
 ```
+
+### Read and write semantics
+
+`async_read()` reads one available chunk and completes with the number of bytes
+received. It may complete with fewer bytes than the buffer size, so protocol
+parsers should keep calling it until they have enough data. `async_read_some()`
+is the explicit spelling for the same one-read operation.
+
+`async_write()` is a write-all operation for TCP streams, TLS streams, and file
+descriptors: it repeats bounded native writes until the whole buffer has been
+transferred or an error/stopped signal occurs. `async_write_some()` performs one
+bounded write attempt and returns that attempt's byte count.
 
 ---
 

@@ -29,10 +29,24 @@ auto io_context::basic_scheduler<Kind>::async_read(
 }
 
 template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_read_some(
+    async_io::stream_socket_view socket, mutable_buffer buffer,
+    int flags) const {
+  return context_->async_read_some(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_read_direct(
     async_io::stream_socket_view socket, mutable_buffer buffer,
     int flags) const {
   return context_->async_read_direct(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_read_some_direct(
+    async_io::stream_socket_view socket, mutable_buffer buffer,
+    int flags) const {
+  return context_->async_read_some_direct(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
@@ -42,9 +56,21 @@ auto io_context::basic_scheduler<Kind>::async_write(
 }
 
 template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_write_some(
+    async_io::stream_socket_view socket, const_buffer buffer, int flags) const {
+  return context_->async_write_some(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_write_direct(
     async_io::stream_socket_view socket, const_buffer buffer, int flags) const {
   return context_->async_write_direct(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_write_some_direct(
+    async_io::stream_socket_view socket, const_buffer buffer, int flags) const {
+  return context_->async_write_some_direct(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
@@ -55,10 +81,24 @@ auto io_context::basic_scheduler<Kind>::async_read(
 }
 
 template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_read_some(
+    async_io::descriptor_view descriptor, mutable_buffer buffer,
+    std::uint64_t offset) const {
+  return context_->async_read_some(descriptor, buffer, offset);
+}
+
+template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_read_direct(
     async_io::descriptor_view descriptor, mutable_buffer buffer,
     std::uint64_t offset) const {
   return context_->async_read_direct(descriptor, buffer, offset);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_read_some_direct(
+    async_io::descriptor_view descriptor, mutable_buffer buffer,
+    std::uint64_t offset) const {
+  return context_->async_read_some_direct(descriptor, buffer, offset);
 }
 
 template <io_context::schedule_kind Kind>
@@ -69,10 +109,24 @@ auto io_context::basic_scheduler<Kind>::async_write(
 }
 
 template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_write_some(
+    async_io::descriptor_view descriptor, const_buffer buffer,
+    std::uint64_t offset) const {
+  return context_->async_write_some(descriptor, buffer, offset);
+}
+
+template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_write_direct(
     async_io::descriptor_view descriptor, const_buffer buffer,
     std::uint64_t offset) const {
   return context_->async_write_direct(descriptor, buffer, offset);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_write_some_direct(
+    async_io::descriptor_view descriptor, const_buffer buffer,
+    std::uint64_t offset) const {
+  return context_->async_write_some_direct(descriptor, buffer, offset);
 }
 
 template <io_context::schedule_kind Kind>

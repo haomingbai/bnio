@@ -35,18 +35,19 @@ enum class ssl_io_phase {
 };
 
 template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
-          class Receiver, ssl_application_io Application>
+          class Receiver, ssl_application_io Application, bool CompleteBuffer>
 class ssl_io_operation;
 
 template <class State, bool DirectSubmit, class Receiver>
 class ssl_io_step_operation;
 
 template <class Scheduler, class NextLayer, class Holder,
-          ssl_application_io Application>
+          ssl_application_io Application, bool CompleteBuffer>
 struct ssl_io_state {
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using next_layer_type = NextLayer;
   static constexpr ssl_application_io application = Application;
+  static constexpr bool complete_buffer = CompleteBuffer;
   static constexpr ssl_resume_action application_action =
       Application == ssl_application_io::read
           ? ssl_resume_action::application_read
@@ -202,17 +203,34 @@ class ssl_io_step_operation {
                                   ssl_bounded_int_size(view.size));
       handle_application_result(result);
     } else {
+      const auto* data = static_cast<const char*>(state_->buffer.data());
+      const std::size_t remaining = state_->buffer.size() - state_->bytes;
       const int result =
-          SSL_write(state_->stream->native_handle(), state_->buffer.data(),
-                    ssl_bounded_int_size(state_->buffer.size()));
+          SSL_write(state_->stream->native_handle(), data + state_->bytes,
+                    ssl_bounded_int_size(remaining));
       handle_application_result(result);
     }
   }
 
   void handle_application_result(int result) noexcept {
     if (result > 0) {
-      state_->bytes = static_cast<std::size_t>(result);
+      const std::size_t transferred = static_cast<std::size_t>(result);
+      if constexpr (State::application == ssl_application_io::read) {
+        state_->bytes = transferred;
+      } else {
+        if (transferred > state_->buffer.size() - state_->bytes) {
+          complete_error(std::make_error_code(std::errc::protocol_error));
+          return;
+        }
+        state_->bytes += transferred;
+      }
       state_->after_flush = ssl_resume_action::finish;
+      if constexpr (State::application == ssl_application_io::write &&
+                    State::complete_buffer) {
+        if (state_->bytes < state_->buffer.size()) {
+          state_->after_flush = State::application_action;
+        }
+      }
       state_->phase = ssl_io_phase::flush_output;
       complete_value(0);
       return;
@@ -384,10 +402,11 @@ class ssl_io_step_operation {
 };
 
 template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
-          class Receiver, ssl_application_io Application>
+          class Receiver, ssl_application_io Application, bool CompleteBuffer>
 class ssl_io_operation {
  public:
-  using state_type = ssl_io_state<Scheduler, NextLayer, Holder, Application>;
+  using state_type =
+      ssl_io_state<Scheduler, NextLayer, Holder, Application, CompleteBuffer>;
   using receiver_type = std::remove_cvref_t<Receiver>;
   using factory_type = ssl_io_step_factory<state_type, DirectSubmit>;
   using predicate_type = ssl_io_done_predicate<state_type>;
@@ -438,14 +457,35 @@ class ssl_io_operation {
   ssl_io_operation(ssl_io_operation&&) = delete;
   ssl_io_operation& operator=(ssl_io_operation&&) = delete;
 
-  void start() noexcept { bexec::start(*repeat_operation_); }
+  void start() noexcept {
+    if (ssl_stop_requested(receiver_)) {
+      complete_stopped();
+      return;
+    }
+    if (empty_buffer()) {
+      complete_value(0);
+      return;
+    }
+
+    bexec::start(*repeat_operation_);
+  }
 
  private:
+  [[nodiscard]] bool empty_buffer() const noexcept {
+    if constexpr (Application == ssl_application_io::read) {
+      return state_.buffer.view().size == 0;
+    } else {
+      return state_.buffer.size() == 0;
+    }
+  }
+
   void complete_value(std::size_t bytes) noexcept {
     if constexpr (Application == ssl_application_io::read) {
       state_.buffer.commit(bytes);
+      bexec::set_value(std::move(receiver_), bytes);
+    } else {
+      bexec::set_value(std::move(receiver_), state_.bytes);
     }
-    bexec::set_value(std::move(receiver_), bytes);
   }
 
   void complete_error(std::error_code error) noexcept {
@@ -469,13 +509,19 @@ template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
           class Receiver>
 using ssl_read_operation =
     ssl_io_operation<Scheduler, NextLayer, Holder, DirectSubmit, Receiver,
-                     ssl_application_io::read>;
+                     ssl_application_io::read, false>;
 
 template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
           class Receiver>
 using ssl_write_operation =
     ssl_io_operation<Scheduler, NextLayer, Holder, DirectSubmit, Receiver,
-                     ssl_application_io::write>;
+                     ssl_application_io::write, true>;
+
+template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
+          class Receiver>
+using ssl_write_some_operation =
+    ssl_io_operation<Scheduler, NextLayer, Holder, DirectSubmit, Receiver,
+                     ssl_application_io::write, false>;
 
 }  // namespace detail
 /** @endcond */

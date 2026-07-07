@@ -93,6 +93,9 @@ void ok() {
 
 `mutable_buffer`, `const_buffer`, and `buffer_view` hold raw pointers. The
 pointed-to storage must remain valid until the I/O operation completes.
+For `async_write()`, completion means the composed write-all operation has
+finished every internal `async_write_some()` attempt. The buffer must therefore
+outlive the full composed operation, not just the first native submission.
 
 ```cpp
 // WRONG — stack buffer dies before operation completes
@@ -208,14 +211,43 @@ op.start();
 // op must remain alive until the receiver gets set_value/set_error/set_stopped.
 ```
 
+Composite senders such as write-all operations own additional nested state:
+
+- A durable state object tracks the original buffer, current offset, bytes
+  transferred, and done flag.
+- A `repeat_until` operation owns the loop machinery and predicate.
+- Each loop iteration constructs one child `async_write_some*` operation for the
+  current buffer slice.
+
+The parent operation must outlive all of these nested objects. This is why the
+write-all operation stores the state beside the `repeat_until` operation rather
+than on the stack inside `start()`.
+
+```mermaid
+graph TB
+    UserOp["write_all_operation"] --> State["write_all_state<br/>buffer + transferred + done"]
+    UserOp --> Repeat["bexec::repeat_until operation"]
+    Repeat --> Child["current async_write_some operation"]
+    Child --> Ctx["io_context / io_uring"]
+    Ctx --> Child
+    Child --> Repeat
+    Repeat -->|"predicate sees done"| UserOp
+    UserOp --> Receiver["downstream receiver"]
+```
+
 ### `operation_base` Inheritance Chain
 
 ```
 async_io::linux_native::io_uring_operation_base   (intrusive node, result/flags)
     └── io_context::operation_base                (queued-I/O list link, prepare hooks)
         ├── detail::native_io_operation<Model,R>  (read/write/accept/connect/wait)
-        └── detail::ssl_completion_base           (SSL state machine base)
-            └── detail::ssl_async_operation_base<D,NL,R>  (SSL handshake/read/write/shutdown)
+
+Composite operations are not necessarily derived from `operation_base`
+themselves. For example, `detail::write_all_operation<State,R>` owns a
+`repeat_until` operation, and each repeat iteration owns a child
+`native_io_operation<write_model,R>` that is submitted to io_uring. SSL
+read/write uses the same shape: `ssl_io_operation` owns SSL state plus a
+`repeat_until` loop whose children are transport read/write operations.
 ```
 
 Both base classes disable copy and move because they are intrusive list nodes.

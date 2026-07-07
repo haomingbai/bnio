@@ -23,56 +23,127 @@ constexpr std::size_t k_max_endpoints = 16;
 constexpr std::size_t k_receive_size = 16 * 1024;
 constexpr int k_max_redirects = 10;
 
+/**
+ * Parsed command-line options for a mini_curl request.
+ */
 struct request_options {
+  /** HTTP method to send. */
   std::string method = "GET";
+
+  /** Remote host name or address. */
   std::string host;
+
+  /** Remote service name or numeric port. */
   std::string service = "80";
+
+  /** Absolute request target sent in the request line. */
   std::string target = "/";
+
+  /** Additional request headers, without trailing CRLF. */
   std::vector<std::string> headers;
+
+  /** Optional request body used by methods such as POST. */
   std::string post_data;
+
+  /** Optional output file path; stdout is used when empty. */
   std::string output_file;
+
+  /** Address family preference used during DNS resolution. */
   bupp::ip::address::version address_version =
       bupp::ip::address::version::unspecified;
+
+  /** Whether to use TLS for the connection. */
   bool use_tls = false;
+
+  /** Whether TLS certificate verification should be disabled. */
   bool insecure = false;
+
+  /** Whether HTTP redirects should be followed. */
   bool follow_redirects = false;
+
+  /** Whether help output was requested. */
   bool help = false;
+
+  /** Whether verbose progress should be written to stderr. */
   bool verbose = false;
 };
 
 // ---- URL / header helpers ----
 
+/**
+ * Returns true when value begins with prefix.
+ */
 [[nodiscard]] bool starts_with(std::string_view value,
                                std::string_view prefix) noexcept;
 
+/**
+ * Returns true when value contains CR or LF characters.
+ */
 [[nodiscard]] bool contains_crlf(std::string_view value) noexcept;
 
+/**
+ * Normalizes an HTTP request target to an absolute path.
+ */
 [[nodiscard]] std::string normalized_target(std::string target);
 
+/**
+ * Removes a URL fragment from a request target.
+ */
 [[nodiscard]] std::string remove_fragment(std::string_view target);
 
+/**
+ * Parses URL authority text into host and service options.
+ */
 [[nodiscard]] bool parse_authority(std::string_view authority,
                                    request_options& options,
                                    std::string& error);
 
+/**
+ * Parses an HTTP or HTTPS URL into request options.
+ */
 [[nodiscard]] bool parse_url(std::string_view url, request_options& options,
                              std::string& error);
 
+/**
+ * Returns true when a header block already contains the named field.
+ */
 [[nodiscard]] bool header_contains(std::string_view header,
                                    std::string_view name) noexcept;
 
+/**
+ * Builds the value for the Host request header.
+ */
 [[nodiscard]] std::string host_header_value(const request_options& options);
 
+/**
+ * Builds an HTTP/1.1 request from parsed options.
+ */
 [[nodiscard]] std::string build_request(const request_options& options);
 
+/**
+ * Parses the numeric status code from an HTTP status line.
+ */
 [[nodiscard]] int parse_status_code(std::string_view status_line) noexcept;
 
+/**
+ * Extracts the Location header value from a header block.
+ */
 [[nodiscard]] std::string extract_location(std::string_view headers);
 
 // ---- Async operation lifecycle management ----
 
+/**
+ * Type-erased base for operations stored by operation_registry.
+ */
 struct operation_holder_base {
+  /**
+   * Destroys a stored operation holder.
+   */
   virtual ~operation_holder_base() = default;
+
+  /**
+   * Starts the wrapped async operation.
+   */
   virtual void start() noexcept = 0;
 };
 
@@ -82,6 +153,9 @@ struct operation_holder_base {
  */
 class operation_registry {
  public:
+  /**
+   * Connects a sender to a receiver, starts it, and keeps the operation alive.
+   */
   template <class Sender, class Receiver>
   void spawn(Sender&& sender, Receiver&& receiver) {
     using operation_type = decltype(bexec::connect(std::declval<Sender>(),
@@ -103,21 +177,35 @@ class operation_registry {
     ops_.push_back(std::move(op));
   }
 
+  /**
+   * Releases all stored async operations.
+   */
   void clear() noexcept { ops_.clear(); }
 
  private:
   std::vector<std::unique_ptr<operation_holder_base>> ops_;
 };
 
-// ---- mini_curl_client ----
-
+/**
+ * Asynchronous HTTP client used by the mini_curl example.
+ */
 class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
  public:
+  /**
+   * Creates a client bound to an io_context, parsed request options, and
+   * operation registry.
+   */
   mini_curl_client(bupp::io_context& context, request_options options,
                    operation_registry& registry);
 
+  /**
+   * Starts the resolve/connect/handshake/send/receive pipeline.
+   */
   void start();
 
+  /**
+   * Returns the process-style exit code selected by the client.
+   */
   [[nodiscard]] int exit_code() const noexcept { return exit_code_; }
 
  private:
@@ -189,6 +277,7 @@ class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
 // ============================================================
 // Receiver implementations (must be in header for template spawn)
 // ============================================================
+/** @cond BUPP_DETAIL */
 
 struct mini_curl_client::resolve_receiver {
   std::shared_ptr<mini_curl_client> client;
@@ -249,6 +338,8 @@ struct mini_curl_client::shutdown_receiver {
   void set_error(std::error_code) noexcept { client->on_shutdown_complete(); }
   void set_stopped() noexcept { client->on_shutdown_complete(); }
 };
+
+/** @endcond */
 
 // ============================================================
 // mini_curl_client inline implementation

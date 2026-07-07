@@ -386,6 +386,10 @@ class BUPP_EXPORT io_uring_context {
 
   // --- manual batch submission (caller holds uring_mutex_) ---
 
+  /**
+   * Returns a lock guard for the io_uring mutex when multi-issuer locking is
+   * required.
+   */
   [[nodiscard]] std::unique_lock<std::mutex> lock_uring() const noexcept {
     std::unique_lock lock(uring_mutex_, std::defer_lock);
     if (!single_issuer_) {
@@ -394,6 +398,10 @@ class BUPP_EXPORT io_uring_context {
     return lock;
   }
 
+  /**
+   * Prepares one operation into the submission queue while the caller holds the
+   * io_uring lock.
+   */
   template <class Operation>
   int prepare_locked(Operation& operation) noexcept {
     if (!ring_.is_open()) {
@@ -410,8 +418,14 @@ class BUPP_EXPORT io_uring_context {
     return 0;
   }
 
+  /**
+   * Submits prepared queue entries while the caller holds the io_uring lock.
+   */
   int submit_locked() noexcept;
 
+  /**
+   * Wakes threads waiting for io_uring progress.
+   */
   void notify_waiters() noexcept;
 
  private:

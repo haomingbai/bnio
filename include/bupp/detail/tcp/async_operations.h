@@ -21,7 +21,8 @@ class tcp_socket;
 /** @cond BUPP_DETAIL */
 namespace detail {
 
-template <class Scheduler, class Holder, bool DirectSubmit, class Receiver>
+template <class Scheduler, class Holder, bool DirectSubmit, bool Some,
+          class Receiver>
 class tcp_read_operation {
  public:
   using scheduler_type = std::remove_cvref_t<Scheduler>;
@@ -30,8 +31,13 @@ class tcp_read_operation {
   static auto make_child_sender(scheduler_type& scheduler,
                                 async_io::stream_socket_view socket,
                                 async_io::buffer_view buffer, int flags) {
-    if constexpr (DirectSubmit) {
+    if constexpr (DirectSubmit && Some) {
+      return scheduler.async_read_some_direct(socket, bupp::buffer(buffer),
+                                              flags);
+    } else if constexpr (DirectSubmit) {
       return scheduler.async_read_direct(socket, bupp::buffer(buffer), flags);
+    } else if constexpr (Some) {
+      return scheduler.async_read_some(socket, bupp::buffer(buffer), flags);
     } else {
       return scheduler.async_read(socket, bupp::buffer(buffer), flags);
     }
@@ -101,7 +107,7 @@ class tcp_read_operation {
   bexec::detail::manual_lifetime<child_operation_type> child_operation_;
 };
 
-template <class Scheduler, class Holder, bool DirectSubmit>
+template <class Scheduler, class Holder, bool DirectSubmit, bool Some>
 class tcp_read_sender {
  public:
   using completion_signatures =
@@ -118,7 +124,7 @@ class tcp_read_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return tcp_read_operation<Scheduler, Holder, DirectSubmit,
+    return tcp_read_operation<Scheduler, Holder, DirectSubmit, Some,
                               std::remove_cvref_t<Receiver>>(
         std::move(scheduler_), socket_, std::move(holder_), flags_,
         std::move(receiver));
@@ -131,7 +137,8 @@ class tcp_read_sender {
   int flags_;
 };
 
-template <class Scheduler, class Holder, bool DirectSubmit, class Receiver>
+template <class Scheduler, class Holder, bool DirectSubmit, bool Some,
+          class Receiver>
 class tcp_write_operation {
  public:
   using scheduler_type = std::remove_cvref_t<Scheduler>;
@@ -140,8 +147,12 @@ class tcp_write_operation {
   static auto make_child_sender(scheduler_type& scheduler,
                                 async_io::stream_socket_view socket,
                                 const_buffer buffer, int flags) {
-    if constexpr (DirectSubmit) {
+    if constexpr (DirectSubmit && Some) {
+      return scheduler.async_write_some_direct(socket, buffer, flags);
+    } else if constexpr (DirectSubmit) {
       return scheduler.async_write_direct(socket, buffer, flags);
+    } else if constexpr (Some) {
+      return scheduler.async_write_some(socket, buffer, flags);
     } else {
       return scheduler.async_write(socket, buffer, flags);
     }
@@ -214,7 +225,7 @@ class tcp_write_operation {
   bexec::detail::manual_lifetime<child_operation_type> child_operation_;
 };
 
-template <class Scheduler, class Holder, bool DirectSubmit>
+template <class Scheduler, class Holder, bool DirectSubmit, bool Some>
 class tcp_write_sender {
  public:
   using completion_signatures =
@@ -231,7 +242,7 @@ class tcp_write_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return tcp_write_operation<Scheduler, Holder, DirectSubmit,
+    return tcp_write_operation<Scheduler, Holder, DirectSubmit, Some,
                                std::remove_cvref_t<Receiver>>(
         std::move(scheduler_), socket_, std::move(holder_), flags_,
         std::move(receiver));

@@ -136,6 +136,9 @@ struct dns_query_view {
  */
 class dns_result_view {
  public:
+  /**
+   * Endpoint type stored in the result view.
+   */
   using endpoint_type = ip::endpoint;
 
   /**
