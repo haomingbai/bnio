@@ -2,12 +2,12 @@
 #ifndef BUPP_IP_H_
 #define BUPP_IP_H_
 
+#include <bupp/async_io/config.h>
 #include <bupp/async_io/dns.h>
 #include <bupp/async_io/ip/address.h>
 #include <bupp/async_io/ip/endpoint.h>
 #include <bupp/async_io/ip/tcp.h>
 #include <bupp/async_io/ip/udp.h>
-#include <bupp/async_io/config.h>
 #include <bupp/export.h>
 
 namespace bupp {

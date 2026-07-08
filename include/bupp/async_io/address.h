@@ -2,8 +2,8 @@
 #ifndef BUPP_ASYNC_IO_ADDRESS_H_
 #define BUPP_ASYNC_IO_ADDRESS_H_
 
-#include <bupp/async_io/ip/address.h>
 #include <bupp/async_io/config.h>
+#include <bupp/async_io/ip/address.h>
 
 namespace bupp::async_io {
 
