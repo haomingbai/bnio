@@ -6,9 +6,13 @@
 #include <bupp/base.h>
 #include <bupp/buffer.h>
 #include <bupp/export.h>
-#include <bupp/io_context.h>
+#include <bupp/io_context/config.h>
 #include <bupp/ip.h>
+
+#if defined(BUPP_HAS_IO_CONTEXT_LINUX)
+#include <bupp/io_context.h>
 #include <bupp/ssl.h>
 #include <bupp/tcp.h>
+#endif
 
 #endif  // BUPP_BUPP_H_

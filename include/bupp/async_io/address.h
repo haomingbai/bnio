@@ -3,6 +3,7 @@
 #define BUPP_ASYNC_IO_ADDRESS_H_
 
 #include <bupp/async_io/ip/address.h>
+#include <bupp/async_io/config.h>
 
 namespace bupp::async_io {
 
@@ -11,6 +12,7 @@ namespace bupp::async_io {
  */
 using address = ip::address;
 
+#if defined(BUPP_HAS_ASYNC_IO_IP_ADDRESS_PARSER)
 /**
  * Imports the generic IP address parser into bupp::async_io.
  */
@@ -30,6 +32,7 @@ using ip::make_v4_address;
  * Imports the IPv6 address parser into bupp::async_io.
  */
 using ip::make_v6_address;
+#endif
 
 }  // namespace bupp::async_io
 

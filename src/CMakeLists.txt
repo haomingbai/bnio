@@ -2,15 +2,24 @@ add_library(bupp)
 add_library(bupp::bupp ALIAS bupp)
 
 add_subdirectory(async_io)
-add_subdirectory(base/linux)
 
 target_compile_features(bupp PUBLIC cxx_std_20)
-target_link_libraries(bupp PUBLIC PkgConfig::LIBURING
-                                  OpenSSL::SSL
-                                  OpenSSL::Crypto
-                                  $<BUILD_INTERFACE:bexec::bexec>)
+target_link_libraries(bupp PUBLIC $<BUILD_INTERFACE:bexec::bexec>)
 
-target_sources(bupp PRIVATE linux/io_context.cpp ssl.cpp tcp.cpp)
+if(BUPP_PLATFORM_LINUX)
+  add_subdirectory(base/linux)
+  target_link_libraries(bupp PUBLIC PkgConfig::LIBURING
+                                    OpenSSL::SSL
+                                    OpenSSL::Crypto)
+  target_sources(bupp PRIVATE linux/io_context.cpp ssl.cpp tcp.cpp)
+else()
+  target_compile_definitions(
+    bupp
+    PUBLIC BUPP_DISABLE_ASYNC_IO_IP_ADDRESS_PARSER=1
+           BUPP_DISABLE_ASYNC_IO_LINUX=1
+           BUPP_DISABLE_BASE_LINUX=1
+           BUPP_DISABLE_IO_CONTEXT_LINUX=1)
+endif()
 
 target_include_directories(
   bupp
@@ -30,7 +39,8 @@ target_sources(
          BASE_DIRS
          ${PROJECT_SOURCE_DIR}/include
          FILES
-         ${BUPP_PUBLIC_HEADERS})
+         ${BUPP_PUBLIC_HEADERS}
+         ${BUPP_LINUX_PUBLIC_HEADERS})
 
 bupp_set_project_warnings(bupp)
 

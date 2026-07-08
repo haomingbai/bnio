@@ -1,3 +1,6 @@
 add_subdirectory(async_io)
-add_subdirectory(base/linux)
-add_subdirectory(io_context)
+
+if(BUPP_PLATFORM_LINUX)
+  add_subdirectory(base/linux)
+  add_subdirectory(io_context)
+endif()

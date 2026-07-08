@@ -2,6 +2,7 @@
 #ifndef BUPP_ASYNC_IO_IP_ADDRESS_H_
 #define BUPP_ASYNC_IO_IP_ADDRESS_H_
 
+#include <bupp/async_io/config.h>
 #include <bupp/export.h>
 
 #include <array>
@@ -169,6 +170,7 @@ class BUPP_EXPORT address {
   v6_bytes v6_{};
 };
 
+#if defined(BUPP_HAS_ASYNC_IO_IP_ADDRESS_PARSER)
 /**
  * Parses an IPv4 or IPv6 address string.
  */
@@ -192,6 +194,7 @@ class BUPP_EXPORT address {
  */
 [[nodiscard]] BUPP_EXPORT std::optional<address> make_v6_address(
     std::string_view text);
+#endif
 
 }  // namespace bupp::async_io::ip
 

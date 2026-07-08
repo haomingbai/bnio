@@ -7,6 +7,7 @@
 #include <bupp/async_io/ip/endpoint.h>
 #include <bupp/async_io/ip/tcp.h>
 #include <bupp/async_io/ip/udp.h>
+#include <bupp/async_io/config.h>
 #include <bupp/export.h>
 
 namespace bupp {
@@ -46,6 +47,7 @@ using address = async_io::ip::address;
  */
 using endpoint = async_io::ip::endpoint;
 
+#if defined(BUPP_HAS_ASYNC_IO_IP_ADDRESS_PARSER)
 /**
  * Imports the generic IP address parser into bupp::ip.
  */
@@ -65,6 +67,7 @@ using async_io::ip::make_v4_address;
  * Imports the IPv6 address parser into bupp::ip.
  */
 using async_io::ip::make_v6_address;
+#endif
 
 /**
  * Protocol tag and type namespace for TCP over IPv4 or IPv6.

@@ -10,9 +10,24 @@ include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/bexec.cmake")
 
-find_package(PkgConfig REQUIRED)
-find_package(OpenSSL REQUIRED)
-pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.2)
+# ---- Platform detection ----
+#
+# bupp currently implements its async I/O backend on Linux using io_uring.
+# On other platforms (e.g. macOS) only the platform-neutral vocabulary types
+# and build scaffolding are compiled; the Linux-only backend, headers, and the
+# liburing dependency are excluded entirely.
+set(BUPP_PLATFORM_LINUX_DEFAULT OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(BUPP_PLATFORM_LINUX_DEFAULT ON)
+endif()
+option(BUPP_PLATFORM_LINUX "Build the Linux io_uring backend"
+       ${BUPP_PLATFORM_LINUX_DEFAULT})
+
+if(BUPP_PLATFORM_LINUX)
+  find_package(PkgConfig REQUIRED)
+  find_package(OpenSSL REQUIRED)
+  pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.2)
+endif()
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(BUPP_BUILD_EXAMPLES "Build bupp examples" ON)

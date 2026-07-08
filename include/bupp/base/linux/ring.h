@@ -6,7 +6,7 @@
 #include <bupp/base/linux/params.h>
 #include <bupp/base/linux/submission_queue_entry.h>
 #include <bupp/export.h>
-#include <liburing.h>
+#include <liburing.h>  // System io_uring library; Linux only.
 
 namespace bupp::base {
 

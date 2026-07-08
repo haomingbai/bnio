@@ -28,6 +28,13 @@ int main() {
   assert(loopback_v4.v4() != nullptr);
   assert(*loopback_v4.v4() == k_loopback_v4);
 
+  auto loopback_v6 = bupp::async_io::ip::address::loopback_v6();
+  assert(loopback_v6.is_v6());
+  assert(loopback_v6.v4() == nullptr);
+  assert(loopback_v6.v6() != nullptr);
+  assert(*loopback_v6.v6() == k_loopback_v6);
+
+#if defined(BUPP_HAS_ASYNC_IO_IP_ADDRESS_PARSER)
   auto parsed_v4 = bupp::async_io::ip::make_address("127.0.0.1");
   assert(parsed_v4.has_value());
   assert(parsed_v4->is_v4());
@@ -37,12 +44,6 @@ int main() {
   assert(parsed_v4_alias.has_value());
   assert(parsed_v4_alias->to_v4() == 0);
 
-  auto loopback_v6 = bupp::async_io::ip::address::loopback_v6();
-  assert(loopback_v6.is_v6());
-  assert(loopback_v6.v4() == nullptr);
-  assert(loopback_v6.v6() != nullptr);
-  assert(*loopback_v6.v6() == k_loopback_v6);
-
   auto parsed_v6 = bupp::async_io::ip::make_v6_address("::1");
   assert(parsed_v6.has_value());
   assert(parsed_v6->is_v6());
@@ -50,6 +51,7 @@ int main() {
   assert(*parsed_v6->v6() == k_loopback_v6);
 
   assert(!bupp::async_io::ip::make_address("not an address").has_value());
+#endif
 
   bupp::async_io::ip::address reset_address =
       bupp::async_io::ip::address::loopback_v4();

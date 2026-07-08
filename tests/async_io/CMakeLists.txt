@@ -8,12 +8,12 @@ endfunction()
 bupp_add_async_io_test(address address_test.cpp)
 bupp_add_async_io_test(buffer_view buffer_view_test.cpp)
 bupp_add_async_io_test(descriptor_view descriptor_view_test.cpp)
-bupp_add_async_io_test(dns dns_test.cpp)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(BUPP_PLATFORM_LINUX)
+  bupp_add_async_io_test(dns dns_test.cpp)
   bupp_add_async_io_test(io_uring_context io_uring_context_test.cpp)
+  bupp_add_async_io_test(linux_socket_address linux_socket_address_test.cpp)
+  bupp_add_async_io_test(socket_view socket_view_test.cpp)
 endif()
-bupp_add_async_io_test(linux_socket_address linux_socket_address_test.cpp)
-bupp_add_async_io_test(socket_view socket_view_test.cpp)
 bupp_add_async_io_test(tcp_endpoint tcp_endpoint_test.cpp)
 bupp_add_async_io_test(time time_test.cpp)
 
@@ -43,10 +43,12 @@ bupp_add_async_io_header_self_contained_test(ip_endpoint
                                              BUPP_HEADER_TEST_IP_ENDPOINT)
 bupp_add_async_io_header_self_contained_test(ip_tcp BUPP_HEADER_TEST_IP_TCP)
 bupp_add_async_io_header_self_contained_test(ip_udp BUPP_HEADER_TEST_IP_UDP)
-bupp_add_async_io_header_self_contained_test(
-  linux_io_uring_context BUPP_HEADER_TEST_LINUX_IO_URING_CONTEXT)
-bupp_add_async_io_header_self_contained_test(
-  linux_socket_address BUPP_HEADER_TEST_LINUX_SOCKET_ADDRESS)
+if(BUPP_PLATFORM_LINUX)
+  bupp_add_async_io_header_self_contained_test(
+    linux_io_uring_context BUPP_HEADER_TEST_LINUX_IO_URING_CONTEXT)
+  bupp_add_async_io_header_self_contained_test(
+    linux_socket_address BUPP_HEADER_TEST_LINUX_SOCKET_ADDRESS)
+endif()
 bupp_add_async_io_header_self_contained_test(socket_view
                                              BUPP_HEADER_TEST_SOCKET_VIEW)
 bupp_add_async_io_header_self_contained_test(tcp_endpoint
