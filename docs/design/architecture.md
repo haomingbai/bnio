@@ -71,6 +71,14 @@ graph LR
     L2 -->|"uses"| LIB2["liburing<br/>(linux_native operations)"]
 ```
 
+## Platform Native Backends
+
+The current implementation is Linux-only and uses `io_uring`. The planned
+macOS/BSD port keeps the same three-layer model but adds a `kqueue` backend
+instead of treating `io_uring` as the permanent shape of every platform.
+
+See [`kqueue-roadmap.md`](kqueue-roadmap.md) for the macOS/BSD technical route.
+
 ---
 
 ## Layer 1: `bupp::base` — Thin `liburing` Wrappers

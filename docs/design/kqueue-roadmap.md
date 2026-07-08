@@ -1,0 +1,343 @@
+# kqueue Portability Roadmap
+
+This document describes the planned macOS and BSD port. The first target is
+Darwin/macOS. FreeBSD should then be a small follow-up because both targets can
+share the same `kqueue` backend with only minor platform probes and build-system
+differences.
+
+The existing Linux implementation is built around `io_uring`, which is a
+proactor-style interface: the kernel performs the requested I/O and later
+returns a completion. `kqueue` is a reactor-style interface: the kernel reports
+that an fd is ready, and bupp must then perform the actual `accept`, `connect`,
+`read`, `write`, or `poll` step before completing the sender.
+
+## Goals
+
+- Preserve the public high-level sender APIs where practical.
+- Keep the current three-layer model:
+  - `base`: thin native API wrappers.
+  - `async_io`: non-owning views, value types, and platform-native operation
+    contexts.
+  - `io_context`: public runtime, schedulers, batching policy, timers, TCP, and
+    TLS integration.
+- Make Darwin/macOS work first, then adjust FreeBSD in a small number of
+  follow-up commits.
+- Avoid forcing Linux-specific names into cross-platform APIs.
+- Keep platform-native code isolated under platform directories.
+
+## Non-Goals
+
+- Do not emulate `io_uring` at the base layer.
+- Do not add executors, coroutines, or sender abstractions to `base`.
+- Do not require `async_io` vocabulary types to own descriptors or buffers.
+- Do not promise fully asynchronous regular-file I/O through `kqueue` in the
+  first port. Network sockets, timers, polling, DNS, and high-level TCP/TLS are
+  the priority.
+
+## Platform Shape
+
+The platform split should evolve from the current Linux-only shape into this:
+
+| Layer | Linux | macOS / BSD |
+|-------|-------|-------------|
+| `base` | `include/bupp/base/linux/`, `src/base/linux/` | `include/bupp/base/bsd/`, `src/base/bsd/` |
+| `async_io` native backend | `async_io::linux_native::io_uring_context` | `async_io::bsd_native::kqueue_context` |
+| high-level runtime | `include/bupp/linux/io_context.h`, `src/linux/` | `include/bupp/bsd/io_context.h`, `src/bsd/` |
+| system macros | `BUPP_SYSTEM_LINUX` | `BUPP_SYSTEM_DARWIN`, `BUPP_SYSTEM_FREEBSD`, `BUPP_SYSTEM_BSD` |
+
+The public umbrella headers should eventually select the platform runtime
+through `include/bupp/config/system.h`, while platform-native headers remain
+available for users that explicitly opt into a backend.
+
+## Reactor vs. Proactor Mapping
+
+`io_uring` reports completed work. `kqueue` reports readiness, so bupp must run
+the nonblocking I/O attempt between the readiness event and the sender
+completion.
+
+```mermaid
+flowchart TB
+    subgraph P["io_uring proactor"]
+        P1["operation prepares SQE"]
+        P2["kernel performs I/O"]
+        P3["CQE carries completion result"]
+        P4["operation completes receiver"]
+        P1 --> P2 --> P3 --> P4
+    end
+
+    subgraph R["kqueue reactor"]
+        R1["operation registers readiness interest"]
+        R2["kernel reports fd readiness"]
+        R3["operation performs nonblocking I/O"]
+        R4{"I/O result"}
+        R5["complete receiver"]
+        R6["rearm readiness interest"]
+        R1 --> R2 --> R3 --> R4
+        R4 -->|"success, error, or stopped"| R5
+        R4 -->|"would block or partial step"| R6 --> R2
+    end
+```
+
+The important difference is the extra nonblocking I/O step after readiness is
+reported. A readiness event is not a completion by itself.
+
+## Open Decision: Who Performs I/O?
+
+The port can start before this decision is permanently settled as long as the
+boundary is explicit. There are three viable shapes:
+
+| Option | Description | Pros | Cons |
+|--------|-------------|------|------|
+| Operation-owned I/O | Each operation handles readiness and performs its own syscall in an `on_ready()` / `try_complete()` hook. | Keeps protocol-specific logic close to the receiver completion path; maps well to accept/connect/read/write differences. | More code in each operation type. |
+| Context-owned I/O | `kqueue_context` interprets events and performs syscall-specific work before calling operation completion. | Centralizes native dispatch. | Pushes socket/file semantics into the context and makes the context less generic. |
+| Hybrid | `kqueue_context` owns readiness registration and dispatch; operations own actual I/O attempts. | Keeps the event loop generic while isolating reactor-specific I/O logic behind a stable hook. | Requires a small operation interface beyond the current io_uring operation base. |
+
+Recommended initial direction: use the hybrid shape. `kqueue_context` should not
+know how to accept, read, write, or finish a connect. It should know how to
+register interests, wait for events, wake itself, and dispatch an event to the
+operation associated with `udata`. Each operation then performs the nonblocking
+syscall and chooses one of:
+
+- complete with `set_value`;
+- complete with `set_error`;
+- complete with `set_stopped`;
+- rearm and wait again after `EAGAIN` / `EWOULDBLOCK` or a partial step.
+
+This keeps the unresolved "who is responsible for I/O" question localized to
+the operation/context interface. If the final design moves more work into the
+context, only that interface should need to change.
+
+## Base Layer Work
+
+The `base` layer should be a thin C API to C++ object mapping for `kqueue` and
+`kevent`, similar in spirit to the current `liburing` wrappers.
+
+Planned types:
+
+| Type | Ownership | Role |
+|------|-----------|------|
+| `base::kqueue` | RAII owner | Owns the native kqueue fd. |
+| `base::event` | value/view-like wrapper | Wraps `struct kevent` construction and field access. |
+| `base::event_list_view` | non-owning view | Optional helper over caller-owned `kevent` arrays. |
+
+Expected `kqueue` wrapper shape:
+
+```cpp
+class kqueue {
+public:
+    kqueue() noexcept;
+    ~kqueue() noexcept;
+
+    kqueue(const kqueue&) = delete;
+    kqueue& operator=(const kqueue&) = delete;
+    kqueue(kqueue&& other) noexcept;
+    kqueue& operator=(kqueue&& other) noexcept;
+
+    int open() noexcept;
+    void close() noexcept;
+    [[nodiscard]] bool is_open() const noexcept;
+    [[nodiscard]] int native_fd() const noexcept;
+
+    int control(const event* changelist, int nchanges,
+                event* eventlist, int nevents,
+                const timespec* timeout) noexcept;
+};
+```
+
+Base-layer rules:
+
+- Return non-negative values on success and negative `errno` values on failure,
+  matching the rest of bupp's base-layer style instead of exposing `errno`
+  directly.
+- Do not own user fds, buffers, socket addresses, or event arrays.
+- Do not expose sender/receiver concepts.
+- Keep wrappers close to `kqueue(2)` and `kevent(2)`.
+- Put Darwin/FreeBSD feature differences behind small compile-time branches
+  only when needed.
+
+Likely base tests:
+
+- header self-containment for `base/bsd` headers;
+- open/close/move behavior;
+- `EVFILT_USER` wakeup round trip;
+- pipe read readiness round trip;
+- timeout behavior with an empty event list where supported.
+
+## async_io Work
+
+`async_io` already owns platform-neutral views such as `buffer_view`,
+`descriptor_view`, `stream_socket_view`, and `listening_socket_view`. Those
+should remain shared. The macOS/BSD work belongs in a new native backend:
+
+```text
+include/bupp/async_io/bsd/
+src/async_io/bsd/
+```
+
+Planned native objects:
+
+| Object | Role |
+|--------|------|
+| `bsd_native::kqueue_context` | Owns `base::kqueue`, pending post queue, changelist/event buffers, and run-loop state. |
+| `bsd_native::kqueue_operation_base` | Intrusive operation base with readiness dispatch and terminal `execute()` behavior. |
+| `bsd_native::*_operation` | Read, write, accept, connect, poll, timer/wakeup, and post operations. |
+
+The context needs these responsibilities:
+
+- own and close the kqueue descriptor;
+- register and unregister readiness interests;
+- store `udata` pointers to operation objects;
+- wake the run loop for `post()` and `stop()`;
+- dispatch readiness events to operations;
+- provide `run()`, `stop()`, `is_open()`, and `is_in_context()`;
+- support queued and direct scheduling paths used by high-level `io_context`;
+- convert platform errors to `std::error_code` at operation completion.
+
+Operations need these responsibilities:
+
+- keep user buffers, descriptors, addresses, and receivers non-owning according
+  to existing lifetime rules;
+- set socket descriptors to nonblocking mode before reactor-style operations;
+- perform exactly one bounded native I/O attempt when readiness is reported;
+- complete immediately when a syscall succeeds or fails with a terminal error;
+- rearm when readiness was insufficient;
+- preserve existing `async_read_some`, `async_write_some`, and write-all
+  semantics.
+
+### Socket Operations
+
+`kqueue` socket operations should map readiness filters to nonblocking syscalls:
+
+| Operation | Readiness | I/O step after event |
+|-----------|-----------|----------------------|
+| `async_accept` | `EVFILT_READ` on listening socket | `accept` / `accept4` where available |
+| `async_connect` | `EVFILT_WRITE` on connecting socket | check `SO_ERROR` |
+| `async_read_some` | `EVFILT_READ` | `recv` |
+| `async_write_some` | `EVFILT_WRITE` | `send` |
+| `async_poll` | requested filter(s) | report ready mask |
+
+`EV_EOF` and filter-specific flags must be interpreted carefully. EOF on a
+read side can be a clean zero-byte read, while connect failures should surface
+through `SO_ERROR`.
+
+### Descriptor I/O
+
+`io_uring` can perform file I/O as true asynchronous kernel work. `kqueue`
+cannot provide the same guarantee for regular files. The first macOS/BSD port
+should therefore document descriptor I/O support in two tiers:
+
+- socket-like descriptors: supported through readiness and nonblocking syscalls;
+- regular files: deferred, or implemented through an explicitly documented
+  blocking/fallback path later.
+
+This avoids accidentally making `io_context::run()` block on large file reads or
+writes while the public API still looks asynchronous.
+
+### Timers And Wakeups
+
+The current high-level timer design should stay mostly intact: `io_context`
+owns timer state and posts operations when expiry/cancellation is known. The
+BSD native backend only needs a way to sleep until the next deadline and wake
+early when new work arrives.
+
+Candidate implementation:
+
+- use `kevent`'s timeout parameter for the nearest deadline;
+- use `EVFILT_USER` as the cross-thread wakeup mechanism for `post()`, `stop()`,
+  and timer rescheduling;
+- keep timer heap ownership in high-level `io_context`, not in `base`.
+
+If this becomes awkward for reusable internal waits, an `EVFILT_TIMER` helper
+can be added later, but it should not be the first dependency.
+
+## High-Level io_context Work
+
+Although this roadmap focuses on `base` and `async_io`, the public port finishes
+only when `bupp::io_context` can select the BSD backend.
+
+Expected work:
+
+- add `include/bupp/bsd/io_context.h` and `src/bsd/io_context.cpp`;
+- introduce `bsd_io_context_options`;
+- make `platform_io_context_options` select Linux or BSD options from
+  `config/system.h`;
+- reuse the existing scheduler factory, queued/direct submission policy, timer
+  heap, TCP owner types, SSL stream integration, and CPO surface;
+- keep Linux names out of cross-platform public headers.
+
+The queued/direct distinction may need slightly different wording on BSD:
+
+- queued: collect registrations or ready-to-register operations before flushing
+  a changelist to `kevent`;
+- direct: register immediately and wake the loop if needed.
+
+The semantic split still holds: `async_write_some` is one native attempt, while
+`async_write` is the composed write-all loop.
+
+## Build And Test Plan
+
+### Phase 1: Documentation And Platform Detection
+
+- Add the roadmap.
+- Extend `config/system.h` with FreeBSD and a shared BSD-family macro.
+- Teach CMake to compile platform sources conditionally.
+
+### Phase 2: BSD Base Wrappers
+
+- Add `base::kqueue` and event helpers.
+- Add unit tests for open/close, wakeup, pipe readiness, and timeout behavior.
+- Keep this phase independent from senders and high-level runtime code.
+
+### Phase 3: Native kqueue Context
+
+- Add `bsd_native::kqueue_context`.
+- Implement post queue, wakeup event, stop handling, event wait, and operation
+  dispatch.
+- Add context-level tests using simple posted operations and `EVFILT_USER`.
+
+### Phase 4: Socket Readiness Operations
+
+- Implement nonblocking accept, connect, read_some, write_some, and poll.
+- Add tests mirroring existing Linux socket tests where possible.
+- Validate EOF, cancellation, short write, and `EWOULDBLOCK` rearm paths.
+
+### Phase 5: High-Level Runtime Integration
+
+- Wire `bupp::io_context` to the BSD native backend.
+- Reuse TCP, TLS, DNS, timers, and write-all composition.
+- Run existing `io_context`, TCP, SSL, mini_curl, and raw echo tests/examples on
+  macOS.
+
+### Phase 6: FreeBSD Follow-Up
+
+- Add or adjust platform detection for FreeBSD.
+- Resolve small syscall and flag differences.
+- Run the same BSD backend tests on FreeBSD.
+- Document any remaining Darwin/FreeBSD behavior differences.
+
+## Main Risks
+
+- Readiness is not completion. Every operation must handle spurious readiness,
+  short I/O, and `EAGAIN` / `EWOULDBLOCK`.
+- Cancellation must unregister interests without racing a readiness event that
+  already carried the operation pointer.
+- One fd can have multiple logical operations; the backend needs clear rules for
+  one read-side and one write-side waiter, or an explicit queueing model.
+- Connect completion must use `getsockopt(SO_ERROR)`.
+- EOF semantics differ by filter and operation type.
+- Regular-file descriptor operations cannot be treated as equivalent to
+  `io_uring` file I/O.
+- macOS and FreeBSD share `kqueue`, but not every flag or edge case is identical.
+
+## Acceptance Criteria
+
+The macOS port is considered usable when:
+
+- the library configures and builds without `liburing`;
+- `base/bsd` tests pass;
+- async post, stop, timer, poll, TCP accept/connect/read/write, DNS, and TLS
+  tests pass;
+- `mini_curl` works for HTTP and HTTPS;
+- `raw_echo` works with multiple concurrent clients;
+- unsupported descriptor/file-I/O behavior is explicitly documented rather than
+  silently blocking the event loop.

@@ -1,6 +1,6 @@
 # bupp
 
-**bupp** is a modern C++20 async I/O library built on `liburing`. It provides a
+**bupp** is a modern C++20 async I/O library. It provides a
 scheduler-based async model — every I/O operation is a lazy sender that composes
 with the standard receiver pattern. TCP, TLS (OpenSSL), DNS resolution, timers,
 and composed writes all ship out of the box.
@@ -11,15 +11,25 @@ and composed writes all ship out of the box.
 
 ## Table of Contents
 
-- [Dependencies](#dependencies)
-- [Quick Start](#quick-start)
-- [Examples](#examples)
-  - [mini_curl](#mini_curl)
-  - [Low-level base examples](#low-level-base-examples)
-  - [Raw TCP echo](#raw-tcp-echo)
-  - [Standalone Asio echo](#standalone-asio-echo)
-- [Architecture](#architecture)
-- [Build Options](#build-options)
+- [bupp](#bupp)
+  - [Table of Contents](#table-of-contents)
+  - [Dependencies](#dependencies)
+  - [Quick Start](#quick-start)
+    - [Minimal Example](#minimal-example)
+  - [Examples](#examples)
+    - [mini\_curl](#mini_curl)
+      - [Usage](#usage)
+      - [Options](#options)
+      - [Design](#design)
+    - [Low-level base examples](#low-level-base-examples)
+    - [Raw TCP echo](#raw-tcp-echo)
+    - [Standalone Asio echo](#standalone-asio-echo)
+  - [Architecture](#architecture)
+    - [Read and write semantics](#read-and-write-semantics)
+  - [Build Options](#build-options)
+    - [Using a local bexec checkout](#using-a-local-bexec-checkout)
+    - [Shared library build](#shared-library-build)
+  - [License](#license)
 
 ---
 
