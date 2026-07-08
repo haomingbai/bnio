@@ -473,36 +473,37 @@ class BUPP_EXPORT io_uring_context {
    * Runs ready local and global tasks.
    */
   [[nodiscard]] run_phase handle_run_ready_tasks(
-      operation_queue& local_tasks) noexcept;
+      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
 
   /**
    * Waits for work when no tasks are immediately ready.
    */
   [[nodiscard]] run_phase handle_wait_for_work(
-      operation_queue& local_tasks) noexcept;
+      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
 
   /**
    * Drains remaining work during shutdown.
    */
   [[nodiscard]] run_phase handle_finish_drain(
-      operation_queue& local_tasks) noexcept;
+      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
 
   /**
    * Polls briefly for CQEs or posted tasks before blocking.
    */
-  [[nodiscard]] run_phase spin_for_work(operation_queue& local_tasks) noexcept;
+  [[nodiscard]] run_phase spin_for_work(operation_queue& local_tasks,
+                                        unsigned& local_task_budget) noexcept;
 
   /**
    * Waits on the condition variable while another thread waits for io_uring.
    */
   [[nodiscard]] run_phase wait_for_condition_work(
-      operation_queue& local_tasks) noexcept;
+      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
 
   /**
    * Waits for io_uring completion events.
    */
   [[nodiscard]] run_phase wait_for_io_work(
-      operation_queue& local_tasks) noexcept;
+      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
 
   /**
    * Publishes a single operation to the global task queue.
@@ -542,7 +543,8 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Collects and dispatches ready CQE-backed tasks.
    */
-  [[nodiscard]] bool collect_ready_cqes(operation_queue& local_tasks) noexcept;
+  [[nodiscard]] bool collect_ready_cqes(operation_queue& local_tasks,
+                                        unsigned& local_task_budget) noexcept;
 
   /**
    * Collects ready CQEs into an operation queue.
@@ -553,7 +555,8 @@ class BUPP_EXPORT io_uring_context {
    * Dispatches collected CQE tasks locally or through the global queue.
    */
   void dispatch_cqe_tasks(operation_queue& cqe_tasks, unsigned task_count,
-                          operation_queue& local_tasks) noexcept;
+                          operation_queue& local_tasks,
+                          unsigned& local_task_budget) noexcept;
 
   /**
    * Enqueues the operation represented by one CQE data record.
@@ -569,7 +572,8 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Drains work and marks the context finished.
    */
-  void finish(operation_queue& local_tasks) noexcept;
+  void finish(operation_queue& local_tasks,
+              unsigned& local_task_budget) noexcept;
 
   bupp::base::ring ring_;
   mutable std::mutex uring_mutex_;
@@ -590,7 +594,6 @@ class BUPP_EXPORT io_uring_context {
       io_uring_context_options{}.cqe_inline_completion_threshold;
   unsigned local_queue_threshold_ =
       io_uring_context_options{}.local_queue_threshold;
-  unsigned local_task_budget_ = 0;
 
   static thread_local io_uring_context* current_context_;
   static thread_local operation_queue* current_local_tasks_;

@@ -207,20 +207,21 @@ void io_uring_context::run() noexcept {
   current_context_ = this;
   current_local_tasks_ = &local_tasks;
 
+  unsigned local_task_budget = 0;
   run_phase phase = run_phase::run_ready_tasks;
 
   while (phase != run_phase::finished) {
     switch (phase) {
       case run_phase::run_ready_tasks:
-        phase = handle_run_ready_tasks(local_tasks);
+        phase = handle_run_ready_tasks(local_tasks, local_task_budget);
         break;
 
       case run_phase::wait_for_work:
-        phase = handle_wait_for_work(local_tasks);
+        phase = handle_wait_for_work(local_tasks, local_task_budget);
         break;
 
       case run_phase::finish_drain:
-        phase = handle_finish_drain(local_tasks);
+        phase = handle_finish_drain(local_tasks, local_task_budget);
         break;
 
       case run_phase::finished:
@@ -267,9 +268,9 @@ void io_uring_context::assert_running() const noexcept {
 }
 
 io_uring_context::run_phase io_uring_context::handle_run_ready_tasks(
-    operation_queue& local_tasks) noexcept {
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   // Reset the local-queue budget for this pass through the run loop.
-  local_task_budget_ = local_queue_threshold_;
+  local_task_budget = local_queue_threshold_;
 
   if (io_uring_operation_base* operations =
           reverse_tasks(local_tasks.pop_all())) {
@@ -285,29 +286,30 @@ io_uring_context::run_phase io_uring_context::handle_run_ready_tasks(
 }
 
 io_uring_context::run_phase io_uring_context::handle_wait_for_work(
-    operation_queue& local_tasks) noexcept {
-  const run_phase spin_result = spin_for_work(local_tasks);
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
+  const run_phase spin_result = spin_for_work(local_tasks, local_task_budget);
   if (spin_result != run_phase::wait_for_work) {
     return spin_result;
   }
 
   if (!io_waiter_active_.exchange(true, std::memory_order_acq_rel)) {
-    return wait_for_io_work(local_tasks);
+    return wait_for_io_work(local_tasks, local_task_budget);
   }
 
-  return wait_for_condition_work(local_tasks);
+  return wait_for_condition_work(local_tasks, local_task_budget);
 }
 
 io_uring_context::run_phase io_uring_context::handle_finish_drain(
-    operation_queue& local_tasks) noexcept {
-  finish(local_tasks);
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
+  finish(local_tasks, local_task_budget);
   return run_phase::finished;
 }
 
 io_uring_context::run_phase io_uring_context::spin_for_work(
-    operation_queue& local_tasks) noexcept {
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   for (unsigned round = 0; round < wait_spin_count_; ++round) {
-    if (collect_ready_cqes(local_tasks) || move_global_tasks(local_tasks)) {
+    if (collect_ready_cqes(local_tasks, local_task_budget) ||
+        move_global_tasks(local_tasks)) {
       return run_phase::run_ready_tasks;
     }
     if (should_finish()) {
@@ -319,9 +321,9 @@ io_uring_context::run_phase io_uring_context::spin_for_work(
 }
 
 io_uring_context::run_phase io_uring_context::wait_for_condition_work(
-    operation_queue& local_tasks) noexcept {
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   for (;;) {
-    const run_phase spin_result = spin_for_work(local_tasks);
+    const run_phase spin_result = spin_for_work(local_tasks, local_task_budget);
     if (spin_result != run_phase::wait_for_work) {
       return spin_result;
     }
@@ -339,9 +341,9 @@ io_uring_context::run_phase io_uring_context::wait_for_condition_work(
 }
 
 io_uring_context::run_phase io_uring_context::wait_for_io_work(
-    operation_queue& local_tasks) noexcept {
-  if (collect_ready_cqes(local_tasks) || move_global_tasks(local_tasks) ||
-      should_finish()) {
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
+  if (collect_ready_cqes(local_tasks, local_task_budget) ||
+      move_global_tasks(local_tasks) || should_finish()) {
     io_waiter_active_.store(false, std::memory_order_release);
     notify_waiters();
     return should_finish() ? run_phase::finish_drain
@@ -356,7 +358,8 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work(
     return run_phase::finished;
   }
 
-  if (collect_ready_cqes(local_tasks) || move_global_tasks(local_tasks)) {
+  if (collect_ready_cqes(local_tasks, local_task_budget) ||
+      move_global_tasks(local_tasks)) {
     return run_phase::run_ready_tasks;
   }
 
@@ -468,14 +471,14 @@ int io_uring_context::wait_for_cqe_event() noexcept {
 }
 
 bool io_uring_context::collect_ready_cqes(
-    operation_queue& local_tasks) noexcept {
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   operation_queue cqe_tasks;
   const unsigned task_count = collect_cqe_tasks(cqe_tasks);
   if (task_count == 0) {
     return false;
   }
 
-  dispatch_cqe_tasks(cqe_tasks, task_count, local_tasks);
+  dispatch_cqe_tasks(cqe_tasks, task_count, local_tasks, local_task_budget);
   return true;
 }
 
@@ -509,7 +512,7 @@ unsigned io_uring_context::collect_cqe_tasks(
 
 void io_uring_context::dispatch_cqe_tasks(
     operation_queue& cqe_tasks, unsigned task_count,
-    operation_queue& local_tasks) noexcept {
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   // Tier 1 — inline: small batch, always push to the local queue.
   if (task_count <= cqe_inline_completion_threshold_) {
     local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
@@ -520,10 +523,10 @@ void io_uring_context::dispatch_cqe_tasks(
   // When local_queue_threshold_ is 0 (default) this tier is unlimited and
   // CQEs never spill to the global queue on this path.
   if (local_queue_threshold_ == 0 ||
-      (local_task_budget_ > 0 && task_count <= local_task_budget_)) {
+      (local_task_budget > 0 && task_count <= local_task_budget)) {
     local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
     if (local_queue_threshold_ > 0) {
-      local_task_budget_ -= task_count;
+      local_task_budget -= task_count;
     }
     return;
   }
@@ -554,10 +557,11 @@ bool io_uring_context::should_finish() const noexcept {
   return state_.load(std::memory_order_acquire) != context_state::running;
 }
 
-void io_uring_context::finish(operation_queue& local_tasks) noexcept {
+void io_uring_context::finish(operation_queue& local_tasks,
+                              unsigned& local_task_budget) noexcept {
   for (;;) {
     (void)move_global_tasks(local_tasks);
-    (void)collect_ready_cqes(local_tasks);
+    (void)collect_ready_cqes(local_tasks, local_task_budget);
     (void)move_global_tasks(local_tasks);
 
     io_uring_operation_base* operations = reverse_tasks(local_tasks.pop_all());

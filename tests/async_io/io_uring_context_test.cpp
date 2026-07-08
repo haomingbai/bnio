@@ -7,17 +7,21 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
 #include <bexec/stop_token.hpp>
 #include <cassert>
 #include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <system_error>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 namespace {
 
@@ -309,6 +313,42 @@ struct post_batch_receiver {
     ++state->stopped;
     state->all_in_context =
         state->all_in_context && context != nullptr && context->is_in_context();
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+};
+
+struct concurrent_batch_state {
+  std::atomic<unsigned> completed{0};
+  std::atomic<unsigned> errors{0};
+  std::atomic<unsigned> stopped{0};
+};
+
+struct concurrent_batch_receiver {
+  std::shared_ptr<concurrent_batch_state> state =
+      std::make_shared<concurrent_batch_state>();
+  io_uring_context* context = nullptr;
+  unsigned target = 0;
+
+  void set_value(int result, unsigned /*flags*/) noexcept {
+    assert(result == 0);
+    const unsigned completed =
+        state->completed.fetch_add(1, std::memory_order_acq_rel) + 1;
+    if (completed == target && context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_error(std::error_code /*error*/) noexcept {
+    state->errors.fetch_add(1, std::memory_order_acq_rel);
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_stopped() noexcept {
+    state->stopped.fetch_add(1, std::memory_order_acq_rel);
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -723,6 +763,59 @@ void test_cqe_batch_window_drains_multiple_rounds() {
   assert(state->all_in_context);
 }
 
+void test_multithreaded_cqe_dispatch_with_local_queue_threshold() {
+  io_uring_context context;
+  io_uring_context_options options;
+  options.entries = 1024;
+  options.cqe_batch_window = 1;
+  options.wait_spin_count = 1024;
+  options.cqe_inline_completion_threshold = 0;
+  options.local_queue_threshold = 8;
+  if (!queue_init_or_skip(context, options)) {
+    return;
+  }
+
+  constexpr unsigned k_count = 512;
+  constexpr unsigned k_threads = 4;
+  auto state = std::make_shared<concurrent_batch_state>();
+
+  std::barrier ready(static_cast<std::ptrdiff_t>(k_threads + 1));
+  std::vector<std::thread> workers;
+  workers.reserve(k_threads);
+  for (unsigned index = 0; index < k_threads; ++index) {
+    workers.emplace_back([&context, &ready] {
+      ready.arrive_and_wait();
+      context.run();
+    });
+  }
+
+  ready.arrive_and_wait();
+  std::this_thread::sleep_for(std::chrono::milliseconds(25));
+
+  std::vector<
+      std::unique_ptr<io_uring_nop_operation<concurrent_batch_receiver>>>
+      operations;
+  operations.reserve(k_count);
+  for (unsigned index = 0; index < k_count; ++index) {
+    concurrent_batch_receiver recv;
+    recv.context = &context;
+    recv.target = k_count;
+    recv.state = state;
+    operations.push_back(
+        std::make_unique<io_uring_nop_operation<concurrent_batch_receiver>>(
+            context, std::move(recv)));
+    bexec::start(*operations.back());
+  }
+
+  for (auto& worker : workers) {
+    worker.join();
+  }
+
+  assert(state->completed.load(std::memory_order_acquire) == k_count);
+  assert(state->errors.load(std::memory_order_acquire) == 0);
+  assert(state->stopped.load(std::memory_order_acquire) == 0);
+}
+
 void test_submit_failure_posts_error_completion() {
   io_uring_context context;
   io_uring_context_options options;
@@ -776,6 +869,7 @@ int main() {
   test_global_posts_drain_in_post_order();
   test_cqe_completion_runs_without_uring_lock();
   test_cqe_batch_window_drains_multiple_rounds();
+  test_multithreaded_cqe_dispatch_with_local_queue_threshold();
   test_submit_failure_posts_error_completion();
   return 0;
 }
