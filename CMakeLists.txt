@@ -23,6 +23,13 @@ endif()
 option(BUPP_PLATFORM_LINUX "Build the Linux io_uring backend"
        ${BUPP_PLATFORM_LINUX_DEFAULT})
 
+set(BUPP_PLATFORM_BSD_DEFAULT OFF)
+if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+  set(BUPP_PLATFORM_BSD_DEFAULT ON)
+endif()
+option(BUPP_PLATFORM_BSD "Build the BSD kqueue base backend"
+       ${BUPP_PLATFORM_BSD_DEFAULT})
+
 if(BUPP_PLATFORM_LINUX)
   find_package(PkgConfig REQUIRED)
   find_package(OpenSSL REQUIRED)

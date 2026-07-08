@@ -21,6 +21,12 @@ else()
            BUPP_DISABLE_IO_CONTEXT_LINUX=1)
 endif()
 
+if(BUPP_PLATFORM_BSD)
+  add_subdirectory(base/bsd)
+else()
+  target_compile_definitions(bupp PUBLIC BUPP_DISABLE_BASE_BSD=1)
+endif()
+
 target_include_directories(
   bupp
   PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -40,7 +46,8 @@ target_sources(
          ${PROJECT_SOURCE_DIR}/include
          FILES
          ${BUPP_PUBLIC_HEADERS}
-         ${BUPP_LINUX_PUBLIC_HEADERS})
+         ${BUPP_LINUX_PUBLIC_HEADERS}
+         ${BUPP_BSD_PUBLIC_HEADERS})
 
 bupp_set_project_warnings(bupp)
 

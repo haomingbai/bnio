@@ -55,3 +55,14 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp.h
       PARENT_SCOPE)
 endif()
+
+# BSD-only public headers. These pull in <sys/event.h> and are exposed only
+# when the kqueue base backend is enabled.
+set(BUPP_BSD_PUBLIC_HEADERS "" PARENT_SCOPE)
+if(BUPP_PLATFORM_BSD)
+  set(BUPP_BSD_PUBLIC_HEADERS
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/bsd/event.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/bsd/event_list_view.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/bsd/kqueue.h
+      PARENT_SCOPE)
+endif()

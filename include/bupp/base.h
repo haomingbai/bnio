@@ -13,4 +13,11 @@
 #include <bupp/base/linux/submission_queue_entry.h>
 #endif
 
+// The BSD base layer wraps kqueue/kevent types.
+#if defined(BUPP_HAS_BASE_BSD)
+#include <bupp/base/bsd/event.h>
+#include <bupp/base/bsd/event_list_view.h>
+#include <bupp/base/bsd/kqueue.h>
+#endif
+
 #endif  // BUPP_BASE_H_

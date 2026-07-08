@@ -1,0 +1,73 @@
+#pragma once
+#ifndef BUPP_BASE_BSD_KQUEUE_H_
+#define BUPP_BASE_BSD_KQUEUE_H_
+
+#include <bupp/base/bsd/event.h>
+#include <bupp/export.h>
+
+#include <ctime>
+
+namespace bupp::base {
+
+/**
+ * RAII wrapper for a native kqueue descriptor.
+ *
+ * @see kqueue
+ * @see kevent
+ */
+class BUPP_EXPORT kqueue {
+ public:
+  /**
+   * Creates a closed kqueue wrapper.
+   */
+  kqueue() noexcept;
+
+  /**
+   * Closes the native descriptor if it is open.
+   */
+  ~kqueue() noexcept;
+
+  kqueue(const kqueue&) = delete;
+  kqueue& operator=(const kqueue&) = delete;
+
+  /**
+   * Moves ownership of the native descriptor.
+   */
+  kqueue(kqueue&& other) noexcept;
+
+  /**
+   * Moves ownership of the native descriptor.
+   */
+  kqueue& operator=(kqueue&& other) noexcept;
+
+  /**
+   * Opens a native kqueue descriptor.
+   *
+   * Returns 0 on success, or a negative errno value on failure.
+   */
+  int open() noexcept;
+
+  /**
+   * Closes the native descriptor if it is open.
+   */
+  void close() noexcept;
+
+  [[nodiscard]] bool is_open() const noexcept;
+  [[nodiscard]] int native_fd() const noexcept;
+
+  /**
+   * Calls kevent against the owned kqueue descriptor.
+   *
+   * Returns the native non-negative event count on success, or a negative errno
+   * value on failure.
+   */
+  int control(const event* changelist, int nchanges, event* eventlist,
+              int nevents, const timespec* timeout) noexcept;
+
+ private:
+  int fd_ = -1;
+};
+
+}  // namespace bupp::base
+
+#endif  // BUPP_BASE_BSD_KQUEUE_H_

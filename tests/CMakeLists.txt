@@ -4,3 +4,7 @@ if(BUPP_PLATFORM_LINUX)
   add_subdirectory(base/linux)
   add_subdirectory(io_context)
 endif()
+
+if(BUPP_PLATFORM_BSD)
+  add_subdirectory(base/bsd)
+endif()

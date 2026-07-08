@@ -7,6 +7,11 @@
 #define BUPP_SYSTEM_POSIX 1
 #elif defined(__APPLE__) && defined(__MACH__)
 #define BUPP_SYSTEM_DARWIN 1
+#define BUPP_SYSTEM_BSD 1
+#define BUPP_SYSTEM_POSIX 1
+#elif defined(__FreeBSD__)
+#define BUPP_SYSTEM_FREEBSD 1
+#define BUPP_SYSTEM_BSD 1
 #define BUPP_SYSTEM_POSIX 1
 #elif defined(_WIN32)
 #define BUPP_SYSTEM_WINDOWS 1
