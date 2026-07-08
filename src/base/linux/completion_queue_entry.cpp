@@ -22,7 +22,7 @@ void* completion_queue_entry::get_data() const noexcept {
 }
 
 std::uint64_t completion_queue_entry::get_data64() const noexcept {
-  return io_uring_cqe_get_data64(cqe_);
+  return detail::io_uring_cqe_get_data64(cqe_);
 }
 
 }  // namespace bupp::base

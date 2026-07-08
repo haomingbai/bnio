@@ -4,7 +4,6 @@
 
 #include <bupp/base/linux/ring.h>
 #include <bupp/export.h>
-#include <liburing.h>
 
 namespace bupp::base {
 

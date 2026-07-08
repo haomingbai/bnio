@@ -1,6 +1,5 @@
 #include <bupp/base/linux/probe.h>
 #include <bupp/base/linux/ring.h>
-#include <liburing.h>
 
 #include <cassert>
 #include <cerrno>

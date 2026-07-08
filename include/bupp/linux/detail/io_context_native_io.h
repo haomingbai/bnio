@@ -7,7 +7,6 @@
 #include <bupp/buffer.h>
 #include <bupp/linux/io_context.h>
 #include <bupp/tcp.h>
-#include <liburing.h>
 
 #include <bexec/completion_signatures.hpp>
 #include <bexec/detail/manual_lifetime.hpp>

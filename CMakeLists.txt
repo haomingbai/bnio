@@ -33,7 +33,7 @@ option(BUPP_PLATFORM_BSD "Build the BSD kqueue base backend"
 if(BUPP_PLATFORM_LINUX)
   find_package(PkgConfig REQUIRED)
   find_package(OpenSSL REQUIRED)
-  pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.2)
+  pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.1)
 endif()
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)

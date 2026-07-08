@@ -2,8 +2,8 @@
 #ifndef BUPP_BASE_LINUX_COMPLETION_QUEUE_ENTRY_H_
 #define BUPP_BASE_LINUX_COMPLETION_QUEUE_ENTRY_H_
 
+#include <bupp/base/linux/liburing.h>
 #include <bupp/export.h>
-#include <liburing.h>
 
 #include <cstdint>
 

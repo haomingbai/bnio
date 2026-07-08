@@ -139,7 +139,8 @@ int io_uring_context::init_ring_params(
   // Fallback: retry without bupp-managed setup flags for older kernels.
   if (flags != 0) {
     queue_params.reset();
-    flags &= ~(IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SQPOLL);
+    flags &= ~(bupp::base::detail::io_uring_setup_coop_taskrun |
+               IORING_SETUP_SQPOLL);
     queue_params.set_flags(flags);
     result = ring_.queue_init_params(entries, queue_params);
   }

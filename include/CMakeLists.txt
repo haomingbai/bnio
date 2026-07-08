@@ -33,6 +33,7 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/socket_address.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/completion_queue_entry.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/liburing.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/params.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/probe.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/ring.h

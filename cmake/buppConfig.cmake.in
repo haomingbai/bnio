@@ -5,7 +5,7 @@ include(CMakeFindDependencyMacro)
 if(@BUPP_PLATFORM_LINUX@)
   find_dependency(OpenSSL)
   find_dependency(PkgConfig)
-  pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.2)
+  pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.1)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/buppTargets.cmake")

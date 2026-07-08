@@ -18,7 +18,7 @@ void submission_queue_entry::set_data(void* data) noexcept {
 }
 
 void submission_queue_entry::set_data64(std::uint64_t data) noexcept {
-  io_uring_sqe_set_data64(sqe_, data);
+  detail::io_uring_sqe_set_data64(sqe_, data);
 }
 
 void submission_queue_entry::prep_nop() noexcept { io_uring_prep_nop(sqe_); }

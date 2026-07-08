@@ -268,7 +268,8 @@ int main(int argc, char** argv) {
 
   io_context_options opts;
   opts.platform.uring.entries = 1024;
-  opts.platform.uring.setup_flags = IORING_SETUP_COOP_TASKRUN;
+  opts.platform.uring.setup_flags =
+      bupp::base::detail::io_uring_setup_coop_taskrun;
   io_context ctx(opts);
   if (!ctx.is_open()) {
     std::cerr << "ctx unavailable\n";

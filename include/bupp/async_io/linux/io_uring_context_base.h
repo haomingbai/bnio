@@ -43,7 +43,7 @@ struct io_uring_context_options {
    * @see io_uring_queue_init
    * @see docs/design/io_uring-setup.md
    */
-  unsigned setup_flags = IORING_SETUP_COOP_TASKRUN;
+  unsigned setup_flags = bupp::base::detail::io_uring_setup_coop_taskrun;
 
   /**
    * Maximum number of ready CQEs collected in one batch.
