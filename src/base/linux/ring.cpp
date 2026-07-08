@@ -1,6 +1,8 @@
 #include <bupp/base/linux/ring.h>
 
 #include <cerrno>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <utility>
 
 namespace bupp::base {
@@ -93,8 +95,10 @@ int ring::wait_cqe_event(int ring_fd, unsigned wait_nr) noexcept {
   if (ring_fd < 0) {
     return -EINVAL;
   }
-  return io_uring_enter(static_cast<unsigned>(ring_fd), 0, wait_nr,
-                        IORING_ENTER_GETEVENTS, nullptr);
+  const int result = static_cast<int>(syscall(SYS_io_uring_enter, ring_fd, 0U,
+                                             wait_nr, IORING_ENTER_GETEVENTS,
+                                             nullptr, 0U));
+  return result < 0 ? -errno : result;
 }
 
 bool ring::is_open() const noexcept { return open_; }

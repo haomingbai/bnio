@@ -90,20 +90,6 @@ class BUPP_EXPORT submission_queue_entry {
   void set_data64(std::uint64_t data) noexcept;
 
   /**
-   * Sets SQE flags.
-   *
-   * @see io_uring_sqe_set_flags
-   */
-  void set_flags(unsigned flags) noexcept;
-
-  /**
-   * Sets the provided buffer group ID.
-   *
-   * @see io_uring_sqe_set_buf_group
-   */
-  void set_buf_group(int bgid) noexcept;
-
-  /**
    * Prepares a no-op operation.
    *
    * @see io_uring_prep_nop
@@ -162,71 +148,20 @@ class BUPP_EXPORT submission_queue_entry {
   void prep_poll_add(int fd, unsigned poll_mask) noexcept;
 
   /**
-   * Prepares a multishot poll add operation.
-   *
-   * @see io_uring_prep_poll_multishot
-   */
-  void prep_poll_multishot(int fd, unsigned poll_mask) noexcept;
-
-  /**
-   * Prepares a poll remove operation.
-   *
-   * @see io_uring_prep_poll_remove
-   */
-  void prep_poll_remove(std::uint64_t user_data) noexcept;
-
-  /**
-   * Prepares a poll update operation.
-   *
-   * @see io_uring_prep_poll_update
-   */
-  void prep_poll_update(std::uint64_t old_user_data,
-                        std::uint64_t new_user_data, unsigned poll_mask,
-                        unsigned flags) noexcept;
-
-  /**
    * Prepares a timeout operation.
    *
    * @see io_uring_prep_timeout
    */
-  void prep_timeout(const __kernel_timespec* ts, unsigned count,
+  void prep_timeout(__kernel_timespec* ts, unsigned count,
                     unsigned flags) noexcept;
-
-  /**
-   * Prepares a timeout remove operation.
-   *
-   * @see io_uring_prep_timeout_remove
-   */
-  void prep_timeout_remove(std::uint64_t user_data, unsigned flags) noexcept;
 
   /**
    * Prepares a timeout update operation.
    *
    * @see io_uring_prep_timeout_update
    */
-  void prep_timeout_update(const __kernel_timespec* ts, std::uint64_t user_data,
+  void prep_timeout_update(__kernel_timespec* ts, std::uint64_t user_data,
                            unsigned flags) noexcept;
-
-  /**
-   * Prepares an async cancel operation using pointer user data.
-   *
-   * @see io_uring_prep_cancel
-   */
-  void prep_cancel(const void* user_data, int flags) noexcept;
-
-  /**
-   * Prepares an async cancel operation using 64-bit user data.
-   *
-   * @see io_uring_prep_cancel64
-   */
-  void prep_cancel64(std::uint64_t user_data, int flags) noexcept;
-
-  /**
-   * Prepares an async cancel operation matching a file descriptor.
-   *
-   * @see io_uring_prep_cancel_fd
-   */
-  void prep_cancel_fd(int fd, unsigned flags) noexcept;
 
   /**
    * Prepares a read operation.
@@ -259,65 +194,6 @@ class BUPP_EXPORT submission_queue_entry {
    */
   void prep_writev(int fd, const iovec* iovecs, unsigned nr_vecs,
                    std::uint64_t offset) noexcept;
-
-  /**
-   * Prepares an openat operation.
-   *
-   * @see io_uring_prep_openat
-   */
-  void prep_openat(int dfd, const char* path, int flags, mode_t mode) noexcept;
-
-  /**
-   * Prepares an open operation.
-   *
-   * @see io_uring_prep_open
-   */
-  void prep_open(const char* path, int flags, mode_t mode) noexcept;
-
-  /**
-   * Prepares a close operation.
-   *
-   * @see io_uring_prep_close
-   */
-  void prep_close(int fd) noexcept;
-
-  /**
-   * Prepares an fsync operation.
-   *
-   * @see io_uring_prep_fsync
-   */
-  void prep_fsync(int fd, unsigned fsync_flags) noexcept;
-
-  /**
-   * Prepares a statx operation.
-   *
-   * @see io_uring_prep_statx
-   */
-  void prep_statx(int dfd, const char* path, int flags, unsigned mask,
-                  struct statx* statxbuf) noexcept;
-
-  /**
-   * Prepares a fallocate operation.
-   *
-   * @see io_uring_prep_fallocate
-   */
-  void prep_fallocate(int fd, int mode, std::uint64_t offset,
-                      std::uint64_t len) noexcept;
-
-  /**
-   * Prepares a provided buffers operation.
-   *
-   * @see io_uring_prep_provide_buffers
-   */
-  void prep_provide_buffers(void* addr, int len, int nr, int bgid,
-                            int bid) noexcept;
-
-  /**
-   * Prepares a remove buffers operation.
-   *
-   * @see io_uring_prep_remove_buffers
-   */
-  void prep_remove_buffers(int nr, int bgid) noexcept;
 
  private:
   io_uring_sqe* sqe_ = nullptr;

@@ -38,12 +38,6 @@ struct io_uring_context_options {
    * Defaults to COOP_TASKRUN (supported since Linux 5.19) — lets the kernel
    * defer task_work, reducing involuntary context switches.
    *
-   * Set IORING_SETUP_SINGLE_ISSUER explicitly when you guarantee that all
-   * submissions come from a single thread (benchmarks, dedicated event-loop
-   * threads).  Do NOT set it when multiple threads may call post() or
-   * timer::cancel() / timer::expires_at() — those paths submit SQEs that
-   * would race with the run thread.
-   *
    * The library falls back automatically on EINVAL for kernels < 5.19.
    *
    * @see io_uring_queue_init
@@ -387,15 +381,10 @@ class BUPP_EXPORT io_uring_context {
   // --- manual batch submission (caller holds uring_mutex_) ---
 
   /**
-   * Returns a lock guard for the io_uring mutex when multi-issuer locking is
-   * required.
+   * Returns a lock guard for the io_uring mutex.
    */
   [[nodiscard]] std::unique_lock<std::mutex> lock_uring() const noexcept {
-    std::unique_lock lock(uring_mutex_, std::defer_lock);
-    if (!single_issuer_) {
-      lock.lock();
-    }
-    return lock;
+    return std::unique_lock(uring_mutex_);
   }
 
   /**
@@ -462,8 +451,8 @@ class BUPP_EXPORT io_uring_context {
   struct operation_queue;
 
   /**
-   * Initialises the ring with the supplied flags, retrying without
-   * SINGLE_ISSUER / COOP_TASKRUN / SQPOLL on EINVAL.
+   * Initialises the ring with the supplied flags, retrying without bupp-managed
+   * setup flags on EINVAL.
    *
    * @return 0 on success, or a negative errno.
    */
@@ -584,7 +573,6 @@ class BUPP_EXPORT io_uring_context {
 
   bupp::base::ring ring_;
   mutable std::mutex uring_mutex_;
-  bool single_issuer_ = false;
   unsigned kernel_features_ = 0;
 
   // Cross-thread task publication stack. run() workers drain it in one batch

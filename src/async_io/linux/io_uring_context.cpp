@@ -110,14 +110,12 @@ int io_uring_context::queue_init(
   queue_initialized_ = true;
   apply_context_options(options);
   wake_task_pending_ = false;
-  single_issuer_ = false;
 
   bupp::base::params queue_params;
   const unsigned flags = prepare_queue_params(options, queue_params);
   const int result = init_ring_params(options.entries, flags, queue_params);
 
   if (result >= 0) {
-    single_issuer_ = (queue_params.flags() & IORING_SETUP_SINGLE_ISSUER) != 0;
     kernel_features_ = queue_params.features();
   } else {
     kernel_features_ = 0;
@@ -138,7 +136,7 @@ int io_uring_context::init_ring_params(
     return result;
   }
 
-  // Fallback: retry without COOP_TASKRUN / SQPOLL for kernels < 5.19.
+  // Fallback: retry without bupp-managed setup flags for older kernels.
   if (flags != 0) {
     queue_params.reset();
     flags &= ~(IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SQPOLL);

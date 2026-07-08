@@ -102,27 +102,6 @@ class BUPP_EXPORT completion_queue_entry {
    */
   [[nodiscard]] std::uint64_t get_data64() const noexcept;
 
-  /**
-   * Returns whether the parent SQE will produce more CQEs.
-   *
-   * @see IORING_CQE_F_MORE
-   */
-  [[nodiscard]] bool has_more() const noexcept;
-
-  /**
-   * Returns whether this CQE carries a selected buffer ID.
-   *
-   * @see IORING_CQE_F_BUFFER
-   */
-  [[nodiscard]] bool has_buffer() const noexcept;
-
-  /**
-   * Returns the selected buffer ID encoded in the CQE flags.
-   *
-   * @see IORING_CQE_BUFFER_SHIFT
-   */
-  [[nodiscard]] unsigned buffer_id() const noexcept;
-
  private:
   io_uring_cqe* cqe_ = nullptr;
 };

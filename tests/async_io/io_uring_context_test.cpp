@@ -427,7 +427,6 @@ void test_io_operations_accept_async_io_views() {
 void test_timeout_operation_prepares_async_io_time() {
   io_uring_context context;
   io_uring_sqe raw_sqe{};
-  io_uring_initialize_sqe(&raw_sqe);
   bupp::base::submission_queue_entry sqe(&raw_sqe);
 
   io_uring_timeout_operation operation(

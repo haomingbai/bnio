@@ -25,16 +25,4 @@ std::uint64_t completion_queue_entry::get_data64() const noexcept {
   return io_uring_cqe_get_data64(cqe_);
 }
 
-bool completion_queue_entry::has_more() const noexcept {
-  return (flags() & IORING_CQE_F_MORE) != 0;
-}
-
-bool completion_queue_entry::has_buffer() const noexcept {
-  return (flags() & IORING_CQE_F_BUFFER) != 0;
-}
-
-unsigned completion_queue_entry::buffer_id() const noexcept {
-  return flags() >> IORING_CQE_BUFFER_SHIFT;
-}
-
 }  // namespace bupp::base

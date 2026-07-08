@@ -180,9 +180,7 @@ Key patterns demonstrated:
 | `bupp_base_probe`             | Print kernel opcode support                               |
 | `bupp_base_nop`               | Smallest possible operation with `user_data` validation   |
 | `bupp_base_timeout`           | Kernel timer completions                                  |
-| `bupp_base_file_io`           | Write, fsync, read, close a temp file through io_uring    |
 | `bupp_base_poll`              | Wait for pipe readiness                                   |
-| `bupp_base_provided_buffers`  | Receive into kernel-selected provided buffers             |
 | `bupp_base_echo_server`       | Echo server event loop (accept → recv → send)             |
 
 ```sh

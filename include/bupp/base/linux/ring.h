@@ -141,19 +141,19 @@ class BUPP_EXPORT ring {
     }
 
     unsigned consumed_entries = 0;
-    unsigned advanced_slots = 0;
+    unsigned advanced_entries = 0;
     unsigned head = 0;
     io_uring_cqe* raw_cqe = nullptr;
     io_uring_for_each_cqe(&ring_, head, raw_cqe) {
       handler(completion_queue_entry(raw_cqe));
-      advanced_slots += io_uring_cqe_nr(raw_cqe);
+      advanced_entries += cqe_advance_count(raw_cqe);
       ++consumed_entries;
       if (consumed_entries == max_count) {
         break;
       }
     }
 
-    io_uring_cq_advance(&ring_, advanced_slots);
+    io_uring_cq_advance(&ring_, advanced_entries);
     return consumed_entries;
   }
 
@@ -194,6 +194,16 @@ class BUPP_EXPORT ring {
   [[nodiscard]] bool is_open() const noexcept;
 
  private:
+  [[nodiscard]] static unsigned cqe_advance_count(
+      const io_uring_cqe* cqe) noexcept {
+#if defined(IORING_CQE_F_32)
+    return (cqe->flags & IORING_CQE_F_32) != 0 ? 2U : 1U;
+#else
+    (void)cqe;
+    return 1U;
+#endif
+  }
+
   io_uring ring_{};
   bool open_ = false;
 };

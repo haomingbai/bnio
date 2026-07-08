@@ -1,22 +1,13 @@
 # io_uring Setup Optimizations
 
-This page documents the io_uring setup flags and runtime optimizations
-applied by `bupp::async_io::linux_native::io_uring_context`.
+This page documents the io_uring setup flags applied by
+`bupp::async_io::linux_native::io_uring_context`.
 
 ## Default Setup Flags
 
-Since kernel 5.19 (2022), Linux supports two flags that materially reduce
-per-submission overhead when the application follows a single-threaded event
-loop model — exactly the model that `io_uring_context::run()` implements.
-
-### `IORING_SETUP_SINGLE_ISSUER`
-
-| Property | Value |
-|---|---|
-| Kernel requirement | Linux ≥ 6.0 |
-| What it does | Tells the kernel that only one thread will submit SQEs. The kernel skips internal `mutex_lock`/`mutex_unlock` pairs around every submission. |
-| Why it helps | Eliminates kernel-side locking on the hot `io_uring_enter` path. |
-| Compatibility fallback | If `io_uring_queue_init_params` returns `-EINVAL`, the library retries without this flag. |
+Since kernel 5.19 (2022), Linux supports `IORING_SETUP_COOP_TASKRUN`, which
+can reduce task-work wakeups while preserving bupp's multi-submitter locking
+model.
 
 ### `IORING_SETUP_COOP_TASKRUN`
 
@@ -32,34 +23,10 @@ loop model — exactly the model that `io_uring_context::run()` implements.
 `io_uring_context_options::setup_flags` defaults to:
 
 ```cpp
-IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN
+IORING_SETUP_COOP_TASKRUN
 ```
 
 Applications that need the old behaviour can explicitly set `setup_flags = 0`.
-
-## Runtime: Conditional Mutex Bypass
-
-When `IORING_SETUP_SINGLE_ISSUER` is accepted by the kernel, `io_uring_context`
-sets an internal flag `single_issuer_ = true`. Two hot paths then skip
-`uring_mutex_`:
-
-### CQE Collection (`collect_cqe_tasks`)
-
-```
-spin_for_work() → collect_ready_cqes() → collect_cqe_tasks()
-                                                    ↑
-                                          skips uring_mutex_ when
-                                          single_issuer_ == true
-```
-
-`collect_cqe_tasks()` reads CQEs via `ring_.consume_ready_cqes()`.  With
-`SINGLE_ISSUER` the kernel guarantees no concurrent submission, so reading
-CQEs without a userspace lock is safe.
-
-### Submission (`submit`, `submit_wake_task`)
-
-`submit()` and `submit_wake_task()` acquire `uring_mutex_` only when
-`single_issuer_` is false.
 
 ## Kernel Feature Probing
 
@@ -97,5 +64,5 @@ more than CPU efficiency.
 
 On kernels older than 5.19, `io_uring_queue_init_params` returns `-EINVAL`
 for the new flags.  The library detects this and retries with `setup_flags
-& ~(IORING_SETUP_SINGLE_ISSUER | IORING_SETUP_COOP_TASKRUN)`, falling back
-to the pre-optimization behaviour transparently.
+& ~IORING_SETUP_COOP_TASKRUN`, falling back to the pre-optimization behaviour
+transparently.

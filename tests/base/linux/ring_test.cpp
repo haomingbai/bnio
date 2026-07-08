@@ -58,7 +58,6 @@ void test_nop_round_trip() {
   assert(cqe.raw() != nullptr);
   assert(cqe.res() == 0);
   assert(cqe.get_data64() == k_user_data);
-  assert(!cqe.has_more());
 
   ring.cqe_seen(cqe);
 
