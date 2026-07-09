@@ -18,9 +18,8 @@ void io_uring_context::run() noexcept {
 
   operation_queue local_tasks;
   io_uring_context* previous_context = current_context_;
-  operation_queue* previous_local_tasks = current_local_tasks_;
   current_context_ = this;
-  current_local_tasks_ = &local_tasks;
+  this->local_tasks_ = &local_tasks;
 
   unsigned local_task_budget = 0;
   run_phase phase = run_phase::run_ready_tasks;
@@ -44,8 +43,8 @@ void io_uring_context::run() noexcept {
     }
   }
 
+  this->local_tasks_ = nullptr;
   current_context_ = previous_context;
-  current_local_tasks_ = previous_local_tasks;
   run_active_.store(false, std::memory_order_release);
 }
 

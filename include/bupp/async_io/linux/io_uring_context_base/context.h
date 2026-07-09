@@ -471,7 +471,7 @@ class BUPP_EXPORT io_uring_context {
       io_uring_context_options{}.local_queue_threshold;
 
   static thread_local io_uring_context* current_context_;
-  static thread_local operation_queue* current_local_tasks_;
+  operation_queue* local_tasks_ = nullptr;
 };
 
 }  // namespace bupp::async_io::linux_native

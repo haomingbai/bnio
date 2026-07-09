@@ -10,8 +10,8 @@ namespace bupp::async_io::linux_native {
 int io_uring_context::post(io_uring_operation_base& operation) noexcept {
   assert_running();
 
-  if (current_context_ == this && current_local_tasks_ != nullptr) {
-    current_local_tasks_->push(operation);
+  if (current_context_ == this && this->local_tasks_ != nullptr) {
+    this->local_tasks_->push(operation);
     return 0;
   }
 

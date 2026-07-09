@@ -25,8 +25,6 @@ unsigned prepare_queue_params(const io_uring_context_options& options,
 }  // namespace
 
 thread_local io_uring_context* io_uring_context::current_context_ = nullptr;
-thread_local io_uring_context::operation_queue*
-    io_uring_context::current_local_tasks_ = nullptr;
 
 io_uring_context::io_uring_context() noexcept = default;
 
