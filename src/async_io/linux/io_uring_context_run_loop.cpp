@@ -4,7 +4,15 @@ namespace bupp::async_io::linux_native {
 
 void io_uring_context::run() noexcept {
   assert_running();
+  bool expected_active = false;
+  if (!run_active_.compare_exchange_strong(expected_active, true,
+                                           std::memory_order_acq_rel,
+                                           std::memory_order_acquire)) {
+    return;
+  }
+
   if (!is_open()) {
+    run_active_.store(false, std::memory_order_release);
     return;
   }
 
@@ -38,6 +46,7 @@ void io_uring_context::run() noexcept {
 
   current_context_ = previous_context;
   current_local_tasks_ = previous_local_tasks;
+  run_active_.store(false, std::memory_order_release);
 }
 
 int io_uring_context::stop() noexcept {
@@ -49,12 +58,7 @@ int io_uring_context::stop() noexcept {
     return 0;
   }
 
-  notify_waiters();
-
-  if (io_waiter_active_.load(std::memory_order_acquire)) {
-    return submit_wake_task();
-  }
-  return 0;
+  return signal_eventfd();
 }
 
 bool io_uring_context::is_in_context() const noexcept {
@@ -86,11 +90,7 @@ io_uring_context::run_phase io_uring_context::handle_wait_for_work(
     return spin_result;
   }
 
-  if (!io_waiter_active_.exchange(true, std::memory_order_acq_rel)) {
-    return wait_for_io_work(local_tasks, local_task_budget);
-  }
-
-  return wait_for_condition_work(local_tasks, local_task_budget);
+  return wait_for_io_work(local_tasks, local_task_budget);
 }
 
 io_uring_context::run_phase io_uring_context::handle_finish_drain(
@@ -114,37 +114,16 @@ io_uring_context::run_phase io_uring_context::spin_for_work(
   return run_phase::wait_for_work;
 }
 
-io_uring_context::run_phase io_uring_context::wait_for_condition_work(
-    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
-  for (;;) {
-    const run_phase spin_result = spin_for_work(local_tasks, local_task_budget);
-    if (spin_result != run_phase::wait_for_work) {
-      return spin_result;
-    }
-    if (!io_waiter_active_.load(std::memory_order_acquire)) {
-      return run_phase::wait_for_work;
-    }
-
-    std::unique_lock lock(wait_mutex_);
-    wait_cv_.wait(lock, [this] {
-      return should_finish() ||
-             global_tasks_.load(std::memory_order_acquire) != nullptr ||
-             !io_waiter_active_.load(std::memory_order_acquire);
-    });
-  }
-}
-
 io_uring_context::run_phase io_uring_context::wait_for_io_work(
     operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   if (collect_ready_cqes(local_tasks, local_task_budget) ||
       move_global_tasks(local_tasks) || should_finish()) {
-    io_waiter_active_.store(false, std::memory_order_release);
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
   }
 
+  (void)submit_eventfd_poll();
   const int wait_result = wait_for_cqe_event();
-  io_waiter_active_.store(false, std::memory_order_release);
 
   if (wait_result < 0 && !should_finish()) {
     return run_phase::finished;
@@ -177,7 +156,6 @@ void io_uring_context::finish(operation_queue& local_tasks,
   }
 
   state_.store(context_state::finished, std::memory_order_release);
-  notify_waiters();
 }
 
 }  // namespace bupp::async_io::linux_native

@@ -51,7 +51,10 @@ These are copyable, self-contained value types.
 ### `linux_native::io_uring_context` — Platform Operation Context
 
 Within `bupp::async_io::linux_native`, `io_uring_context` owns a `base::ring`
-and provides an event loop with intrusive operation scheduling:
+and provides an event loop with intrusive operation scheduling. Cross-thread
+producers publish work through an MPSC intrusive stack and wake the single
+consumer with an eventfd-backed poll request; this low-level loop does not use
+`std::mutex` or `std::condition_variable`.
 
 ```cpp
 class io_uring_context {
@@ -83,6 +86,9 @@ public:
     [[nodiscard]] bool is_in_context() const noexcept;
 };
 ```
+
+`io_uring_context_options::event_fd` may name a caller-owned eventfd. A
+negative value, the default, makes the context create and own a private eventfd.
 
 All operations derive from `io_uring_operation_base`:
 

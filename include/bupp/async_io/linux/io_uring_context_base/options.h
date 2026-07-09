@@ -86,6 +86,15 @@ struct io_uring_context_options {
    * @see io_uring_params::sq_thread_idle
    */
   unsigned sqpoll_idle_ms = 1000;
+
+  /**
+   * Optional non-owning eventfd used to wake the context run loop.
+   *
+   * A negative value makes the context create and own a private eventfd.
+   * Supplying a descriptor lets an embedding layer provide its own eventfd;
+   * the caller must keep it valid until queue_exit() or context destruction.
+   */
+  int event_fd = -1;
 };
 
 }  // namespace bupp::async_io::linux_native

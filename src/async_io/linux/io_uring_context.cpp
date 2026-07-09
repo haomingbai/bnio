@@ -1,6 +1,8 @@
 #include <bupp/async_io/linux/io_uring_context.h>
 #include <bupp/base/linux/liburing.h>
 #include <bupp/base/linux/params.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <cerrno>
@@ -47,14 +49,27 @@ void io_uring_context::apply_context_options(
 int io_uring_context::queue_init(
     const io_uring_context_options& options) noexcept {
   global_tasks_.store(nullptr, std::memory_order_release);
-  io_waiter_active_.store(false, std::memory_order_release);
+  run_active_.store(false, std::memory_order_release);
 
   if (queue_initialized_) {
     return -EALREADY;
   }
   queue_initialized_ = true;
   apply_context_options(options);
-  wake_task_pending_ = false;
+  eventfd_poll_pending_ = false;
+
+  if (options.event_fd >= 0) {
+    event_fd_ = options.event_fd;
+    owns_event_fd_ = false;
+  } else {
+    event_fd_ = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (event_fd_ < 0) {
+      const int error = -errno;
+      queue_initialized_ = false;
+      return error;
+    }
+    owns_event_fd_ = true;
+  }
 
   bupp::base::params queue_params;
   const unsigned flags = prepare_queue_params(options, queue_params);
@@ -66,9 +81,34 @@ int io_uring_context::queue_init(
     kernel_features_ = 0;
   }
 
-  state_.store(result >= 0 ? context_state::running : context_state::finished,
-               std::memory_order_release);
-  return result;
+  if (result < 0) {
+    state_.store(context_state::finished, std::memory_order_release);
+    if (owns_event_fd_ && event_fd_ >= 0) {
+      (void)::close(event_fd_);
+    }
+    event_fd_ = -1;
+    owns_event_fd_ = false;
+    return result;
+  }
+
+  state_.store(context_state::running, std::memory_order_release);
+  {
+    auto lock = lock_uring();
+    const int poll_result = submit_eventfd_poll_locked();
+    if (poll_result < 0) {
+      state_.store(context_state::finished, std::memory_order_release);
+      lock.reset();
+      ring_.queue_exit();
+      if (owns_event_fd_ && event_fd_ >= 0) {
+        (void)::close(event_fd_);
+      }
+      event_fd_ = -1;
+      owns_event_fd_ = false;
+      return poll_result;
+    }
+  }
+
+  return 0;
 }
 
 int io_uring_context::init_ring_params(
@@ -95,12 +135,17 @@ int io_uring_context::init_ring_params(
 
 void io_uring_context::queue_exit() noexcept {
   state_.store(context_state::finished, std::memory_order_release);
-  io_waiter_active_.store(false, std::memory_order_release);
   global_tasks_.store(nullptr, std::memory_order_release);
-  notify_waiters();
+  (void)signal_eventfd();
 
-  wake_task_pending_ = false;
+  eventfd_poll_pending_ = false;
   ring_.queue_exit();
+  if (owns_event_fd_ && event_fd_ >= 0) {
+    (void)::close(event_fd_);
+  }
+  event_fd_ = -1;
+  owns_event_fd_ = false;
+  queue_initialized_ = false;
 }
 
 bool io_uring_context::is_open() const noexcept { return ring_.is_open(); }

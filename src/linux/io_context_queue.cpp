@@ -1,5 +1,6 @@
 #include <bupp/linux/io_context.h>
 
+#include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <mutex>
@@ -41,22 +42,32 @@ std::size_t io_context::queued_io_size() const noexcept {
 }
 
 void io_context::enqueue_io(operation_base& operation) noexcept {
+  native_worker& worker = ensure_operation_worker(operation);
   const std::size_t prev =
       pending_io_count_.fetch_add(1, std::memory_order_acq_rel);
+  const std::size_t worker_prev =
+      worker.pending_io_count.fetch_add(1, std::memory_order_acq_rel);
 
   operation_base* current_head =
-      pending_io_head_.load(std::memory_order_acquire);
+      worker.pending_io_head.load(std::memory_order_acquire);
   do {
     operation.pending_next = current_head;
-  } while (!pending_io_head_.compare_exchange_weak(current_head, &operation,
-                                                   std::memory_order_acq_rel,
-                                                   std::memory_order_acquire));
+  } while (!worker.pending_io_head.compare_exchange_weak(
+      current_head, &operation, std::memory_order_acq_rel,
+      std::memory_order_acquire));
 
-  const bool reached_max = linux_options_.max_queued_io_operations > 0 &&
-                           prev + 1 >= linux_options_.max_queued_io_operations;
+  const std::size_t active_workers = std::max<std::size_t>(
+      1, active_native_worker_count_.load(std::memory_order_acquire));
+  const std::size_t worker_flush_threshold =
+      linux_options_.max_queued_io_operations == 0
+          ? 0
+          : std::max<std::size_t>(
+                1, linux_options_.max_queued_io_operations / active_workers);
+  const bool reached_max =
+      worker_flush_threshold > 0 && worker_prev + 1 >= worker_flush_threshold;
   if (linux_options_.queued_io_flush_after <= duration::zero()) {
-    if (prev == 0 || reached_max) {
-      (void)flush_io_queue(true);
+    if (worker_prev == 0 || reached_max) {
+      (void)flush_io_queue(worker, true);
     }
     return;
   }
@@ -65,21 +76,24 @@ void io_context::enqueue_io(operation_base& operation) noexcept {
     arm_flush_timer();
   }
   if (reached_max) {
-    (void)flush_io_queue(false);
+    (void)flush_io_queue(worker, false);
   }
 }
 
 void io_context::submit_direct(operation_base& operation) noexcept {
-  const int result = native_context_.submit(operation);
+  native_worker& worker = ensure_operation_worker(operation);
+  async_io::linux_native::io_uring_context& native_context = *worker.context;
+  const int result = native_context.submit(operation);
   if (result < 0) {
     operation.complete_submit_error(result);
-    (void)native_context_.post(operation);
+    (void)native_context.post(operation);
   }
 }
 
 void io_context::post(
     async_io::linux_native::io_uring_operation_base& operation) noexcept {
-  (void)native_context_.post(operation);
+  native_worker& worker = select_worker();
+  (void)worker.context->post(operation);
 }
 
 std::error_code io_context::flush_io_queue() noexcept {
@@ -87,8 +101,27 @@ std::error_code io_context::flush_io_queue() noexcept {
 }
 
 std::error_code io_context::flush_io_queue(bool wait_for_gate) noexcept {
-  auto lock = wait_for_gate ? native_context_.lock_uring()
-                            : native_context_.try_lock_uring();
+  std::error_code first_error;
+  const std::size_t worker_count =
+      active_native_worker_count_.load(std::memory_order_acquire);
+  for (std::size_t index = 0; index < worker_count; ++index) {
+    native_worker* worker = native_workers_[index].get();
+    if (worker == nullptr || worker->context == nullptr) {
+      continue;
+    }
+    const std::error_code error = flush_io_queue(*worker, wait_for_gate);
+    if (!first_error && error) {
+      first_error = error;
+    }
+  }
+  return first_error;
+}
+
+std::error_code io_context::flush_io_queue(native_worker& worker,
+                                           bool wait_for_gate) noexcept {
+  async_io::linux_native::io_uring_context& native_context = *worker.context;
+  auto lock = wait_for_gate ? native_context.lock_uring()
+                            : native_context.try_lock_uring();
   if (!lock) {
     if (queued_io_size() != 0 &&
         linux_options_.queued_io_flush_after > duration::zero()) {
@@ -97,7 +130,7 @@ std::error_code io_context::flush_io_queue(bool wait_for_gate) noexcept {
     return {};
   }
 
-  operation_base* operations = take_pending_io();
+  operation_base* operations = take_pending_io(worker);
   const std::size_t operation_count = count_operations(operations);
   if (operations == nullptr) {
     lock.reset();
@@ -108,10 +141,14 @@ std::error_code io_context::flush_io_queue(bool wait_for_gate) noexcept {
     return {};
   }
 
-  std::error_code error = flush_operations(operations, lock);
+  std::error_code error = flush_operations(operations, native_context, lock);
   [[maybe_unused]] const std::size_t prev =
       pending_io_count_.fetch_sub(operation_count, std::memory_order_acq_rel);
   assert(prev >= operation_count);
+  [[maybe_unused]] const std::size_t worker_prev =
+      worker.pending_io_count.fetch_sub(operation_count,
+                                        std::memory_order_acq_rel);
+  assert(worker_prev >= operation_count);
 
   if (linux_options_.queued_io_flush_after > duration::zero()) {
     (void)queued_io_flush_timer_.cancel();
@@ -165,6 +202,7 @@ static io_context::operation_base* try_prepare_batch(
 
 std::error_code io_context::flush_operations(
     operation_base* operations,
+    async_io::linux_native::io_uring_context& native_context,
     async_io::linux_native::io_uring_context::uring_lock& lock) noexcept {
   if (operations == nullptr) {
     lock.reset();
@@ -176,9 +214,9 @@ std::error_code io_context::flush_operations(
   operation_base** failed_tail = &failed_head;
 
   while (operations != nullptr) {
-    operations = try_prepare_batch(operations, native_context_, failed_tail,
-                                   first_error);
-    const int result = native_context_.submit_locked();
+    operations =
+        try_prepare_batch(operations, native_context, failed_tail, first_error);
+    const int result = native_context.submit_locked();
     if (result < 0 && first_error == 0) first_error = result;
   }
 
@@ -188,16 +226,17 @@ std::error_code io_context::flush_operations(
     operation_base* op = failed_head;
     failed_head = failed_head->pending_next;
     op->pending_next = nullptr;
-    (void)native_context_.post(*op);
+    (void)native_context.post(*op);
   }
 
   if (first_error < 0) return make_submit_error(first_error);
   return {};
 }
 
-io_context::operation_base* io_context::take_pending_io() noexcept {
+io_context::operation_base* io_context::take_pending_io(
+    native_worker& worker) noexcept {
   operation_base* operations =
-      pending_io_head_.exchange(nullptr, std::memory_order_acq_rel);
+      worker.pending_io_head.exchange(nullptr, std::memory_order_acq_rel);
   if (operations != nullptr) {
     operations = reverse_operations(operations);
   }
@@ -230,7 +269,7 @@ void io_context::arm_flush_timer() noexcept {
   }
 
   if (should_post_driver) {
-    (void)native_context_.post(timer_driver_operation_);
+    (void)primary_native_context().post(timer_driver_operation_);
   }
 }
 

@@ -55,8 +55,11 @@ unsigned io_uring_context::collect_cqe_tasks(operation_queue& cqe_tasks,
         data.result = cqe.res();
         data.flags = cqe.flags();
 
-        if (data.user_data == wake_user_data()) {
-          wake_task_pending_ = false;
+        if (data.user_data == eventfd_user_data()) {
+          eventfd_poll_pending_ = false;
+          drain_eventfd();
+          (void)submit_eventfd_poll_locked();
+          return;
         }
 
         if (enqueue_cqe_task(data, cqe_tasks)) {
@@ -94,7 +97,7 @@ void io_uring_context::dispatch_cqe_tasks(
 
 bool io_uring_context::enqueue_cqe_task(const cqe_data& data,
                                         operation_queue& tasks) noexcept {
-  if (data.user_data == wake_user_data()) {
+  if (data.user_data == eventfd_user_data()) {
     return false;
   }
 

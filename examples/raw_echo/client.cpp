@@ -33,8 +33,7 @@ constexpr unsigned long k_max_workers = 1024;
 }
 
 [[nodiscard]] unsigned parse_workers(char** argv, int argc, int index) {
-  const unsigned long value =
-      parse_arg(argv, argc, index, k_default_workers);
+  const unsigned long value = parse_arg(argv, argc, index, k_default_workers);
   if (value > k_max_workers) {
     return static_cast<unsigned>(k_max_workers);
   }

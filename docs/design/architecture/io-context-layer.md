@@ -50,6 +50,17 @@ struct io_context_options {
 };
 ```
 
+On Linux, `concurrency_hint` reserves native run-loop slots. Slot 0 keeps the
+construction-time primary `io_uring_context`, so existing code can start work
+before `run()`. Additional slots create their own `io_uring_context` when a
+thread enters `run()`, preserving the public "one `io_context`, many threads
+calling `run()`" usage pattern while using multiple rings internally.
+
+High-level `post` work is distributed round-robin across active native slots.
+I/O started from a run-loop thread stays on that thread's native slot, keeping a
+connection's read/write loop ring-local after it has been handed off. Timer
+bookkeeping remains on the primary native context.
+
 ### Sender Factories
 
 Streams expose the high-level async I/O factories. Schedulers expose the

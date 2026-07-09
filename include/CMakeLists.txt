@@ -39,18 +39,9 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/context.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/cqe_dispatch_state.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/lifecycle_api.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/lifecycle_state.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/operation_base.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/operation_factory_api.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/options.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/run_loop_api.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/run_loop_state.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/submission.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/submission_api.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/task_queue_api.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/task_queue_state.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/core.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/file.h
@@ -95,11 +86,7 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/socket.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/timer_wait.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/write_all.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_operation_members.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_options.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_private_io_members.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_scheduler_members.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_timer_members.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_timer_types.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/steady_timer.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/io_context.h

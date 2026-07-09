@@ -183,12 +183,56 @@ class await_result {
   std::error_code error_;
 };
 
+template <>
+class await_result<void> {
+ public:
+  static await_result value() {
+    await_result result;
+    result.status_ = await_status::value;
+    return result;
+  }
+
+  static await_result error(std::error_code error) {
+    await_result result;
+    result.status_ = await_status::error;
+    result.error_ = error;
+    return result;
+  }
+
+  static await_result stopped() {
+    await_result result;
+    result.status_ = await_status::stopped;
+    return result;
+  }
+
+  [[nodiscard]] bool has_value() const noexcept {
+    return status_ == await_status::value;
+  }
+
+  explicit operator bool() const noexcept { return has_value(); }
+
+  [[nodiscard]] bool stopped_completion() const noexcept {
+    return status_ == await_status::stopped;
+  }
+
+  [[nodiscard]] std::error_code error() const noexcept { return error_; }
+
+ private:
+  await_status status_ = await_status::stopped;
+  std::error_code error_;
+};
+
 template <class List>
 struct sender_value_type;
 
 template <class T>
 struct sender_value_type<bexec::type_list<std::tuple<T>>> {
   using type = T;
+};
+
+template <>
+struct sender_value_type<bexec::type_list<std::tuple<>>> {
+  using type = void;
 };
 
 template <class Sender>
@@ -208,8 +252,16 @@ class sender_awaiter {
 
     [[nodiscard]] bexec::empty_env get_env() const noexcept { return {}; }
 
+    void set_value() noexcept
+      requires std::is_void_v<value_type>
+    {
+      awaiter_->result_ = result_type::value();
+      awaiter_->resume();
+    }
+
     template <class Value>
-      requires std::constructible_from<value_type, Value>
+      requires(!std::is_void_v<value_type> &&
+               std::constructible_from<value_type, Value>)
     void set_value(Value&& value) noexcept {
       awaiter_->result_ = result_type::value(std::forward<Value>(value));
       awaiter_->resume();
@@ -265,6 +317,12 @@ auto async_result(Sender&& sender) {
 
 detached_task echo_session(io_context& ctx, tcp_socket sk) {
   auto scheduler = ctx.get_post_scheduler();
+  auto handoff = co_await async_result(scheduler.schedule());
+  if (!handoff) {
+    (void)sk.close();
+    co_return;
+  }
+
   std::array<char, k_buffer_size> buf{};
 
   while (true) {
@@ -331,6 +389,7 @@ int main(int argc, char** argv) {
       parse_nonnegative_arg(argv, argc, 4, k_default_flush_after_us);
 
   io_context_options opts;
+  opts.concurrency_hint = worker_count;
   opts.platform.uring.entries = 1024;
   opts.platform.uring.setup_flags =
       bupp::base::detail::io_uring_setup_coop_taskrun;

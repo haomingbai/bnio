@@ -97,7 +97,7 @@ void io_context::post_timer_driver() noexcept {
   }
 
   if (should_post) {
-    (void)native_context_.post(timer_driver_operation_);
+    (void)primary_native_context().post(timer_driver_operation_);
   }
 }
 
@@ -194,7 +194,7 @@ void io_context::post_timer_operations(
     operations = operations->timer_next_;
     operation->timer_next_ = nullptr;
     operation->timer_completion_ = completion;
-    (void)native_context_.post(*operation);
+    (void)primary_native_context().post(*operation);
   }
 }
 
@@ -222,10 +222,12 @@ void io_context::submit_timer_wakeup_locked(time_point deadline) noexcept {
   timer_wakeup_operation_.set_timeout(
       std::max(deadline - clock::now(), duration::zero()));
 
-  int result = native_context_.submit(timer_wakeup_operation_);
+  async_io::linux_native::io_uring_context& native_context =
+      primary_native_context();
+  int result = native_context.submit(timer_wakeup_operation_);
   if (result == -EAGAIN) {
-    (void)native_context_.submit();
-    result = native_context_.submit(timer_wakeup_operation_);
+    (void)native_context.submit();
+    result = native_context.submit(timer_wakeup_operation_);
   }
 
   if (result >= 0) {
@@ -241,10 +243,12 @@ void io_context::submit_timer_update_locked(time_point deadline) noexcept {
   timer_update_operation_.set_timeout(
       std::max(deadline - clock::now(), duration::zero()));
 
-  int result = native_context_.submit(timer_update_operation_);
+  async_io::linux_native::io_uring_context& native_context =
+      primary_native_context();
+  int result = native_context.submit(timer_update_operation_);
   if (result == -EAGAIN) {
-    (void)native_context_.submit();
-    result = native_context_.submit(timer_update_operation_);
+    (void)native_context.submit();
+    result = native_context.submit(timer_update_operation_);
   }
 
   if (result >= 0) {

@@ -1,3 +1,6 @@
+#include <poll.h>
+#include <unistd.h>
+
 #include <cerrno>
 
 #include "io_uring_context_internal.h"
@@ -13,10 +16,6 @@ int io_uring_context::post(io_uring_operation_base& operation) noexcept {
   }
 
   push_global_task(operation);
-
-  if (io_waiter_active_.load(std::memory_order_acquire)) {
-    return submit_wake_task();
-  }
   return 0;
 }
 
@@ -65,49 +64,99 @@ bool io_uring_context::move_global_tasks(
   return true;
 }
 
-void io_uring_context::notify_waiters() noexcept {
-  std::lock_guard lock(wait_mutex_);
-  wait_cv_.notify_all();
-}
+void io_uring_context::notify_waiters() noexcept { (void)signal_eventfd(); }
 
-void io_uring_context::notify_one_waiter() noexcept {
-  std::lock_guard lock(wait_mutex_);
-  wait_cv_.notify_one();
-}
+void io_uring_context::notify_one_waiter() noexcept { (void)signal_eventfd(); }
 
-int io_uring_context::submit_wake_task() noexcept {
-  auto lock = lock_uring();
-  return submit_wake_task_locked();
-}
-
-int io_uring_context::submit_wake_task_locked() noexcept {
-  if (!ring_.is_open()) {
+int io_uring_context::signal_eventfd() noexcept {
+  if (event_fd_ < 0) {
     return -EINVAL;
   }
-  if (wake_task_pending_) {
+
+  const std::uint64_t value = 1;
+  const auto* bytes = reinterpret_cast<const char*>(&value);
+  std::size_t offset = 0;
+  while (offset < sizeof(value)) {
+    const ssize_t result =
+        ::write(event_fd_, bytes + offset, sizeof(value) - offset);
+    if (result > 0) {
+      offset += static_cast<std::size_t>(result);
+      continue;
+    }
+    if (result < 0 && errno == EINTR) {
+      continue;
+    }
+    if (result < 0 && errno == EAGAIN) {
+      return 0;
+    }
+    return result < 0 ? -errno : -EIO;
+  }
+  return 0;
+}
+
+void io_uring_context::drain_eventfd() noexcept {
+  if (event_fd_ < 0) {
+    return;
+  }
+
+  for (;;) {
+    std::uint64_t value = 0;
+    const ssize_t result = ::read(event_fd_, &value, sizeof(value));
+    if (result == static_cast<ssize_t>(sizeof(value))) {
+      continue;
+    }
+    if (result < 0 && errno == EINTR) {
+      continue;
+    }
+    if (result < 0 && errno == EAGAIN) {
+      return;
+    }
+    return;
+  }
+}
+
+int io_uring_context::submit_eventfd_poll() noexcept {
+  auto lock = lock_uring();
+  return submit_eventfd_poll_locked();
+}
+
+int io_uring_context::submit_eventfd_poll_locked() noexcept {
+  if (!ring_.is_open() || event_fd_ < 0) {
+    return -EINVAL;
+  }
+  if (eventfd_poll_pending_ ||
+      state_.load(std::memory_order_acquire) != context_state::running) {
     return 0;
   }
 
-  bupp::base::submission_queue_entry sqe = ring_.get_sqe();
-  if (sqe.raw() == nullptr) {
-    return -EAGAIN;
+  for (unsigned attempt = 0; attempt < 2; ++attempt) {
+    bupp::base::submission_queue_entry sqe = ring_.get_sqe();
+    if (sqe.raw() == nullptr) {
+      const int submit_result = ring_.submit();
+      if (submit_result < 0) {
+        return submit_result;
+      }
+      continue;
+    }
+
+    sqe.prep_poll_add(event_fd_, static_cast<unsigned>(POLLIN));
+    sqe.set_data(eventfd_user_data());
+
+    const int submit_result = ring_.submit();
+    if (submit_result <= 0) {
+      return submit_result < 0 ? submit_result : -EAGAIN;
+    }
+
+    eventfd_poll_pending_ = true;
+    return submit_result;
   }
 
-  sqe.prep_nop();
-  sqe.set_data(wake_user_data());
-
-  const int submit_result = ring_.submit();
-  if (submit_result <= 0) {
-    return submit_result < 0 ? submit_result : -EAGAIN;
-  }
-
-  wake_task_pending_ = true;
-  return submit_result;
+  return -EAGAIN;
 }
 
-void* io_uring_context::wake_user_data() noexcept {
-  static int wake_sentinel = 0;
-  return &wake_sentinel;
+void* io_uring_context::eventfd_user_data() noexcept {
+  static int eventfd_sentinel = 0;
+  return &eventfd_sentinel;
 }
 
 }  // namespace bupp::async_io::linux_native
