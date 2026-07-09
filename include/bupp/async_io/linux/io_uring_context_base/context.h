@@ -10,10 +10,10 @@
 #include <bupp/base/linux/ring.h>
 #include <bupp/base/linux/submission_queue_entry.h>
 #include <bupp/export.h>
+#include <emmintrin.h>
 
 #include <atomic>
 #include <cstdint>
-#include <emmintrin.h>
 #include <string_view>
 
 namespace bupp::async_io::linux_native {

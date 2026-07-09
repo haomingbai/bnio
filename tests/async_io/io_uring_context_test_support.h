@@ -78,7 +78,7 @@ struct receiver {
 
   void set_value() noexcept {
     state->signal = signal_kind::value;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
       (void)context->stop();
     }
@@ -88,7 +88,7 @@ struct receiver {
     state->signal = signal_kind::value;
     state->result = result;
     state->flags = flags;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
       (void)context->stop();
     }
@@ -97,7 +97,7 @@ struct receiver {
   void set_error(std::error_code error) noexcept {
     state->signal = signal_kind::error;
     state->error = error;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
       (void)context->stop();
     }
@@ -105,7 +105,7 @@ struct receiver {
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
       (void)context->stop();
     }
@@ -119,7 +119,7 @@ struct poll_receiver {
   void set_value(unsigned events) noexcept {
     state->signal = signal_kind::value;
     state->result = static_cast<int>(events);
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -128,7 +128,7 @@ struct poll_receiver {
   void set_error(std::error_code error) noexcept {
     state->signal = signal_kind::error;
     state->error = error;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -136,7 +136,7 @@ struct poll_receiver {
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -158,7 +158,7 @@ struct resolve_receiver {
     if (state != nullptr) {
       state->signal = signal_kind::value;
       state->endpoint_count = count;
-      state->in_context = context != nullptr && context->is_in_context();
+      state->in_context = (context != nullptr && context->is_in_context());
     }
     if (context != nullptr) {
       (void)context->stop();
@@ -169,7 +169,7 @@ struct resolve_receiver {
     if (state != nullptr) {
       state->signal = signal_kind::error;
       state->error = error;
-      state->in_context = context != nullptr && context->is_in_context();
+      state->in_context = (context != nullptr && context->is_in_context());
     }
     if (context != nullptr) {
       (void)context->stop();
@@ -179,7 +179,7 @@ struct resolve_receiver {
   void set_stopped() noexcept {
     if (state != nullptr) {
       state->signal = signal_kind::stopped;
-      state->in_context = context != nullptr && context->is_in_context();
+      state->in_context = (context != nullptr && context->is_in_context());
     }
     if (context != nullptr) {
       (void)context->stop();
@@ -219,7 +219,7 @@ struct prepare_on_completion_receiver {
     state->signal = signal_kind::value;
     state->result = result;
     state->flags = flags;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr && filler != nullptr) {
       state->prepare_result = context->prepare(*filler);
       (void)context->stop();
@@ -229,7 +229,7 @@ struct prepare_on_completion_receiver {
   void set_error(std::error_code error) noexcept {
     state->signal = signal_kind::error;
     state->error = error;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -237,7 +237,7 @@ struct prepare_on_completion_receiver {
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
-    state->in_context = context != nullptr && context->is_in_context();
+    state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -262,7 +262,7 @@ struct batch_receiver {
     assert(result == 0);
     ++state->completed;
     state->all_in_context =
-        state->all_in_context && context != nullptr && context->is_in_context();
+        state->all_in_context && (context != nullptr && context->is_in_context());
     if (state->completed == target && context != nullptr) {
       (void)context->stop();
     }
@@ -271,7 +271,7 @@ struct batch_receiver {
   void set_error(std::error_code /*error*/) noexcept {
     ++state->errors;
     state->all_in_context =
-        state->all_in_context && context != nullptr && context->is_in_context();
+        state->all_in_context && (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -280,7 +280,7 @@ struct batch_receiver {
   void set_stopped() noexcept {
     ++state->stopped;
     state->all_in_context =
-        state->all_in_context && context != nullptr && context->is_in_context();
+        state->all_in_context && (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -298,7 +298,7 @@ struct post_batch_receiver {
     ++state->next_index;
     ++state->completed;
     state->all_in_context =
-        state->all_in_context && context != nullptr && context->is_in_context();
+        state->all_in_context && (context != nullptr && context->is_in_context());
     if (state->completed == target && context != nullptr) {
       (void)context->stop();
     }
@@ -307,7 +307,7 @@ struct post_batch_receiver {
   void set_error(std::error_code /*error*/) noexcept {
     ++state->errors;
     state->all_in_context =
-        state->all_in_context && context != nullptr && context->is_in_context();
+        state->all_in_context && (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -316,7 +316,7 @@ struct post_batch_receiver {
   void set_stopped() noexcept {
     ++state->stopped;
     state->all_in_context =
-        state->all_in_context && context != nullptr && context->is_in_context();
+        state->all_in_context && (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
