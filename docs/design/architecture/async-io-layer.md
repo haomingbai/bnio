@@ -48,13 +48,15 @@ operation set differs.
 
 These are copyable, self-contained value types.
 
-### `linux_native::io_uring_context` — Platform Operation Context
+### `linux_native::io_uring_context` — Platform Event Loop
 
 Within `bupp::async_io::linux_native`, `io_uring_context` owns a `base::ring`
-and provides an event loop with intrusive operation scheduling. Cross-thread
-producers publish work through an MPSC intrusive stack and wake the single
-consumer with an eventfd-backed poll request; this low-level loop does not use
-`std::mutex` or `std::condition_variable`.
+and provides a single-threaded event loop. Under the **one-thread-one-uring**
+model, each run-loop thread owns its own `io_uring_context` (allocated from
+`io_context`'s native worker pool). Cross-thread producers publish work through
+an MPSC intrusive stack and wake the consumer with an eventfd-backed poll
+request; this low-level loop does not use `std::mutex` or
+`std::condition_variable`.
 
 ```cpp
 class io_uring_context {
@@ -63,11 +65,13 @@ public:
     explicit io_uring_context(const io_uring_context_options& opts) noexcept;
     ~io_uring_context() noexcept;
 
-    // non-copyable, non-movable
+    // non-copyable, non-movable (owns synchronization primitives
+    // and thread-local run-loop state)
 
     int queue_init(const io_uring_context_options& opts) noexcept;
     void queue_exit() noexcept;
     [[nodiscard]] bool is_open() const noexcept;
+    [[nodiscard]] unsigned kernel_features() const noexcept;
 
     template <class Operation>
     int prepare(Operation& op) noexcept;        // lock, get SQE, fill
@@ -80,6 +84,27 @@ public:
     template <class Function>
     void submit_batch(Function&& fn) noexcept;   // batch prepare+submit
 
+    // Locked submission (caller holds the uring gate)
+    template <class Operation>
+    int prepare_locked(Operation& op) noexcept;
+    int submit_locked() noexcept;
+
+    // uring gate acquisition
+    [[nodiscard]] uring_lock lock_uring() const noexcept;
+    [[nodiscard]] uring_lock try_lock_uring() const noexcept;
+
+    // Sender factories
+    [[nodiscard]] auto async_poll(descriptor_view descriptor,
+                                   unsigned poll_mask);
+    [[nodiscard]] auto async_resolve(dns_query query,
+                                      dns_result_view result);
+    [[nodiscard]] auto async_resolve(std::string_view host,
+                                      std::string_view service,
+                                      dns_result_view result);
+
+    void notify_waiters() noexcept;
+    void notify_one_waiter() noexcept;
+
     int post(io_uring_operation_base& op) noexcept;
     void run() noexcept;
     int stop() noexcept;
@@ -87,8 +112,28 @@ public:
 };
 ```
 
+The `uring_lock` is an RAII guard for exclusive SQ/CQ access. It is acquired
+via `lock_uring()` (spinning) or `try_lock_uring()` (non-blocking).
+
 `io_uring_context_options::event_fd` may name a caller-owned eventfd. A
 negative value, the default, makes the context create and own a private eventfd.
+
+### `io_uring_context_options`
+
+```cpp
+struct io_uring_context_options {
+    unsigned entries = 256;
+    unsigned setup_flags = IORING_SETUP_COOP_TASKRUN;
+    unsigned cqe_batch_window = 64;
+    unsigned wait_spin_count = 4;
+    unsigned cqe_inline_completion_threshold = 64;
+    unsigned local_queue_threshold = 0;
+    bool enable_sqpoll = false;
+    unsigned sqpoll_thread_cpu = 0;
+    unsigned sqpoll_idle_ms = 1000;
+    int event_fd = -1;
+};
+```
 
 All operations derive from `io_uring_operation_base`:
 

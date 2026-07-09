@@ -14,22 +14,25 @@ graph TB
     subgraph OWN["RAII Owners — destroy = release resource"]
         O1["base::ring → io_uring instance"]
         O2["base::probe → io_uring_probe"]
-        O3["tcp_socket → socket fd"]
-        O4["tcp_acceptor → socket fd"]
-        O5["ssl_context → SSL_CTX*"]
-        O6["ssl_stream → SSL* + BIO* + NextLayer"]
-        O7["io_context → io_uring_context + timer heap"]
-        O8["linux_native::io_uring_context → base::ring"]
+        O3["base::kqueue → kqueue fd"]
+        O4["tcp_socket → socket fd"]
+        O5["tcp_acceptor → socket fd"]
+        O6["ssl_context → SSL_CTX*"]
+        O7["ssl_stream → SSL* + BIO* + NextLayer"]
+        O8["io_context → native_worker slots + timer heap"]
+        O9["linux_native::io_uring_context → base::ring (non-movable)"]
     end
 
     subgraph VIEW["Non-Owning Views — destroy = nothing"]
         V1["base::submission_queue_entry → ring's SQE slot"]
         V2["base::completion_queue_entry → ring's CQE slot"]
-        V3["async_io::buffer_view → external bytes"]
-        V4["async_io::descriptor_view → fd value"]
-        V5["async_io::*_socket_view → fd value"]
-        V6["mutable_buffer / const_buffer → external bytes"]
-        V7["dynamic_string_buffer → external std::string"]
+        V3["base::event → external kevent"]
+        V4["base::event_list_view → external kevent array"]
+        V5["async_io::buffer_view → external bytes"]
+        V6["async_io::descriptor_view → fd value"]
+        V7["async_io::*_socket_view → fd value"]
+        V8["mutable_buffer / const_buffer → external bytes"]
+        V9["dynamic_string_buffer → external std::string"]
     end
 
     subgraph VAL["Value Types — copy = independent"]
@@ -46,7 +49,8 @@ Arrows mean "must outlive":
 
 ```mermaid
 graph TB
-    Ctx["io_context"] -->|"owns"| UCtx["io_uring_context"]
+    Ctx["io_context"] -->|"owns"| Workers["native_worker slots"]
+    Workers -->|"each owns"| UCtx["io_uring_context"]
     UCtx -->|"owns"| Ring["base::ring"]
 
     OpOwner["operation owner<br/>(caller / combinator / coroutine frame / registry)"] -->|"must outlive"| Ops["all pending operations"]
@@ -239,42 +243,51 @@ graph TB
 
 ```
 async_io::linux_native::io_uring_operation_base   (intrusive node, result/flags)
-    └── io_context::operation_base                (queued-I/O list link, prepare hooks)
-        ├── detail::native_io_operation<Model,R>  (read/write/accept/connect/wait)
+    └── io_context::operation_base                (queued-I/O list link, prepare hooks, native_worker pointer)
+        ├── native_io_operation<Model,R>          (read/write/accept/connect/poll)
+        └── timer_operation_base                  (timer completion posting)
 
 Composite operations are not necessarily derived from `operation_base`
-themselves. For example, `detail::write_all_operation<State,R>` owns a
+themselves. For example, the write-all sender owns a
 `repeat_until` operation, and each repeat iteration owns a child
-`native_io_operation<write_model,R>` that is submitted to io_uring. SSL
-read/write uses the same shape: `ssl_io_operation` owns SSL state plus a
+`native_io_operation` that is submitted to io_uring. SSL
+read/write uses the same shape: it owns SSL state plus a
 `repeat_until` loop whose children are transport read/write operations.
 ```
 
 Both base classes disable copy and move because they are intrusive list nodes.
 
-## Move-Only Types
+## Move-Only and Non-Movable Types
 
-The following types are **move-only** (copy deleted) because they own unique
-resources:
+The following types are **move-only** (copy deleted, move allowed) because they
+own unique resources:
 
 | Type | Resource Owned |
 |------|---------------|
 | `base::ring` | `io_uring` instance |
 | `base::probe` | `io_uring_probe` |
+| `base::kqueue` | kqueue fd |
 | `tcp_socket` | socket file descriptor |
 | `tcp_acceptor` | socket file descriptor |
 | `ssl_context` | `SSL_CTX*` |
 | `ssl_stream<NextLayer>` | `SSL*` + `BIO*` + `NextLayer` |
-| `io_context` | `io_uring_context` + timer heap |
-| `io_uring_context` | `base::ring` |
+
+The following types are **non-movable** (both copy and move deleted) because
+they own synchronization primitives and thread-local state:
+
+| Type | Reason |
+|------|--------|
+| `io_context` | Owns native worker slots, timer heap, and mutexes. |
+| `linux_native::io_uring_context` | Owns sync primitives and thread-local run-loop state. |
 
 ```cpp
 // These are all compile errors:
-//   ring r2 = r1;
-//   tcp_socket s2 = s1;
-//   ssl_context c2 = c1;
+//   ring r2 = r1;           // copy deleted
+//   tcp_socket s2 = s1;     // copy deleted
+//   io_context c2 = c1;     // copy deleted
+//   io_context c2 = std::move(c1);  // move deleted
 
-// Move is allowed:
+// Move is allowed for move-only types:
 bupp::tcp_socket a;
 a.open(bupp::ip::tcp::v4());
 bupp::tcp_socket b = std::move(a);  // ok; a is now closed

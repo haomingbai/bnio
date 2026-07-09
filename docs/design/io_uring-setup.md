@@ -37,11 +37,16 @@ available for future use (e.g. detecting `IORING_FEAT_NODROP`,
 
 ## SQPOLL Option
 
-`io_uring_context_options` exposes three new fields:
+`io_uring_context_options` exposes SQPOLL fields alongside other tuning knobs:
 
 ```cpp
 struct io_uring_context_options {
-  // ... existing fields ...
+  unsigned entries = 256;
+  unsigned setup_flags = IORING_SETUP_COOP_TASKRUN;
+  unsigned cqe_batch_window = 64;
+  unsigned wait_spin_count = 4;
+  unsigned cqe_inline_completion_threshold = 64;
+  unsigned local_queue_threshold = 0;
 
   /// When true, adds IORING_SETUP_SQPOLL to setup_flags.
   /// A kernel thread polls the SQ ring, eliminating io_uring_enter syscalls
@@ -53,6 +58,9 @@ struct io_uring_context_options {
 
   /// SQPOLL idle timeout in milliseconds before the kernel thread parks.
   unsigned sqpoll_idle_ms = 1000;
+
+  /// Optional non-owning eventfd used to wake the context run loop.
+  int event_fd = -1;
 };
 ```
 

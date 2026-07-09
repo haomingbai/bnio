@@ -1,10 +1,13 @@
 # Layer 3: `bupp::io_context` — High-Level Async I/O Context
 
-Namespace `bupp`. Header `include/bupp/linux/io_context.h`.
+Namespace `bupp`. Header `include/bupp/linux/io_context.h` (plus sub-headers
+under `include/bupp/linux/detail/`).
 
 `io_context` is the event-loop owner and scheduler factory:
 
-1. **Event loop host** — `run()` drives the io_uring completion loop.
+1. **Event loop host** — `run()` drives the io_uring completion loop. Under the
+   one-thread-one-uring model, each thread calling `run()` claims a native worker
+   slot with its own `io_uring_context`.
 2. **Scheduler factory** — produces dispatch and post schedulers.
 3. **I/O batching backend** — manages queued vs. direct submission for scheduler
    I/O senders.
@@ -50,16 +53,16 @@ struct io_context_options {
 };
 ```
 
-On Linux, `concurrency_hint` reserves native run-loop slots. Slot 0 keeps the
-construction-time primary `io_uring_context`, so existing code can start work
-before `run()`. Additional slots create their own `io_uring_context` when a
-thread enters `run()`, preserving the public "one `io_context`, many threads
-calling `run()`" usage pattern while using multiple rings internally.
+On Linux, `concurrency_hint` reserves native run-loop slots. Each slot holds
+its own `io_uring_context`. When `concurrency_hint > 1` and multiple threads
+call `run()`, each thread claims a distinct slot with its own ring — hence
+**one thread, one uring**. Slot 0 always hosts the construction-time primary
+context, so existing code can start work before `run()`.
 
 High-level `post` work is distributed round-robin across active native slots.
 I/O started from a run-loop thread stays on that thread's native slot, keeping a
 connection's read/write loop ring-local after it has been handed off. Timer
-bookkeeping remains on the primary native context.
+bookkeeping remains on the primary native context (slot 0).
 
 ### Sender Factories
 
@@ -188,6 +191,7 @@ sequenceDiagram
     participant S as scheduler
     participant Stream as tcp_socket
     participant Op as operation
+    participant Worker as native_worker (slot)
     participant UCtx as io_uring_context
     participant Ring as base::ring
     participant K as Kernel
@@ -202,7 +206,8 @@ sequenceDiagram
 
     Note over Ctx: flush triggers (count / timer / manual)
     Ctx->>Ctx: take_pending_io()
-    Ctx->>UCtx: submit_batch(fn)
+    Ctx->>Worker: distribute to native slot (round-robin or ring-local)
+    Worker->>UCtx: submit_batch(fn)
     UCtx->>Ring: get_sqe() + prepare(sqe)
     Ring->>K: io_uring_submit()
 

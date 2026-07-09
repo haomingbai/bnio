@@ -5,7 +5,9 @@ scheduler-based async model — every I/O operation is a lazy sender that compos
 with the standard receiver pattern. TCP, TLS (OpenSSL), DNS resolution, timers,
 and composed writes all ship out of the box.
 
-> **Status:** Linux-only (io_uring). OpenSSL ≥ 1.1 required for TLS support.
+> **Status:** Linux (io_uring) is the primary platform. BSD kqueue base wrappers
+> are available; a full kqueue backend is in progress. OpenSSL ≥ 1.1 is required
+> for TLS support.
 
 ---
 
@@ -39,7 +41,7 @@ and composed writes all ship out of the box.
 | ------------- | --------------- | ------------------------------------ |
 | C++ compiler  | C++20           | GCC 12+ or Clang 16+                 |
 | CMake         | 3.20            |                                      |
-| liburing      | 2.2             | `pkg-config` required                |
+| liburing      | 2.1             | `pkg-config` required                |
 | OpenSSL       | 1.1             | `pkg-config` required; TLS feature   |
 | bexec         | —               | Fetched automatically from GitHub    |
 
@@ -143,13 +145,28 @@ bupp_mini_curl -k --ipv4 https://localhost:8443/test
 
 #### Design
 
-The client is split into two files:
+The client is split into several files under `examples/mini_curl/`:
 
 - [`mini_curl.cpp`](examples/mini_curl/mini_curl.cpp) — `main()`, argument
-  parsing, URL parsing, and HTTP protocol helpers.
-- [`mini_curl_client.hpp`](examples/mini_curl/mini_curl_client.hpp) — the
+  parsing, and URL parsing.
+- [`request.cpp`](examples/mini_curl/request.cpp) — HTTP request construction.
+- [`mini_curl/request.hpp`](examples/mini_curl/mini_curl/request.hpp) — request
+  type definition.
+- [`mini_curl/client.hpp`](examples/mini_curl/mini_curl/client.hpp) — the
   async client class with sender/receiver plumbing, DNS→connect→TLS→HTTP
-  pipeline, redirect following, and write completion handling.
+  pipeline, and redirect following.
+- [`mini_curl/client_connection.hpp`](examples/mini_curl/mini_curl/client_connection.hpp) —
+  connection establishment with endpoint fallback.
+- [`mini_curl/client_transfer.hpp`](examples/mini_curl/mini_curl/client_transfer.hpp) —
+  HTTP request/response transfer.
+- [`mini_curl/client_receivers.hpp`](examples/mini_curl/mini_curl/client_receivers.hpp) —
+  completion receivers.
+- [`mini_curl/client_redirect.hpp`](examples/mini_curl/mini_curl/client_redirect.hpp) —
+  redirect handling.
+- [`mini_curl/client_output.hpp`](examples/mini_curl/mini_curl/client_output.hpp) —
+  response body output.
+- [`mini_curl/operation_registry.hpp`](examples/mini_curl/mini_curl/operation_registry.hpp) —
+  operation lifetime container.
 
 Key patterns demonstrated:
 
@@ -223,22 +240,30 @@ cmake --build build-asio --target bupp_asio_echo_server
 │  bupp::tcp_socket / bupp::tcp_acceptor          │
 ├─────────────────────────────────────────────────┤
 │  bupp::async_io  (non-owning views + DNS)        │
-│  descriptor_view  buffer_view  dns_query         │
+│  descriptor_view  buffer_view  socket_view       │
+│  linux_native::io_uring_context                  │
 ├─────────────────────────────────────────────────┤
-│  bupp::base  (thin liburing wrapper)             │
-│  ring  submission_queue_entry  completion_queue  │
+│  bupp::base  (thin system call wrappers)         │
+│  Linux: ring  submission_queue_entry             │
+│         completion_queue_entry                   │
+│  BSD:   kqueue  event  event_list_view           │
 └─────────────────────────────────────────────────┘
 ```text
 
-- **`bupp::base`** — the thinnest possible wrapper around `liburing`. Owns the
-  ring fd, exposes SQE preparation and CQE walking.
+- **`bupp::base`** — the thinnest possible wrapper around system call APIs.
+  Linux: owns the ring fd, exposes SQE preparation and CQE walking. BSD: owns a
+  kqueue fd, exposes kevent registration and polling.
 - **`bupp::async_io`** — platform-neutral vocabulary types. Non-owning views
-  for descriptors, buffers, IP addresses/endpoints, and DNS queries. This layer
-  intentionally has no senders, no RAII owners, no event loop.
-- **`bupp::io_context`** — the high-level async runtime. Owns the event loop,
-  produces schedulers (dispatch and post semantics), and provides sender
-  factories for the lowest-layer socket views, file descriptors, DNS, polling,
-  and timers. Stream owners build their higher-level senders on top.
+  for descriptors, buffers, socket views, IP addresses/endpoints, and DNS
+  queries. This layer intentionally has no RAII owners.
+  `linux_native::io_uring_context` provides the platform-level event loop (one
+  per run-loop thread under the one-thread-one-uring model).
+- **`bupp::io_context`** — the high-level async runtime. Uses
+  `concurrency_hint` to allocate native run-loop slots; each thread entering
+  `run()` claims a slot with its own `io_uring_context`. Produces schedulers
+  (dispatch and post semantics), and provides sender factories for socket views,
+  descriptors, DNS, polling, and timers. Stream owners build their higher-level
+  senders on top.
 - **`bupp::ssl_stream`** — an RAII TLS stream that layers over any next layer
   (default: `tcp_socket`). Owns the SSL object and transport BIO pairs. Senders
   for handshake, read, write, and shutdown are produced by the stream.

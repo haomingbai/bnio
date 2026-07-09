@@ -10,16 +10,19 @@
 
 ## liburing Baseline
 
-- The project depends on `liburing >= 2.2`.
+- The project depends on `liburing >= 2.1` with compatibility workarounds for
+  older headers where feasible.
 - Avoid adding wrappers for newer or niche helpers unless the version baseline is
   intentionally raised.
 
 ## Base Layer Rules
 
 - `bupp::base` is a thin C API to C++ object mapping.
-- Public wrapper headers declare API; method implementations live under
+- On Linux, public wrapper headers declare API; method implementations live under
   `src/base/linux/` and are compiled into `bupp`.
-- Keep `liburing` return semantics: successful values are non-negative and
+- On BSD, wrapper headers live in `include/bupp/base/bsd/` and implementations
+  in `src/base/bsd/`.
+- Keep system call return semantics: successful values are non-negative and
   failures are negative `errno` values.
 - Do not throw exceptions from base wrapper calls.
 - Do not add executors, coroutines, schedulers, or higher-level async models to
@@ -29,11 +32,14 @@
 
 ## Adding Wrappers
 
-- Prefer direct wrappers around stable `liburing >= 2.2` APIs.
-- Keep ownership explicit: `ring` and `probe` own resources, while SQE and CQE
-  wrappers are non-owning views.
+- Prefer direct wrappers around stable system call APIs.
+- Keep ownership explicit: `ring`, `probe`, and `kqueue` own resources, while
+  SQE, CQE, and `event` wrappers are non-owning views.
 - Match existing method shape before introducing a new abstraction.
-- Add declarations to `include/bupp/base/linux/` and definitions to `src/base/linux/`.
+- On Linux, add declarations to `include/bupp/base/linux/` and definitions to
+  `src/base/linux/`.
+- On BSD, add declarations to `include/bupp/base/bsd/` and definitions to
+  `src/base/bsd/`.
 - Keep `bupp` buildable as both a static and shared library with
   `BUILD_SHARED_LIBS`.
 
@@ -46,7 +52,8 @@
 
 ## Tests
 
-- Keep base-layer tests under `tests/base/linux/`.
+- Keep base-layer Linux tests under `tests/base/linux/`.
+- Keep base-layer BSD tests under `tests/base/bsd/`.
 - Ensure each public base header can be included independently.
 - Cover runtime `ring + nop` behavior where the host supports `io_uring`.
 - Treat expected unavailable-host errors such as `-ENOSYS`, `-EPERM`, and

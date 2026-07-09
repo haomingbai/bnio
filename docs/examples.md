@@ -84,7 +84,7 @@ and one shared Asio-based client. The same client runs against both servers with
 the same connection count, duration, and message size.
 
 | Option | What it does |
-|---|---|
+|--------|-------------|
 | `BUPP_BUILD_ASIO_EXAMPLES=ON` | Build the Asio comparison server and benchmark client |
 
 Run the helper script:

@@ -40,10 +40,10 @@ The platform split should evolve from the current Linux-only shape into this:
 
 | Layer | Linux | macOS / BSD |
 |-------|-------|-------------|
-| `base` | `include/bupp/base/linux/`, `src/base/linux/` | `include/bupp/base/bsd/`, `src/base/bsd/` |
-| `async_io` native backend | `async_io::linux_native::io_uring_context` | `async_io::bsd_native::kqueue_context` |
-| high-level runtime | `include/bupp/linux/io_context.h`, `src/linux/` | `include/bupp/bsd/io_context.h`, `src/bsd/` |
-| system macros | `BUPP_SYSTEM_LINUX` | `BUPP_SYSTEM_DARWIN`, `BUPP_SYSTEM_FREEBSD`, `BUPP_SYSTEM_BSD` |
+| `base` | `include/bupp/base/linux/`, `src/base/linux/` ✅ | `include/bupp/base/bsd/`, `src/base/bsd/` ✅ |
+| `async_io` native backend | `async_io::linux_native::io_uring_context` ✅ | `async_io::bsd_native::kqueue_context` (planned) |
+| high-level runtime | `include/bupp/linux/io_context.h`, `src/linux/` ✅ | `include/bupp/bsd/io_context.h`, `src/bsd/` (planned) |
+| system macros | `BUPP_SYSTEM_LINUX` ✅ | `BUPP_SYSTEM_DARWIN`, `BUPP_SYSTEM_FREEBSD`, `BUPP_SYSTEM_BSD` ✅ |
 
 The public umbrella headers should eventually select the platform runtime
 through `include/bupp/config/system.h`, while platform-native headers remain
@@ -276,17 +276,20 @@ The semantic split still holds: `async_write_some` is one native attempt, while
 
 ## Build And Test Plan
 
-### Phase 1: Documentation And Platform Detection
+### Phase 1: Documentation And Platform Detection ✅
 
-- Add the roadmap.
-- Extend `config/system.h` with FreeBSD and a shared BSD-family macro.
-- Teach CMake to compile platform sources conditionally.
+- [x] Add the roadmap.
+- [x] Extend `config/system.h` with FreeBSD and a shared BSD-family macro
+  (`BUPP_SYSTEM_DARWIN`, `BUPP_SYSTEM_FREEBSD`, `BUPP_SYSTEM_BSD`).
+- [x] Teach CMake to compile platform sources conditionally.
 
-### Phase 2: BSD Base Wrappers
+### Phase 2: BSD Base Wrappers ✅
 
-- Add `base::kqueue` and event helpers.
-- Add unit tests for open/close, wakeup, pipe readiness, and timeout behavior.
-- Keep this phase independent from senders and high-level runtime code.
+- [x] Add `base::kqueue`, `base::event`, and `base::event_list_view` in
+  `include/bupp/base/bsd/` and `src/base/bsd/`.
+- [x] Add unit tests for open/close and header self-containment in
+  `tests/base/bsd/`.
+- [x] Keep this phase independent from senders and high-level runtime code.
 
 ### Phase 3: Native kqueue Context
 
