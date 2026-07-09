@@ -3,6 +3,7 @@
 
 #include <array>
 #include <bexec/bexec.hpp>
+#include <chrono>
 #include <concepts>
 #include <coroutine>
 #include <csignal>
@@ -26,6 +27,8 @@ constexpr int k_backlog = 512;
 constexpr std::size_t k_buffer_size = 4096;
 constexpr unsigned long k_default_workers = 1;
 constexpr unsigned long k_max_workers = 1024;
+constexpr unsigned long k_default_max_queued_io_operations = 64;
+constexpr unsigned long k_default_flush_after_us = 1000;
 
 [[nodiscard]] unsigned long parse_arg(char** argv, int argc, int index,
                                       unsigned long fallback) {
@@ -41,9 +44,23 @@ constexpr unsigned long k_max_workers = 1024;
   return value;
 }
 
+[[nodiscard]] unsigned long parse_nonnegative_arg(char** argv, int argc,
+                                                  int index,
+                                                  unsigned long fallback) {
+  if (argc <= index) {
+    return fallback;
+  }
+
+  char* end = nullptr;
+  const unsigned long value = std::strtoul(argv[index], &end, 10);
+  if (end == argv[index] || *end != '\0') {
+    return fallback;
+  }
+  return value;
+}
+
 [[nodiscard]] unsigned parse_workers(char** argv, int argc, int index) {
-  const unsigned long value =
-      parse_arg(argv, argc, index, k_default_workers);
+  const unsigned long value = parse_arg(argv, argc, index, k_default_workers);
   if (value > k_max_workers) {
     return static_cast<unsigned>(k_max_workers);
   }
@@ -308,11 +325,18 @@ int main(int argc, char** argv) {
   const auto port =
       static_cast<std::uint16_t>(parse_arg(argv, argc, 1, k_port));
   const unsigned worker_count = parse_workers(argv, argc, 2);
+  const auto max_queued_io_operations = static_cast<std::size_t>(
+      parse_nonnegative_arg(argv, argc, 3, k_default_max_queued_io_operations));
+  const auto flush_after_us =
+      parse_nonnegative_arg(argv, argc, 4, k_default_flush_after_us);
 
   io_context_options opts;
   opts.platform.uring.entries = 1024;
   opts.platform.uring.setup_flags =
       bupp::base::detail::io_uring_setup_coop_taskrun;
+  opts.platform.max_queued_io_operations = max_queued_io_operations;
+  opts.platform.queued_io_flush_after =
+      std::chrono::microseconds(flush_after_us);
   io_context ctx(opts);
   if (!ctx.is_open()) {
     std::cerr << "ctx unavailable\n";
@@ -340,6 +364,7 @@ int main(int argc, char** argv) {
   start(accept_loop(ctx, a));
 
   std::cout << "bupp_raw_echo " << port << " workers " << worker_count
-            << std::endl;
+            << " queue " << max_queued_io_operations << " flush_after_us "
+            << flush_after_us << std::endl;
   run_context(ctx, worker_count);
 }

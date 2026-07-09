@@ -35,7 +35,7 @@ void push_global_tasks(operation_queue& operations) noexcept;
 int submit_wake_task() noexcept;
 
 /**
- * Submits a wake-up SQE while the uring mutex is already held.
+ * Submits a wake-up SQE while the uring gate is already held.
  */
 int submit_wake_task_locked() noexcept;
 

@@ -4,7 +4,6 @@
 
 #include <atomic>
 #include <cerrno>
-#include <mutex>
 
 namespace bupp::async_io::linux_native {
 
@@ -50,7 +49,6 @@ int io_uring_context::queue_init(
   global_tasks_.store(nullptr, std::memory_order_release);
   io_waiter_active_.store(false, std::memory_order_release);
 
-  std::lock_guard lock(uring_mutex_);
   if (queue_initialized_) {
     return -EALREADY;
   }
@@ -101,14 +99,10 @@ void io_uring_context::queue_exit() noexcept {
   global_tasks_.store(nullptr, std::memory_order_release);
   notify_waiters();
 
-  std::lock_guard lock(uring_mutex_);
   wake_task_pending_ = false;
   ring_.queue_exit();
 }
 
-bool io_uring_context::is_open() const noexcept {
-  std::lock_guard lock(uring_mutex_);
-  return ring_.is_open();
-}
+bool io_uring_context::is_open() const noexcept { return ring_.is_open(); }
 
 }  // namespace bupp::async_io::linux_native

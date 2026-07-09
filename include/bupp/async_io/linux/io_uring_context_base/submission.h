@@ -24,45 +24,28 @@ template <class Operation>
 int io_uring_context::submit(Operation& operation) noexcept {
   assert_running();
 
-  int submit_result = 0;
   {
     auto lock = lock_uring();
     const int prepare_result = prepare_locked(operation);
     if (prepare_result < 0) {
       return prepare_result;
     }
-    submit_result = submit_locked();
+    return submit_locked();
   }
-
-  if (submit_result >= 0) {
-    notify_waiters();
-  }
-  return submit_result;
 }
 
 template <class Function>
 void io_uring_context::submit_batch(Function&& fn) noexcept {
   assert_running();
 
-  bool should_notify = false;
   {
     auto lock = lock_uring();
     auto prepare = [this](auto& operation) noexcept {
       return prepare_locked(operation);
     };
-    auto submit = [this, &should_notify]() noexcept {
-      const int result = submit_locked();
-      if (result >= 0) {
-        should_notify = true;
-      }
-      return result;
-    };
+    auto submit = [this]() noexcept { return submit_locked(); };
 
     std::forward<Function>(fn)(prepare, submit);
-  }
-
-  if (should_notify) {
-    notify_waiters();
   }
 }
 

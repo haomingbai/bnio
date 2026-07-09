@@ -7,16 +7,10 @@ namespace bupp::async_io::linux_native {
 int io_uring_context::submit() noexcept {
   assert_running();
 
-  int result = 0;
   {
     auto lock = lock_uring();
-    result = submit_locked();
+    return submit_locked();
   }
-
-  if (result >= 0) {
-    notify_waiters();
-  }
-  return result;
 }
 
 int io_uring_context::submit_locked() noexcept {

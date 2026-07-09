@@ -20,12 +20,14 @@ struct cqe_data;
  * Collects and dispatches ready CQE-backed tasks.
  */
 [[nodiscard]] bool collect_ready_cqes(operation_queue& local_tasks,
-                                      unsigned& local_task_budget) noexcept;
+                                      unsigned& local_task_budget,
+                                      bool wait_for_gate = false) noexcept;
 
 /**
  * Collects ready CQEs into an operation queue.
  */
-[[nodiscard]] unsigned collect_cqe_tasks(operation_queue& cqe_tasks) noexcept;
+[[nodiscard]] unsigned collect_cqe_tasks(operation_queue& cqe_tasks,
+                                         bool wait_for_gate) noexcept;
 
 /**
  * Dispatches collected CQE tasks locally or through the global queue.

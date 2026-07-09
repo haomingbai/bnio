@@ -29,7 +29,7 @@ void io_uring_context::push_global_task(
   } while (!global_tasks_.compare_exchange_weak(current_head, &operation,
                                                 std::memory_order_acq_rel,
                                                 std::memory_order_acquire));
-  notify_waiters();
+  notify_one_waiter();
 }
 
 void io_uring_context::push_global_tasks(operation_queue& operations) noexcept {
@@ -50,7 +50,7 @@ void io_uring_context::push_global_tasks(operation_queue& operations) noexcept {
                                                   std::memory_order_acq_rel,
                                                   std::memory_order_acquire));
   }
-  notify_waiters();
+  notify_one_waiter();
 }
 
 bool io_uring_context::move_global_tasks(
@@ -68,6 +68,11 @@ bool io_uring_context::move_global_tasks(
 void io_uring_context::notify_waiters() noexcept {
   std::lock_guard lock(wait_mutex_);
   wait_cv_.notify_all();
+}
+
+void io_uring_context::notify_one_waiter() noexcept {
+  std::lock_guard lock(wait_mutex_);
+  wait_cv_.notify_one();
 }
 
 int io_uring_context::submit_wake_task() noexcept {

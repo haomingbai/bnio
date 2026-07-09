@@ -26,7 +26,7 @@ void apply_context_options(const io_uring_context_options& options) noexcept;
 void assert_running() const noexcept;
 
 bupp::base::ring ring_;
-mutable std::mutex uring_mutex_;
+mutable std::atomic<unsigned> uring_gate_{1U};
 unsigned kernel_features_ = 0;
 std::atomic<context_state> state_{context_state::finished};
 bool queue_initialized_ = false;

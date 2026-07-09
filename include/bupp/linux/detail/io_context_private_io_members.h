@@ -22,6 +22,11 @@ friend class detail::native_io_operation;
 [[nodiscard]] std::error_code flush_io_queue() noexcept;
 
 /**
+ * Submits queued I/O, optionally waiting for exclusive io_uring access.
+ */
+[[nodiscard]] std::error_code flush_io_queue(bool wait_for_gate) noexcept;
+
+/**
  * Returns the number of operations waiting in the queued I/O list.
  */
 [[nodiscard]] std::size_t queued_io_size() const noexcept;

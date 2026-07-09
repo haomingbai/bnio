@@ -117,7 +117,8 @@ struct timer_state_data {
 };
 
 [[nodiscard]] std::error_code flush_operations(
-    operation_base* operations) noexcept;
+    operation_base* operations,
+    async_io::linux_native::io_uring_context::uring_lock& lock) noexcept;
 
 [[nodiscard]] operation_base* take_pending_io() noexcept;
 

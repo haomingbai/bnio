@@ -1,7 +1,6 @@
 #include <bupp/base/linux/completion_queue_entry.h>
 
 #include <cerrno>
-#include <mutex>
 
 #include "io_uring_context_internal.h"
 
@@ -9,13 +8,10 @@ namespace bupp::async_io::linux_native {
 
 int io_uring_context::wait_for_cqe_event() noexcept {
   int ring_fd = -1;
-  {
-    std::lock_guard lock(uring_mutex_);
-    if (!ring_.is_open()) {
-      return -EINVAL;
-    }
-    ring_fd = ring_.native_fd();
+  if (!ring_.is_open()) {
+    return -EINVAL;
   }
+  ring_fd = ring_.native_fd();
 
   for (;;) {
     const int result = bupp::base::ring::wait_cqe_event(ring_fd, 1);
@@ -26,10 +22,11 @@ int io_uring_context::wait_for_cqe_event() noexcept {
   }
 }
 
-bool io_uring_context::collect_ready_cqes(
-    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
+bool io_uring_context::collect_ready_cqes(operation_queue& local_tasks,
+                                          unsigned& local_task_budget,
+                                          bool wait_for_gate) noexcept {
   operation_queue cqe_tasks;
-  const unsigned task_count = collect_cqe_tasks(cqe_tasks);
+  const unsigned task_count = collect_cqe_tasks(cqe_tasks, wait_for_gate);
   if (task_count == 0) {
     return false;
   }
@@ -38,9 +35,12 @@ bool io_uring_context::collect_ready_cqes(
   return true;
 }
 
-unsigned io_uring_context::collect_cqe_tasks(
-    operation_queue& cqe_tasks) noexcept {
-  auto lock = lock_uring();
+unsigned io_uring_context::collect_cqe_tasks(operation_queue& cqe_tasks,
+                                             bool wait_for_gate) noexcept {
+  auto lock = wait_for_gate ? lock_uring() : try_lock_uring();
+  if (!lock) {
+    return 0;
+  }
 
   if (!ring_.is_open()) {
     return 0;

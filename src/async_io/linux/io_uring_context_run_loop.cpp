@@ -139,14 +139,12 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work(
   if (collect_ready_cqes(local_tasks, local_task_budget) ||
       move_global_tasks(local_tasks) || should_finish()) {
     io_waiter_active_.store(false, std::memory_order_release);
-    notify_waiters();
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
   }
 
   const int wait_result = wait_for_cqe_event();
   io_waiter_active_.store(false, std::memory_order_release);
-  notify_waiters();
 
   if (wait_result < 0 && !should_finish()) {
     return run_phase::finished;
@@ -168,7 +166,7 @@ void io_uring_context::finish(operation_queue& local_tasks,
                               unsigned& local_task_budget) noexcept {
   for (;;) {
     (void)move_global_tasks(local_tasks);
-    (void)collect_ready_cqes(local_tasks, local_task_budget);
+    (void)collect_ready_cqes(local_tasks, local_task_budget, true);
     (void)move_global_tasks(local_tasks);
 
     io_uring_operation_base* operations = reverse_tasks(local_tasks.pop_all());

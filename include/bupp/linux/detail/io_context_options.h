@@ -27,6 +27,13 @@ struct linux_io_context_options {
 
   /**
    * Maximum time a queued operation waits before an automatic flush.
+   *
+   * Values less than or equal to zero disable the timer fallback. That mode is
+   * not recommended outside controlled benchmarks: progress then relies on
+   * enqueue-side flush attempts, and the implementation uses a spinning uring
+   * gate fallback when the queue first becomes non-empty or reaches the batch
+   * threshold. This can reduce throughput and makes low-concurrency progress
+   * more sensitive to submission timing.
    */
   async_io::duration queued_io_flush_after = std::chrono::milliseconds(1);
 };
