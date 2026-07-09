@@ -104,15 +104,16 @@ std::error_code io_context::flush_io_queue(bool wait_for_gate) noexcept {
   std::error_code first_error;
   const std::size_t worker_count =
       active_native_worker_count_.load(std::memory_order_acquire);
-  for (std::size_t index = 0; index < worker_count; ++index) {
-    native_worker* worker = native_workers_[index].get();
-    if (worker == nullptr || worker->context == nullptr) {
-      continue;
+  native_worker* worker = native_workers_head_;
+  for (std::size_t index = 0; index < worker_count && worker != nullptr;
+       ++index) {
+    if (worker->context != nullptr) {
+      const std::error_code error = flush_io_queue(*worker, wait_for_gate);
+      if (!first_error && error) {
+        first_error = error;
+      }
     }
-    const std::error_code error = flush_io_queue(*worker, wait_for_gate);
-    if (!first_error && error) {
-      first_error = error;
-    }
+    worker = worker->next.load(std::memory_order_acquire);
   }
   return first_error;
 }

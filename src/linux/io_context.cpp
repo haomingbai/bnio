@@ -21,11 +21,18 @@ io_context::io_context(const io_context_options& options) noexcept
       queued_io_flush_timer_(*this) {
   const std::size_t worker_count =
       std::max<std::size_t>(1, options.concurrency_hint);
-  native_workers_.reserve(worker_count);
-  for (std::size_t index = 0; index < worker_count; ++index) {
-    native_workers_.push_back(std::make_unique<native_worker>(*this));
+
+  // Manually manage worker memory as an intrusive singly-linked list.
+  native_workers_head_ = new native_worker(*this);
+  native_worker* current = native_workers_head_;
+  for (std::size_t index = 1; index < worker_count; ++index) {
+    auto* new_worker = new native_worker(*this);
+    current->next.store(new_worker, std::memory_order_release);
+    current = new_worker;
   }
-  native_workers_[0]->context = &native_context_;
+
+  native_workers_head_->context = &native_context_;
+  round_robin_cursor_.store(native_workers_head_, std::memory_order_release);
   active_native_worker_count_.store(native_context_.is_open() ? 1 : 0,
                                     std::memory_order_release);
   timers_.queued_io_flush_wait.emplace(*this);
@@ -45,6 +52,14 @@ io_context::~io_context() noexcept {
   }
   timers_.timers.clear();
   timers_.heap.clear();
+
+  // Manually delete all workers in the intrusive singly-linked list.
+  native_worker* current = native_workers_head_;
+  while (current != nullptr) {
+    native_worker* next = current->next.load(std::memory_order_acquire);
+    delete current;
+    current = next;
+  }
 }
 
 bool io_context::is_open() const noexcept { return native_context_.is_open(); }
@@ -67,15 +82,16 @@ int io_context::stop() noexcept {
   int first_error = 0;
   const std::size_t worker_count =
       active_native_worker_count_.load(std::memory_order_acquire);
-  for (std::size_t index = 0; index < worker_count; ++index) {
-    native_worker* worker = native_workers_[index].get();
-    if (worker == nullptr || worker->context == nullptr) {
-      continue;
+  native_worker* worker = native_workers_head_;
+  for (std::size_t index = 0; index < worker_count && worker != nullptr;
+       ++index) {
+    if (worker->context != nullptr) {
+      const int result = worker->context->stop();
+      if (result < 0 && first_error == 0) {
+        first_error = result;
+      }
     }
-    const int result = worker->context->stop();
-    if (result < 0 && first_error == 0) {
-      first_error = result;
-    }
+    worker = worker->next.load(std::memory_order_acquire);
   }
   return first_error;
 }
@@ -94,28 +110,44 @@ io_context::post_scheduler io_context::get_post_scheduler() noexcept {
 }
 
 io_context::native_worker& io_context::primary_worker() noexcept {
-  return *native_workers_[0];
+  return *native_workers_head_;
 }
 
 io_context::native_worker& io_context::select_worker() noexcept {
-  const std::size_t worker_count =
-      active_native_worker_count_.load(std::memory_order_acquire);
-  if (worker_count == 0) {
-    return primary_worker();
+  native_worker* const head = native_workers_head_;
+
+  native_worker* selected = round_robin_cursor_.load(std::memory_order_acquire);
+  if (selected == nullptr) {
+    selected = head;
   }
 
-  for (std::size_t attempt = 0; attempt < worker_count; ++attempt) {
-    const std::size_t index =
-        next_native_worker_.fetch_add(1, std::memory_order_relaxed) %
-        worker_count;
-    native_worker* worker = native_workers_[index].get();
-    if (worker != nullptr && worker->context != nullptr &&
-        worker->context->is_open()) {
-      return *worker;
+  // Advance the round-robin cursor: move to next, wrap to head at end.
+  native_worker* next = selected->next.load(std::memory_order_acquire);
+  if (next == nullptr) {
+    next = head;
+  }
+  round_robin_cursor_.store(next, std::memory_order_release);
+
+  // Return the selected worker if it has a valid open context.
+  if (selected != nullptr && selected->context != nullptr &&
+      selected->context->is_open()) {
+    return *selected;
+  }
+
+  // Fallback: walk the list to find a worker with a valid open context.
+  native_worker* current = next;
+  while (current != selected) {
+    if (current == nullptr) {
+      current = head;
+      if (current == selected) break;
     }
+    if (current->context != nullptr && current->context->is_open()) {
+      return *current;
+    }
+    current = current->next.load(std::memory_order_acquire);
   }
 
-  return primary_worker();
+  return *head;
 }
 
 io_context::native_worker& io_context::select_io_worker() noexcept {
@@ -148,24 +180,43 @@ io_context::native_worker* io_context::register_run_worker() noexcept {
 
   const std::size_t index =
       next_run_worker_.fetch_add(1, std::memory_order_acq_rel);
-  if (index >= native_workers_.size()) {
-    return nullptr;
+
+  // Walk (or dynamically extend) the intrusive singly-linked list to reach
+  // the worker at position `index`.
+  native_worker* worker = native_workers_head_;
+  for (std::size_t i = 0; i < index; ++i) {
+    native_worker* next = worker->next.load(std::memory_order_acquire);
+    if (next == nullptr) {
+      // Dynamically extend the list with a new worker.
+      auto* new_worker = new native_worker(*this);
+      native_worker* expected = nullptr;
+      if (worker->next.compare_exchange_strong(expected, new_worker,
+                                               std::memory_order_acq_rel,
+                                               std::memory_order_acquire)) {
+        next = new_worker;
+      } else {
+        // Another thread already appended a worker at this position — use
+        // theirs and discard ours.
+        delete new_worker;
+        next = expected;
+      }
+    }
+    worker = next;
   }
 
-  native_worker& worker = *native_workers_[index];
   if (index == 0) {
-    if (worker.context == nullptr || !worker.context->is_open()) {
+    if (worker->context == nullptr || !worker->context->is_open()) {
       return nullptr;
     }
-  } else if (worker.context == nullptr) {
-    worker.owned_context =
+  } else if (worker->context == nullptr) {
+    worker->owned_context =
         std::make_unique<async_io::linux_native::io_uring_context>(
             linux_options_.uring);
-    if (!worker.owned_context->is_open()) {
-      worker.owned_context.reset();
+    if (!worker->owned_context->is_open()) {
+      worker->owned_context.reset();
       return nullptr;
     }
-    worker.context = worker.owned_context.get();
+    worker->context = worker->owned_context.get();
   }
 
   const std::size_t published_count = index + 1;
@@ -177,7 +228,7 @@ io_context::native_worker* io_context::register_run_worker() noexcept {
              std::memory_order_acquire)) {
   }
 
-  return &worker;
+  return worker;
 }
 
 }  // namespace bupp

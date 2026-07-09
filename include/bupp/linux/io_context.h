@@ -924,6 +924,7 @@ class BUPP_EXPORT io_context {
     explicit native_worker(io_context& owner) noexcept : owner(&owner) {}
 
     io_context* owner = nullptr;
+    std::atomic<native_worker*> next{nullptr};
     async_io::linux_native::io_uring_context* context = nullptr;
     std::unique_ptr<async_io::linux_native::io_uring_context> owned_context;
     std::atomic<operation_base*> pending_io_head{nullptr};
@@ -1009,9 +1010,9 @@ class BUPP_EXPORT io_context {
   timer_driver_operation timer_driver_operation_;
 
   std::atomic<std::size_t> pending_io_count_{0};
-  std::vector<std::unique_ptr<native_worker>> native_workers_;
+  native_worker* native_workers_head_ = nullptr;
+  std::atomic<native_worker*> round_robin_cursor_{nullptr};
   std::atomic<std::size_t> active_native_worker_count_{1};
-  std::atomic<std::size_t> next_native_worker_{0};
   std::atomic<std::size_t> next_run_worker_{0};
   std::atomic_bool stop_requested_{false};
 

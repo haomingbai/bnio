@@ -261,8 +261,8 @@ struct batch_receiver {
   void set_value(int result, unsigned /*flags*/) noexcept {
     assert(result == 0);
     ++state->completed;
-    state->all_in_context =
-        state->all_in_context && (context != nullptr && context->is_in_context());
+    state->all_in_context = state->all_in_context &&
+                            (context != nullptr && context->is_in_context());
     if (state->completed == target && context != nullptr) {
       (void)context->stop();
     }
@@ -270,8 +270,8 @@ struct batch_receiver {
 
   void set_error(std::error_code /*error*/) noexcept {
     ++state->errors;
-    state->all_in_context =
-        state->all_in_context && (context != nullptr && context->is_in_context());
+    state->all_in_context = state->all_in_context &&
+                            (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -279,8 +279,8 @@ struct batch_receiver {
 
   void set_stopped() noexcept {
     ++state->stopped;
-    state->all_in_context =
-        state->all_in_context && (context != nullptr && context->is_in_context());
+    state->all_in_context = state->all_in_context &&
+                            (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -297,8 +297,8 @@ struct post_batch_receiver {
     state->in_order = state->in_order && index == state->next_index;
     ++state->next_index;
     ++state->completed;
-    state->all_in_context =
-        state->all_in_context && (context != nullptr && context->is_in_context());
+    state->all_in_context = state->all_in_context &&
+                            (context != nullptr && context->is_in_context());
     if (state->completed == target && context != nullptr) {
       (void)context->stop();
     }
@@ -306,8 +306,8 @@ struct post_batch_receiver {
 
   void set_error(std::error_code /*error*/) noexcept {
     ++state->errors;
-    state->all_in_context =
-        state->all_in_context && (context != nullptr && context->is_in_context());
+    state->all_in_context = state->all_in_context &&
+                            (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -315,8 +315,8 @@ struct post_batch_receiver {
 
   void set_stopped() noexcept {
     ++state->stopped;
-    state->all_in_context =
-        state->all_in_context && (context != nullptr && context->is_in_context());
+    state->all_in_context = state->all_in_context &&
+                            (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
