@@ -6,6 +6,8 @@
 #ifndef BUPP_LINUX_DETAIL_IO_CONTEXT_PRIVATE_IO_MEMBERS_H_
 #define BUPP_LINUX_DETAIL_IO_CONTEXT_PRIVATE_IO_MEMBERS_H_
 
+/** @cond BUPP_DETAIL */
+
 private:
 friend class steady_timer;
 friend class detail::timer_operation_base;
@@ -206,5 +208,7 @@ void submit_direct(operation_base& operation) noexcept;
  * Posts an operation for execution on the context run loop.
  */
 void post(async_io::linux_native::io_uring_operation_base& operation) noexcept;
+
+/** @endcond */
 
 #endif  // BUPP_LINUX_DETAIL_IO_CONTEXT_PRIVATE_IO_MEMBERS_H_

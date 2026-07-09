@@ -1,5 +1,6 @@
 #include <bupp/linux/io_context.h>
 
+#include <atomic>
 #include <mutex>
 
 namespace bupp {

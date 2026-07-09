@@ -52,7 +52,14 @@ class BUPP_EXPORT kqueue {
    */
   void close() noexcept;
 
+  /**
+   * Returns whether this wrapper owns an open kqueue descriptor.
+   */
   [[nodiscard]] bool is_open() const noexcept;
+
+  /**
+   * Returns the owned native descriptor, or -1 when closed.
+   */
   [[nodiscard]] int native_fd() const noexcept;
 
   /**

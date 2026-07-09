@@ -6,7 +6,9 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using asio::ip::tcp;
@@ -14,6 +16,8 @@ using asio::ip::tcp;
 constexpr std::size_t k_default_message_size = 1024;
 constexpr int k_default_connections = 128;
 constexpr int k_default_duration_sec = 10;
+constexpr unsigned long k_default_workers = 1;
+constexpr unsigned long k_max_workers = 1024;
 
 [[nodiscard]] unsigned long parse_arg(char** argv, int argc, int index,
                                       unsigned long fallback) {
@@ -28,6 +32,30 @@ constexpr int k_default_duration_sec = 10;
   return value;
 }
 
+[[nodiscard]] unsigned parse_workers(char** argv, int argc, int index) {
+  const unsigned long value =
+      parse_arg(argv, argc, index, k_default_workers);
+  if (value > k_max_workers) {
+    return static_cast<unsigned>(k_max_workers);
+  }
+  return static_cast<unsigned>(value);
+}
+
+void run_context(asio::io_context& ctx, unsigned worker_count) {
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count - 1);
+
+  for (unsigned index = 1; index < worker_count; ++index) {
+    workers.emplace_back([&ctx] { ctx.run(); });
+  }
+
+  ctx.run();
+
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
+}
+
 int main(int argc, char** argv) {
   const auto port = static_cast<std::uint16_t>(parse_arg(argv, argc, 1, 8090));
   const auto connections =
@@ -36,6 +64,7 @@ int main(int argc, char** argv) {
       static_cast<int>(parse_arg(argv, argc, 3, k_default_duration_sec));
   const auto message_size = static_cast<std::size_t>(
       parse_arg(argv, argc, 4, k_default_message_size));
+  const unsigned worker_count = parse_workers(argv, argc, 5);
 
   asio::io_context ctx;
   std::atomic<std::uint64_t> total{0};
@@ -90,7 +119,7 @@ int main(int argc, char** argv) {
   });
 
   const auto start = std::chrono::steady_clock::now();
-  ctx.run();
+  run_context(ctx, worker_count);
   const auto end = std::chrono::steady_clock::now();
   timer.join();
 
@@ -101,6 +130,7 @@ int main(int argc, char** argv) {
                             static_cast<double>(message_size) / secs / 1024.0 /
                             1024.0;
   std::cout << "connections: " << connections << "\n"
+            << "workers: " << worker_count << "\n"
             << "message_size: " << message_size << " bytes\n"
             << "duration: " << secs << " s\n"
             << "total: " << n << " echoes\n"

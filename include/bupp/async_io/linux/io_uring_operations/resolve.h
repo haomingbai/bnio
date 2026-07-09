@@ -169,6 +169,8 @@ class io_uring_resolve_sender {
   bupp::async_io::dns_result_view result_;
 };
 
+/** @cond BUPP_DETAIL */
+
 inline auto io_uring_context::async_resolve(
     bupp::async_io::dns_query query, bupp::async_io::dns_result_view result) {
   return io_uring_resolve_sender(*this, std::move(query), result);
@@ -179,6 +181,8 @@ inline auto io_uring_context::async_resolve(
     bupp::async_io::dns_result_view result) {
   return async_resolve(bupp::async_io::dns_query(host, service), result);
 }
+
+/** @endcond */
 
 }  // namespace bupp::async_io::linux_native
 

@@ -16,6 +16,8 @@ class steady_timer;
 
 namespace detail {
 
+/** @cond BUPP_DETAIL */
+
 class timer_operation_base;
 template <class Receiver>
 class timer_wait_operation;
@@ -67,6 +69,8 @@ struct timer_slot {
   std::atomic<timer_operation_base*> submitted_head{nullptr};
   timer_operation_base* waiting_head = nullptr;
 };
+
+/** @endcond */
 
 }  // namespace detail
 

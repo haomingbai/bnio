@@ -1,5 +1,8 @@
 #include <bupp/async_io/linux/io_uring_context.h>
+#include <bupp/base/linux/liburing.h>
+#include <bupp/base/linux/params.h>
 
+#include <atomic>
 #include <cerrno>
 #include <mutex>
 

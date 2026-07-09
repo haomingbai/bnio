@@ -11,6 +11,8 @@
 
 namespace bupp::async_io::linux_native {
 
+/** @cond BUPP_DETAIL */
+
 template <class Operation>
 int io_uring_context::prepare(Operation& operation) noexcept {
   assert_running();
@@ -79,6 +81,8 @@ int io_uring_context::prepare_locked(Operation& operation) noexcept {
   sqe.set_data(static_cast<io_uring_operation_base*>(&operation));
   return 0;
 }
+
+/** @endcond */
 
 }  // namespace bupp::async_io::linux_native
 

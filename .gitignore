@@ -11,3 +11,4 @@ Testing/
 *.dll
 *.exe
 .artifacts/
+.cache/

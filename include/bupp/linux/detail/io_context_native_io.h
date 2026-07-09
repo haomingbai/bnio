@@ -11,6 +11,8 @@
 
 namespace bupp {
 
+/** @cond BUPP_DETAIL */
+
 inline auto io_context::async_read(async_io::stream_socket_view socket,
                                    mutable_buffer buffer, int flags) {
   return detail::native_io_sender(
@@ -176,6 +178,8 @@ inline auto io_context::async_resolve(std::string_view host,
 inline auto steady_timer::async_wait() {
   return detail::timer_wait_sender(*this);
 }
+
+/** @endcond */
 
 }  // namespace bupp
 

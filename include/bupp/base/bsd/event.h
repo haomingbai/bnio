@@ -53,21 +53,74 @@ class BUPP_EXPORT event {
    */
   [[nodiscard]] const struct kevent* raw() const noexcept;
 
+  /**
+   * Returns the native event identifier.
+   */
   [[nodiscard]] uintptr_t ident() const noexcept;
+
+  /**
+   * Returns the native event filter.
+   */
   [[nodiscard]] int16_t filter() const noexcept;
+
+  /**
+   * Returns the native event flags.
+   */
   [[nodiscard]] uint16_t flags() const noexcept;
+
+  /**
+   * Returns the native filter-specific flags.
+   */
   [[nodiscard]] uint32_t fflags() const noexcept;
+
+  /**
+   * Returns the native event data field.
+   */
   [[nodiscard]] intptr_t data() const noexcept;
+
+  /**
+   * Returns the native user data pointer.
+   */
   [[nodiscard]] void* udata() const noexcept;
 
+  /**
+   * Sets the native event identifier.
+   */
   void set_ident(uintptr_t ident) noexcept;
+
+  /**
+   * Sets the native event filter.
+   */
   void set_filter(int16_t filter) noexcept;
+
+  /**
+   * Sets the native event flags.
+   */
   void set_flags(uint16_t flags) noexcept;
+
+  /**
+   * Sets the native filter-specific flags.
+   */
   void set_fflags(uint32_t fflags) noexcept;
+
+  /**
+   * Sets the native event data field.
+   */
   void set_data(intptr_t data) noexcept;
+
+  /**
+   * Sets the native user data pointer.
+   */
   void set_udata(void* udata) noexcept;
 
+  /**
+   * Returns whether the event has the EV_ERROR flag.
+   */
   [[nodiscard]] bool has_error() const noexcept;
+
+  /**
+   * Returns whether the event has the EV_EOF flag.
+   */
   [[nodiscard]] bool has_eof() const noexcept;
 
  private:

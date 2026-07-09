@@ -64,10 +64,10 @@ class BUPP_EXPORT io_uring_context {
 
  private:
 #define BUPP_ASYNC_IO_LINUX_IO_URING_CONTEXT_CLASS_SCOPE_
+#include <bupp/async_io/linux/io_uring_context_base/task_queue_state.h>
+#include <bupp/async_io/linux/io_uring_context_base/run_loop_state.h>
 #include <bupp/async_io/linux/io_uring_context_base/cqe_dispatch_state.h>
 #include <bupp/async_io/linux/io_uring_context_base/lifecycle_state.h>
-#include <bupp/async_io/linux/io_uring_context_base/run_loop_state.h>
-#include <bupp/async_io/linux/io_uring_context_base/task_queue_state.h>
 #undef BUPP_ASYNC_IO_LINUX_IO_URING_CONTEXT_CLASS_SCOPE_
 };
 

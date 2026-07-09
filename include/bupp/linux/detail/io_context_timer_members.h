@@ -6,6 +6,8 @@
 #ifndef BUPP_LINUX_DETAIL_IO_CONTEXT_TIMER_MEMBERS_H_
 #define BUPP_LINUX_DETAIL_IO_CONTEXT_TIMER_MEMBERS_H_
 
+/** @cond BUPP_DETAIL */
+
 class timer_wakeup_operation
     : public async_io::linux_native::io_uring_operation_base {
  public:
@@ -181,5 +183,7 @@ std::atomic<std::size_t> pending_io_count_{0};
 
 timer_state_data timers_;
 steady_timer queued_io_flush_timer_;
+
+/** @endcond */
 
 #endif  // BUPP_LINUX_DETAIL_IO_CONTEXT_TIMER_MEMBERS_H_

@@ -3,6 +3,7 @@
 
 #include <array>
 #include <bexec/bexec.hpp>
+#include <concepts>
 #include <coroutine>
 #include <csignal>
 #include <cstdint>
@@ -10,9 +11,12 @@
 #include <exception>
 #include <iostream>
 #include <optional>
+#include <system_error>
+#include <thread>
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 using namespace bupp;
 namespace {
@@ -20,6 +24,31 @@ namespace {
 constexpr std::uint16_t k_port = 8090;
 constexpr int k_backlog = 512;
 constexpr std::size_t k_buffer_size = 4096;
+constexpr unsigned long k_default_workers = 1;
+constexpr unsigned long k_max_workers = 1024;
+
+[[nodiscard]] unsigned long parse_arg(char** argv, int argc, int index,
+                                      unsigned long fallback) {
+  if (argc <= index) {
+    return fallback;
+  }
+
+  char* end = nullptr;
+  const unsigned long value = std::strtoul(argv[index], &end, 10);
+  if (end == argv[index] || *end != '\0' || value == 0) {
+    return fallback;
+  }
+  return value;
+}
+
+[[nodiscard]] unsigned parse_workers(char** argv, int argc, int index) {
+  const unsigned long value =
+      parse_arg(argv, argc, index, k_default_workers);
+  if (value > k_max_workers) {
+    return static_cast<unsigned>(k_max_workers);
+  }
+  return static_cast<unsigned>(value);
+}
 
 class detached_task {
  public:
@@ -258,13 +287,27 @@ detached_task accept_loop(io_context& ctx, tcp_acceptor& acceptor) {
   }
 }
 
+void run_context(io_context& ctx, unsigned worker_count) {
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count - 1);
+
+  for (unsigned index = 1; index < worker_count; ++index) {
+    workers.emplace_back([&ctx] { ctx.run(); });
+  }
+
+  ctx.run();
+
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::uint16_t port = k_port;
-  if (argc > 1) {
-    port = static_cast<std::uint16_t>(std::strtoul(argv[1], nullptr, 10));
-  }
+  const auto port =
+      static_cast<std::uint16_t>(parse_arg(argv, argc, 1, k_port));
+  const unsigned worker_count = parse_workers(argv, argc, 2);
 
   io_context_options opts;
   opts.platform.uring.entries = 1024;
@@ -296,6 +339,7 @@ int main(int argc, char** argv) {
 
   start(accept_loop(ctx, a));
 
-  std::cout << "bupp_raw_echo " << port << std::endl;
-  ctx.run();
+  std::cout << "bupp_raw_echo " << port << " workers " << worker_count
+            << std::endl;
+  run_context(ctx, worker_count);
 }

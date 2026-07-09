@@ -200,10 +200,14 @@ class io_uring_poll_sender {
   unsigned poll_mask_;
 };
 
+/** @cond BUPP_DETAIL */
+
 inline auto io_uring_context::async_poll(
     bupp::async_io::descriptor_view descriptor, unsigned poll_mask) {
   return io_uring_poll_sender(*this, descriptor, poll_mask);
 }
+
+/** @endcond */
 
 }  // namespace bupp::async_io::linux_native
 

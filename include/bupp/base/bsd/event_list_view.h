@@ -14,15 +14,44 @@ namespace bupp::base {
  */
 class BUPP_EXPORT event_list_view {
  public:
+  /**
+   * Creates an empty view.
+   */
   event_list_view() noexcept;
+
+  /**
+   * Creates a view over a contiguous event array.
+   */
   event_list_view(event* events, std::size_t size) noexcept;
 
+  /**
+   * Returns the first event in the viewed array.
+   */
   [[nodiscard]] event* data() noexcept;
+
+  /**
+   * Returns the first event in the viewed array.
+   */
   [[nodiscard]] const event* data() const noexcept;
+
+  /**
+   * Returns the number of events in the view.
+   */
   [[nodiscard]] std::size_t size() const noexcept;
+
+  /**
+   * Returns whether the view contains no events.
+   */
   [[nodiscard]] bool empty() const noexcept;
 
+  /**
+   * Returns the event at the requested index.
+   */
   [[nodiscard]] event& operator[](std::size_t index) noexcept;
+
+  /**
+   * Returns the event at the requested index.
+   */
   [[nodiscard]] const event& operator[](std::size_t index) const noexcept;
 
  private:
