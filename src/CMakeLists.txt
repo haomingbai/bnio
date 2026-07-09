@@ -11,7 +11,15 @@ if(BUPP_PLATFORM_LINUX)
   target_link_libraries(bupp PUBLIC PkgConfig::LIBURING
                                     OpenSSL::SSL
                                     OpenSSL::Crypto)
-  target_sources(bupp PRIVATE linux/io_context.cpp ssl.cpp tcp.cpp)
+  target_sources(
+    bupp
+    PRIVATE linux/io_context.cpp
+            linux/io_context_queue.cpp
+            linux/io_context_timer.cpp
+            linux/io_context_timer_driver.cpp
+            linux/io_context_timer_state.cpp
+            ssl.cpp
+            tcp.cpp)
 else()
   target_compile_definitions(
     bupp

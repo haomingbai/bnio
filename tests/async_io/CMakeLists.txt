@@ -10,7 +10,12 @@ bupp_add_async_io_test(buffer_view buffer_view_test.cpp)
 bupp_add_async_io_test(descriptor_view descriptor_view_test.cpp)
 if(BUPP_PLATFORM_LINUX)
   bupp_add_async_io_test(dns dns_test.cpp)
-  bupp_add_async_io_test(io_uring_context io_uring_context_test.cpp)
+  bupp_add_async_io_test(io_uring_cqe_dispatch
+                         io_uring_cqe_dispatch_test.cpp)
+  bupp_add_async_io_test(io_uring_operation_traits
+                         io_uring_operation_traits_test.cpp)
+  bupp_add_async_io_test(io_uring_run_loop io_uring_run_loop_test.cpp)
+  bupp_add_async_io_test(io_uring_sender io_uring_sender_test.cpp)
   bupp_add_async_io_test(linux_socket_address linux_socket_address_test.cpp)
   bupp_add_async_io_test(socket_view socket_view_test.cpp)
 endif()

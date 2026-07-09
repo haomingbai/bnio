@@ -59,8 +59,7 @@ void submission_queue_entry::prep_poll_add(int fd,
   io_uring_prep_poll_add(sqe_, fd, poll_mask);
 }
 
-void submission_queue_entry::prep_timeout(__kernel_timespec* ts,
-                                          unsigned count,
+void submission_queue_entry::prep_timeout(__kernel_timespec* ts, unsigned count,
                                           unsigned flags) noexcept {
   io_uring_prep_timeout(sqe_, ts, count, flags);
 }

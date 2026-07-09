@@ -5,6 +5,10 @@ set(BUPP_PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/config.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/descriptor_view.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/dns.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/dns/query.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/dns/resolve.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/dns/result.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/dns/types.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/ip/address.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/ip/endpoint.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/ip/tcp.h
@@ -15,6 +19,10 @@ set(BUPP_PUBLIC_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/config.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/buffer.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/buffer/basic.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/buffer/dynamic_byte_vector.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/buffer/dynamic_string.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/bupp/buffer/holders.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/bupp.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/config.h
     ${CMAKE_CURRENT_SOURCE_DIR}/bupp/config/system.h
@@ -30,7 +38,27 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/detail/io_uring_receiver_operation.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/context.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/cqe_dispatch_state.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/lifecycle_api.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/lifecycle_state.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/operation_base.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/operation_factory_api.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/options.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/run_loop_api.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/run_loop_state.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/submission.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/submission_api.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/task_queue_api.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/task_queue_state.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/core.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/file.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/helpers.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/poll.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/resolve.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/socket.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/views.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/socket_address.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/completion_queue_entry.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/linux/liburing.h
@@ -43,6 +71,9 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/common.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/handshake.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/read_write.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/read_write/operation.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/read_write/state.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/read_write/step.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/senders.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/shutdown.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/state_machine.h
@@ -50,10 +81,39 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context/config.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/concepts.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/connection.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/instances.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/poll.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/read.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/resolve.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/write.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/common.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/file.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/poll.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/socket.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/timer_wait.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/write_all.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_operation_members.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_options.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_private_io_members.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_scheduler_members.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_timer_members.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_timer_types.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/steady_timer.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/io_context.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/ssl.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/ssl/context.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/ssl/cpo.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/ssl/stream.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/ssl/stream_class.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/ssl/stream_operations.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp/acceptor.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp/async_operations.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp/layers.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp/socket.h
       PARENT_SCOPE)
 endif()
 

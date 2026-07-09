@@ -1,4 +1,4 @@
-add_executable(bupp_asio_echo_server asio_echo_server.cpp)
+add_executable(bupp_asio_echo_server asio_echo_server.cpp http_message.cpp)
 target_compile_features(bupp_asio_echo_server PRIVATE cxx_std_20)
 target_compile_definitions(bupp_asio_echo_server PRIVATE ASIO_STANDALONE)
 target_link_libraries(bupp_asio_echo_server PRIVATE asio::asio)
