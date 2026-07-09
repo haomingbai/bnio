@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <emmintrin.h>
 #include <string_view>
 
 namespace bupp::async_io::linux_native {
@@ -231,11 +232,7 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Issues a short processor pause while spinning.
    */
-  static void pause_uring_spin() noexcept {
-#if defined(__i386__) || defined(__x86_64__)
-    __builtin_ia32_pause();
-#endif
-  }
+  static void pause_uring_spin() noexcept { _mm_pause(); }
 
   /**
    * Spins until exclusive io_uring access is acquired.
