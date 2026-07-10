@@ -12,6 +12,7 @@
 #include <exception>
 #include <iostream>
 #include <optional>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <tuple>
@@ -65,6 +66,15 @@ constexpr unsigned long k_default_flush_after_us = 1000;
     return static_cast<unsigned>(k_max_workers);
   }
   return static_cast<unsigned>(value);
+}
+
+[[nodiscard]] bool parse_bind_any_v4(char** argv, int argc, int index) {
+  if (argc <= index) {
+    return false;
+  }
+
+  const std::string_view value(argv[index]);
+  return value == "0.0.0.0" || value == "*" || value == "any";
 }
 
 class detached_task {
@@ -387,6 +397,7 @@ int main(int argc, char** argv) {
       parse_nonnegative_arg(argv, argc, 3, k_default_max_queued_io_operations));
   const auto flush_after_us =
       parse_nonnegative_arg(argv, argc, 4, k_default_flush_after_us);
+  const bool bind_any_v4 = parse_bind_any_v4(argv, argc, 5);
 
   io_context_options opts;
   opts.concurrency_hint = worker_count;
@@ -411,7 +422,9 @@ int main(int argc, char** argv) {
     std::cerr << "setsockopt failed: " << ec.message() << '\n';
     return 1;
   }
-  if (const std::error_code ec = a.bind(ip::endpoint::loopback_v4(port))) {
+  if (const std::error_code ec = a.bind(bind_any_v4
+                                            ? ip::endpoint::any_v4(port)
+                                            : ip::endpoint::loopback_v4(port))) {
     std::cerr << "bind failed: " << ec.message() << '\n';
     return 1;
   }
@@ -424,6 +437,7 @@ int main(int argc, char** argv) {
 
   std::cout << "bupp_raw_echo " << port << " workers " << worker_count
             << " queue " << max_queued_io_operations << " flush_after_us "
-            << flush_after_us << std::endl;
+            << flush_after_us << " bind "
+            << (bind_any_v4 ? "0.0.0.0" : "127.0.0.1") << std::endl;
   run_context(ctx, worker_count);
 }

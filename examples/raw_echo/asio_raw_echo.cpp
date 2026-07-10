@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <utility>
@@ -37,6 +38,26 @@ constexpr unsigned long k_max_workers = 1024;
     return static_cast<unsigned>(k_max_workers);
   }
   return static_cast<unsigned>(value);
+}
+
+[[nodiscard]] asio::ip::address_v4 parse_bind_address(char** argv, int argc,
+                                                      int index) {
+  if (argc <= index) {
+    return asio::ip::make_address_v4("127.0.0.1");
+  }
+
+  const std::string_view value(argv[index]);
+  if (value == "*" || value == "any") {
+    return asio::ip::address_v4::any();
+  }
+
+  std::error_code ec;
+  auto address = asio::ip::make_address_v4(value, ec);
+  if (ec) {
+    std::cerr << "invalid bind address: " << value << '\n';
+    std::exit(2);
+  }
+  return address;
 }
 
 asio::awaitable<void> echo_session(tcp::socket sk) {
@@ -95,6 +116,7 @@ int main(int argc, char** argv) {
   const auto port =
       static_cast<std::uint16_t>(parse_arg(argv, argc, 1, k_port));
   const unsigned worker_count = parse_workers(argv, argc, 2);
+  const asio::ip::address_v4 bind_address = parse_bind_address(argv, argc, 3);
 
   asio::io_context ctx;
   tcp::acceptor a(ctx);
@@ -110,7 +132,7 @@ int main(int argc, char** argv) {
     std::cerr << "setsockopt failed: " << ec.message() << '\n';
     return 1;
   }
-  a.bind(tcp::endpoint(asio::ip::make_address_v4("127.0.0.1"), port), ec);
+  a.bind(tcp::endpoint(bind_address, port), ec);
   if (ec) {
     std::cerr << "bind failed: " << ec.message() << '\n';
     return 1;
@@ -127,6 +149,6 @@ int main(int argc, char** argv) {
   asio::co_spawn(ctx, accept_loop(a), asio::detached);
 
   std::cout << "asio_raw_echo " << port << " workers " << worker_count
-            << std::endl;
+            << " bind " << bind_address.to_string() << std::endl;
   run_context(ctx, worker_count);
 }
