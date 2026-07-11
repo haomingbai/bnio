@@ -75,7 +75,7 @@ io_uring_context::run_phase io_uring_context::handle_run_ready_tasks(
     return run_phase::run_ready_tasks;
   }
 
-  if (move_global_tasks(local_tasks)) {
+  if (move_posted_tasks(local_tasks)) {
     return run_phase::run_ready_tasks;
   }
 
@@ -102,7 +102,7 @@ io_uring_context::run_phase io_uring_context::spin_for_work(
     operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   for (unsigned round = 0; round < wait_spin_count_; ++round) {
     if (collect_ready_cqes(local_tasks, local_task_budget) ||
-        move_global_tasks(local_tasks)) {
+        move_posted_tasks(local_tasks)) {
       return run_phase::run_ready_tasks;
     }
     if (should_finish()) {
@@ -116,7 +116,7 @@ io_uring_context::run_phase io_uring_context::spin_for_work(
 io_uring_context::run_phase io_uring_context::wait_for_io_work(
     operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   if (collect_ready_cqes(local_tasks, local_task_budget) ||
-      move_global_tasks(local_tasks) || should_finish()) {
+      move_posted_tasks(local_tasks) || should_finish()) {
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
   }
@@ -129,7 +129,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work(
   }
 
   if (collect_ready_cqes(local_tasks, local_task_budget) ||
-      move_global_tasks(local_tasks)) {
+      move_posted_tasks(local_tasks)) {
     return run_phase::run_ready_tasks;
   }
 
@@ -143,9 +143,9 @@ bool io_uring_context::should_finish() const noexcept {
 void io_uring_context::finish(operation_queue& local_tasks,
                               unsigned& local_task_budget) noexcept {
   for (;;) {
-    (void)move_global_tasks(local_tasks);
+    (void)move_posted_tasks(local_tasks);
     (void)collect_ready_cqes(local_tasks, local_task_budget, true);
-    (void)move_global_tasks(local_tasks);
+    (void)move_posted_tasks(local_tasks);
 
     io_uring_operation_base* operations = reverse_tasks(local_tasks.pop_all());
     if (operations == nullptr) {

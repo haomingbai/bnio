@@ -15,12 +15,19 @@
 #include <bupp/linux/detail/io_context_timer_types.h>
 #include <bupp/linux/detail/steady_timer.h>
 
+#include <linux/fs.h>
+#include <sys/socket.h>
+#include <sys/syscall.h>
+#include <sys/uio.h>
+#include <unistd.h>
+
 #include <atomic>
 #include <bexec/completion_signatures.hpp>
 #include <bexec/detail/manual_lifetime.hpp>
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
 #include <bexec/repeat_until.hpp>
+#include <cerrno>
 #include <chrono>
 #include <concepts>
 #include <cstddef>
@@ -1036,6 +1043,50 @@ template <class Receiver>
   return token.stop_requested();
 }
 
+template <class Model>
+concept has_immediate_read = requires(Model& model) {
+  { model.try_immediate() } -> std::convertible_to<int>;
+};
+
+[[nodiscard]] inline bool should_wait_for_read_result(int result) noexcept {
+  return result == -EAGAIN || result == -EWOULDBLOCK;
+}
+
+[[nodiscard]] inline bool should_defer_nowait_read_error(int error) noexcept {
+  return error == ENOSYS || error == EOPNOTSUPP || error == EINVAL;
+}
+
+[[nodiscard]] constexpr int nowait_read_flag() noexcept {
+#ifdef RWF_NOWAIT
+  return RWF_NOWAIT;
+#else
+  return 0x00000008;
+#endif
+}
+
+[[nodiscard]] inline ssize_t pread_nowait(int descriptor, void* data,
+                                          std::size_t size,
+                                          std::uint64_t offset) noexcept {
+#ifdef SYS_preadv2
+  struct iovec view{data, size};
+  const auto low = static_cast<unsigned long>(offset);
+  unsigned long high = 0;
+  if constexpr (sizeof(unsigned long) < sizeof(std::uint64_t)) {
+    high =
+        static_cast<unsigned long>(offset >> (sizeof(unsigned long) * 8U));
+  }
+  return ::syscall(SYS_preadv2, descriptor, &view, 1, low, high,
+                   nowait_read_flag());
+#else
+  (void)descriptor;
+  (void)data;
+  (void)size;
+  (void)offset;
+  errno = ENOSYS;
+  return -1;
+#endif
+}
+
 template <class Model, class Receiver>
 class native_io_operation : public io_context::operation_base {
  public:
@@ -1067,6 +1118,10 @@ class native_io_operation : public io_context::operation_base {
       return;
     }
 
+    if (try_complete_immediate()) {
+      return;
+    }
+
     completion_ = completion_kind::value;
     if (mode_ == submit_mode::direct) {
       context_->submit_direct(*this);
@@ -1095,6 +1150,28 @@ class native_io_operation : public io_context::operation_base {
   }
 
  private:
+  [[nodiscard]] bool try_complete_immediate() noexcept {
+    if constexpr (has_immediate_read<Model>) {
+      const int result = model_.try_immediate();
+      if (should_wait_for_read_result(result)) {
+        return false;
+      }
+
+      this->result = result;
+      this->flags = 0;
+      if (result < 0) {
+        completion_ = completion_kind::error;
+        error_ = errno_result(result);
+      } else {
+        completion_ = completion_kind::value;
+      }
+      context_->post(*this);
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   enum class completion_kind {
     value,
     error,
@@ -1152,6 +1229,23 @@ class read_model {
         descriptor_.native_handle(), buffer_.data(),
         async_io::linux_native::detail::bounded_io_size(buffer_.size()),
         offset_);
+  }
+
+  [[nodiscard]] int try_immediate() noexcept {
+    const ssize_t result = pread_nowait(
+        descriptor_.native_handle(), buffer_.data(),
+        async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+        offset_);
+    if (result >= 0) {
+      return static_cast<int>(result);
+    }
+
+    const int error = errno;
+    if (error == EAGAIN || error == EWOULDBLOCK ||
+        should_defer_nowait_read_error(error)) {
+      return -EAGAIN;
+    }
+    return -error;
   }
 
   [[nodiscard]] bool is_error_result(int result) const noexcept {
@@ -1228,6 +1322,23 @@ class socket_read_model {
     sqe.prep_recv(socket_.native_handle(), view.data,
                   async_io::linux_native::detail::bounded_io_size(view.size),
                   flags_);
+  }
+
+  [[nodiscard]] int try_immediate() noexcept {
+    const async_io::buffer_view view = buffer_.view();
+    const ssize_t result = ::recv(
+        socket_.native_handle(), view.data,
+        async_io::linux_native::detail::bounded_io_size(view.size),
+        flags_ | MSG_DONTWAIT);
+    if (result >= 0) {
+      return static_cast<int>(result);
+    }
+
+    const int error = errno;
+    if (error == EINTR || error == EAGAIN || error == EWOULDBLOCK) {
+      return -EAGAIN;
+    }
+    return -error;
   }
 
   [[nodiscard]] bool is_error_result(int result) const noexcept {

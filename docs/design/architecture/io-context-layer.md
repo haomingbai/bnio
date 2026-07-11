@@ -38,6 +38,12 @@ The submission suffix is orthogonal to the read/write semantic. For example,
 `async_write_direct()` is still a write-all operation; it only submits each
 lower-level write directly instead of going through the queued I/O batch.
 
+Read operations first try one non-blocking read in the high-level layer. Socket
+reads use `recv(..., MSG_DONTWAIT)`. Descriptor reads use `preadv2` with
+`RWF_NOWAIT` when the kernel and filesystem support it. If that immediate read
+would block, or if `RWF_NOWAIT` is unsupported, the operation falls back to the
+normal queued/direct io_uring wait path.
+
 ### Configuration
 
 ```cpp

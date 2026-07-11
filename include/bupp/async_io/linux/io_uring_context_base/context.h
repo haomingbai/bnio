@@ -288,10 +288,7 @@ class BUPP_EXPORT io_uring_context {
   int post(io_uring_operation_base& operation) noexcept;
 
  private:
-  /**
-   * Intrusive stack of operations used by run-loop phases.
-   */
-  struct operation_queue;
+  using operation_queue = operation_stack_state;
 
   /**
    * Small copy of CQE data used after the CQ head advances.
@@ -318,22 +315,22 @@ class BUPP_EXPORT io_uring_context {
   };
 
   /**
-   * Publishes a single operation to the global task queue.
+   * Publishes a single operation to the posted task stack.
    */
-  void push_global_task(io_uring_operation_base& operation) noexcept;
+  void push_posted_task(io_uring_operation_base& operation) noexcept;
 
   /**
-   * Publishes all operations from a local queue to the global task queue.
+   * Publishes all operations from a local queue to the posted task stack.
    */
-  void push_global_tasks(operation_queue& operations) noexcept;
+  void push_posted_tasks(operation_queue& operations) noexcept;
 
   /**
-   * Moves globally published tasks into a local queue.
+   * Moves posted tasks into a local queue.
    */
-  [[nodiscard]] bool move_global_tasks(operation_queue& local_tasks) noexcept;
+  [[nodiscard]] bool move_posted_tasks(operation_queue& local_tasks) noexcept;
 
   /**
-   * Signals the eventfd used by cross-thread producers.
+   * Signals the eventfd used by posted work and stop requests.
    */
   [[nodiscard]] int signal_eventfd() noexcept;
 
@@ -358,7 +355,7 @@ class BUPP_EXPORT io_uring_context {
   [[nodiscard]] static void* eventfd_user_data() noexcept;
 
   /**
-   * Runs ready local and global tasks.
+   * Runs ready local and posted tasks.
    */
   [[nodiscard]] run_phase handle_run_ready_tasks(
       operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
@@ -417,7 +414,7 @@ class BUPP_EXPORT io_uring_context {
                                            bool wait_for_gate) noexcept;
 
   /**
-   * Dispatches collected CQE tasks locally or through the global queue.
+   * Dispatches collected CQE tasks locally or through the posted stack.
    */
   void dispatch_cqe_tasks(operation_queue& cqe_tasks, unsigned task_count,
                           operation_queue& local_tasks,
@@ -454,7 +451,7 @@ class BUPP_EXPORT io_uring_context {
   std::atomic<context_state> state_{context_state::finished};
   bool queue_initialized_ = false;
 
-  std::atomic<io_uring_operation_base*> global_tasks_{nullptr};
+  operation_stack_state posted_tasks_;
   std::atomic_bool run_active_{false};
   int event_fd_ = -1;
   bool owns_event_fd_ = false;

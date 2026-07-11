@@ -2,6 +2,42 @@
 
 namespace {
 
+void test_ready_socket_read_completes_without_queue() {
+  bupp::io_context_options options;
+  options.platform.max_queued_io_operations = 64;
+  options.platform.queued_io_flush_after = std::chrono::seconds(30);
+  bupp::io_context context(options);
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  assert(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+  bupp::tcp_socket receiver_socket(sockets[0]);
+  bupp::tcp_socket sender_socket(sockets[1]);
+
+  constexpr std::string_view payload = "ready";
+  assert(::send(sender_socket.native_handle(), payload.data(), payload.size(),
+                MSG_NOSIGNAL) == static_cast<ssize_t>(payload.size()));
+
+  std::array<char, 16> bytes{};
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = receiver_socket.async_read(scheduler, bupp::buffer(bytes));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  assert(scheduler.queued_io_size() == 0);
+
+  context.run();
+
+  assert(state->signal == signal_kind::value);
+  assert(state->size == payload.size());
+  assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+}
+
 void test_manual_flush_reads_queued_io() {
   bupp::io_context_options options;
   options.platform.max_queued_io_operations = 64;
@@ -292,8 +328,10 @@ void test_direct_file_write_and_queued_read() {
         scheduler, bupp::async_io::descriptor_view(fd), bupp::buffer(bytes), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
-    assert(scheduler.queued_io_size() == 1);
-    assert(!scheduler.flush_io_queue());
+    assert(scheduler.queued_io_size() <= 1);
+    if (scheduler.queued_io_size() != 0) {
+      assert(!scheduler.flush_io_queue());
+    }
     context.run();
 
     assert(state->signal == signal_kind::value);
@@ -307,6 +345,7 @@ void test_direct_file_write_and_queued_read() {
 }  // namespace
 
 int main() {
+  test_ready_socket_read_completes_without_queue();
   test_manual_flush_reads_queued_io();
   test_direct_read_submits_without_queue();
   test_queued_write_writes_to_peer();

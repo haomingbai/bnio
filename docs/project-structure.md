@@ -141,7 +141,7 @@ High-level async runtime, stream owners, and buffer types.
   - `io_uring_context_cqe.cpp` — CQE dispatch.
   - `io_uring_context_run_loop.cpp` — main run loop.
   - `io_uring_context_submission.cpp` — submission helpers.
-  - `io_uring_context_task_queue.cpp` — task queue and MPSC post stack.
+  - `io_uring_context_task_queue.cpp` — task queue and non-atomic posted stack.
   - `io_uring_context_internal.h` — internal context state.
 - `src/linux/` — high-level Linux `io_context` implementations:
   - `io_context.cpp` — lifecycle, schedulers, native worker slots.
@@ -167,8 +167,7 @@ High-level async runtime, stream owners, and buffer types.
 - `tests/io_context/` — high-level `io_context` tests:
   - `io_context_test.cpp`, `io_context_scheduler_test.cpp`,
     `io_context_sender_concept_test.cpp`, `io_context_accept_connect_test.cpp`,
-    `io_context_read_write_test.cpp`, `io_context_poll_test.cpp`,
-    `io_context_stress_test.cpp`.
+    `io_context_read_write_test.cpp`, `io_context_poll_test.cpp`.
   - `tcp_test.cpp`, `buffer_test.cpp`, `dns_test.cpp`.
   - `ssl_test.cpp`, `ssl_handshake_test.cpp`, `ssl_transfer_test.cpp`,
     `ssl_concept_test.cpp`.

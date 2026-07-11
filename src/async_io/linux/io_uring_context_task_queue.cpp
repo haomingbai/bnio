@@ -15,23 +15,17 @@ int io_uring_context::post(io_uring_operation_base& operation) noexcept {
     return 0;
   }
 
-  push_global_task(operation);
+  push_posted_task(operation);
   return 0;
 }
 
-void io_uring_context::push_global_task(
+void io_uring_context::push_posted_task(
     io_uring_operation_base& operation) noexcept {
-  io_uring_operation_base* current_head =
-      global_tasks_.load(std::memory_order_acquire);
-  do {
-    operation.next = current_head;
-  } while (!global_tasks_.compare_exchange_weak(current_head, &operation,
-                                                std::memory_order_acq_rel,
-                                                std::memory_order_acquire));
+  posted_tasks_.push(operation);
   notify_one_waiter();
 }
 
-void io_uring_context::push_global_tasks(operation_queue& operations) noexcept {
+void io_uring_context::push_posted_tasks(operation_queue& operations) noexcept {
   io_uring_operation_base* ordered_tasks = reverse_tasks(operations.pop_all());
   if (ordered_tasks == nullptr) {
     return;
@@ -41,21 +35,15 @@ void io_uring_context::push_global_tasks(operation_queue& operations) noexcept {
     io_uring_operation_base* operation = ordered_tasks;
     ordered_tasks = ordered_tasks->next;
 
-    io_uring_operation_base* current_head =
-        global_tasks_.load(std::memory_order_acquire);
-    do {
-      operation->next = current_head;
-    } while (!global_tasks_.compare_exchange_weak(current_head, operation,
-                                                  std::memory_order_acq_rel,
-                                                  std::memory_order_acquire));
+    operation->next = nullptr;
+    posted_tasks_.push(*operation);
   }
   notify_one_waiter();
 }
 
-bool io_uring_context::move_global_tasks(
+bool io_uring_context::move_posted_tasks(
     operation_queue& local_tasks) noexcept {
-  io_uring_operation_base* incoming =
-      global_tasks_.exchange(nullptr, std::memory_order_acq_rel);
+  io_uring_operation_base* incoming = posted_tasks_.pop_all();
   if (incoming == nullptr) {
     return false;
   }

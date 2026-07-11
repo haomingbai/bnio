@@ -53,10 +53,10 @@ These are copyable, self-contained value types.
 Within `bupp::async_io::linux_native`, `io_uring_context` owns a `base::ring`
 and provides a single-threaded event loop. Under the **one-thread-one-uring**
 model, each run-loop thread owns its own `io_uring_context` (allocated from
-`io_context`'s native worker pool). Cross-thread producers publish work through
-an MPSC intrusive stack and wake the consumer with an eventfd-backed poll
-request; this low-level loop does not use `std::mutex` or
-`std::condition_variable`.
+`io_context`'s native worker pool). Posted work is stored in a non-atomic
+`operation_stack_state`; the async_io layer no longer provides an MPSC task
+queue. Higher layers that accept cross-thread producers must synchronize and
+batch work before handing it to a native context.
 
 ```cpp
 class io_uring_context {
@@ -141,6 +141,7 @@ All operations derive from `io_uring_operation_base`:
 class io_uring_operation_base {
 public:
     io_uring_operation_base* next = nullptr;
+    operation_stack_state* stack_state = nullptr;
     int result = 0;
     unsigned flags = 0;
 
@@ -148,6 +149,15 @@ public:
 
     virtual ~io_uring_operation_base() = default;
     virtual void execute() noexcept = 0;
+};
+
+struct operation_stack_state {
+    io_uring_operation_base* head = nullptr;
+
+    void push(io_uring_operation_base& op) noexcept;
+    void push(io_uring_operation_base* ops) noexcept;
+    [[nodiscard]] io_uring_operation_base* pop_all() noexcept;
+    [[nodiscard]] bool empty() const noexcept;
 };
 ```
 

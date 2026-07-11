@@ -80,7 +80,7 @@ void io_uring_context::dispatch_cqe_tasks(
 
   // Tier 2 — local queue: within the per-iteration budget.
   // When local_queue_threshold_ is 0 (default) this tier is unlimited and
-  // CQEs never spill to the global queue on this path.
+  // CQEs never spill to the posted stack on this path.
   if (local_queue_threshold_ == 0 ||
       (local_task_budget > 0 && task_count <= local_task_budget)) {
     local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
@@ -90,9 +90,9 @@ void io_uring_context::dispatch_cqe_tasks(
     return;
   }
 
-  // Tier 3 — global: local budget exhausted or batch exceeds remaining
-  // budget; publish to the global (cross-thread) queue.
-  push_global_tasks(cqe_tasks);
+  // Tier 3: local budget exhausted or batch exceeds remaining budget; publish
+  // to the context's posted stack for a later run-loop pass.
+  push_posted_tasks(cqe_tasks);
 }
 
 bool io_uring_context::enqueue_cqe_task(const cqe_data& data,

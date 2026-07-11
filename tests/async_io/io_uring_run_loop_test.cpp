@@ -1,8 +1,6 @@
 #include <array>
 #include <cassert>
-#include <chrono>
 #include <memory>
-#include <thread>
 
 #include "io_uring_context_test_support.h"
 
@@ -10,54 +8,7 @@ namespace {
 
 using namespace bupp_async_io_io_uring_test;
 
-void test_cpu_post_wakes_blocked_worker() {
-  io_uring_context context;
-  if (!queue_init_or_skip(context)) {
-    return;
-  }
-
-  std::thread worker([&context] { context.run(); });
-  std::this_thread::sleep_for(std::chrono::milliseconds(25));
-
-  receiver recv;
-  recv.context = &context;
-  recv.stop_on_completion = true;
-  auto state = recv.state;
-
-  io_uring_post_operation operation(context, std::move(recv));
-  bexec::start(operation);
-  worker.join();
-
-  assert(state->signal == signal_kind::value);
-  assert(state->in_context);
-}
-
-void test_global_post_wakes_waiting_worker() {
-  io_uring_context context;
-  if (!queue_init_or_skip(context)) {
-    return;
-  }
-
-  std::thread io_worker([&context] { context.run(); });
-  std::thread cv_worker([&context] { context.run(); });
-  std::this_thread::sleep_for(std::chrono::milliseconds(25));
-
-  receiver recv;
-  recv.context = &context;
-  recv.stop_on_completion = true;
-  auto state = recv.state;
-
-  io_uring_post_operation operation(context, std::move(recv));
-  bexec::start(operation);
-
-  io_worker.join();
-  cv_worker.join();
-
-  assert(state->signal == signal_kind::value);
-  assert(state->in_context);
-}
-
-void test_global_posts_drain_in_post_order() {
+void test_posted_tasks_drain_in_post_order() {
   io_uring_context context;
   if (!queue_init_or_skip(context)) {
     return;
@@ -93,8 +44,6 @@ void test_global_posts_drain_in_post_order() {
 }  // namespace
 
 int main() {
-  test_cpu_post_wakes_blocked_worker();
-  test_global_post_wakes_waiting_worker();
-  test_global_posts_drain_in_post_order();
+  test_posted_tasks_drain_in_post_order();
   return 0;
 }

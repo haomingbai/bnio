@@ -52,9 +52,8 @@ struct io_uring_context_options {
 
   /**
    * Upper bound for CQE tasks dispatched to the local queue per run-loop
-   * iteration.  When the cumulative local-queue sink exceeds this value
-   * the remaining CQEs are published to the global (cross-thread) queue
-   * instead.
+   * iteration.  When the cumulative local-queue sink exceeds this value,
+   * remaining CQEs are published to the context's posted stack instead.
    *
    * 0 (the default) means no limit.
    */
