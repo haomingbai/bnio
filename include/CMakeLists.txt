@@ -79,6 +79,8 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/read.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/resolve.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo/write.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_state.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_state/native_worker.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/common.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/linux/detail/io_context_native_io/file.h

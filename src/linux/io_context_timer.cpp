@@ -12,34 +12,34 @@ timer_operation_base::timer_operation_base(io_context& context) noexcept
 
 }  // namespace detail
 
-io_context::timer_wakeup_operation::timer_wakeup_operation(
+detail::timer_wakeup_operation::timer_wakeup_operation(
     io_context& context) noexcept
     : context_(&context) {}
 
-void io_context::timer_wakeup_operation::set_timeout(
-    duration timeout) noexcept {
+void detail::timer_wakeup_operation::set_timeout(
+    async_io::duration timeout) noexcept {
   timeout_.reset(timeout);
 }
 
-void io_context::timer_wakeup_operation::prepare(
+void detail::timer_wakeup_operation::prepare(
     base::submission_queue_entry& sqe) noexcept {
   timeout_.prepare_timeout(sqe, 0, 0);
 }
 
-void io_context::timer_wakeup_operation::execute() noexcept {
+void detail::timer_wakeup_operation::execute() noexcept {
   context_->on_timer_wakeup();
 }
 
-io_context::timer_update_operation::timer_update_operation(
+detail::timer_update_operation::timer_update_operation(
     io_context& context) noexcept
     : context_(&context) {}
 
-void io_context::timer_update_operation::set_timeout(
-    duration timeout) noexcept {
+void detail::timer_update_operation::set_timeout(
+    async_io::duration timeout) noexcept {
   timeout_.reset(timeout);
 }
 
-void io_context::timer_update_operation::prepare(
+void detail::timer_update_operation::prepare(
     base::submission_queue_entry& sqe) noexcept {
   timeout_.prepare_timeout_update(
       sqe,
@@ -48,23 +48,23 @@ void io_context::timer_update_operation::prepare(
       0);
 }
 
-void io_context::timer_update_operation::execute() noexcept {
+void detail::timer_update_operation::execute() noexcept {
   context_->on_timer_update();
 }
 
-io_context::timer_driver_operation::timer_driver_operation(
+detail::timer_driver_operation::timer_driver_operation(
     io_context& context) noexcept
     : context_(&context) {}
 
-void io_context::timer_driver_operation::execute() noexcept {
+void detail::timer_driver_operation::execute() noexcept {
   context_->on_timer_driver();
 }
 
-io_context::queued_io_flush_operation::queued_io_flush_operation(
+detail::queued_io_flush_operation::queued_io_flush_operation(
     io_context& context) noexcept
     : timer_operation_base(context) {}
 
-void io_context::queued_io_flush_operation::execute() noexcept {
+void detail::queued_io_flush_operation::execute() noexcept {
   timer_context_->on_queued_io_flush(timer_completion());
 }
 
