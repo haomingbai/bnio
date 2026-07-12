@@ -4,6 +4,19 @@ This document describes the `io_context` timer subsystem. The design is built
 around one rule: timer operations are ordinary operations; the important logic
 is when they are moved between queues and posted.
 
+Timer implementation types live in `include/bupp/linux/detail/`:
+
+- `io_context_timer_types.h` contains `timer_slot`, `timer_heap_item`,
+  `timer_operation_base`, the reusable timer operations, and
+  `timer_state_data`.
+- `io_context_native_io/timer_wait.h` contains the templated user wait sender
+  and operation.
+- `steady_timer.h` contains the public `steady_timer` owner.
+
+`io_context` itself only composes these pieces: it owns one
+`detail::timer_state_data`, reusable timer operation members, and one internal
+`steady_timer` for queued-I/O auto-flush.
+
 ## Goals
 
 - Provide `steady_timer` as an `io_context`-bound timer object.
@@ -69,6 +82,26 @@ The base stores:
 
 Most timer operations contain no scheduling logic. A user wait operation only
 turns `value` into `set_value()` and `stopped` into `set_stopped()`.
+
+### `timer_state_data`
+
+`detail::timer_state_data` is the context-owned timer aggregate. It groups the
+timer map, heap, reusable-operation states, timeout state, and the
+`manual_lifetime` storage for the queued-I/O flush wait.
+
+The aggregate keeps timer state in one place:
+
+| Field | Role |
+|-------|------|
+| `mutex` | Context-level timer lock. |
+| `queued_io_flush_wait` | Storage for the reusable internal flush wait. |
+| `timers` | Map from timer id to live `timer_slot`. |
+| `heap` | Min-heap of `timer_heap_item` values. |
+| `next_timer_id` | Monotonic id source for registered timers. |
+| `queued_io_flush` | Posted-state guard for the internal flush wait. |
+| `driver` | Posted-state guard for `timer_driver_operation_`. |
+| `timeout` | Kernel timeout state machine. |
+| `armed_deadline` | Deadline currently represented by the active timeout request. |
 
 ## Locking
 
