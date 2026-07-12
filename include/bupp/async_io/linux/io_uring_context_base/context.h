@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <string_view>
 
 namespace bupp::async_io::linux_native {
@@ -452,6 +453,7 @@ class BUPP_EXPORT io_uring_context {
   bool queue_initialized_ = false;
 
   operation_stack_state posted_tasks_;
+  std::mutex posted_tasks_mutex_;
   std::atomic_bool run_active_{false};
   int event_fd_ = -1;
   bool owns_event_fd_ = false;

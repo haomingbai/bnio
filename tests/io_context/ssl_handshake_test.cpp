@@ -13,19 +13,20 @@ void test_socketpair_handshake_is_io_context_driven() {
   test_certificate_files files;
 
   bupp::ssl_context server_context(bupp::ssl_context_method::tls_server);
-  assert(server_context.valid());
-  assert(!server_context.use_certificate_chain_file(
+  test_require(server_context.valid());
+  test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
-  assert(
+  test_require(
       !server_context.use_private_key_file(files.private_key.string().c_str()));
-  assert(!server_context.check_private_key());
+  test_require(!server_context.check_private_key());
 
   bupp::ssl_context client_context(bupp::ssl_context_method::tls_client);
-  assert(client_context.valid());
+  test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
   int sockets[2] = {-1, -1};
-  assert(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+  test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
+               0);
 
   bupp::ssl_stream client{bupp::tcp_socket(sockets[0]), client_context};
   bupp::ssl_stream server{bupp::tcp_socket(sockets[1]), server_context};

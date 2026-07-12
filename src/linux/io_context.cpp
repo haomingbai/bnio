@@ -31,7 +31,8 @@ io_context::io_context(const io_context_options& options) noexcept
     current = new_worker;
   }
 
-  native_workers_head_->context = &native_context_;
+  native_workers_head_->context.store(&native_context_,
+                                      std::memory_order_release);
   round_robin_cursor_.store(native_workers_head_, std::memory_order_release);
   active_native_worker_count_.store(native_context_.is_open() ? 1 : 0,
                                     std::memory_order_release);
@@ -66,13 +67,19 @@ bool io_context::is_open() const noexcept { return native_context_.is_open(); }
 
 void io_context::run() noexcept {
   native_worker* worker = register_run_worker();
-  if (worker == nullptr || worker->context == nullptr) {
+  if (worker == nullptr) {
+    return;
+  }
+
+  async_io::linux_native::io_uring_context* native_context =
+      worker->context.load(std::memory_order_acquire);
+  if (native_context == nullptr) {
     return;
   }
 
   native_worker* previous_worker = current_native_worker_;
   current_native_worker_ = worker;
-  worker->context->run();
+  native_context->run();
   current_native_worker_ = previous_worker;
 }
 
@@ -85,8 +92,10 @@ int io_context::stop() noexcept {
   native_worker* worker = native_workers_head_;
   for (std::size_t index = 0; index < worker_count && worker != nullptr;
        ++index) {
-    if (worker->context != nullptr) {
-      const int result = worker->context->stop();
+    async_io::linux_native::io_uring_context* native_context =
+        worker->context.load(std::memory_order_acquire);
+    if (native_context != nullptr) {
+      const int result = native_context->stop();
       if (result < 0 && first_error == 0) {
         first_error = result;
       }
@@ -129,8 +138,10 @@ io_context::native_worker& io_context::select_worker() noexcept {
   round_robin_cursor_.store(next, std::memory_order_release);
 
   // Return the selected worker if it has a valid open context.
-  if (selected != nullptr && selected->context != nullptr &&
-      selected->context->is_open()) {
+  async_io::linux_native::io_uring_context* selected_context =
+      selected == nullptr ? nullptr
+                          : selected->context.load(std::memory_order_acquire);
+  if (selected_context != nullptr && selected_context->is_open()) {
     return *selected;
   }
 
@@ -141,7 +152,9 @@ io_context::native_worker& io_context::select_worker() noexcept {
       current = head;
       if (current == selected) break;
     }
-    if (current->context != nullptr && current->context->is_open()) {
+    async_io::linux_native::io_uring_context* current_context =
+        current->context.load(std::memory_order_acquire);
+    if (current_context != nullptr && current_context->is_open()) {
       return *current;
     }
     current = current->next.load(std::memory_order_acquire);
@@ -152,10 +165,12 @@ io_context::native_worker& io_context::select_worker() noexcept {
 
 io_context::native_worker& io_context::select_io_worker() noexcept {
   if (current_native_worker_ != nullptr &&
-      current_native_worker_->owner == this &&
-      current_native_worker_->context != nullptr &&
-      current_native_worker_->context->is_open()) {
-    return *current_native_worker_;
+      current_native_worker_->owner == this) {
+    async_io::linux_native::io_uring_context* native_context =
+        current_native_worker_->context.load(std::memory_order_acquire);
+    if (native_context != nullptr && native_context->is_open()) {
+      return *current_native_worker_;
+    }
   }
   return select_worker();
 }
@@ -170,7 +185,7 @@ io_context::native_worker& io_context::ensure_operation_worker(
 
 async_io::linux_native::io_uring_context&
 io_context::select_native_context() noexcept {
-  return *select_io_worker().context;
+  return *select_io_worker().context.load(std::memory_order_acquire);
 }
 
 io_context::native_worker* io_context::register_run_worker() noexcept {
@@ -205,10 +220,12 @@ io_context::native_worker* io_context::register_run_worker() noexcept {
   }
 
   if (index == 0) {
-    if (worker->context == nullptr || !worker->context->is_open()) {
+    async_io::linux_native::io_uring_context* native_context =
+        worker->context.load(std::memory_order_acquire);
+    if (native_context == nullptr || !native_context->is_open()) {
       return nullptr;
     }
-  } else if (worker->context == nullptr) {
+  } else if (worker->context.load(std::memory_order_acquire) == nullptr) {
     worker->owned_context =
         std::make_unique<async_io::linux_native::io_uring_context>(
             linux_options_.uring);
@@ -216,7 +233,8 @@ io_context::native_worker* io_context::register_run_worker() noexcept {
       worker->owned_context.reset();
       return nullptr;
     }
-    worker->context = worker->owned_context.get();
+    worker->context.store(worker->owned_context.get(),
+                          std::memory_order_release);
   }
 
   const std::size_t published_count = index + 1;

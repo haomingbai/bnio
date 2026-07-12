@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <cerrno>
+#include <mutex>
 
 namespace bupp::async_io::linux_native {
 
@@ -46,7 +47,10 @@ void io_uring_context::apply_context_options(
 
 int io_uring_context::queue_init(
     const io_uring_context_options& options) noexcept {
-  (void)posted_tasks_.pop_all();
+  {
+    std::lock_guard lock(posted_tasks_mutex_);
+    (void)posted_tasks_.pop_all();
+  }
   run_active_.store(false, std::memory_order_release);
 
   if (queue_initialized_) {
@@ -133,7 +137,10 @@ int io_uring_context::init_ring_params(
 
 void io_uring_context::queue_exit() noexcept {
   state_.store(context_state::finished, std::memory_order_release);
-  (void)posted_tasks_.pop_all();
+  {
+    std::lock_guard lock(posted_tasks_mutex_);
+    (void)posted_tasks_.pop_all();
+  }
   (void)signal_eventfd();
 
   eventfd_poll_pending_ = false;

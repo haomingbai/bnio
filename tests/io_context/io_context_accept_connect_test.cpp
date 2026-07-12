@@ -63,7 +63,8 @@ void test_accept_connect_loopback() {
     assert(scheduler.queued_io_size() == 0);
   } else {
     assert(scheduler.queued_io_size() == 2);
-    assert(!scheduler.flush_io_queue());
+    const std::error_code flush_error = scheduler.flush_io_queue();
+    assert(!flush_error);
   }
   context.run();
 

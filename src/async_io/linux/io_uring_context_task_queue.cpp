@@ -2,6 +2,7 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <mutex>
 
 #include "io_uring_context_internal.h"
 
@@ -21,7 +22,10 @@ int io_uring_context::post(io_uring_operation_base& operation) noexcept {
 
 void io_uring_context::push_posted_task(
     io_uring_operation_base& operation) noexcept {
-  posted_tasks_.push(operation);
+  {
+    std::lock_guard lock(posted_tasks_mutex_);
+    posted_tasks_.push(operation);
+  }
   notify_one_waiter();
 }
 
@@ -31,19 +35,26 @@ void io_uring_context::push_posted_tasks(operation_queue& operations) noexcept {
     return;
   }
 
-  while (ordered_tasks != nullptr) {
-    io_uring_operation_base* operation = ordered_tasks;
-    ordered_tasks = ordered_tasks->next;
+  {
+    std::lock_guard lock(posted_tasks_mutex_);
+    while (ordered_tasks != nullptr) {
+      io_uring_operation_base* operation = ordered_tasks;
+      ordered_tasks = ordered_tasks->next;
 
-    operation->next = nullptr;
-    posted_tasks_.push(*operation);
+      operation->next = nullptr;
+      posted_tasks_.push(*operation);
+    }
   }
   notify_one_waiter();
 }
 
 bool io_uring_context::move_posted_tasks(
     operation_queue& local_tasks) noexcept {
-  io_uring_operation_base* incoming = posted_tasks_.pop_all();
+  io_uring_operation_base* incoming = nullptr;
+  {
+    std::lock_guard lock(posted_tasks_mutex_);
+    incoming = posted_tasks_.pop_all();
+  }
   if (incoming == nullptr) {
     return false;
   }

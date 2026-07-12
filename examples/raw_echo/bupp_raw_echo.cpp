@@ -422,9 +422,9 @@ int main(int argc, char** argv) {
     std::cerr << "setsockopt failed: " << ec.message() << '\n';
     return 1;
   }
-  if (const std::error_code ec = a.bind(bind_any_v4
-                                            ? ip::endpoint::any_v4(port)
-                                            : ip::endpoint::loopback_v4(port))) {
+  if (const std::error_code ec =
+          a.bind(bind_any_v4 ? ip::endpoint::any_v4(port)
+                             : ip::endpoint::loopback_v4(port))) {
     std::cerr << "bind failed: " << ec.message() << '\n';
     return 1;
   }

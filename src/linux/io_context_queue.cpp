@@ -1,6 +1,5 @@
 #include <bupp/linux/io_context.h>
 
-#include <algorithm>
 #include <cassert>
 #include <cerrno>
 #include <mutex>
@@ -8,18 +7,6 @@
 namespace bupp {
 
 namespace {
-
-[[nodiscard]] io_context::operation_base* reverse_operations(
-    io_context::operation_base* operations) noexcept {
-  io_context::operation_base* reversed = nullptr;
-  while (operations != nullptr) {
-    io_context::operation_base* operation = operations;
-    operations = operations->pending_next;
-    operation->pending_next = reversed;
-    reversed = operation;
-  }
-  return reversed;
-}
 
 [[nodiscard]] std::error_code make_submit_error(int result) noexcept {
   return std::error_code(-result, std::generic_category());
@@ -35,6 +22,33 @@ namespace {
   return count;
 }
 
+void push_operation(std::atomic<io_context::operation_base*>& stack,
+                    io_context::operation_base& operation) noexcept {
+  io_context::operation_base* head = stack.load(std::memory_order_acquire);
+  do {
+    operation.pending_next = head;
+  } while (!stack.compare_exchange_weak(
+      head, &operation, std::memory_order_release, std::memory_order_acquire));
+}
+
+void push_operation_chain(std::atomic<io_context::operation_base*>& stack,
+                          io_context::operation_base* operations) noexcept {
+  if (operations == nullptr) {
+    return;
+  }
+
+  io_context::operation_base* tail = operations;
+  while (tail->pending_next != nullptr) {
+    tail = tail->pending_next;
+  }
+
+  io_context::operation_base* head = stack.load(std::memory_order_acquire);
+  do {
+    tail->pending_next = head;
+  } while (!stack.compare_exchange_weak(
+      head, operations, std::memory_order_release, std::memory_order_acquire));
+}
+
 }  // namespace
 
 std::size_t io_context::queued_io_size() const noexcept {
@@ -42,33 +56,18 @@ std::size_t io_context::queued_io_size() const noexcept {
 }
 
 void io_context::enqueue_io(operation_base& operation) noexcept {
-  native_worker& worker = ensure_operation_worker(operation);
+  operation.native_worker_ = nullptr;
+
   const std::size_t prev =
       pending_io_count_.fetch_add(1, std::memory_order_acq_rel);
-  const std::size_t worker_prev =
-      worker.pending_io_count.fetch_add(1, std::memory_order_acq_rel);
 
-  operation_base* current_head =
-      worker.pending_io_head.load(std::memory_order_acquire);
-  do {
-    operation.pending_next = current_head;
-  } while (!worker.pending_io_head.compare_exchange_weak(
-      current_head, &operation, std::memory_order_acq_rel,
-      std::memory_order_acquire));
+  push_operation(global_pending_io_head_, operation);
 
-  const std::size_t active_workers = std::max<std::size_t>(
-      1, active_native_worker_count_.load(std::memory_order_acquire));
-  const std::size_t worker_flush_threshold =
-      linux_options_.max_queued_io_operations == 0
-          ? 0
-          : std::max<std::size_t>(
-                1, linux_options_.max_queued_io_operations / active_workers);
-  const bool reached_max =
-      worker_flush_threshold > 0 && worker_prev + 1 >= worker_flush_threshold;
+  const bool reached_max = linux_options_.max_queued_io_operations > 0 &&
+                           prev + 1 >= linux_options_.max_queued_io_operations;
+
   if (linux_options_.queued_io_flush_after <= duration::zero()) {
-    if (worker_prev == 0 || reached_max) {
-      (void)flush_io_queue(worker, true);
-    }
+    (void)flush_io_queue(select_io_worker(), true);
     return;
   }
 
@@ -76,13 +75,14 @@ void io_context::enqueue_io(operation_base& operation) noexcept {
     arm_flush_timer();
   }
   if (reached_max) {
-    (void)flush_io_queue(worker, false);
+    (void)flush_io_queue(select_io_worker(), false);
   }
 }
 
 void io_context::submit_direct(operation_base& operation) noexcept {
   native_worker& worker = ensure_operation_worker(operation);
-  async_io::linux_native::io_uring_context& native_context = *worker.context;
+  async_io::linux_native::io_uring_context& native_context =
+      *worker.context.load(std::memory_order_acquire);
   const int result = native_context.submit(operation);
   if (result < 0) {
     operation.complete_submit_error(result);
@@ -93,7 +93,11 @@ void io_context::submit_direct(operation_base& operation) noexcept {
 void io_context::post(
     async_io::linux_native::io_uring_operation_base& operation) noexcept {
   native_worker& worker = select_worker();
-  (void)worker.context->post(operation);
+  async_io::linux_native::io_uring_context* native_context =
+      worker.context.load(std::memory_order_acquire);
+  if (native_context != nullptr) {
+    (void)native_context->post(operation);
+  }
 }
 
 std::error_code io_context::flush_io_queue() noexcept {
@@ -102,12 +106,13 @@ std::error_code io_context::flush_io_queue() noexcept {
 
 std::error_code io_context::flush_io_queue(bool wait_for_gate) noexcept {
   std::error_code first_error;
-  const std::size_t worker_count =
-      active_native_worker_count_.load(std::memory_order_acquire);
+  const std::size_t worker_count = std::max<std::size_t>(
+      1, active_native_worker_count_.load(std::memory_order_acquire));
+
   native_worker* worker = native_workers_head_;
   for (std::size_t index = 0; index < worker_count && worker != nullptr;
        ++index) {
-    if (worker->context != nullptr) {
+    if (worker->context.load(std::memory_order_acquire) != nullptr) {
       const std::error_code error = flush_io_queue(*worker, wait_for_gate);
       if (!first_error && error) {
         first_error = error;
@@ -120,7 +125,13 @@ std::error_code io_context::flush_io_queue(bool wait_for_gate) noexcept {
 
 std::error_code io_context::flush_io_queue(native_worker& worker,
                                            bool wait_for_gate) noexcept {
-  async_io::linux_native::io_uring_context& native_context = *worker.context;
+  async_io::linux_native::io_uring_context* worker_context =
+      worker.context.load(std::memory_order_acquire);
+  if (worker_context == nullptr) {
+    return {};
+  }
+
+  async_io::linux_native::io_uring_context& native_context = *worker_context;
   auto lock = wait_for_gate ? native_context.lock_uring()
                             : native_context.try_lock_uring();
   if (!lock) {
@@ -146,10 +157,6 @@ std::error_code io_context::flush_io_queue(native_worker& worker,
   [[maybe_unused]] const std::size_t prev =
       pending_io_count_.fetch_sub(operation_count, std::memory_order_acq_rel);
   assert(prev >= operation_count);
-  [[maybe_unused]] const std::size_t worker_prev =
-      worker.pending_io_count.fetch_sub(operation_count,
-                                        std::memory_order_acq_rel);
-  assert(worker_prev >= operation_count);
 
   if (linux_options_.queued_io_flush_after > duration::zero()) {
     (void)queued_io_flush_timer_.cancel();
@@ -173,7 +180,7 @@ std::error_code io_context::flush_io_queue(native_worker& worker,
 static io_context::operation_base* try_prepare_batch(
     io_context::operation_base* chain,
     async_io::linux_native::io_uring_context& native_ctx,
-    io_context::operation_base** failed_tail, int& first_error) noexcept {
+    io_context::operation_base**& failed_tail, int& first_error) noexcept {
   while (chain != nullptr) {
     io_context::operation_base* next = chain->pending_next;
     chain->pending_next = nullptr;
@@ -236,12 +243,28 @@ std::error_code io_context::flush_operations(
 
 io_context::operation_base* io_context::take_pending_io(
     native_worker& worker) noexcept {
+  move_global_io_to_worker(worker);
+  return take_worker_pending_io(worker);
+}
+
+void io_context::move_global_io_to_worker(native_worker& worker) noexcept {
   operation_base* operations =
-      worker.pending_io_head.exchange(nullptr, std::memory_order_acq_rel);
-  if (operations != nullptr) {
-    operations = reverse_operations(operations);
+      global_pending_io_head_.exchange(nullptr, std::memory_order_acq_rel);
+  if (operations == nullptr) {
+    return;
   }
-  return operations;
+
+  operation_base* current = operations;
+  while (current != nullptr) {
+    current->native_worker_ = &worker;
+    current = current->pending_next;
+  }
+  push_operation_chain(worker.pending_io_head, operations);
+}
+
+io_context::operation_base* io_context::take_worker_pending_io(
+    native_worker& worker) noexcept {
+  return worker.pending_io_head.exchange(nullptr, std::memory_order_acq_rel);
 }
 
 void io_context::arm_flush_timer() noexcept {

@@ -1,12 +1,48 @@
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <cassert>
+#include <chrono>
 #include <memory>
+#include <thread>
+#include <vector>
 
 #include "io_uring_context_test_support.h"
 
 namespace {
 
 using namespace bupp_async_io_io_uring_test;
+
+struct concurrent_post_state {
+  std::atomic<unsigned> completed{0};
+  std::atomic<unsigned> stopped{0};
+  std::atomic_bool all_in_context{true};
+};
+
+struct concurrent_post_receiver {
+  std::shared_ptr<concurrent_post_state> state =
+      std::make_shared<concurrent_post_state>();
+  io_uring_context* context = nullptr;
+  unsigned target = 0;
+
+  void set_value() noexcept {
+    if (context == nullptr || !context->is_in_context()) {
+      state->all_in_context.store(false, std::memory_order_release);
+    }
+    const unsigned completed =
+        state->completed.fetch_add(1, std::memory_order_acq_rel) + 1;
+    if (completed == target && context != nullptr) {
+      (void)context->stop();
+    }
+  }
+
+  void set_stopped() noexcept {
+    state->stopped.fetch_add(1, std::memory_order_acq_rel);
+    if (context != nullptr) {
+      (void)context->stop();
+    }
+  }
+};
 
 void test_posted_tasks_drain_in_post_order() {
   io_uring_context context;
@@ -41,9 +77,75 @@ void test_posted_tasks_drain_in_post_order() {
   assert(state->in_order);
 }
 
+void test_posted_tasks_accept_concurrent_external_posts() {
+  io_uring_context context;
+  if (!queue_init_or_skip(context)) {
+    return;
+  }
+
+  constexpr unsigned k_threads = 8;
+  constexpr unsigned k_posts_per_thread = 128;
+  constexpr unsigned k_count = k_threads * k_posts_per_thread;
+
+  auto state = std::make_shared<concurrent_post_state>();
+  std::vector<
+      std::unique_ptr<io_uring_post_operation<concurrent_post_receiver>>>
+      operations;
+  operations.reserve(k_count);
+
+  for (unsigned index = 0; index < k_count; ++index) {
+    concurrent_post_receiver recv;
+    recv.context = &context;
+    recv.target = k_count;
+    recv.state = state;
+    operations.emplace_back(
+        std::make_unique<io_uring_post_operation<concurrent_post_receiver>>(
+            context, std::move(recv)));
+  }
+
+  std::thread runner([&context] { context.run(); });
+
+  std::barrier ready(static_cast<std::ptrdiff_t>(k_threads + 1));
+  std::vector<std::thread> producers;
+  producers.reserve(k_threads);
+  for (unsigned thread = 0; thread < k_threads; ++thread) {
+    producers.emplace_back([&operations, &ready, thread] {
+      ready.arrive_and_wait();
+      const unsigned first = thread * k_posts_per_thread;
+      const unsigned last = first + k_posts_per_thread;
+      for (unsigned index = first; index < last; ++index) {
+        bexec::start(*operations[index]);
+      }
+    });
+  }
+
+  ready.arrive_and_wait();
+
+  for (std::thread& producer : producers) {
+    producer.join();
+  }
+
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (state->completed.load(std::memory_order_acquire) != k_count &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  if (state->completed.load(std::memory_order_acquire) != k_count) {
+    (void)context.stop();
+  }
+  runner.join();
+
+  assert(state->completed.load(std::memory_order_acquire) == k_count);
+  assert(state->stopped.load(std::memory_order_acquire) == 0);
+  assert(state->all_in_context.load(std::memory_order_acquire));
+}
+
 }  // namespace
 
 int main() {
   test_posted_tasks_drain_in_post_order();
+  test_posted_tasks_accept_concurrent_external_posts();
   return 0;
 }

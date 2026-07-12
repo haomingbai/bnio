@@ -7,6 +7,7 @@
 #include <bexec/sender.hpp>
 #include <cassert>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -19,6 +20,13 @@
 #include <vector>
 
 namespace {
+
+void test_require(bool condition) noexcept {
+  assert(condition);
+  if (!condition) {
+    std::abort();
+  }
+}
 
 struct void_receiver {
   void set_value() noexcept {}

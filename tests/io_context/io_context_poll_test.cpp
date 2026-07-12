@@ -26,7 +26,8 @@ void test_queued_poll_observes_pipe_readiness() {
   constexpr char byte = 'q';
   assert(::write(descriptors[1], &byte, sizeof(byte)) ==
          static_cast<ssize_t>(sizeof(byte)));
-  assert(!scheduler.flush_io_queue());
+  const std::error_code flush_error = scheduler.flush_io_queue();
+  assert(!flush_error);
   context.run();
 
   assert(state->signal == signal_kind::value);

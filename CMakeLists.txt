@@ -40,6 +40,7 @@ option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(BUPP_BUILD_EXAMPLES "Build bupp examples" ON)
 option(BUPP_BUILD_ASIO_EXAMPLES "Build standalone Asio echo server example (auto-fetches Asio)" OFF)
 option(BUPP_ENABLE_WARNINGS "Enable compiler warnings for bupp targets" ON)
+option(BUPP_ENABLE_TSAN "Build bupp targets with ThreadSanitizer" OFF)
 
 bupp_resolve_bexec_dependency()
 
@@ -98,6 +99,15 @@ function(bupp_set_project_warnings target)
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
   endif()
 endfunction()
+
+if(BUPP_ENABLE_TSAN)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
+  else()
+    message(FATAL_ERROR "BUPP_ENABLE_TSAN requires GCC or Clang")
+  endif()
+endif()
 
 add_subdirectory(include)
 add_subdirectory(src)

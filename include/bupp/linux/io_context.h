@@ -14,7 +14,6 @@
 #include <bupp/linux/detail/io_context_options.h>
 #include <bupp/linux/detail/io_context_timer_types.h>
 #include <bupp/linux/detail/steady_timer.h>
-
 #include <linux/fs.h>
 #include <sys/socket.h>
 #include <sys/syscall.h>
@@ -98,7 +97,7 @@ class BUPP_EXPORT io_context {
     ~operation_base() override = default;
 
     /**
-     * Intrusive next pointer used by the lock-free pending-I/O stack.
+     * Intrusive next pointer used by queued-I/O stacks.
      */
     operation_base* pending_next = nullptr;
 
@@ -932,10 +931,9 @@ class BUPP_EXPORT io_context {
 
     io_context* owner = nullptr;
     std::atomic<native_worker*> next{nullptr};
-    async_io::linux_native::io_uring_context* context = nullptr;
+    std::atomic<async_io::linux_native::io_uring_context*> context{nullptr};
     std::unique_ptr<async_io::linux_native::io_uring_context> owned_context;
     std::atomic<operation_base*> pending_io_head{nullptr};
-    std::atomic<std::size_t> pending_io_count{0};
   };
 
   [[nodiscard]] native_worker& primary_worker() noexcept;
@@ -958,6 +956,11 @@ class BUPP_EXPORT io_context {
                                                bool wait_for_gate) noexcept;
 
   [[nodiscard]] operation_base* take_pending_io(native_worker& worker) noexcept;
+
+  void move_global_io_to_worker(native_worker& worker) noexcept;
+
+  [[nodiscard]] operation_base* take_worker_pending_io(
+      native_worker& worker) noexcept;
 
   void arm_flush_timer() noexcept;
 
@@ -1017,6 +1020,7 @@ class BUPP_EXPORT io_context {
   timer_driver_operation timer_driver_operation_;
 
   std::atomic<std::size_t> pending_io_count_{0};
+  std::atomic<operation_base*> global_pending_io_head_{nullptr};
   native_worker* native_workers_head_ = nullptr;
   std::atomic<native_worker*> round_robin_cursor_{nullptr};
   std::atomic<std::size_t> active_native_worker_count_{1};
@@ -1072,8 +1076,7 @@ concept has_immediate_read = requires(Model& model) {
   const auto low = static_cast<unsigned long>(offset);
   unsigned long high = 0;
   if constexpr (sizeof(unsigned long) < sizeof(std::uint64_t)) {
-    high =
-        static_cast<unsigned long>(offset >> (sizeof(unsigned long) * 8U));
+    high = static_cast<unsigned long>(offset >> (sizeof(unsigned long) * 8U));
   }
   return ::syscall(SYS_preadv2, descriptor, &view, 1, low, high,
                    nowait_read_flag());
@@ -1326,10 +1329,10 @@ class socket_read_model {
 
   [[nodiscard]] int try_immediate() noexcept {
     const async_io::buffer_view view = buffer_.view();
-    const ssize_t result = ::recv(
-        socket_.native_handle(), view.data,
-        async_io::linux_native::detail::bounded_io_size(view.size),
-        flags_ | MSG_DONTWAIT);
+    const ssize_t result =
+        ::recv(socket_.native_handle(), view.data,
+               async_io::linux_native::detail::bounded_io_size(view.size),
+               flags_ | MSG_DONTWAIT);
     if (result >= 0) {
       return static_cast<int>(result);
     }
