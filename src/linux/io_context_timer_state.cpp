@@ -16,11 +16,11 @@ void detail::timer_state_data::complete_driver() noexcept {
   driver = queued_operation_state::idle;
 }
 
-bool detail::timer_state_data::can_submit_wakeup() const noexcept {
+bool detail::timer_state_data::can_queue_wakeup() const noexcept {
   return timeout == timeout_state::idle;
 }
 
-bool detail::timer_state_data::can_submit_update(
+bool detail::timer_state_data::can_queue_update(
     async_io::time_point deadline) const noexcept {
   return timeout == timeout_state::armed && deadline != armed_deadline;
 }
@@ -38,13 +38,13 @@ void detail::timer_state_data::complete_update() noexcept {
   }
 }
 
-void detail::timer_state_data::mark_wakeup_submitted(
+void detail::timer_state_data::mark_wakeup_queued(
     async_io::time_point deadline) noexcept {
   timeout = timeout_state::armed;
   armed_deadline = deadline;
 }
 
-void detail::timer_state_data::mark_update_submitted(
+void detail::timer_state_data::mark_update_queued(
     async_io::time_point deadline) noexcept {
   timeout = timeout_state::updating;
   armed_deadline = deadline;

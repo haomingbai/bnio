@@ -7,23 +7,29 @@
 #include <atomic>
 #include <cstddef>
 
+namespace bupp::base {
+class submission_queue_entry;
+}
+
 namespace bupp::async_io::linux_native {
 
 class io_uring_operation_base;
+class io_uring_io_operation_base;
 
-/** Shared MPSC CPU/I/O queues and worker wake state. */
+/** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BUPP_EXPORT io_uring_task_queue_state {
   void push_cpu(io_uring_operation_base& operation) noexcept;
 
   [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
 
-  void push_io(io_uring_operation_base& operation) noexcept;
+  void push_io(io_uring_io_operation_base& operation) noexcept;
 
-  [[nodiscard]] io_uring_operation_base* pop_io_all() noexcept;
+  [[nodiscard]] io_uring_io_operation_base* pop_io_all() noexcept;
 
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
-  std::atomic<io_uring_operation_base*> io_head{nullptr};
+  std::atomic<io_uring_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
+  std::atomic_bool closing{false};
 };
 
 /**
@@ -86,6 +92,30 @@ class BUPP_EXPORT io_uring_operation_base {
   virtual void execute() noexcept = 0;
 };
 
+/** I/O operation passively prepared by an io_uring_context run loop. */
+class BUPP_EXPORT io_uring_io_operation_base : public io_uring_operation_base {
+ public:
+  io_uring_io_operation_base() noexcept = default;
+  io_uring_io_operation_base(const io_uring_io_operation_base&) = delete;
+  io_uring_io_operation_base& operator=(const io_uring_io_operation_base&) =
+      delete;
+  io_uring_io_operation_base(io_uring_io_operation_base&&) = delete;
+  io_uring_io_operation_base& operator=(io_uring_io_operation_base&&) = delete;
+  ~io_uring_io_operation_base() override = default;
+
+  /** Intrusive link used by local and shared I/O queues. */
+  io_uring_io_operation_base* io_next = nullptr;
+
+  /** Fills one SQE after the run loop takes this operation from the queue. */
+  virtual void prepare(bupp::base::submission_queue_entry& sqe) noexcept = 0;
+
+  /** Selects the completion delivered when SQE preparation fails. */
+  virtual void complete_submit_error(int result) noexcept = 0;
+
+  /** Returns whether this internal operation must stay on the current ring. */
+  [[nodiscard]] virtual bool ring_affine() const noexcept { return false; }
+};
+
 inline void io_uring_task_queue_state::push_cpu(
     io_uring_operation_base& operation) noexcept {
   io_uring_operation_base* head = cpu_head.load(std::memory_order_relaxed);
@@ -101,15 +131,15 @@ io_uring_task_queue_state::pop_cpu_all() noexcept {
 }
 
 inline void io_uring_task_queue_state::push_io(
-    io_uring_operation_base& operation) noexcept {
-  io_uring_operation_base* head = io_head.load(std::memory_order_relaxed);
+    io_uring_io_operation_base& operation) noexcept {
+  io_uring_io_operation_base* head = io_head.load(std::memory_order_relaxed);
   do {
-    operation.next = head;
+    operation.io_next = head;
   } while (!io_head.compare_exchange_weak(
       head, &operation, std::memory_order_release, std::memory_order_relaxed));
 }
 
-inline io_uring_operation_base*
+inline io_uring_io_operation_base*
 io_uring_task_queue_state::pop_io_all() noexcept {
   return io_head.exchange(nullptr, std::memory_order_acquire);
 }

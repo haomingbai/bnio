@@ -14,12 +14,19 @@ struct queue_test_operation : io_uring_operation_base {
   void execute() noexcept override {}
 };
 
+struct io_queue_test_operation
+    : bupp::async_io::linux_native::io_uring_io_operation_base {
+  void prepare(bupp::base::submission_queue_entry&) noexcept override {}
+  void complete_submit_error(int) noexcept override {}
+  void execute() noexcept override {}
+};
+
 void test_shared_task_queue_separates_cpu_and_io() {
   bupp::async_io::linux_native::io_uring_task_queue_state queue;
   queue_test_operation cpu;
-  std::array<queue_test_operation, 3> io;
+  std::array<io_queue_test_operation, 3> io;
 
-  for (queue_test_operation& operation : io) {
+  for (io_queue_test_operation& operation : io) {
     queue.push_io(operation);
   }
   queue.push_cpu(cpu);
@@ -28,12 +35,13 @@ void test_shared_task_queue_separates_cpu_and_io() {
   assert(queue.pop_cpu_all() == nullptr);
 
   std::size_t io_count = 0;
-  for (io_uring_operation_base* operation = queue.pop_io_all();
-       operation != nullptr; operation = operation->next) {
+  for (auto* operation = queue.pop_io_all(); operation != nullptr;
+       operation = operation->io_next) {
     ++io_count;
   }
   assert(io_count == io.size());
   assert(queue.pop_io_all() == nullptr);
+  assert(!queue.closing.load(std::memory_order_acquire));
 }
 
 void test_operation_state_concepts() {

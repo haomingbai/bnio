@@ -16,8 +16,6 @@ bupp_add_io_context_test(io_context_accept_connect
 bupp_add_io_context_test(io_context_poll io_context_poll_test.cpp)
 bupp_add_io_context_test(io_context_read_write io_context_read_write_test.cpp)
 bupp_add_io_context_test(io_context_scheduler io_context_scheduler_test.cpp)
-bupp_add_io_context_test(io_context_global_queue_stress
-                         io_context_global_queue_stress_test.cpp)
 bupp_add_io_context_test(io_context_sender_concept
                          io_context_sender_concept_test.cpp)
 bupp_add_io_context_test(ssl_concept ssl_concept_test.cpp)

@@ -70,13 +70,17 @@ class timer_operation_base
 };
 
 class timer_wakeup_operation
-    : public async_io::linux_native::io_uring_operation_base {
+    : public async_io::linux_native::io_uring_io_operation_base {
  public:
   explicit timer_wakeup_operation(io_context& context) noexcept;
 
   void set_timeout(async_io::duration timeout) noexcept;
 
-  void prepare(base::submission_queue_entry& sqe) noexcept;
+  void prepare(base::submission_queue_entry& sqe) noexcept override;
+
+  void complete_submit_error(int result) noexcept override;
+
+  [[nodiscard]] bool ring_affine() const noexcept override { return true; }
 
   void execute() noexcept override;
 
@@ -86,13 +90,17 @@ class timer_wakeup_operation
 };
 
 class timer_update_operation
-    : public async_io::linux_native::io_uring_operation_base {
+    : public async_io::linux_native::io_uring_io_operation_base {
  public:
   explicit timer_update_operation(io_context& context) noexcept;
 
   void set_timeout(async_io::duration timeout) noexcept;
 
-  void prepare(base::submission_queue_entry& sqe) noexcept;
+  void prepare(base::submission_queue_entry& sqe) noexcept override;
+
+  void complete_submit_error(int result) noexcept override;
+
+  [[nodiscard]] bool ring_affine() const noexcept override { return true; }
 
   void execute() noexcept override;
 
@@ -129,18 +137,18 @@ struct timer_state_data {
 
   void complete_driver() noexcept;
 
-  [[nodiscard]] bool can_submit_wakeup() const noexcept;
+  [[nodiscard]] bool can_queue_wakeup() const noexcept;
 
-  [[nodiscard]] bool can_submit_update(
+  [[nodiscard]] bool can_queue_update(
       async_io::time_point deadline) const noexcept;
 
   void complete_wakeup() noexcept;
 
   void complete_update() noexcept;
 
-  void mark_wakeup_submitted(async_io::time_point deadline) noexcept;
+  void mark_wakeup_queued(async_io::time_point deadline) noexcept;
 
-  void mark_update_submitted(async_io::time_point deadline) noexcept;
+  void mark_update_queued(async_io::time_point deadline) noexcept;
 
   void push_heap(timer_heap_item item) noexcept;
 

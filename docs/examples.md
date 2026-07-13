@@ -25,7 +25,8 @@ cmake -S . -B build -DBUPP_BUILD_EXAMPLES=OFF
 factories. The scheduler provides the low-level ability to operate on socket
 views and file descriptors. Calling an async factory creates a sender.
 Connecting the sender creates an operation state. Starting that operation
-queues or submits I/O. `ctx.run()` then waits for completion events and
+publishes I/O to the context queue. `ctx.run()` takes and submits that work,
+then waits for completion events and
 delivers receiver callbacks.
 
 ```cpp

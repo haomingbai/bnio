@@ -17,7 +17,7 @@
 namespace bupp::async_io::linux_native {
 
 /**
- * Operation that submits an io_uring accept request.
+ * Operation representing an io_uring accept request.
  */
 template <class Receiver>
 class io_uring_accept_operation
@@ -52,7 +52,7 @@ class io_uring_accept_operation
    *
    * @see io_uring_prep_accept
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     if (remote_endpoint_ == nullptr) {
       sqe.prep_accept(socket_.native_handle(), nullptr, nullptr, accept_flags_);
       return;
@@ -96,7 +96,7 @@ class io_uring_accept_operation
 };
 
 /**
- * Operation that submits an io_uring connect request.
+ * Operation representing an io_uring connect request.
  */
 template <class Receiver>
 class io_uring_connect_operation
@@ -119,7 +119,7 @@ class io_uring_connect_operation
    *
    * @see io_uring_prep_connect
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_connect(socket_.native_handle(), address_.data(), address_.size());
   }
 
@@ -134,7 +134,7 @@ class io_uring_connect_operation
 };
 
 /**
- * Operation that submits an io_uring recv request.
+ * Operation representing an io_uring recv request.
  */
 template <class Receiver>
 class io_uring_recv_operation
@@ -157,7 +157,7 @@ class io_uring_recv_operation
    *
    * @see io_uring_prep_recv
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_recv(socket_.native_handle(), buffer_.data,
                   detail::bounded_io_size(buffer_.size), recv_flags_);
   }
@@ -174,7 +174,7 @@ class io_uring_recv_operation
 };
 
 /**
- * Operation that submits an io_uring send request.
+ * Operation representing an io_uring send request.
  */
 template <class Receiver>
 class io_uring_send_operation
@@ -197,7 +197,7 @@ class io_uring_send_operation
    *
    * @see io_uring_prep_send
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_send(socket_.native_handle(), buffer_.data,
                   detail::bounded_io_size(buffer_.size), send_flags_);
   }
@@ -230,7 +230,7 @@ class io_uring_datagram_receive_operation
         buffer_(buffer),
         receive_flags_(receive_flags) {}
 
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_recv(socket_.native_handle(), buffer_.data,
                   detail::bounded_io_size(buffer_.size), receive_flags_);
   }
@@ -260,7 +260,7 @@ class io_uring_datagram_send_operation
         buffer_(buffer),
         send_flags_(send_flags) {}
 
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_send(socket_.native_handle(), buffer_.data,
                   detail::bounded_io_size(buffer_.size), send_flags_);
   }
@@ -274,7 +274,7 @@ class io_uring_datagram_send_operation
 };
 
 /**
- * Operation that submits an io_uring recvmsg request.
+ * Operation representing an io_uring recvmsg request.
  */
 template <class Receiver>
 class io_uring_recvmsg_operation
@@ -298,7 +298,7 @@ class io_uring_recvmsg_operation
    *
    * @see io_uring_prep_recvmsg
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_recvmsg(socket_.native_handle(), message_.native_handle(),
                      message_flags_);
   }
@@ -315,7 +315,7 @@ class io_uring_recvmsg_operation
 };
 
 /**
- * Operation that submits an io_uring sendmsg request.
+ * Operation representing an io_uring sendmsg request.
  */
 template <class Receiver>
 class io_uring_sendmsg_operation
@@ -339,7 +339,7 @@ class io_uring_sendmsg_operation
    *
    * @see io_uring_prep_sendmsg
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_sendmsg(socket_.native_handle(), message_.native_handle(),
                      message_flags_);
   }
@@ -374,7 +374,7 @@ class io_uring_receive_from_operation
         remote_endpoint_(&remote_endpoint),
         receive_flags_(receive_flags) {}
 
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     remote_address_ = {};
     buffer_entry_ = {buffer_.data, detail::bounded_io_size(buffer_.size)};
     message_ = {};
@@ -430,7 +430,7 @@ class io_uring_send_to_operation
         remote_address_(remote_endpoint),
         send_flags_(send_flags) {}
 
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     buffer_entry_ = {buffer_.data, detail::bounded_io_size(buffer_.size)};
     message_ = {};
     message_.msg_name = const_cast<sockaddr*>(remote_address_.data());

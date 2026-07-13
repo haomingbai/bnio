@@ -1,3 +1,6 @@
+#include <thread>
+#include <vector>
+
 #include "io_context_runtime_test_support.h"
 
 namespace {
@@ -169,6 +172,56 @@ void test_steady_timer_pre_stopped_token_stops_wait() {
   assert(state->signal == signal_kind::stopped);
 }
 
+void test_timer_update_stays_on_primary_ring_with_multiple_workers() {
+  constexpr unsigned worker_count = 4;
+  bupp::io_context_options options;
+  options.concurrency_hint = worker_count;
+  bupp::io_context context(options);
+  if (!context_available(context)) {
+    return;
+  }
+
+  unsigned completions = 0;
+  bupp::steady_timer first_timer(context);
+  assert(first_timer.expires_after(std::chrono::milliseconds(60)) == 0);
+
+  void_receiver first_receiver;
+  first_receiver.context = &context;
+  first_receiver.completions = &completions;
+  first_receiver.target = 2;
+  auto first_state = first_receiver.state;
+  auto first_operation =
+      bexec::connect(first_timer.async_wait(), std::move(first_receiver));
+  bexec::start(first_operation);
+
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  for (unsigned index = 0; index < worker_count; ++index) {
+    workers.emplace_back([&context] { context.run(); });
+  }
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  bupp::steady_timer second_timer(context);
+  assert(second_timer.expires_after(std::chrono::milliseconds(5)) == 0);
+
+  void_receiver second_receiver;
+  second_receiver.context = &context;
+  second_receiver.completions = &completions;
+  second_receiver.target = 2;
+  auto second_state = second_receiver.state;
+  auto second_operation =
+      bexec::connect(second_timer.async_wait(), std::move(second_receiver));
+  bexec::start(second_operation);
+
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
+
+  assert(completions == 2);
+  assert(first_state->signal == signal_kind::value);
+  assert(second_state->signal == signal_kind::value);
+}
+
 }  // namespace
 
 int main() {
@@ -178,5 +231,6 @@ int main() {
   test_steady_timer_multiple_waits_complete();
   test_steady_timer_move_stops_old_wait();
   test_steady_timer_pre_stopped_token_stops_wait();
+  test_timer_update_stays_on_primary_ring_with_multiple_workers();
   return 0;
 }

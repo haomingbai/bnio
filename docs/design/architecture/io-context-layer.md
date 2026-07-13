@@ -20,7 +20,7 @@ cohesive `detail` state objects rather than defining all internal data inline:
 | `detail::native_context_state` | `linux/detail/io_context_state.h` | Primary native `io_uring_context` plus Linux-specific options. |
 | `detail::native_worker_state` | `linux/detail/io_context_state.h` | Worker linked list, active worker count, and round-robin cursor. |
 | `detail::native_worker` | `linux/detail/io_context_state/native_worker.h` | Per-run-thread native context slot. |
-| `async_io::linux_native::io_uring_task_queue_state` | `async_io/linux/io_uring_context_base/operation_base.h` | Separate shared CPU/I/O queues and the awake-worker count. |
+| `async_io::linux_native::io_uring_task_queue_state` | `async_io/linux/io_uring_context_base/operation_base.h` | Shared CPU/I/O queues, awake-worker count, and worker-group closing state. |
 | `detail::timer_state_data` | `linux/detail/io_context_timer_types.h` | Timer map, heap, reusable timer-operation states, and timeout state machine. |
 
 Template implementation types are grouped by operation family under
@@ -28,22 +28,22 @@ Template implementation types are grouped by operation family under
 after the complete `io_context` declaration, so templates can call private
 context hooks without splitting a class definition across files.
 
-### Passive I/O Submission
+### Passive I/O Publication
 
 ```mermaid
 graph LR
-    I["operation"] --> E["enqueue_io()"]
+    I["operation"] --> E["publish_io()"]
     E --> Q["shared lower-priority I/O queue"]
-    Q --> W["worker takes all published I/O"]
-    W --> U["worker-owned io_uring submit"]
+    Q --> W["io_uring_context::run() takes all I/O"]
+    W --> U["prepare SQEs + private ring submit"]
 ```
 
-There is one submission policy. Producers publish I/O and wake a worker when
+There is one publication policy. Producers publish I/O and wake a worker when
 the shared awake count indicates that a worker is sleeping. Workers give the
 CPU queue priority, then atomically take the complete I/O list. Busy workloads
-naturally form larger submission batches; idle workloads reach the same drain
-during the pre-sleep recheck. No count, threshold, explicit flush, or direct
-variant is involved.
+naturally form larger kernel submission batches; idle workloads reach the same
+drain during the pre-sleep recheck. No count, threshold, explicit flush, or
+direct variant is involved.
 
 Socket data operations first try one non-blocking syscall in the high-level
 layer. Stream and connected datagram operations use `recv()` or `send()` with
@@ -78,7 +78,22 @@ worker slots and writes one waiting worker's eventfd. I/O is published to the
 lower-priority shared I/O queue. The worker that removes an I/O batch owns all
 SQ preparation and submission for that batch, so the high-level queue code does
 not need native ring synchronization. Timer bookkeeping remains on the primary
-native context (slot 0).
+native context (slot 0). Its timeout and timeout-update requests use the
+primary run loop's local passive I/O chain so both requests remain on the same
+ring; they do not expose or call an active submission API.
+
+The shared state is owned by `io_context`, not by any native
+`io_uring_context`. Construction calls `set_global_state()` on the primary
+native context, and each later worker receives the same pointer before it can
+run. `run()` follows `global_state_` to obtain CPU work, I/O work, the
+awake-worker count, and the group closing flag. A standalone native context
+leaves the pointer null and uses only its local, non-atomic task queues; no
+hidden shared-state fallback is allocated.
+
+`io_context::stop()` sets the shared `closing` flag before scanning and waking
+native workers. Worker registration checks the same flag both before and after
+publishing a new slot, so a worker that races with the stop scan cannot enter a
+new idle run loop.
 
 Before a worker blocks, it publishes sleeping in two stages: first its local
 waiting flag, then a decrement of the shared awake-worker count. It then
@@ -257,14 +272,13 @@ sequenceDiagram
     Stream-->>User: sender
 
     User->>Op: connect(receiver) → start()
-    Op->>Ctx: enqueue_io(*this)
+    Op->>Ctx: publish_io(*this)
 
     Note over Ctx: publish to shared lower-priority I/O queue
     Ctx->>Worker: notify one worker if sleeping
-    Worker->>Worker: CPU queue first; then take all published I/O
-    Worker->>Ctx: take_pending_io()
-    Worker->>UCtx: submit_batch(fn)
-    UCtx->>Ring: get_sqe() + prepare(sqe)
+    Worker->>UCtx: run(): CPU queue first
+    UCtx->>UCtx: consume_io_tasks(): global_state_->pop_io_all()
+    UCtx->>Ring: get_sqe() + operation.prepare(sqe)
     Ring->>K: io_uring_submit()
 
     Note over K: async I/O ...

@@ -78,8 +78,9 @@ void test_posted_tasks_drain_in_post_order() {
 }
 
 void test_posted_tasks_accept_concurrent_external_posts() {
+  io_uring_task_queue_state global_tasks;
   io_uring_context context;
-  if (!queue_init_or_skip(context)) {
+  if (!queue_init_shared_or_skip(context, global_tasks)) {
     return;
   }
 
@@ -142,10 +143,24 @@ void test_posted_tasks_accept_concurrent_external_posts() {
   assert(state->all_in_context.load(std::memory_order_acquire));
 }
 
+void test_shared_closing_state_finishes_the_worker() {
+  io_uring_task_queue_state global_state;
+  io_uring_context context;
+  if (!queue_init_shared_or_skip(context, global_state)) {
+    return;
+  }
+
+  global_state.closing.store(true, std::memory_order_release);
+  context.run();
+
+  assert(global_state.awake_workers.load(std::memory_order_acquire) == 0);
+}
+
 }  // namespace
 
 int main() {
   test_posted_tasks_drain_in_post_order();
   test_posted_tasks_accept_concurrent_external_posts();
+  test_shared_closing_state_finishes_the_worker();
   return 0;
 }

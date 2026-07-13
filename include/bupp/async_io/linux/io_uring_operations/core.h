@@ -79,7 +79,7 @@ class io_uring_post_operation : public io_uring_operation_base {
 };
 
 /**
- * Operation that submits an io_uring no-op request.
+ * Operation representing an io_uring no-op request.
  */
 template <class Receiver>
 class io_uring_nop_operation
@@ -97,7 +97,7 @@ class io_uring_nop_operation
    *
    * @see io_uring_prep_nop
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_nop();
   }
 
@@ -108,7 +108,7 @@ class io_uring_nop_operation
 };
 
 /**
- * Operation that submits an io_uring timeout request.
+ * Operation representing an io_uring timeout request.
  */
 template <class Receiver>
 class io_uring_timeout_operation
@@ -147,7 +147,7 @@ class io_uring_timeout_operation
    *
    * @see io_uring_prep_timeout
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_timeout(&timeout_, count_, timeout_flags_);
   }
 
@@ -181,7 +181,7 @@ class io_uring_raw_operation
   /**
    * Invokes the caller-provided prepare function for the SQE.
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     prepare_(sqe);
   }
 

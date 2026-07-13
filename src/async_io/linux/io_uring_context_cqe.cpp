@@ -22,15 +22,14 @@ int io_uring_context::wait_for_cqe_event() noexcept {
   }
 }
 
-bool io_uring_context::collect_ready_cqes(
-    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
+bool io_uring_context::collect_ready_cqes() noexcept {
   operation_queue cqe_tasks;
   const unsigned task_count = collect_cqe_tasks(cqe_tasks);
   if (task_count == 0) {
     return false;
   }
 
-  dispatch_cqe_tasks(cqe_tasks, task_count, local_tasks, local_task_budget);
+  dispatch_cqe_tasks(cqe_tasks, task_count);
   return true;
 }
 
@@ -65,11 +64,10 @@ unsigned io_uring_context::collect_cqe_tasks(
 }
 
 void io_uring_context::dispatch_cqe_tasks(
-    operation_queue& cqe_tasks, unsigned task_count,
-    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
+    operation_queue& cqe_tasks, unsigned task_count) noexcept {
   // Tier 1 — inline: small batch, always push to the local queue.
   if (task_count <= options_.cqe_inline_completion_threshold) {
-    local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
+    local_tasks_.push(reverse_tasks(cqe_tasks.pop_all()));
     return;
   }
 
@@ -77,10 +75,10 @@ void io_uring_context::dispatch_cqe_tasks(
   // When local_queue_threshold is 0 (default) this tier is unlimited and
   // CQEs never spill to the shared CPU queue on this path.
   if (options_.local_queue_threshold == 0 ||
-      (local_task_budget > 0 && task_count <= local_task_budget)) {
-    local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
+      (local_task_budget_ > 0 && task_count <= local_task_budget_)) {
+    local_tasks_.push(reverse_tasks(cqe_tasks.pop_all()));
     if (options_.local_queue_threshold > 0) {
-      local_task_budget -= task_count;
+      local_task_budget_ -= task_count;
     }
     return;
   }

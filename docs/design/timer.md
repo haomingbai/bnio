@@ -196,10 +196,10 @@ The timer subsystem reuses several internal operation objects:
 | Operation | Purpose | Reuse Rule |
 |-----------|---------|------------|
 | `timer_driver_operation_` | Drains submitted waits, completes due waits, schedules kernel timeout. | Only posted when driver state is idle. |
-| `timer_wakeup_operation_` | The active io_uring timeout request. | Submitted only when timeout state is idle. |
-| `timer_update_operation_` | Retargets the active io_uring timeout. | Submitted only when timeout state is armed and the root deadline changed. |
+| `timer_wakeup_operation_` | The active io_uring timeout request. | Queued on the primary run loop only when timeout state is idle. |
+| `timer_update_operation_` | Retargets the active io_uring timeout. | Queued on the primary run loop only when timeout state is armed and the root deadline changed. |
 
-These objects must not be posted or submitted twice while already in flight.
+These objects must not be posted or queued twice while already in flight.
 The state machines below exist to protect that reuse, not to protect ordinary
 memory access.
 
@@ -229,9 +229,9 @@ request owned by the context.
 ```mermaid
 stateDiagram-v2
     [*] --> idle
-    idle --> armed: mark_wakeup_submitted(deadline)
+    idle --> armed: mark_wakeup_queued(deadline)
     armed --> idle: complete_wakeup()
-    armed --> updating: mark_update_submitted(new_deadline)
+    armed --> updating: mark_update_queued(new_deadline)
     updating --> armed: complete_update()
     updating --> update_pending: complete_wakeup()
     update_pending --> idle: complete_update()
@@ -242,8 +242,8 @@ The states mean:
 | State | Meaning |
 |-------|---------|
 | `idle` | No kernel timeout is currently active. |
-| `armed` | A wakeup timeout is active for `armed_deadline`. |
-| `updating` | A timeout update SQE has been submitted for the active wakeup. |
+| `armed` | A wakeup timeout is queued or active for `armed_deadline`. |
+| `updating` | A timeout update is queued or active for the wakeup. |
 | `update_pending` | The old wakeup completed while the update SQE was still in flight. |
 
 The `update_pending` state handles completion reordering. io_uring can report
@@ -259,13 +259,15 @@ After the driver drains submissions or completes due heap entries, it calls
 The function looks only at the heap root:
 
 1. If the heap is empty, there is nothing to schedule.
-2. If timeout state is `idle`, submit `timer_wakeup_operation_`.
-3. If timeout state is `armed` and the heap root deadline changed, submit
+2. If timeout state is `idle`, queue `timer_wakeup_operation_` on the primary
+   run loop's local I/O list.
+3. If timeout state is `armed` and the heap root deadline changed, queue
    `timer_update_operation_`.
 4. Otherwise do nothing.
 
-Submitting a wakeup or update stores the new `armed_deadline`. If submission
-returns `-EAGAIN`, the code submits currently prepared SQEs and retries once.
+Queuing a wakeup or update stores the new `armed_deadline`. The next run-loop
+pass prepares it together with other passive I/O; timer code never reserves an
+SQE or submits the ring directly.
 
 ## Invariants
 

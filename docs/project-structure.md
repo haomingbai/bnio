@@ -53,11 +53,10 @@ Platform-neutral vocabulary types and the platform-native event-loop context.
 - `ip/tcp.h` — TCP protocol tag.
 - `ip/udp.h` — UDP protocol tag.
 - `linux/io_uring_context.h` — umbrella for the Linux native context.
-- `linux/io_uring_context_base.h` — umbrella for context + operation_base + options + submission.
+- `linux/io_uring_context_base.h` — umbrella for context, operation bases, and options.
 - `linux/io_uring_context_base/context.h` — `io_uring_context` class definition.
-- `linux/io_uring_context_base/operation_base.h` — intrusive `io_uring_operation_base`.
+- `linux/io_uring_context_base/operation_base.h` — intrusive CPU/I/O operation bases and shared queues.
 - `linux/io_uring_context_base/options.h` — `io_uring_context_options`.
-- `linux/io_uring_context_base/submission.h` — template `prepare` / `submit` / `submit_batch`.
 - `linux/io_uring_operations.h` — umbrella for concrete operation types.
 - `linux/io_uring_operations/core.h` — nop, timeout, and internal operations.
 - `linux/io_uring_operations/file.h` — regular-file read/write operations.
@@ -153,12 +152,12 @@ High-level async runtime, stream owners, and buffer types.
   - `io_uring_context.cpp` — lifecycle and queue init/exit.
   - `io_uring_context_cqe.cpp` — CQE dispatch.
   - `io_uring_context_run_loop.cpp` — main run loop.
-  - `io_uring_context_submission.cpp` — submission helpers.
+  - `io_uring_context_io_tasks.cpp` — run-loop-only local/global I/O queue consumption and SQE preparation.
   - `io_uring_context_task_queue.cpp` — shared CPU queue and eventfd wakeup.
   - `io_uring_context_internal.h` — internal context state.
 - `src/linux/` — high-level Linux `io_context` implementations:
   - `io_context.cpp` — lifecycle, schedulers, native worker slots.
-  - `io_context_queue.cpp` — passive I/O submission and worker wakeup.
+  - `io_context_queue.cpp` — passive I/O publication and worker wakeup.
   - `io_context_timer.cpp` — timer operation and slot management.
   - `io_context_timer_driver.cpp` — timer driver and heap.
   - `io_context_timer_state.cpp` — timeout/wakeup state machine.

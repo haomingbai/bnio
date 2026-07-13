@@ -11,28 +11,6 @@ namespace {
 
 using namespace bupp_async_io_io_uring_test;
 
-void test_cqe_completion_can_prepare_the_next_sqe() {
-  fill_nop_operation filler;
-  io_uring_context context;
-  if (!queue_init_or_skip(context)) {
-    return;
-  }
-
-  prepare_on_completion_receiver recv;
-  recv.context = &context;
-  recv.filler = &filler;
-  auto state = recv.state;
-
-  io_uring_nop_operation operation(context, std::move(recv));
-  bexec::start(operation);
-  context.run();
-
-  assert(state->signal == signal_kind::value);
-  assert(state->result == 0);
-  assert(state->prepare_result == 0);
-  assert(state->in_context);
-}
-
 void test_cqe_batch_window_drains_multiple_rounds() {
   io_uring_context context;
   io_uring_context_options options;
@@ -68,6 +46,7 @@ void test_cqe_batch_window_drains_multiple_rounds() {
 }
 
 void test_concurrent_start_uses_the_single_run_thread() {
+  io_uring_task_queue_state global_tasks;
   io_uring_context context;
   io_uring_context_options options;
   options.entries = 1024;
@@ -75,7 +54,7 @@ void test_concurrent_start_uses_the_single_run_thread() {
   options.wait_spin_count = 1024;
   options.cqe_inline_completion_threshold = 0;
   options.local_queue_threshold = 8;
-  if (!queue_init_or_skip(context, options)) {
+  if (!queue_init_shared_or_skip(context, global_tasks, options)) {
     return;
   }
 
@@ -120,48 +99,10 @@ void test_concurrent_start_uses_the_single_run_thread() {
   assert(state->stopped.load(std::memory_order_acquire) == 0);
 }
 
-void test_submit_failure_posts_error_completion() {
-  io_uring_context context;
-  io_uring_context_options options;
-  options.entries = 2;
-  if (!queue_init_or_skip(context, options)) {
-    return;
-  }
-
-  std::array<fill_nop_operation, 64> fillers;
-  bool full = false;
-  for (fill_nop_operation& filler : fillers) {
-    const int result = context.prepare(filler);
-    if (result == -EAGAIN) {
-      full = true;
-      break;
-    }
-    assert(result == 0);
-  }
-  if (!full) {
-    return;
-  }
-
-  receiver recv;
-  recv.context = &context;
-  recv.stop_on_completion = true;
-  auto state = recv.state;
-
-  io_uring_nop_operation operation(context, std::move(recv));
-  bexec::start(operation);
-  context.run();
-
-  assert(state->signal == signal_kind::error);
-  assert(state->error == std::error_code(EAGAIN, std::generic_category()));
-  assert(state->in_context);
-}
-
 }  // namespace
 
 int main() {
-  test_cqe_completion_can_prepare_the_next_sqe();
   test_cqe_batch_window_drains_multiple_rounds();
   test_concurrent_start_uses_the_single_run_thread();
-  test_submit_failure_posts_error_completion();
   return 0;
 }

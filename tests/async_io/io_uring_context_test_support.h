@@ -54,6 +54,7 @@ using bupp::async_io::linux_native::io_uring_resolve_operation;
 using bupp::async_io::linux_native::io_uring_send_operation;
 using bupp::async_io::linux_native::io_uring_send_to_operation;
 using bupp::async_io::linux_native::io_uring_sendmsg_operation;
+using bupp::async_io::linux_native::io_uring_task_queue_state;
 using bupp::async_io::linux_native::io_uring_timeout_operation;
 using bupp::async_io::linux_native::io_uring_write_operation;
 using bupp::async_io::linux_native::io_uring_writev_operation;
@@ -72,7 +73,6 @@ struct shared_state {
   unsigned flags = 0;
   bool in_context = false;
   std::error_code error;
-  int prepare_result = -1;
 };
 
 struct receiver {
@@ -206,48 +206,6 @@ struct stopped_receiver : receiver {
   [[nodiscard]] stop_env get_env() const noexcept { return env; }
 };
 
-struct fill_nop_operation : io_uring_operation_base {
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
-    sqe.prep_nop();
-  }
-
-  void execute() noexcept override {}
-};
-
-struct prepare_on_completion_receiver {
-  std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
-  io_uring_context* context = nullptr;
-  fill_nop_operation* filler = nullptr;
-
-  void set_value(int result, unsigned flags) noexcept {
-    state->signal = signal_kind::value;
-    state->result = result;
-    state->flags = flags;
-    state->in_context = (context != nullptr && context->is_in_context());
-    if (context != nullptr && filler != nullptr) {
-      state->prepare_result = context->prepare(*filler);
-      (void)context->stop();
-    }
-  }
-
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    state->in_context = (context != nullptr && context->is_in_context());
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
-
-  void set_stopped() noexcept {
-    state->signal = signal_kind::stopped;
-    state->in_context = (context != nullptr && context->is_in_context());
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
-};
-
 struct batch_state {
   unsigned completed = 0;
   unsigned errors = 0;
@@ -375,6 +333,13 @@ inline bool queue_init_or_skip(io_uring_context& context,
     return false;
   }
   return true;
+}
+
+inline bool queue_init_shared_or_skip(io_uring_context& context,
+                                      io_uring_task_queue_state& global_tasks,
+                                      io_uring_context_options options = {}) {
+  context.set_global_state(&global_tasks);
+  return queue_init_or_skip(context, options);
 }
 
 }  // namespace bupp_async_io_io_uring_test

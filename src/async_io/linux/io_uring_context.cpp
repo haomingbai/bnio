@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cassert>
 #include <cerrno>
 
 namespace bupp::async_io::linux_native {
@@ -26,9 +27,7 @@ unsigned prepare_queue_params(const io_uring_context_options& options,
 
 thread_local io_uring_context* io_uring_context::current_context_ = nullptr;
 
-io_uring_context::io_uring_context() noexcept {
-  options_.task_queue = &owned_task_queue_;
-}
+io_uring_context::io_uring_context() noexcept = default;
 
 io_uring_context::io_uring_context(
     const io_uring_context_options& options) noexcept
@@ -44,20 +43,12 @@ void io_uring_context::apply_context_options(
   if (options_.cqe_batch_window == 0) {
     options_.cqe_batch_window = 1;
   }
-  if (options_.task_queue == nullptr) {
-    options_.task_queue = &owned_task_queue_;
-  }
 }
 
 int io_uring_context::queue_init(
     const io_uring_context_options& options) noexcept {
   if (queue_initialized_) {
     return -EALREADY;
-  }
-
-  if (options_.task_queue == &owned_task_queue_) {
-    (void)owned_task_queue_.pop_cpu_all();
-    (void)owned_task_queue_.pop_io_all();
   }
   run_active_.store(false, std::memory_order_release);
   queue_initialized_ = true;
@@ -98,18 +89,6 @@ int io_uring_context::queue_init(
   }
 
   state_.store(context_state::running, std::memory_order_release);
-  const int poll_result = submit_eventfd_poll();
-  if (poll_result < 0) {
-    state_.store(context_state::finished, std::memory_order_release);
-    ring_.queue_exit();
-    if (owns_event_fd_ && event_fd_ >= 0) {
-      (void)::close(event_fd_);
-    }
-    event_fd_ = -1;
-    owns_event_fd_ = false;
-    return poll_result;
-  }
-
   return 0;
 }
 
@@ -137,12 +116,10 @@ int io_uring_context::init_ring_params(
 
 void io_uring_context::queue_exit() noexcept {
   state_.store(context_state::finished, std::memory_order_release);
-  if (options_.task_queue == &owned_task_queue_) {
-    (void)owned_task_queue_.pop_cpu_all();
-    (void)owned_task_queue_.pop_io_all();
-  }
   (void)signal_eventfd();
 
+  (void)local_tasks_.pop_all();
+  local_io_tasks_ = nullptr;
   eventfd_poll_pending_ = false;
   ring_.queue_exit();
   if (owns_event_fd_ && event_fd_ >= 0) {
@@ -154,5 +131,11 @@ void io_uring_context::queue_exit() noexcept {
 }
 
 bool io_uring_context::is_open() const noexcept { return ring_.is_open(); }
+
+void io_uring_context::set_global_state(
+    io_uring_task_queue_state* state) noexcept {
+  assert(!run_active_.load(std::memory_order_acquire));
+  global_state_ = state;
+}
 
 }  // namespace bupp::async_io::linux_native

@@ -41,7 +41,7 @@ class io_uring_poll_request {
 };
 
 /**
- * Operation that submits an io_uring poll request.
+ * Operation representing an io_uring poll request.
  */
 template <class Receiver>
 class io_uring_poll_operation
@@ -61,7 +61,7 @@ class io_uring_poll_operation
    *
    * @see io_uring_prep_poll_add
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     request_.prepare(sqe);
   }
 
@@ -78,7 +78,7 @@ class io_uring_poll_operation
  * Operation state used by the typed io_uring poll sender.
  */
 template <class Receiver>
-class io_uring_poll_sender_operation : public io_uring_operation_base {
+class io_uring_poll_sender_operation : public io_uring_io_operation_base {
  public:
   /**
    * Creates a typed poll operation for a context and receiver.
@@ -101,7 +101,7 @@ class io_uring_poll_sender_operation : public io_uring_operation_base {
   /**
    * Prepares the poll request.
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     request_.prepare(sqe);
   }
 
@@ -115,8 +115,13 @@ class io_uring_poll_sender_operation : public io_uring_operation_base {
       return;
     }
 
-    completion_ = completion_kind::submitting;
-    (void)context_->post(*this);
+    completion_ = completion_kind::value;
+    context_->publish_io(*this);
+  }
+
+  void complete_submit_error(int result) noexcept override {
+    completion_ = completion_kind::error;
+    error_ = std::error_code(-result, std::generic_category());
   }
 
   /**
@@ -124,16 +129,6 @@ class io_uring_poll_sender_operation : public io_uring_operation_base {
    */
   void execute() noexcept override {
     switch (completion_) {
-      case completion_kind::submitting: {
-        completion_ = completion_kind::value;
-        const int submit_result = context_->submit(*this);
-        if (submit_result < 0) {
-          completion_ = completion_kind::error;
-          error_ = std::error_code(-submit_result, std::generic_category());
-          (void)context_->post(*this);
-        }
-        break;
-      }
       case completion_kind::value:
         if (result < 0) {
           bexec::set_error(std::move(receiver_),
@@ -153,7 +148,6 @@ class io_uring_poll_sender_operation : public io_uring_operation_base {
 
  private:
   enum class completion_kind {
-    submitting,
     value,
     error,
     stopped,

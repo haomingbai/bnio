@@ -45,10 +45,6 @@ namespace bupp {
 
 enum class ssl_handshake_type;
 
-namespace base {
-class submission_queue_entry;
-}  // namespace base
-
 /**
  * High-level asynchronous I/O context for Linux.
  *
@@ -58,58 +54,8 @@ class submission_queue_entry;
  */
 class BUPP_EXPORT io_context {
  public:
-  /**
-   * Base class for operations scheduled by io_context.
-   */
-  class operation_base
-      : public async_io::linux_native::io_uring_operation_base {
-   public:
-    /**
-     * Creates an unqueued operation base.
-     */
-    operation_base() noexcept = default;
-
-    /**
-     * Copy construction is disabled because operations are queued
-     * intrusively.
-     */
-    operation_base(const operation_base&) = delete;
-
-    /**
-     * Copy assignment is disabled because operations are queued intrusively.
-     */
-    operation_base& operator=(const operation_base&) = delete;
-
-    /**
-     * Move construction is disabled because operations are queued intrusively.
-     */
-    operation_base(operation_base&&) = delete;
-
-    /**
-     * Move assignment is disabled because operations are queued intrusively.
-     */
-    operation_base& operator=(operation_base&&) = delete;
-
-    /**
-     * Destroys the operation base.
-     */
-    ~operation_base() override = default;
-
-    /**
-     * Intrusive next pointer used by the shared I/O queue.
-     */
-    operation_base* pending_next = nullptr;
-
-    /**
-     * Fills one native submission queue entry for this operation.
-     */
-    virtual void prepare(base::submission_queue_entry& sqe) noexcept = 0;
-
-    /**
-     * Completes the operation when submission preparation fails.
-     */
-    virtual void complete_submit_error(int result) noexcept = 0;
-  };
+  /** I/O operation passively consumed by one native run-loop worker. */
+  using operation_base = async_io::linux_native::io_uring_io_operation_base;
 
   /**
    * Monotonic clock used by this context.
@@ -285,21 +231,6 @@ class BUPP_EXPORT io_context {
     [[nodiscard]] async_io::linux_native::io_uring_context& native_context()
         const noexcept {
       return context_->native_context();
-    }
-
-    /**
-     * Publishes one operation for passive io_uring submission by a worker.
-     */
-    void enqueue_io(operation_base& operation) const noexcept {
-      context_->enqueue_io(operation);
-    }
-
-    /**
-     * Posts one operation onto the owning context run loop.
-     */
-    void post(async_io::linux_native::io_uring_operation_base& operation)
-        const noexcept {
-      context_->post(operation);
     }
 
     /**
@@ -625,7 +556,7 @@ class BUPP_EXPORT io_context {
   /**
    * Publishes an operation for passive io_uring submission by a worker.
    */
-  void enqueue_io(operation_base& operation) noexcept;
+  void publish_io(operation_base& operation) noexcept;
 
   /**
    * Posts an operation for execution on the context run loop.
@@ -638,16 +569,6 @@ class BUPP_EXPORT io_context {
   [[nodiscard]] detail::native_worker& select_io_worker() noexcept;
 
   [[nodiscard]] detail::native_worker* register_run_worker() noexcept;
-
-  void submit_operations(
-      operation_base* operations,
-      async_io::linux_native::io_uring_context& native_context) noexcept;
-
-  [[nodiscard]] static bool drain_pending_io(
-      void* owner,
-      async_io::linux_native::io_uring_context& native_context) noexcept;
-
-  [[nodiscard]] operation_base* take_pending_io() noexcept;
 
   void wake_one_worker() noexcept;
 
@@ -694,18 +615,17 @@ class BUPP_EXPORT io_context {
 
   void schedule_timer_wakeup_locked() noexcept;
 
-  void submit_timer_wakeup_locked(time_point deadline) noexcept;
+  void queue_timer_wakeup_locked(time_point deadline) noexcept;
 
-  void submit_timer_update_locked(time_point deadline) noexcept;
+  void queue_timer_update_locked(time_point deadline) noexcept;
 
-  async_io::linux_native::io_uring_task_queue_state task_queue_;
+  async_io::linux_native::io_uring_task_queue_state global_state_;
   detail::native_context_state native_;
   detail::timer_wakeup_operation timer_wakeup_operation_;
   detail::timer_update_operation timer_update_operation_;
   detail::timer_driver_operation timer_driver_operation_;
 
   detail::native_worker_state native_workers_;
-  std::atomic_bool stop_requested_{false};
 
   detail::timer_state_data timers_;
 

@@ -14,23 +14,11 @@ namespace bupp::detail {
 struct native_context_state {
   explicit native_context_state(
       const linux_io_context_options& context_options,
-      async_io::linux_native::io_uring_task_queue_state& task_queue) noexcept
-      : context(make_options(context_options, task_queue)),
-        options(context_options) {
-    options.uring.task_queue = &task_queue;
+      async_io::linux_native::io_uring_task_queue_state& global_state) noexcept
+      : context(context_options.uring), options(context_options) {
+    context.set_global_state(&global_state);
   }
 
- private:
-  [[nodiscard]] static async_io::linux_native::io_uring_context_options
-  make_options(
-      const linux_io_context_options& context_options,
-      async_io::linux_native::io_uring_task_queue_state& task_queue) noexcept {
-    auto options = context_options.uring;
-    options.task_queue = &task_queue;
-    return options;
-  }
-
- public:
   async_io::linux_native::io_uring_context context;
   linux_io_context_options options;
 };

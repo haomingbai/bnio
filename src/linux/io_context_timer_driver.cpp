@@ -187,56 +187,38 @@ void io_context::schedule_timer_wakeup_locked() noexcept {
   }
 
   const time_point deadline = timers_.heap.front().deadline;
-  if (timers_.can_submit_wakeup()) {
-    submit_timer_wakeup_locked(deadline);
+  if (timers_.can_queue_wakeup()) {
+    queue_timer_wakeup_locked(deadline);
     return;
   }
 
-  if (timers_.can_submit_update(deadline)) {
-    submit_timer_update_locked(deadline);
+  if (timers_.can_queue_update(deadline)) {
+    queue_timer_update_locked(deadline);
   }
 }
 
-void io_context::submit_timer_wakeup_locked(time_point deadline) noexcept {
-  if (!timers_.can_submit_wakeup()) {
+void io_context::queue_timer_wakeup_locked(time_point deadline) noexcept {
+  if (!timers_.can_queue_wakeup()) {
     return;
   }
 
   timer_wakeup_operation_.set_timeout(
       std::max(deadline - clock::now(), duration::zero()));
 
-  async_io::linux_native::io_uring_context& native_context =
-      primary_native_context();
-  int result = native_context.submit(timer_wakeup_operation_);
-  if (result == -EAGAIN) {
-    (void)native_context.submit();
-    result = native_context.submit(timer_wakeup_operation_);
-  }
-
-  if (result >= 0) {
-    timers_.mark_wakeup_submitted(deadline);
-  }
+  primary_native_context().publish_io(timer_wakeup_operation_);
+  timers_.mark_wakeup_queued(deadline);
 }
 
-void io_context::submit_timer_update_locked(time_point deadline) noexcept {
-  if (!timers_.can_submit_update(deadline)) {
+void io_context::queue_timer_update_locked(time_point deadline) noexcept {
+  if (!timers_.can_queue_update(deadline)) {
     return;
   }
 
   timer_update_operation_.set_timeout(
       std::max(deadline - clock::now(), duration::zero()));
 
-  async_io::linux_native::io_uring_context& native_context =
-      primary_native_context();
-  int result = native_context.submit(timer_update_operation_);
-  if (result == -EAGAIN) {
-    (void)native_context.submit();
-    result = native_context.submit(timer_update_operation_);
-  }
-
-  if (result >= 0) {
-    timers_.mark_update_submitted(deadline);
-  }
+  primary_native_context().publish_io(timer_update_operation_);
+  timers_.mark_update_queued(deadline);
 }
 
 }  // namespace bupp

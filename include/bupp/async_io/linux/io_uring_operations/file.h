@@ -15,7 +15,7 @@
 namespace bupp::async_io::linux_native {
 
 /**
- * Operation that submits an io_uring read request.
+ * Operation representing an io_uring read request.
  */
 template <class Receiver>
 class io_uring_read_operation
@@ -38,7 +38,7 @@ class io_uring_read_operation
    *
    * @see io_uring_prep_read
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_read(descriptor_.native_handle(), buffer_.data,
                   detail::bounded_io_size(buffer_.size), offset_);
   }
@@ -55,7 +55,7 @@ class io_uring_read_operation
 };
 
 /**
- * Operation that submits an io_uring write request.
+ * Operation representing an io_uring write request.
  */
 template <class Receiver>
 class io_uring_write_operation
@@ -79,7 +79,7 @@ class io_uring_write_operation
    *
    * @see io_uring_prep_write
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_write(descriptor_.native_handle(), buffer_.data,
                    detail::bounded_io_size(buffer_.size), offset_);
   }
@@ -96,7 +96,7 @@ class io_uring_write_operation
 };
 
 /**
- * Operation that submits an io_uring readv request.
+ * Operation representing an io_uring readv request.
  */
 template <class Receiver>
 class io_uring_readv_operation
@@ -120,7 +120,7 @@ class io_uring_readv_operation
    *
    * @see io_uring_prep_readv
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_readv(descriptor_.native_handle(), buffers_.native_data(),
                    buffers_.size(), offset_);
   }
@@ -137,7 +137,7 @@ class io_uring_readv_operation
 };
 
 /**
- * Operation that submits an io_uring writev request.
+ * Operation representing an io_uring writev request.
  */
 template <class Receiver>
 class io_uring_writev_operation
@@ -161,7 +161,7 @@ class io_uring_writev_operation
    *
    * @see io_uring_prep_writev
    */
-  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_writev(descriptor_.native_handle(), buffers_.native_data(),
                     buffers_.size(), offset_);
   }

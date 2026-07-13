@@ -18,9 +18,6 @@ namespace detail {
  * Completion channel selected for receiver delivery.
  */
 enum class io_uring_receiver_completion {
-  /** Submit the request from the context's owning run thread. */
-  submitting,
-
   /**
    * Complete the receiver with set_value.
    */
@@ -41,7 +38,7 @@ enum class io_uring_receiver_completion {
  * Base operation that translates io_uring completions into receiver signals.
  */
 template <class Receiver>
-class io_uring_receiver_operation : public io_uring_operation_base {
+class io_uring_receiver_operation : public io_uring_io_operation_base {
  public:
   /**
    * Copy construction is disabled because operations are queued intrusively.
@@ -75,12 +72,6 @@ class io_uring_receiver_operation : public io_uring_operation_base {
    */
   void execute() noexcept override {
     switch (completion_) {
-      case io_uring_receiver_completion::submitting: {
-        submission_function submit = submission_;
-        submission_ = nullptr;
-        submit(*this);
-        break;
-      }
       case io_uring_receiver_completion::value:
         bexec::set_value(std::move(receiver_), result, flags);
         break;
@@ -91,6 +82,10 @@ class io_uring_receiver_operation : public io_uring_operation_base {
         bexec::set_stopped(std::move(receiver_));
         break;
     }
+  }
+
+  void complete_submit_error(int result_code) noexcept override {
+    complete_with_error(result_code);
   }
 
  protected:
@@ -142,21 +137,12 @@ class io_uring_receiver_operation : public io_uring_operation_base {
       return;
     }
 
-    completion_ = io_uring_receiver_completion::submitting;
-    submission_ = [](io_uring_receiver_operation& base) noexcept {
-      auto& submitted_operation = static_cast<Operation&>(base);
-      base.complete_with_value();
-      const int result_code = base.context_->submit(submitted_operation);
-      if (result_code < 0) {
-        base.complete_with_error(result_code);
-        (void)base.context_->post(submitted_operation);
-      }
-    };
-    (void)context_->post(operation);
+    complete_with_value();
+    context_->publish_io(operation);
   }
 
   /**
-   * Context that owns submission and completion dispatch for the operation.
+   * Context that passively prepares and completes the operation.
    */
   io_uring_context* context_;
 
@@ -164,10 +150,6 @@ class io_uring_receiver_operation : public io_uring_operation_base {
    * Receiver completed by this operation.
    */
   std::remove_cvref_t<Receiver> receiver_;
-
-  using submission_function = void (*)(io_uring_receiver_operation&) noexcept;
-
-  submission_function submission_ = nullptr;
 
   /**
    * Completion channel selected before execute runs.

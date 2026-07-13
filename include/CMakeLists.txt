@@ -41,7 +41,6 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/context.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/operation_base.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/options.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_context_base/submission.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/core.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/linux/io_uring_operations/file.h

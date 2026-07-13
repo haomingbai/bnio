@@ -25,8 +25,7 @@ bupp/bupp.h  (umbrella)
 │           ├── async_io/linux/io_uring_context_base.h
 │           │   ├── async_io/linux/io_uring_context_base/context.h
 │           │   ├── async_io/linux/io_uring_context_base/operation_base.h
-│           │   ├── async_io/linux/io_uring_context_base/options.h
-│           │   └── async_io/linux/io_uring_context_base/submission.h
+│           │   └── async_io/linux/io_uring_context_base/options.h
 │           └── async_io/linux/io_uring_operations.h
 │               └── async_io/linux/io_uring_operations/{core, file,
 │                   helpers, poll, resolve, socket, views}.h
@@ -78,7 +77,7 @@ bupp
 │       ├── io_uring_context              platform event-loop owner (non-movable)
 │       ├── io_uring_context_options      context configuration
 │       ├── io_uring_operation_base       intrusive operation node
-│       ├── io_uring_task_queue_state     shared CPU/I/O queues + wake state
+│       ├── io_uring_task_queue_state     shared queues + wake/closing state
 │       └── io_uring_*_operation          concrete I/O operations
 ├── io_context                            Layer 3: high-level async context
 │   ├── operation_base                    intrusive shared-I/O node

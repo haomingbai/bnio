@@ -1,6 +1,7 @@
 #include <poll.h>
 #include <unistd.h>
 
+#include <cassert>
 #include <cerrno>
 
 #include "io_uring_context_internal.h"
@@ -10,8 +11,10 @@ namespace bupp::async_io::linux_native {
 int io_uring_context::post(io_uring_operation_base& operation) noexcept {
   assert_running();
 
-  if (current_context_ == this && this->local_tasks_ != nullptr) {
-    this->local_tasks_->push(operation);
+  if (current_context_ == this || global_state_ == nullptr) {
+    assert(!run_active_.load(std::memory_order_acquire) ||
+           current_context_ == this);
+    local_tasks_.push(operation);
     return 0;
   }
 
@@ -19,13 +22,38 @@ int io_uring_context::post(io_uring_operation_base& operation) noexcept {
   return 0;
 }
 
+void io_uring_context::publish_io(
+    io_uring_io_operation_base& operation) noexcept {
+  assert_running();
+  if (operation.ring_affine()) {
+    assert(current_context_ == this);
+    if (current_context_ != this) {
+      return;
+    }
+  } else if (global_state_ != nullptr) {
+    global_state_->push_io(operation);
+    notify_one_waiter();
+    return;
+  }
+
+  assert(!run_active_.load(std::memory_order_acquire) ||
+         current_context_ == this);
+  operation.io_next = local_io_tasks_;
+  local_io_tasks_ = &operation;
+}
+
 void io_uring_context::push_cpu_task(
     io_uring_operation_base& operation) noexcept {
-  options_.task_queue->push_cpu(operation);
+  assert(global_state_ != nullptr);
+  global_state_->push_cpu(operation);
   notify_one_waiter();
 }
 
 void io_uring_context::push_cpu_tasks(operation_queue& operations) noexcept {
+  if (global_state_ == nullptr) {
+    local_tasks_.push(reverse_tasks(operations.pop_all()));
+    return;
+  }
   io_uring_operation_base* ordered_tasks = reverse_tasks(operations.pop_all());
   if (ordered_tasks == nullptr) {
     return;
@@ -35,22 +63,23 @@ void io_uring_context::push_cpu_tasks(operation_queue& operations) noexcept {
     io_uring_operation_base* operation = ordered_tasks;
     ordered_tasks = ordered_tasks->next;
     operation->next = nullptr;
-    options_.task_queue->push_cpu(*operation);
+    global_state_->push_cpu(*operation);
   }
   notify_one_waiter();
 }
 
-bool io_uring_context::move_cpu_tasks(operation_queue& local_tasks) noexcept {
-  io_uring_operation_base* incoming = options_.task_queue->pop_cpu_all();
+bool io_uring_context::move_cpu_tasks() noexcept {
+  if (global_state_ == nullptr) {
+    return false;
+  }
+  io_uring_operation_base* incoming = global_state_->pop_cpu_all();
   if (incoming == nullptr) {
     return false;
   }
 
-  local_tasks.push(reverse_tasks(incoming));
+  local_tasks_.push(reverse_tasks(incoming));
   return true;
 }
-
-void io_uring_context::notify_waiters() noexcept { (void)signal_eventfd(); }
 
 void io_uring_context::notify_one_waiter() noexcept {
   if (is_waiting()) {
@@ -62,25 +91,20 @@ bool io_uring_context::is_waiting() const noexcept {
   return waiting_.load(std::memory_order_acquire);
 }
 
-void io_uring_context::set_pending_work(pending_work_function function,
-                                        void* data) noexcept {
-  pending_work_ = function;
-  pending_work_data_ = data;
-}
-
-bool io_uring_context::run_pending_work() noexcept {
-  return pending_work_ != nullptr && pending_work_(pending_work_data_, *this);
-}
-
 void io_uring_context::begin_wait() noexcept {
   waiting_.store(true, std::memory_order_release);
-  const std::size_t previous = options_.task_queue->awake_workers.fetch_sub(
-      1, std::memory_order_acq_rel);
+  if (global_state_ == nullptr) {
+    return;
+  }
+  const std::size_t previous =
+      global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
   assert(previous != 0);
 }
 
 void io_uring_context::end_wait() noexcept {
-  options_.task_queue->awake_workers.fetch_add(1, std::memory_order_acq_rel);
+  if (global_state_ != nullptr) {
+    global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
+  }
   waiting_.store(false, std::memory_order_release);
 }
 
@@ -143,7 +167,7 @@ int io_uring_context::submit_eventfd_poll() noexcept {
   for (unsigned attempt = 0; attempt < 2; ++attempt) {
     bupp::base::submission_queue_entry sqe = ring_.get_sqe();
     if (sqe.raw() == nullptr) {
-      const int submit_result = ring_.submit();
+      const int submit_result = submit_ring();
       if (submit_result < 0) {
         return submit_result;
       }
@@ -153,7 +177,7 @@ int io_uring_context::submit_eventfd_poll() noexcept {
     sqe.prep_poll_add(event_fd_, static_cast<unsigned>(POLLIN));
     sqe.set_data(eventfd_user_data());
 
-    const int submit_result = ring_.submit();
+    const int submit_result = submit_ring();
     if (submit_result <= 0) {
       return submit_result < 0 ? submit_result : -EAGAIN;
     }

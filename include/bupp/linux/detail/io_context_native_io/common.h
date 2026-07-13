@@ -103,7 +103,7 @@ class native_io_operation : public io_context::operation_base {
     }
 
     completion_ = completion_kind::value;
-    context_->enqueue_io(*this);
+    context_->publish_io(*this);
   }
 
   void execute() noexcept override {

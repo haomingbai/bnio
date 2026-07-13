@@ -7,6 +7,7 @@
 #include <bupp/udp.h>
 
 #include <array>
+#include <atomic>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
 #include <cassert>
@@ -15,7 +16,9 @@
 #include <cstring>
 #include <memory>
 #include <system_error>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #include "io_context_runtime_test_support.h"
 
@@ -25,9 +28,9 @@ constexpr std::size_t datagram_count = 128;
 constexpr std::size_t datagram_size = sizeof(std::uint32_t);
 
 struct stress_state {
-  unsigned completions = 0;
-  unsigned errors = 0;
-  unsigned stopped = 0;
+  std::atomic<unsigned> completions{0};
+  std::atomic<unsigned> errors{0};
+  std::atomic<unsigned> stopped{0};
   std::array<std::size_t, datagram_count> receive_sizes{};
   std::array<std::size_t, datagram_count> send_sizes{};
 };
@@ -48,18 +51,20 @@ struct stress_receiver {
   }
 
   void set_error(std::error_code) noexcept {
-    ++state->errors;
+    state->errors.fetch_add(1, std::memory_order_relaxed);
     complete();
   }
 
   void set_stopped() noexcept {
-    ++state->stopped;
+    state->stopped.fetch_add(1, std::memory_order_relaxed);
     complete();
   }
 
  private:
   void complete() noexcept {
-    if (++state->completions == datagram_count * 2) {
+    const unsigned completed =
+        state->completions.fetch_add(1, std::memory_order_acq_rel) + 1;
+    if (completed == datagram_count * 2) {
       (void)context->stop();
     }
   }
@@ -67,6 +72,8 @@ struct stress_receiver {
 
 void run_stress_test() {
   bupp::io_context_options options;
+  constexpr unsigned worker_count = 4;
+  options.concurrency_hint = worker_count;
   options.platform.uring.entries = 512;
   bupp::io_context context(options);
   if (!context_available(context)) {
@@ -130,11 +137,19 @@ void run_stress_test() {
     bexec::start(*send_operations[index]);
   }
 
-  context.run();
+  std::vector<std::thread> workers;
+  workers.reserve(worker_count);
+  for (unsigned index = 0; index < worker_count; ++index) {
+    workers.emplace_back([&context] { context.run(); });
+  }
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
 
-  assert(state.completions == datagram_count * 2);
-  assert(state.errors == 0);
-  assert(state.stopped == 0);
+  assert(state.completions.load(std::memory_order_acquire) ==
+         datagram_count * 2);
+  assert(state.errors.load(std::memory_order_acquire) == 0);
+  assert(state.stopped.load(std::memory_order_acquire) == 0);
 
   std::array<bool, datagram_count> observed{};
   for (std::size_t index = 0; index < datagram_count; ++index) {

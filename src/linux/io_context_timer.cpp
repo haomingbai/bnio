@@ -26,6 +26,11 @@ void detail::timer_wakeup_operation::prepare(
   timeout_.prepare_timeout(sqe, 0, 0);
 }
 
+void detail::timer_wakeup_operation::complete_submit_error(
+    int submit_result) noexcept {
+  result = submit_result;
+}
+
 void detail::timer_wakeup_operation::execute() noexcept {
   context_->on_timer_wakeup();
 }
@@ -46,6 +51,11 @@ void detail::timer_update_operation::prepare(
       static_cast<std::uint64_t>(
           reinterpret_cast<std::uintptr_t>(&context_->timer_wakeup_operation_)),
       0);
+}
+
+void detail::timer_update_operation::complete_submit_error(
+    int submit_result) noexcept {
+  result = submit_result;
 }
 
 void detail::timer_update_operation::execute() noexcept {
@@ -116,10 +126,10 @@ std::size_t io_context::cancel_timer(detail::timer_slot& timer) noexcept {
     ++timer.generation;
     canceled = take_timer_waiters_locked(timer);
     count = count_timer_operations(canceled);
-    schedule_timer_wakeup_locked();
   }
 
   post_timer_operations(canceled, detail::timer_completion_kind::stopped);
+  post_timer_driver();
   return count;
 }
 
@@ -138,10 +148,10 @@ std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
     ++timer.generation;
     canceled = take_timer_waiters_locked(timer);
     count = count_timer_operations(canceled);
-    schedule_timer_wakeup_locked();
   }
 
   post_timer_operations(canceled, detail::timer_completion_kind::stopped);
+  post_timer_driver();
   return count;
 }
 

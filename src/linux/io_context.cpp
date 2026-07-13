@@ -15,7 +15,7 @@ thread_local detail::native_worker* io_context::current_native_worker_ =
 io_context::io_context() noexcept : io_context(io_context_options{}) {}
 
 io_context::io_context(const io_context_options& options) noexcept
-    : native_(options.platform, task_queue_),
+    : native_(options.platform, global_state_),
       timer_wakeup_operation_(*this),
       timer_update_operation_(*this),
       timer_driver_operation_(*this) {
@@ -33,7 +33,6 @@ io_context::io_context(const io_context_options& options) noexcept
 
   native_workers_.head->context.store(&native_.context,
                                       std::memory_order_release);
-  native_.context.set_pending_work(&io_context::drain_pending_io, this);
   native_workers_.round_robin_cursor.store(native_workers_.head,
                                            std::memory_order_release);
   native_workers_.active_count.store(native_.context.is_open() ? 1 : 0,
@@ -85,7 +84,7 @@ void io_context::run() noexcept {
 }
 
 int io_context::stop() noexcept {
-  stop_requested_.store(true, std::memory_order_release);
+  global_state_.closing.store(true, std::memory_order_release);
 
   int first_error = 0;
   const std::size_t worker_count =
@@ -179,7 +178,7 @@ io_context::select_native_context() noexcept {
 }
 
 detail::native_worker* io_context::register_run_worker() noexcept {
-  if (stop_requested_.load(std::memory_order_acquire)) {
+  if (global_state_.closing.load(std::memory_order_acquire)) {
     return nullptr;
   }
 
@@ -223,10 +222,9 @@ detail::native_worker* io_context::register_run_worker() noexcept {
       worker->owned_context.reset();
       return nullptr;
     }
+    worker->owned_context->set_global_state(&global_state_);
     worker->context.store(worker->owned_context.get(),
                           std::memory_order_release);
-    worker->owned_context->set_pending_work(&io_context::drain_pending_io,
-                                            this);
   }
 
   const std::size_t published_count = index + 1;
@@ -236,6 +234,18 @@ detail::native_worker* io_context::register_run_worker() noexcept {
          !native_workers_.active_count.compare_exchange_weak(
              current_count, published_count, std::memory_order_acq_rel,
              std::memory_order_acquire)) {
+  }
+
+  // stop() may race with worker registration. If it observed the worker list
+  // before this slot was published, do not let the late worker enter an idle
+  // run loop that the completed stop scan could not have signalled.
+  if (global_state_.closing.load(std::memory_order_acquire)) {
+    async_io::linux_native::io_uring_context* native_context =
+        worker->context.load(std::memory_order_acquire);
+    if (native_context != nullptr) {
+      (void)native_context->stop();
+    }
+    return nullptr;
   }
 
   return worker;

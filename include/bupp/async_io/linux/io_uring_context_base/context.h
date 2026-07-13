@@ -8,7 +8,6 @@
 #include <bupp/async_io/linux/io_uring_context_base/options.h>
 #include <bupp/async_io/time.h>
 #include <bupp/base/linux/ring.h>
-#include <bupp/base/linux/submission_queue_entry.h>
 #include <bupp/export.h>
 
 #include <atomic>
@@ -18,7 +17,7 @@
 namespace bupp::async_io::linux_native {
 
 /**
- * Run loop and submission context backed by a Linux io_uring instance.
+ * Single-threaded run loop backed by a Linux io_uring instance.
  */
 class BUPP_EXPORT io_uring_context {
  public:
@@ -157,44 +156,12 @@ class BUPP_EXPORT io_uring_context {
   [[nodiscard]] bool is_in_context() const noexcept;
 
   /**
-   * Prepares an operation SQE without submitting the ring.
+   * Selects externally owned shared state for a worker group.
    *
-   * Call before run() starts or from this context's owning run thread.
+   * A null pointer selects this context's single-threaded local queues. The
+   * state must remain valid until this context stops running.
    */
-  template <class Operation>
-  int prepare(Operation& operation) noexcept;
-
-  /**
-   * Submits all prepared SQEs on the context ring.
-   *
-   * Call before run() starts or from this context's owning run thread.
-   *
-   * @see io_uring_submit
-   */
-  int submit() noexcept;
-
-  /**
-   * Prepares one operation and submits the context ring.
-   *
-   * Call before run() starts or from this context's owning run thread.
-   */
-  template <class Operation>
-  int submit(Operation& operation) noexcept;
-
-  /**
-   * Runs a batch of submission work on the context's owning thread.
-   *
-   * The callback receives two callables: prepare(operation) reserves and fills
-   * one SQE, and submit() submits all SQEs prepared so far.
-   * Call before run() starts or from this context's owning run thread.
-   */
-  template <class Function>
-  void submit_batch(Function&& fn) noexcept;
-
-  /**
-   * Wakes the run loop through the context eventfd.
-   */
-  void notify_waiters() noexcept;
+  void set_global_state(io_uring_task_queue_state* state) noexcept;
 
   /**
    * Wakes the run loop through the context eventfd.
@@ -204,21 +171,26 @@ class BUPP_EXPORT io_uring_context {
   /** Returns whether this run-loop worker has published a sleeping state. */
   [[nodiscard]] bool is_waiting() const noexcept;
 
-  using pending_work_function = bool (*)(void*, io_uring_context&) noexcept;
-
-  /** Installs embedding-layer work drained before this worker parks. */
-  void set_pending_work(pending_work_function function, void* data) noexcept;
-
   /**
    * Posts an operation for execution by the context run loop.
    */
   int post(io_uring_operation_base& operation) noexcept;
 
- private:
-  struct operation_queue;
+  /** Publishes I/O for passive preparation by the context run loop. */
+  void publish_io(io_uring_io_operation_base& operation) noexcept;
 
-  template <class Operation>
-  int prepare_sqe(Operation& operation) noexcept;
+ private:
+  struct operation_queue {
+    void push(io_uring_operation_base& operation) noexcept;
+
+    void push(io_uring_operation_base* operations) noexcept;
+
+    [[nodiscard]] io_uring_operation_base* pop_all() noexcept;
+
+    io_uring_operation_base* head = nullptr;
+  };
+
+  int prepare_io(io_uring_io_operation_base& operation) noexcept;
 
   int submit_ring() noexcept;
 
@@ -256,12 +228,11 @@ class BUPP_EXPORT io_uring_context {
    */
   void push_cpu_tasks(operation_queue& operations) noexcept;
 
-  /**
-   * Moves shared CPU tasks into a local queue.
-   */
-  [[nodiscard]] bool move_cpu_tasks(operation_queue& local_tasks) noexcept;
+  /** Moves shared CPU tasks into the run-loop-local queue. */
+  [[nodiscard]] bool move_cpu_tasks() noexcept;
 
-  [[nodiscard]] bool run_pending_work() noexcept;
+  /** Consumes ring-local control I/O and all shared I/O after CPU work. */
+  [[nodiscard]] bool consume_io_tasks() noexcept;
 
   void begin_wait() noexcept;
 
@@ -290,32 +261,27 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Runs ready local and posted tasks.
    */
-  [[nodiscard]] run_phase handle_run_ready_tasks(
-      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
+  [[nodiscard]] run_phase handle_run_ready_tasks() noexcept;
 
   /**
    * Waits for work when no tasks are immediately ready.
    */
-  [[nodiscard]] run_phase handle_wait_for_work(
-      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
+  [[nodiscard]] run_phase handle_wait_for_work() noexcept;
 
   /**
    * Drains remaining work during shutdown.
    */
-  [[nodiscard]] run_phase handle_finish_drain(
-      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
+  [[nodiscard]] run_phase handle_finish_drain() noexcept;
 
   /**
    * Polls briefly for CQEs or posted tasks before blocking.
    */
-  [[nodiscard]] run_phase spin_for_work(operation_queue& local_tasks,
-                                        unsigned& local_task_budget) noexcept;
+  [[nodiscard]] run_phase spin_for_work() noexcept;
 
   /**
    * Waits for io_uring completion events.
    */
-  [[nodiscard]] run_phase wait_for_io_work(
-      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
+  [[nodiscard]] run_phase wait_for_io_work() noexcept;
 
   /**
    * Returns whether the context should leave the running state.
@@ -325,8 +291,7 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Drains work and marks the context finished.
    */
-  void finish(operation_queue& local_tasks,
-              unsigned& local_task_budget) noexcept;
+  void finish() noexcept;
 
   /**
    * Waits for at least one CQE event on the native ring descriptor.
@@ -336,8 +301,7 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Collects and dispatches ready CQE-backed tasks.
    */
-  [[nodiscard]] bool collect_ready_cqes(operation_queue& local_tasks,
-                                        unsigned& local_task_budget) noexcept;
+  [[nodiscard]] bool collect_ready_cqes() noexcept;
 
   /**
    * Collects ready CQEs into an operation queue.
@@ -347,9 +311,8 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Dispatches collected CQE tasks locally or through the shared CPU queue.
    */
-  void dispatch_cqe_tasks(operation_queue& cqe_tasks, unsigned task_count,
-                          operation_queue& local_tasks,
-                          unsigned& local_task_budget) noexcept;
+  void dispatch_cqe_tasks(operation_queue& cqe_tasks,
+                          unsigned task_count) noexcept;
 
   /**
    * Enqueues the operation represented by one CQE data record.
@@ -376,27 +339,23 @@ class BUPP_EXPORT io_uring_context {
    */
   void assert_running() const noexcept;
 
-  /** Verifies that ring access occurs before run or on its owning thread. */
-  void assert_ring_owner() const noexcept;
-
   bupp::base::ring ring_;
   io_uring_context_options options_{};
   unsigned kernel_features_ = 0;
   std::atomic<context_state> state_{context_state::finished};
   bool queue_initialized_ = false;
 
-  io_uring_task_queue_state owned_task_queue_;
   std::atomic_bool run_active_{false};
   std::atomic_bool waiting_{false};
   int event_fd_ = -1;
   bool owns_event_fd_ = false;
   bool eventfd_poll_pending_ = false;
 
-  pending_work_function pending_work_ = nullptr;
-  void* pending_work_data_ = nullptr;
-
   static thread_local io_uring_context* current_context_;
-  operation_queue* local_tasks_ = nullptr;
+  io_uring_task_queue_state* global_state_ = nullptr;
+  operation_queue local_tasks_;
+  io_uring_io_operation_base* local_io_tasks_ = nullptr;
+  unsigned local_task_budget_ = 0;
 };
 
 }  // namespace bupp::async_io::linux_native
