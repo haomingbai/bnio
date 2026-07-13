@@ -10,6 +10,8 @@
 #include <bupp/ssl.h>
 #elif defined(BUPP_HEADER_TEST_TCP)
 #include <bupp/tcp.h>
+#elif defined(BUPP_HEADER_TEST_UDP)
+#include <bupp/udp.h>
 #else
 #error "missing header self-contained test definition"
 #endif

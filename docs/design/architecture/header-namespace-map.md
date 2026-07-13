@@ -60,8 +60,8 @@ bupp
 │   ├── buffer_view                       non-owning byte range
 │   ├── descriptor_view                   non-owning fd
 │   ├── socket_view                       non-owning generic socket
-│   ├── listening_socket_view             non-owning passive socket
-│   ├── stream_socket_view                non-owning active socket
+│   ├── stream_socket_view                non-owning SOCK_STREAM socket
+│   ├── datagram_socket_view              non-owning SOCK_DGRAM socket
 │   ├── ip
 │   │   ├── address                       IPv4/IPv6 address
 │   │   ├── endpoint                      address + port
@@ -83,10 +83,15 @@ bupp
 │   ├── address (= async_io::ip::address)
 │   ├── endpoint (= async_io::ip::endpoint)
 │   ├── tcp                               protocol tag + socket type aliases
-│   └── udp (= async_io::ip::udp)
+│   └── udp                               protocol tag + UDP socket alias
 ├── submit_mode                           {queued, direct} submission policy
-├── tcp_socket                            RAII TCP stream socket owner
-├── tcp_acceptor                          RAII TCP listening socket owner
+├── tcp
+│   ├── socket                            RAII TCP stream socket owner
+│   └── acceptor                          RAII TCP listening socket owner
+├── udp
+│   └── socket                            RAII UDP datagram socket owner
+├── tcp_socket / tcp_acceptor             compatibility aliases
+├── udp_socket                            compatibility alias
 ├── ssl_context                           RAII SSL_CTX owner
 ├── ssl_stream<NextLayer>                 RAII SSL + BIO + transport owner
 ├── mutable_buffer                        non-owning mutable byte view

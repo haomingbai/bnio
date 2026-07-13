@@ -387,6 +387,32 @@ class BUPP_EXPORT io_context {
         async_io::stream_socket_view socket, const_buffer buffer,
         int flags = 0) const;
 
+    [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
+                                     mutable_buffer buffer,
+                                     int flags = 0) const;
+    [[nodiscard]] auto async_receive_direct(
+        async_io::datagram_socket_view socket, mutable_buffer buffer,
+        int flags = 0) const;
+    [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
+                                  const_buffer buffer, int flags = 0) const;
+    [[nodiscard]] auto async_send_direct(async_io::datagram_socket_view socket,
+                                         const_buffer buffer,
+                                         int flags = 0) const;
+    [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
+                                          mutable_buffer buffer,
+                                          ip::endpoint& endpoint,
+                                          int flags = 0) const;
+    [[nodiscard]] auto async_receive_from_direct(
+        async_io::datagram_socket_view socket, mutable_buffer buffer,
+        ip::endpoint& endpoint, int flags = 0) const;
+    [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
+                                     const_buffer buffer,
+                                     const ip::endpoint& endpoint,
+                                     int flags = 0) const;
+    [[nodiscard]] auto async_send_to_direct(
+        async_io::datagram_socket_view socket, const_buffer buffer,
+        const ip::endpoint& endpoint, int flags = 0) const;
+
     /**
      * Creates a queued sender for one descriptor read operation at an offset.
      */
@@ -451,14 +477,14 @@ class BUPP_EXPORT io_context {
     /**
      * Creates a queued sender that accepts one connection.
      */
-    [[nodiscard]] auto async_accept(async_io::listening_socket_view socket,
+    [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                     int flags = 0) const;
 
     /**
      * Creates a direct-submission sender that accepts one connection.
      */
-    [[nodiscard]] auto async_accept_direct(
-        async_io::listening_socket_view socket, int flags = 0) const;
+    [[nodiscard]] auto async_accept_direct(async_io::stream_socket_view socket,
+                                           int flags = 0) const;
 
     /**
      * Creates a queued sender that connects a socket to an endpoint.
@@ -748,18 +774,40 @@ class BUPP_EXPORT io_context {
       async_io::descriptor_view descriptor, const_buffer buffer,
       std::uint64_t offset = 0);
 
+  [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
+                                   mutable_buffer buffer, int flags = 0);
+  [[nodiscard]] auto async_receive_direct(async_io::datagram_socket_view socket,
+                                          mutable_buffer buffer, int flags = 0);
+  [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
+                                const_buffer buffer, int flags = 0);
+  [[nodiscard]] auto async_send_direct(async_io::datagram_socket_view socket,
+                                       const_buffer buffer, int flags = 0);
+  [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
+                                        mutable_buffer buffer,
+                                        ip::endpoint& endpoint, int flags = 0);
+  [[nodiscard]] auto async_receive_from_direct(
+      async_io::datagram_socket_view socket, mutable_buffer buffer,
+      ip::endpoint& endpoint, int flags = 0);
+  [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
+                                   const_buffer buffer,
+                                   const ip::endpoint& endpoint, int flags = 0);
+  [[nodiscard]] auto async_send_to_direct(async_io::datagram_socket_view socket,
+                                          const_buffer buffer,
+                                          const ip::endpoint& endpoint,
+                                          int flags = 0);
+
   /**
    * Creates a queued sender that accepts one connection from a non-owning
    * listening socket view.
    */
-  [[nodiscard]] auto async_accept(async_io::listening_socket_view socket,
+  [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                   int flags = 0);
 
   /**
    * Creates a direct-submission sender that accepts one connection from a
    * non-owning listening socket view.
    */
-  [[nodiscard]] auto async_accept_direct(async_io::listening_socket_view socket,
+  [[nodiscard]] auto async_accept_direct(async_io::stream_socket_view socket,
                                          int flags = 0);
 
   /**
@@ -1048,12 +1096,24 @@ template <class Receiver>
 }
 
 template <class Model>
-concept has_immediate_read = requires(Model& model) {
+concept has_immediate_io = requires(Model& model) {
   { model.try_immediate() } -> std::convertible_to<int>;
 };
 
-[[nodiscard]] inline bool should_wait_for_read_result(int result) noexcept {
+[[nodiscard]] inline bool should_wait_for_immediate_result(
+    int result) noexcept {
   return result == -EAGAIN || result == -EWOULDBLOCK;
+}
+
+[[nodiscard]] inline int immediate_socket_result(ssize_t result) noexcept {
+  if (result >= 0) {
+    return static_cast<int>(result);
+  }
+  const int error = errno;
+  if (error == EINTR || error == EAGAIN || error == EWOULDBLOCK) {
+    return -EAGAIN;
+  }
+  return -error;
 }
 
 [[nodiscard]] inline bool should_defer_nowait_read_error(int error) noexcept {
@@ -1072,7 +1132,9 @@ concept has_immediate_read = requires(Model& model) {
                                           std::size_t size,
                                           std::uint64_t offset) noexcept {
 #ifdef SYS_preadv2
-  struct iovec view{data, size};
+  struct iovec view {
+    data, size
+  };
   const auto low = static_cast<unsigned long>(offset);
   unsigned long high = 0;
   if constexpr (sizeof(unsigned long) < sizeof(std::uint64_t)) {
@@ -1154,9 +1216,9 @@ class native_io_operation : public io_context::operation_base {
 
  private:
   [[nodiscard]] bool try_complete_immediate() noexcept {
-    if constexpr (has_immediate_read<Model>) {
+    if constexpr (has_immediate_io<Model>) {
       const int result = model_.try_immediate();
-      if (should_wait_for_read_result(result)) {
+      if (should_wait_for_immediate_result(result)) {
         return false;
       }
 
@@ -1402,6 +1464,221 @@ class socket_write_model {
   int flags_;
 };
 
+class datagram_receive_model {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  datagram_receive_model(async_io::datagram_socket_view socket,
+                         mutable_buffer buffer, int flags) noexcept
+      : socket_(socket), buffer_(buffer), flags_(flags) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    sqe.prep_recv(
+        socket_.native_handle(), buffer_.data(),
+        async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+        flags_);
+  }
+
+  [[nodiscard]] int try_immediate() noexcept {
+    const ssize_t result =
+        ::recv(socket_.native_handle(), buffer_.data(),
+               async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+               flags_ | MSG_DONTWAIT);
+    return immediate_socket_result(result);
+  }
+
+  [[nodiscard]] bool is_error_result(int result) const noexcept {
+    return result < 0;
+  }
+  [[nodiscard]] std::error_code make_error(int result) const noexcept {
+    return errno_result(result);
+  }
+  template <class Receiver>
+  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver),
+                     static_cast<std::size_t>(result));
+  }
+
+ private:
+  async_io::datagram_socket_view socket_;
+  mutable_buffer buffer_;
+  int flags_;
+};
+
+class datagram_send_model {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  datagram_send_model(async_io::datagram_socket_view socket,
+                      const_buffer buffer, int flags) noexcept
+      : socket_(socket), buffer_(buffer), flags_(flags) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    sqe.prep_send(
+        socket_.native_handle(), buffer_.data(),
+        async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+        flags_);
+  }
+  [[nodiscard]] int try_immediate() noexcept {
+    const ssize_t result =
+        ::send(socket_.native_handle(), buffer_.data(),
+               async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+               flags_ | MSG_DONTWAIT);
+    return immediate_socket_result(result);
+  }
+  [[nodiscard]] bool is_error_result(int result) const noexcept {
+    return result < 0;
+  }
+  [[nodiscard]] std::error_code make_error(int result) const noexcept {
+    return errno_result(result);
+  }
+  template <class Receiver>
+  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver),
+                     static_cast<std::size_t>(result));
+  }
+
+ private:
+  async_io::datagram_socket_view socket_;
+  const_buffer buffer_;
+  int flags_;
+};
+
+class datagram_receive_from_model {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  datagram_receive_from_model(async_io::datagram_socket_view socket,
+                              mutable_buffer buffer, ip::endpoint& endpoint,
+                              int flags) noexcept
+      : socket_(socket), buffer_(buffer), endpoint_(&endpoint), flags_(flags) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    remote_address_ = {};
+    buffer_entry_ = {
+        buffer_.data(),
+        async_io::linux_native::detail::bounded_io_size(buffer_.size())};
+    message_ = {};
+    message_.msg_name = &remote_address_;
+    message_.msg_namelen = sizeof(remote_address_);
+    message_.msg_iov = &buffer_entry_;
+    message_.msg_iovlen = 1;
+    sqe.prep_recvmsg(socket_.native_handle(), &message_,
+                     static_cast<unsigned>(flags_));
+  }
+
+  [[nodiscard]] int try_immediate() noexcept {
+    remote_address_ = {};
+    socklen_t size = sizeof(remote_address_);
+    const ssize_t result = ::recvfrom(
+        socket_.native_handle(), buffer_.data(),
+        async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+        flags_ | MSG_DONTWAIT, reinterpret_cast<sockaddr*>(&remote_address_),
+        &size);
+    if (result >= 0) {
+      message_.msg_namelen = size;
+    }
+    return immediate_socket_result(result);
+  }
+
+  [[nodiscard]] bool is_error_result(int result) const noexcept {
+    return result < 0;
+  }
+  [[nodiscard]] std::error_code make_error(int result) const noexcept {
+    return errno_result(result);
+  }
+
+  template <class Receiver>
+  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
+    const auto endpoint = async_io::linux_native::make_endpoint(
+        reinterpret_cast<const sockaddr*>(&remote_address_),
+        message_.msg_namelen);
+    if (!endpoint.has_value()) {
+      endpoint_->reset();
+      bexec::set_error(
+          std::forward<Receiver>(receiver),
+          std::make_error_code(std::errc::address_family_not_supported));
+      return;
+    }
+    *endpoint_ = *endpoint;
+    bexec::set_value(std::forward<Receiver>(receiver),
+                     static_cast<std::size_t>(result));
+  }
+
+ private:
+  async_io::datagram_socket_view socket_;
+  mutable_buffer buffer_;
+  ip::endpoint* endpoint_;
+  sockaddr_storage remote_address_{};
+  iovec buffer_entry_{};
+  msghdr message_{};
+  int flags_;
+};
+
+class datagram_send_to_model {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  datagram_send_to_model(async_io::datagram_socket_view socket,
+                         const_buffer buffer, const ip::endpoint& endpoint,
+                         int flags)
+      : socket_(socket),
+        buffer_(buffer),
+        remote_address_(endpoint),
+        flags_(flags) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    buffer_entry_ = {
+        const_cast<void*>(buffer_.data()),
+        async_io::linux_native::detail::bounded_io_size(buffer_.size())};
+    message_ = {};
+    message_.msg_name = const_cast<sockaddr*>(remote_address_.data());
+    message_.msg_namelen = remote_address_.size();
+    message_.msg_iov = &buffer_entry_;
+    message_.msg_iovlen = 1;
+    sqe.prep_sendmsg(socket_.native_handle(), &message_,
+                     static_cast<unsigned>(flags_));
+  }
+  [[nodiscard]] int try_immediate() noexcept {
+    const ssize_t result = ::sendto(
+        socket_.native_handle(), buffer_.data(),
+        async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+        flags_ | MSG_DONTWAIT, remote_address_.data(), remote_address_.size());
+    return immediate_socket_result(result);
+  }
+  [[nodiscard]] bool is_error_result(int result) const noexcept {
+    return result < 0;
+  }
+  [[nodiscard]] std::error_code make_error(int result) const noexcept {
+    return errno_result(result);
+  }
+  template <class Receiver>
+  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver),
+                     static_cast<std::size_t>(result));
+  }
+
+ private:
+  async_io::datagram_socket_view socket_;
+  const_buffer buffer_;
+  async_io::linux_native::socket_address remote_address_;
+  iovec buffer_entry_{};
+  msghdr message_{};
+  int flags_;
+};
+
 class accept_model {
  public:
   using completion_signatures =
@@ -1409,7 +1686,7 @@ class accept_model {
                                    bexec::set_error_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  accept_model(async_io::listening_socket_view socket, int flags) noexcept
+  accept_model(async_io::stream_socket_view socket, int flags) noexcept
       : socket_(socket), flags_(flags) {}
 
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
@@ -1430,7 +1707,7 @@ class accept_model {
   }
 
  private:
-  async_io::listening_socket_view socket_;
+  async_io::stream_socket_view socket_;
   int flags_;
 };
 
@@ -1932,6 +2209,68 @@ inline auto io_context::async_write_some_direct(
       submit_mode::direct);
 }
 
+inline auto io_context::async_receive(async_io::datagram_socket_view socket,
+                                      mutable_buffer buffer, int flags) {
+  return detail::native_io_sender(
+      *this, detail::datagram_receive_model(socket, buffer, flags),
+      submit_mode::queued);
+}
+
+inline auto io_context::async_receive_direct(
+    async_io::datagram_socket_view socket, mutable_buffer buffer, int flags) {
+  return detail::native_io_sender(
+      *this, detail::datagram_receive_model(socket, buffer, flags),
+      submit_mode::direct);
+}
+
+inline auto io_context::async_send(async_io::datagram_socket_view socket,
+                                   const_buffer buffer, int flags) {
+  return detail::native_io_sender(
+      *this, detail::datagram_send_model(socket, buffer, flags),
+      submit_mode::queued);
+}
+
+inline auto io_context::async_send_direct(async_io::datagram_socket_view socket,
+                                          const_buffer buffer, int flags) {
+  return detail::native_io_sender(
+      *this, detail::datagram_send_model(socket, buffer, flags),
+      submit_mode::direct);
+}
+
+inline auto io_context::async_receive_from(
+    async_io::datagram_socket_view socket, mutable_buffer buffer,
+    ip::endpoint& endpoint, int flags) {
+  return detail::native_io_sender(
+      *this,
+      detail::datagram_receive_from_model(socket, buffer, endpoint, flags),
+      submit_mode::queued);
+}
+
+inline auto io_context::async_receive_from_direct(
+    async_io::datagram_socket_view socket, mutable_buffer buffer,
+    ip::endpoint& endpoint, int flags) {
+  return detail::native_io_sender(
+      *this,
+      detail::datagram_receive_from_model(socket, buffer, endpoint, flags),
+      submit_mode::direct);
+}
+
+inline auto io_context::async_send_to(async_io::datagram_socket_view socket,
+                                      const_buffer buffer,
+                                      const ip::endpoint& endpoint, int flags) {
+  return detail::native_io_sender(
+      *this, detail::datagram_send_to_model(socket, buffer, endpoint, flags),
+      submit_mode::queued);
+}
+
+inline auto io_context::async_send_to_direct(
+    async_io::datagram_socket_view socket, const_buffer buffer,
+    const ip::endpoint& endpoint, int flags) {
+  return detail::native_io_sender(
+      *this, detail::datagram_send_to_model(socket, buffer, endpoint, flags),
+      submit_mode::direct);
+}
+
 inline auto io_context::async_read(async_io::descriptor_view descriptor,
                                    mutable_buffer buffer,
                                    std::uint64_t offset) {
@@ -1993,14 +2332,14 @@ inline auto io_context::async_write_some_direct(
       submit_mode::direct);
 }
 
-inline auto io_context::async_accept(async_io::listening_socket_view socket,
+inline auto io_context::async_accept(async_io::stream_socket_view socket,
                                      int flags) {
   return detail::native_io_sender(*this, detail::accept_model(socket, flags),
                                   submit_mode::queued);
 }
 
-inline auto io_context::async_accept_direct(
-    async_io::listening_socket_view socket, int flags) {
+inline auto io_context::async_accept_direct(async_io::stream_socket_view socket,
+                                            int flags) {
   return detail::native_io_sender(*this, detail::accept_model(socket, flags),
                                   submit_mode::direct);
 }
@@ -2108,6 +2447,62 @@ auto io_context::basic_scheduler<Kind>::async_write_some_direct(
 }
 
 template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_receive(
+    async_io::datagram_socket_view socket, mutable_buffer buffer,
+    int flags) const {
+  return context_->async_receive(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_receive_direct(
+    async_io::datagram_socket_view socket, mutable_buffer buffer,
+    int flags) const {
+  return context_->async_receive_direct(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_send(
+    async_io::datagram_socket_view socket, const_buffer buffer,
+    int flags) const {
+  return context_->async_send(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_send_direct(
+    async_io::datagram_socket_view socket, const_buffer buffer,
+    int flags) const {
+  return context_->async_send_direct(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_receive_from(
+    async_io::datagram_socket_view socket, mutable_buffer buffer,
+    ip::endpoint& endpoint, int flags) const {
+  return context_->async_receive_from(socket, buffer, endpoint, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_receive_from_direct(
+    async_io::datagram_socket_view socket, mutable_buffer buffer,
+    ip::endpoint& endpoint, int flags) const {
+  return context_->async_receive_from_direct(socket, buffer, endpoint, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_send_to(
+    async_io::datagram_socket_view socket, const_buffer buffer,
+    const ip::endpoint& endpoint, int flags) const {
+  return context_->async_send_to(socket, buffer, endpoint, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_send_to_direct(
+    async_io::datagram_socket_view socket, const_buffer buffer,
+    const ip::endpoint& endpoint, int flags) const {
+  return context_->async_send_to_direct(socket, buffer, endpoint, flags);
+}
+
+template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_read(
     async_io::descriptor_view descriptor, mutable_buffer buffer,
     std::uint64_t offset) const {
@@ -2165,13 +2560,13 @@ auto io_context::basic_scheduler<Kind>::async_write_some_direct(
 
 template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_accept(
-    async_io::listening_socket_view socket, int flags) const {
+    async_io::stream_socket_view socket, int flags) const {
   return context_->async_accept(socket, flags);
 }
 
 template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_accept_direct(
-    async_io::listening_socket_view socket, int flags) const {
+    async_io::stream_socket_view socket, int flags) const {
   return context_->async_accept_direct(socket, flags);
 }
 

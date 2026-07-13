@@ -87,6 +87,10 @@ calling `start()` begins the asynchronous I/O.
 | `socket.async_write_some(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes written by one operation |
 | `acceptor.async_accept(scheduler, flags)` | `tcp_acceptor` | `tcp_socket` new connection |
 | `socket.async_connect(scheduler, endpoint)` | `tcp_socket` | `()` |
+| `socket.async_send_to(scheduler, buffer, endpoint, flags)` | `udp::socket` | one datagram byte count |
+| `socket.async_receive_from(scheduler, buffer, endpoint, flags)` | `udp::socket` | one datagram byte count |
+| `socket.async_send(scheduler, buffer, flags)` | connected `udp::socket` | one datagram byte count |
+| `socket.async_receive(scheduler, buffer, flags)` | connected `udp::socket` | one datagram byte count |
 | `stream.async_handshake(scheduler, type)` | `ssl_stream` | `()` |
 | `stream.async_read(scheduler, buffer, flags)` | `ssl_stream` | `size_t` plaintext bytes read by one operation |
 | `stream.async_read_some(scheduler, buffer, flags)` | `ssl_stream` | `size_t` plaintext bytes read by one operation |
@@ -102,8 +106,12 @@ calling `start()` begins the asynchronous I/O.
 | `scheduler.async_read_some(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes read by one operation |
 | `scheduler.async_write(view, buffer, flags)` | `stream_socket_view` | `size_t` total bytes written |
 | `scheduler.async_write_some(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes written by one operation |
-| `scheduler.async_accept(view, flags)` | `listening_socket_view` | native fd |
+| `scheduler.async_accept(view, flags)` | `stream_socket_view` | native fd |
 | `scheduler.async_connect(view, endpoint)` | `stream_socket_view` | `()` |
+| `scheduler.async_send(view, buffer, flags)` | `datagram_socket_view` | one datagram byte count |
+| `scheduler.async_receive(view, buffer, flags)` | `datagram_socket_view` | one datagram byte count |
+| `scheduler.async_send_to(view, buffer, endpoint, flags)` | `datagram_socket_view` | one datagram byte count |
+| `scheduler.async_receive_from(view, buffer, endpoint, flags)` | `datagram_socket_view` | one datagram byte count |
 | `scheduler.async_read(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read by one operation |
 | `scheduler.async_read_some(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read by one operation |
 | `scheduler.async_write(descriptor, buffer, offset)` | `descriptor_view` | `size_t` total bytes written |

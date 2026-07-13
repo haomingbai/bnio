@@ -19,7 +19,8 @@ if(BUPP_PLATFORM_LINUX)
             linux/io_context_timer_driver.cpp
             linux/io_context_timer_state.cpp
             ssl.cpp
-            tcp.cpp)
+            tcp.cpp
+            udp.cpp)
 else()
   target_compile_definitions(
     bupp

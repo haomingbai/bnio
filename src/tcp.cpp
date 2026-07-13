@@ -4,7 +4,7 @@
 #include <cerrno>
 #include <utility>
 
-namespace bupp {
+namespace bupp::tcp {
 
 namespace {
 
@@ -36,12 +36,11 @@ namespace {
 
 }  // namespace
 
-tcp_socket::~tcp_socket() noexcept { (void)close(); }
+socket::~socket() noexcept { (void)close(); }
 
-tcp_socket::tcp_socket(tcp_socket&& other) noexcept
-    : fd_(std::exchange(other.fd_, -1)) {}
+socket::socket(socket&& other) noexcept : fd_(std::exchange(other.fd_, -1)) {}
 
-tcp_socket& tcp_socket::operator=(tcp_socket&& other) noexcept {
+socket& socket::operator=(socket&& other) noexcept {
   if (this != &other) {
     (void)close();
     fd_ = std::exchange(other.fd_, -1);
@@ -49,7 +48,7 @@ tcp_socket& tcp_socket::operator=(tcp_socket&& other) noexcept {
   return *this;
 }
 
-std::error_code tcp_socket::open(int family) noexcept {
+std::error_code socket::open(int family) noexcept {
   if (is_open()) {
     return {};
   }
@@ -61,7 +60,7 @@ std::error_code tcp_socket::open(int family) noexcept {
   return {};
 }
 
-std::error_code tcp_socket::open(ip::tcp protocol) noexcept {
+std::error_code socket::open(ip::tcp protocol) noexcept {
   const int family = protocol_family(protocol);
   if (family == AF_UNSPEC) {
     return make_errno_error(EAFNOSUPPORT);
@@ -69,36 +68,36 @@ std::error_code tcp_socket::open(ip::tcp protocol) noexcept {
   return open(family);
 }
 
-std::error_code tcp_socket::close() noexcept {
+std::error_code socket::close() noexcept {
   const int fd = std::exchange(fd_, -1);
   return close_fd(fd);
 }
 
-tcp_socket::native_handle_type tcp_socket::release() noexcept {
+socket::native_handle_type socket::release() noexcept {
   return std::exchange(fd_, -1);
 }
 
-void tcp_socket::assign(native_handle_type fd) noexcept {
+void socket::assign(native_handle_type fd) noexcept {
   if (fd_ != fd) {
     (void)close();
     fd_ = fd;
   }
 }
 
-std::error_code tcp_socket::shutdown(int how) noexcept {
+std::error_code socket::shutdown(int how) noexcept {
   return view().shutdown(how);
 }
 
-std::error_code tcp_socket::set_reuse_address(bool enabled) noexcept {
+std::error_code socket::set_reuse_address(bool enabled) noexcept {
   return view().set_reuse_address(enabled);
 }
 
-tcp_acceptor::~tcp_acceptor() noexcept { (void)close(); }
+acceptor::~acceptor() noexcept { (void)close(); }
 
-tcp_acceptor::tcp_acceptor(tcp_acceptor&& other) noexcept
+acceptor::acceptor(acceptor&& other) noexcept
     : fd_(std::exchange(other.fd_, -1)) {}
 
-tcp_acceptor& tcp_acceptor::operator=(tcp_acceptor&& other) noexcept {
+acceptor& acceptor::operator=(acceptor&& other) noexcept {
   if (this != &other) {
     (void)close();
     fd_ = std::exchange(other.fd_, -1);
@@ -106,7 +105,7 @@ tcp_acceptor& tcp_acceptor::operator=(tcp_acceptor&& other) noexcept {
   return *this;
 }
 
-std::error_code tcp_acceptor::open(int family) noexcept {
+std::error_code acceptor::open(int family) noexcept {
   if (is_open()) {
     return {};
   }
@@ -118,7 +117,7 @@ std::error_code tcp_acceptor::open(int family) noexcept {
   return {};
 }
 
-std::error_code tcp_acceptor::open(ip::tcp protocol) noexcept {
+std::error_code acceptor::open(ip::tcp protocol) noexcept {
   const int family = protocol_family(protocol);
   if (family == AF_UNSPEC) {
     return make_errno_error(EAFNOSUPPORT);
@@ -126,36 +125,36 @@ std::error_code tcp_acceptor::open(ip::tcp protocol) noexcept {
   return open(family);
 }
 
-std::error_code tcp_acceptor::bind(const ip::endpoint& endpoint) noexcept {
+std::error_code acceptor::bind(const ip::endpoint& endpoint) noexcept {
   return view().bind(endpoint);
 }
 
-std::error_code tcp_acceptor::listen(int backlog) noexcept {
+std::error_code acceptor::listen(int backlog) noexcept {
   return view().listen(backlog);
 }
 
-std::error_code tcp_acceptor::close() noexcept {
+std::error_code acceptor::close() noexcept {
   const int fd = std::exchange(fd_, -1);
   return close_fd(fd);
 }
 
-tcp_acceptor::native_handle_type tcp_acceptor::release() noexcept {
+acceptor::native_handle_type acceptor::release() noexcept {
   return std::exchange(fd_, -1);
 }
 
-void tcp_acceptor::assign(native_handle_type fd) noexcept {
+void acceptor::assign(native_handle_type fd) noexcept {
   if (fd_ != fd) {
     (void)close();
     fd_ = fd;
   }
 }
 
-std::error_code tcp_acceptor::shutdown(int how) noexcept {
+std::error_code acceptor::shutdown(int how) noexcept {
   return view().shutdown(how);
 }
 
-std::error_code tcp_acceptor::set_reuse_address(bool enabled) noexcept {
+std::error_code acceptor::set_reuse_address(bool enabled) noexcept {
   return view().set_reuse_address(enabled);
 }
 
-}  // namespace bupp
+}  // namespace bupp::tcp

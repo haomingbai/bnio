@@ -5,6 +5,7 @@ graph TB
     subgraph L3["Layer 3 — bupp::io_context"]
         C3_ctx["io_context<br/>(event loop + scheduler factory)"]
         C3_tcp["tcp_socket / tcp_acceptor<br/>(RAII fd owners)"]
+        C3_udp["udp::socket<br/>(RAII fd owner)"]
         C3_ssl["ssl_context / ssl_stream<br/>(RAII SSL owners)"]
         C3_buf["mutable_buffer / const_buffer<br/>dynamic_string_buffer<br/>(non-owning views / adapters)"]
     end
@@ -13,7 +14,7 @@ graph TB
         C2_buf["buffer_view<br/>(non-owning)"]
         C2_desc["descriptor_view<br/>(non-owning)"]
         C2_stream["stream_socket_view<br/>(non-owning)"]
-        C2_listen["listening_socket_view<br/>(non-owning)"]
+        C2_datagram["datagram_socket_view<br/>(non-owning)"]
         C2_ip["address / endpoint<br/>(value types)"]
         C2_native["linux_native::io_uring_*<br/>(platform operations)"]
     end
@@ -34,6 +35,7 @@ graph TB
     L2 --> L1
     L3 --> L2
     C3_tcp -.->|"view()"| C2_stream
+    C3_udp -.->|"view()"| C2_datagram
     C3_buf -.->|"view()"| C2_buf
 ```
 
@@ -45,8 +47,8 @@ are **non-owning references**:
 | Layer | Non-owning Views | RAII Owners |
 |-------|-----------------|-------------|
 | Layer 1 (`base`) | `submission_queue_entry`, `completion_queue_entry`, `event`, `event_list_view` | `ring`, `probe`, `kqueue` |
-| Layer 2 (`async_io`) | `buffer_view`, `descriptor_view`, `stream_socket_view`, `listening_socket_view` | `linux_native::io_uring_context` |
-| Layer 3 (`io_context`) | `mutable_buffer`, `const_buffer`, `dynamic_string_buffer` | `tcp_socket`, `tcp_acceptor`, `ssl_context`, `ssl_stream`, `io_context` |
+| Layer 2 (`async_io`) | `buffer_view`, `descriptor_view`, `stream_socket_view`, `datagram_socket_view` | `linux_native::io_uring_context` |
+| Layer 3 (`io_context`) | `mutable_buffer`, `const_buffer`, `dynamic_string_buffer` | `tcp::socket`, `tcp::acceptor`, `udp::socket`, `ssl_context`, `ssl_stream`, `io_context` |
 
 **Key invariant:** Layer 2 (`bupp::async_io`) vocabulary types are deliberately
 non-owning views or pure value types. The `linux_native::io_uring_context` is

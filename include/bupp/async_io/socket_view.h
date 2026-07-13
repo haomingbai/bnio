@@ -74,111 +74,42 @@ class BUPP_EXPORT socket_view {
 };
 
 /**
- * Non-owning view over a socket used for bind, listen, and accept.
- *
- * Copying or moving this view copies only the descriptor value. The socket
- * remains owned and closed by the caller.
+ * Non-owning view over a connectionless or connected datagram socket.
  */
-class BUPP_EXPORT listening_socket_view {
+class BUPP_EXPORT datagram_socket_view {
  public:
-  /**
-   * Native socket descriptor type.
-   */
   using native_handle_type = socket_view::native_handle_type;
 
-  /**
-   * Creates an invalid listening socket view.
-   */
-  constexpr listening_socket_view() noexcept = default;
-
-  /**
-   * Wraps a native socket descriptor without taking ownership.
-   */
-  constexpr explicit listening_socket_view(native_handle_type fd) noexcept
+  constexpr datagram_socket_view() noexcept = default;
+  constexpr explicit datagram_socket_view(native_handle_type fd) noexcept
       : socket_(fd) {}
-
-  /**
-   * Wraps a generic socket descriptor view as a listening socket view.
-   */
-  constexpr explicit listening_socket_view(socket_view socket) noexcept
+  constexpr explicit datagram_socket_view(socket_view socket) noexcept
       : socket_(socket) {}
 
-  /**
-   * Copies a listening socket view without taking ownership.
-   */
-  constexpr listening_socket_view(const listening_socket_view&) noexcept =
-      default;
-
-  /**
-   * Copies a listening socket view without taking ownership.
-   */
-  constexpr listening_socket_view& operator=(
-      const listening_socket_view&) noexcept = default;
-
-  /**
-   * Moves a listening socket view by copying the descriptor value.
-   */
-  constexpr listening_socket_view(listening_socket_view&&) noexcept = default;
-
-  /**
-   * Moves a listening socket view by copying the descriptor value.
-   */
-  constexpr listening_socket_view& operator=(listening_socket_view&&) noexcept =
-      default;
-
-  /**
-   * Destroys the view without closing the socket.
-   */
-  ~listening_socket_view() noexcept = default;
-
-  /**
-   * Returns the wrapped native socket descriptor.
-   */
   [[nodiscard]] constexpr native_handle_type native_handle() const noexcept {
     return socket_.native_handle();
   }
 
-  /**
-   * Returns whether this view references a valid descriptor value.
-   */
   [[nodiscard]] constexpr bool valid() const noexcept {
     return socket_.valid();
   }
 
-  /**
-   * Binds the socket to an IP endpoint.
-   *
-   * @see bind
-   */
   [[nodiscard]] std::error_code bind(const ip::endpoint& endpoint) noexcept;
-
-  /**
-   * Marks the socket as a listening socket.
-   *
-   * @see listen
-   */
-  [[nodiscard]] std::error_code listen(int backlog) noexcept;
-
-  /**
-   * Shuts down socket send and/or receive operations.
-   *
-   * @see shutdown
-   */
+  [[nodiscard]] std::error_code connect(const ip::endpoint& endpoint) noexcept;
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
-
-  /**
-   * Enables or disables address reuse on the socket.
-   *
-   * @see setsockopt
-   */
   [[nodiscard]] std::error_code set_reuse_address(bool enabled) noexcept;
+
+  [[nodiscard]] std::error_code local_endpoint(
+      ip::endpoint& endpoint) const noexcept;
+  [[nodiscard]] std::error_code remote_endpoint(
+      ip::endpoint& endpoint) const noexcept;
 
  private:
   socket_view socket_;
 };
 
 /**
- * Non-owning view over a socket used for connect, send, and receive.
+ * Non-owning view over a stream socket in any lifecycle state.
  *
  * Copying or moving this view copies only the descriptor value. The socket
  * remains owned and closed by the caller.
@@ -247,6 +178,20 @@ class BUPP_EXPORT stream_socket_view {
   [[nodiscard]] constexpr bool valid() const noexcept {
     return socket_.valid();
   }
+
+  /**
+   * Binds the socket to an IP endpoint.
+   *
+   * @see bind
+   */
+  [[nodiscard]] std::error_code bind(const ip::endpoint& endpoint) noexcept;
+
+  /**
+   * Marks the bound stream socket as listening.
+   *
+   * @see listen
+   */
+  [[nodiscard]] std::error_code listen(int backlog) noexcept;
 
   /**
    * Connects the socket to an IP endpoint.

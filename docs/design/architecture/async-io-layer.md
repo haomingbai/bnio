@@ -25,17 +25,18 @@ Non-owning wrapper around a native file descriptor (`int`). Destruction does
 
 #### Socket View Family
 
-Role-specialized non-owning socket views built on `socket_view`:
+Socket-kind-specific non-owning views built on `socket_view`:
 
-| Type | Role | Extra Operations |
-|------|------|-----------------|
-| `socket_view` | Generic socket | — |
-| `listening_socket_view` | Passive socket | `bind()`, `listen()`, `shutdown()`, `set_reuse_address()` |
-| `stream_socket_view` | Active socket | `connect()`, `shutdown()`, `set_reuse_address()` |
+| Type | Native Kind | Operations |
+|------|-------------|------------|
+| `socket_view` | Unspecified | Descriptor access only |
+| `stream_socket_view` | `SOCK_STREAM` | `bind()`, `listen()`, `connect()`, `shutdown()`, socket options |
+| `datagram_socket_view` | `SOCK_DGRAM` | `bind()`, `connect()`, endpoint queries; transfer is async-only |
 
-Views can be constructed from each other (e.g. `socket_view` →
-`listening_socket_view`). All hold the same fd value — only the exposed
-operation set differs.
+Typed views can be constructed from `socket_view` and all hold the same fd
+value. Listening is a lifecycle state of a stream socket, not a separate
+socket kind. Stream and datagram operations remain distinct so stream partial
+I/O rules cannot be applied to a datagram.
 
 ### Value Types
 

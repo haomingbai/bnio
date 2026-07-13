@@ -1,8 +1,11 @@
+#include <bupp/async_io/ip/endpoint.h>
 #include <bupp/async_io/linux/socket_address.h>
 #include <bupp/async_io/socket_view.h>
 #include <sys/socket.h>
 
 #include <cerrno>
+#include <optional>
+#include <system_error>
 
 namespace bupp::async_io {
 namespace {
@@ -42,24 +45,36 @@ std::error_code set_socket_reuse_address(int fd, bool enabled) noexcept {
       ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)));
 }
 
+std::error_code get_socket_endpoint(int fd, bool peer,
+                                    ip::endpoint& endpoint) noexcept {
+  sockaddr_storage address{};
+  socklen_t size = sizeof(address);
+  const int result =
+      peer ? ::getpeername(fd, reinterpret_cast<sockaddr*>(&address), &size)
+           : ::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size);
+  if (result != 0) {
+    endpoint.reset();
+    return last_error();
+  }
+  const auto converted = linux_native::make_endpoint(
+      reinterpret_cast<const sockaddr*>(&address), size);
+  if (!converted.has_value()) {
+    endpoint.reset();
+    return std::make_error_code(std::errc::address_family_not_supported);
+  }
+  endpoint = *converted;
+  return {};
+}
+
 }  // namespace
 
-std::error_code listening_socket_view::bind(
+std::error_code stream_socket_view::bind(
     const ip::endpoint& endpoint) noexcept {
   return bind_socket(native_handle(), endpoint);
 }
 
-std::error_code listening_socket_view::listen(int backlog) noexcept {
+std::error_code stream_socket_view::listen(int backlog) noexcept {
   return listen_socket(native_handle(), backlog);
-}
-
-std::error_code listening_socket_view::shutdown(int how) noexcept {
-  return shutdown_socket(native_handle(), how);
-}
-
-std::error_code listening_socket_view::set_reuse_address(
-    bool enabled) noexcept {
-  return set_socket_reuse_address(native_handle(), enabled);
 }
 
 std::error_code stream_socket_view::connect(
@@ -73,6 +88,34 @@ std::error_code stream_socket_view::shutdown(int how) noexcept {
 
 std::error_code stream_socket_view::set_reuse_address(bool enabled) noexcept {
   return set_socket_reuse_address(native_handle(), enabled);
+}
+
+std::error_code datagram_socket_view::bind(
+    const ip::endpoint& endpoint) noexcept {
+  return bind_socket(native_handle(), endpoint);
+}
+
+std::error_code datagram_socket_view::connect(
+    const ip::endpoint& endpoint) noexcept {
+  return connect_socket(native_handle(), endpoint);
+}
+
+std::error_code datagram_socket_view::shutdown(int how) noexcept {
+  return shutdown_socket(native_handle(), how);
+}
+
+std::error_code datagram_socket_view::set_reuse_address(bool enabled) noexcept {
+  return set_socket_reuse_address(native_handle(), enabled);
+}
+
+std::error_code datagram_socket_view::local_endpoint(
+    ip::endpoint& endpoint) const noexcept {
+  return get_socket_endpoint(native_handle(), false, endpoint);
+}
+
+std::error_code datagram_socket_view::remote_endpoint(
+    ip::endpoint& endpoint) const noexcept {
+  return get_socket_endpoint(native_handle(), true, endpoint);
 }
 
 }  // namespace bupp::async_io

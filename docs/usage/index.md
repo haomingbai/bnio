@@ -92,6 +92,8 @@ what work they start and what value they send on success.
 | Scheduling | `bexec::schedule(scheduler)` | `()` |
 | TCP accept | `tcp_acceptor::async_accept(...)` | `tcp_socket` |
 | TCP connect | `tcp_socket::async_connect(...)` | `()` |
+| UDP datagram | `udp::socket::async_send_to(...)`, `async_receive_from(...)` | `std::size_t` |
+| Connected UDP datagram | `udp::socket::async_send(...)`, `async_receive(...)` | `std::size_t` |
 | Byte reads | `async_read(...)`, `async_read_some(...)` | `std::size_t` |
 | Byte writes | `async_write(...)`, `async_write_some(...)` | `std::size_t` |
 | Descriptor polling | `async_poll(...)` | `unsigned` ready mask |
@@ -121,9 +123,20 @@ transferred, or until an error or stopped completion occurs.
 attempt's byte count. Use it when the caller wants manual framing, retry, or
 backpressure policy.
 
+UDP operations always transfer exactly one datagram. `async_send_to()` and
+`async_receive_from()` preserve message boundaries and never use stream-style
+write-all retries. Call `udp::socket::connect(endpoint)` to set a default peer,
+then use `async_send()` and `async_receive()`. The endpoint passed to
+`async_receive_from()` is output storage and must remain alive until the sender
+completes.
+
+Use `udp::make_resolve_query(host, service, protocol)` to create a
+`dns_query` with the UDP transport and address-family filters already set, then
+pass it to the existing `async_resolve()` API.
+
 For lower-level scheduler/view APIs, the same sender model is used but the
 successful value may be closer to the platform operation. For example,
-`scheduler.async_accept(listening_socket_view, flags)` completes with a native
+`scheduler.async_accept(stream_socket_view, flags)` completes with a native
 file descriptor, while `tcp_acceptor::async_accept(scheduler, flags)` wraps
 that descriptor in a `tcp_socket`.
 
@@ -215,6 +228,8 @@ semantics:
 | `async_write_some()` | `async_write_some_direct()` | one write attempt |
 | `async_accept()` | `async_accept_direct()` | accept one connection |
 | `async_connect()` | `async_connect_direct()` | connect one stream |
+| `async_send_to()` | `async_send_to_direct()` | send one datagram |
+| `async_receive_from()` | `async_receive_from_direct()` | receive one datagram and source endpoint |
 | `async_poll()` | `async_poll_direct()` | wait for descriptor events |
 
 TLS direct operations keep their TLS-level behavior as well. For example,

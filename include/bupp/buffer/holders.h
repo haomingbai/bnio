@@ -96,7 +96,12 @@ template <class Buffer>
     const_buffer data = value.data();
     return const_buffer_holder(data);
   } else {
-    return const_buffer_holder(buffer(value));
+    auto data = buffer(value);
+    if constexpr (std::same_as<decltype(data), mutable_buffer>) {
+      return const_buffer_holder(const_buffer(data.data(), data.size()));
+    } else {
+      return const_buffer_holder(data);
+    }
   }
 }
 

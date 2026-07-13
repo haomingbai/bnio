@@ -9,58 +9,57 @@
 
 #include <system_error>
 
-namespace bupp {
+namespace bupp::tcp {
 
 /**
  * RAII owner for a native TCP listening socket descriptor.
  *
  * tcp_acceptor closes its descriptor on destruction. It is move-only because
  * duplicating ownership of one descriptor would make close semantics ambiguous.
- * Use view() when an API needs a non-owning async_io listening socket view.
+ * Use view() when an API needs a non-owning async_io stream socket view.
  */
-class BUPP_EXPORT tcp_acceptor {
+class BUPP_EXPORT acceptor {
  public:
   /**
    * Native listening socket descriptor type.
    */
-  using native_handle_type =
-      async_io::listening_socket_view::native_handle_type;
+  using native_handle_type = async_io::stream_socket_view::native_handle_type;
 
   /**
    * Creates a closed acceptor owner.
    */
-  tcp_acceptor() noexcept = default;
+  acceptor() noexcept = default;
 
   /**
    * Takes ownership of an existing native listening socket descriptor.
    */
-  explicit tcp_acceptor(native_handle_type fd) noexcept : fd_(fd) {}
+  explicit acceptor(native_handle_type fd) noexcept : fd_(fd) {}
 
   /**
    * Closes the owned descriptor, if any.
    */
-  ~tcp_acceptor() noexcept;
+  ~acceptor() noexcept;
 
   /**
    * Copy construction is disabled because the acceptor owns a descriptor.
    */
-  tcp_acceptor(const tcp_acceptor&) = delete;
+  acceptor(const acceptor&) = delete;
 
   /**
    * Copy assignment is disabled because the acceptor owns a descriptor.
    */
-  tcp_acceptor& operator=(const tcp_acceptor&) = delete;
+  acceptor& operator=(const acceptor&) = delete;
 
   /**
    * Moves descriptor ownership from another acceptor.
    */
-  tcp_acceptor(tcp_acceptor&& other) noexcept;
+  acceptor(acceptor&& other) noexcept;
 
   /**
    * Closes the current descriptor and moves descriptor ownership from another
    * acceptor.
    */
-  tcp_acceptor& operator=(tcp_acceptor&& other) noexcept;
+  acceptor& operator=(acceptor&& other) noexcept;
 
   /**
    * Returns the owned native descriptor, or -1 when closed.
@@ -84,8 +83,8 @@ class BUPP_EXPORT tcp_acceptor {
   /**
    * Returns a non-owning view of the owned descriptor.
    */
-  [[nodiscard]] async_io::listening_socket_view view() const noexcept {
-    return async_io::listening_socket_view(fd_);
+  [[nodiscard]] async_io::stream_socket_view view() const noexcept {
+    return async_io::stream_socket_view(fd_);
   }
 
   /**
@@ -153,6 +152,6 @@ class BUPP_EXPORT tcp_acceptor {
   native_handle_type fd_ = -1;
 };
 
-}  // namespace bupp
+}  // namespace bupp::tcp
 
 #endif  // BUPP_TCP_ACCEPTOR_H_

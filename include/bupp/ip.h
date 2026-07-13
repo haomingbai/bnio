@@ -12,8 +12,18 @@
 
 namespace bupp {
 
-class BUPP_EXPORT tcp_socket;
-class BUPP_EXPORT tcp_acceptor;
+namespace tcp {
+class BUPP_EXPORT socket;
+class BUPP_EXPORT acceptor;
+}  // namespace tcp
+
+namespace udp {
+class BUPP_EXPORT socket;
+}  // namespace udp
+
+using tcp_socket = tcp::socket;
+using tcp_acceptor = tcp::acceptor;
+using udp_socket = udp::socket;
 
 /**
  * DNS query object used by io_context resolver senders.
@@ -85,7 +95,7 @@ class BUPP_EXPORT tcp {
   /**
    * Owning TCP stream socket type.
    */
-  using socket = bupp::tcp_socket;
+  using socket = bupp::tcp::socket;
 
   /**
    * Owning TCP stream socket type.
@@ -95,7 +105,7 @@ class BUPP_EXPORT tcp {
   /**
    * Owning TCP listening socket type.
    */
-  using acceptor = bupp::tcp_acceptor;
+  using acceptor = bupp::tcp::acceptor;
 
   /**
    * Creates an unspecified TCP protocol tag.
@@ -161,9 +171,36 @@ class BUPP_EXPORT tcp {
 };
 
 /**
- * Alias for the UDP protocol tag.
+ * Protocol tag and type namespace for UDP over IPv4 or IPv6.
  */
-using udp = async_io::ip::udp;
+class BUPP_EXPORT udp {
+ public:
+  using endpoint = bupp::ip::endpoint;
+  using socket = bupp::udp::socket;
+
+  udp() noexcept = default;
+  udp(const udp&) noexcept = default;
+  udp& operator=(const udp&) noexcept = default;
+  udp(udp&&) noexcept = default;
+  udp& operator=(udp&&) noexcept = default;
+  ~udp() noexcept = default;
+
+  static udp v4() noexcept { return udp(async_io::ip::udp::v4()); }
+  static udp v6() noexcept { return udp(async_io::ip::udp::v6()); }
+
+  [[nodiscard]] bupp::ip::address::version version() const noexcept {
+    return protocol_.version();
+  }
+
+  [[nodiscard]] async_io::ip::udp async_io_protocol() const noexcept {
+    return protocol_;
+  }
+
+ private:
+  explicit udp(async_io::ip::udp protocol) noexcept : protocol_(protocol) {}
+
+  async_io::ip::udp protocol_{};
+};
 
 }  // namespace ip
 

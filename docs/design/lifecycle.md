@@ -17,6 +17,7 @@ graph TB
         O3["base::kqueue → kqueue fd"]
         O4["tcp_socket → socket fd"]
         O5["tcp_acceptor → socket fd"]
+        O5b["udp::socket → socket fd"]
         O6["ssl_context → SSL_CTX*"]
         O7["ssl_stream → SSL* + BIO* + NextLayer"]
         O8["io_context → native_worker slots + timer heap"]
@@ -59,8 +60,9 @@ graph TB
     Ring -->|"must outlive"| SQE["submission_queue_entry"]
     Ring -->|"must outlive (until cqe_seen)"| CQE["completion_queue_entry"]
 
-    TCPSock["tcp_socket"] -->|"must outlive"| SView["stream_socket_view from view()"]
-    TCPAcpt["tcp_acceptor"] -->|"must outlive"| LView["listening_socket_view from view()"]
+    TCPSock["tcp::socket"] -->|"must outlive"| SView["stream_socket_view from view()"]
+    TCPAcpt["tcp::acceptor"] -->|"must outlive"| LView["stream_socket_view from view()"]
+    UDPSock["udp::socket"] -->|"must outlive"| DView["datagram_socket_view from view()"]
 
     UserBuf["caller-owned byte storage"] -->|"must outlive"| BufView["buffer_view"]
     UserBuf -->|"must outlive"| MBuf["mutable_buffer / const_buffer"]

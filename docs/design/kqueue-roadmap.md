@@ -166,7 +166,7 @@ Likely base tests:
 ## async_io Work
 
 `async_io` already owns platform-neutral views such as `buffer_view`,
-`descriptor_view`, `stream_socket_view`, and `listening_socket_view`. Those
+`descriptor_view`, `stream_socket_view`, and `datagram_socket_view`. Those
 should remain shared. The macOS/BSD work belongs in a new native backend:
 
 ```text

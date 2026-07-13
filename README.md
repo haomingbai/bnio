@@ -237,10 +237,10 @@ cmake --build build-asio --target bupp_asio_echo_server
 ┌─────────────────────────────────────────────────┐
 │  bupp::io_context  (event loop + scheduler)     │
 │  bupp::ssl_stream  (TLS over any next layer)     │
-│  bupp::tcp_socket / bupp::tcp_acceptor          │
+│  bupp::tcp::{socket, acceptor} / udp::socket     │
 ├─────────────────────────────────────────────────┤
 │  bupp::async_io  (non-owning views + DNS)        │
-│  descriptor_view  buffer_view  socket_view       │
+│  buffer/descriptor/stream/datagram socket views  │
 │  linux_native::io_uring_context                  │
 ├─────────────────────────────────────────────────┤
 │  bupp::base  (thin system call wrappers)         │

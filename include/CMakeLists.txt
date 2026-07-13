@@ -69,6 +69,7 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/shutdown.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/ssl/async_operations/state_machine.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/tcp/async_operations.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/detail/udp/async_operations.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context/config.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/io_context_cpo.h
@@ -101,6 +102,9 @@ if(BUPP_PLATFORM_LINUX)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp/async_operations.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp/layers.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/tcp/socket.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/udp.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/udp/async_operations.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/udp/socket.h
       PARENT_SCOPE)
 endif()
 

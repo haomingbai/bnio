@@ -4,6 +4,7 @@
 
 #include <bupp/async_io/socket_view.h>
 #include <bupp/buffer.h>
+#include <bupp/ip.h>
 
 #include <bexec/completion_signatures.hpp>
 #include <bexec/detail/manual_lifetime.hpp>
@@ -15,8 +16,6 @@
 #include <utility>
 
 namespace bupp {
-
-class tcp_socket;
 
 /** @cond BUPP_DETAIL */
 namespace detail {
@@ -262,7 +261,7 @@ class tcp_accept_operation {
   using receiver_type = std::remove_cvref_t<Receiver>;
 
   static auto make_child_sender(scheduler_type& scheduler,
-                                async_io::listening_socket_view socket,
+                                async_io::stream_socket_view socket,
                                 int flags) {
     if constexpr (DirectSubmit) {
       return scheduler.async_accept_direct(socket, flags);
@@ -296,12 +295,12 @@ class tcp_accept_operation {
 
   using child_sender_type = decltype(make_child_sender(
       std::declval<scheduler_type&>(),
-      std::declval<async_io::listening_socket_view>(), int{}));
+      std::declval<async_io::stream_socket_view>(), int{}));
   using child_operation_type = decltype(bexec::connect(
       std::declval<child_sender_type>(), std::declval<child_receiver>()));
 
   tcp_accept_operation(scheduler_type scheduler,
-                       async_io::listening_socket_view socket, int flags,
+                       async_io::stream_socket_view socket, int flags,
                        Receiver receiver)
       : scheduler_(std::move(scheduler)),
         socket_(socket),
@@ -322,7 +321,7 @@ class tcp_accept_operation {
 
  private:
   scheduler_type scheduler_;
-  async_io::listening_socket_view socket_;
+  async_io::stream_socket_view socket_;
   int flags_;
   receiver_type receiver_;
   bexec::detail::manual_lifetime<child_operation_type> child_operation_;
@@ -336,7 +335,7 @@ class tcp_accept_sender {
                                    bexec::set_error_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  tcp_accept_sender(Scheduler scheduler, async_io::listening_socket_view socket,
+  tcp_accept_sender(Scheduler scheduler, async_io::stream_socket_view socket,
                     int flags)
       : scheduler_(std::move(scheduler)), socket_(socket), flags_(flags) {}
 
@@ -349,7 +348,7 @@ class tcp_accept_sender {
 
  private:
   Scheduler scheduler_;
-  async_io::listening_socket_view socket_;
+  async_io::stream_socket_view socket_;
   int flags_;
 };
 

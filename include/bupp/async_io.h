@@ -21,7 +21,7 @@
  * This layer intentionally contains only value types and non-owning views. It
  * does not expose sender factories, RAII socket or stream owners, or SSL
  * context objects; those belong to the higher-level bupp::io_context,
- * bupp::ip::tcp, and bupp::ssl APIs.
+ * bupp::ip::{tcp,udp}, and bupp::ssl APIs.
  */
 
 #endif  // BUPP_ASYNC_IO_H_

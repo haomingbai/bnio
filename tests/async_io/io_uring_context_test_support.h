@@ -30,8 +30,8 @@
 namespace bupp_async_io_io_uring_test {
 
 using bupp::async_io::buffer_view;
+using bupp::async_io::datagram_socket_view;
 using bupp::async_io::descriptor_view;
-using bupp::async_io::listening_socket_view;
 using bupp::async_io::stream_socket_view;
 using bupp::async_io::linux_native::buffer_sequence_view;
 using bupp::async_io::linux_native::const_message_view;
@@ -39,16 +39,20 @@ using bupp::async_io::linux_native::io_uring_accept_operation;
 using bupp::async_io::linux_native::io_uring_connect_operation;
 using bupp::async_io::linux_native::io_uring_context;
 using bupp::async_io::linux_native::io_uring_context_options;
+using bupp::async_io::linux_native::io_uring_datagram_receive_operation;
+using bupp::async_io::linux_native::io_uring_datagram_send_operation;
 using bupp::async_io::linux_native::io_uring_nop_operation;
 using bupp::async_io::linux_native::io_uring_operation_base;
 using bupp::async_io::linux_native::io_uring_poll_operation;
 using bupp::async_io::linux_native::io_uring_post_operation;
 using bupp::async_io::linux_native::io_uring_read_operation;
 using bupp::async_io::linux_native::io_uring_readv_operation;
+using bupp::async_io::linux_native::io_uring_receive_from_operation;
 using bupp::async_io::linux_native::io_uring_recv_operation;
 using bupp::async_io::linux_native::io_uring_recvmsg_operation;
 using bupp::async_io::linux_native::io_uring_resolve_operation;
 using bupp::async_io::linux_native::io_uring_send_operation;
+using bupp::async_io::linux_native::io_uring_send_to_operation;
 using bupp::async_io::linux_native::io_uring_sendmsg_operation;
 using bupp::async_io::linux_native::io_uring_timeout_operation;
 using bupp::async_io::linux_native::io_uring_write_operation;

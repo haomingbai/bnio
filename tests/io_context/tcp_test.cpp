@@ -13,7 +13,8 @@ void test_ip_aliases() {
       std::is_same_v<bupp::ip::endpoint, bupp::async_io::ip::endpoint>);
   static_assert(
       std::is_same_v<bupp::ip::tcp::endpoint, bupp::async_io::ip::endpoint>);
-  static_assert(std::is_same_v<bupp::ip::udp, bupp::async_io::ip::udp>);
+  static_assert(
+      std::is_same_v<bupp::ip::udp::endpoint, bupp::async_io::ip::endpoint>);
 
   const auto address = bupp::ip::make_address("127.0.0.1");
   assert(address.has_value());
@@ -21,6 +22,8 @@ void test_ip_aliases() {
 }
 
 void test_tcp_type_namespace() {
+  static_assert(std::is_same_v<bupp::tcp::socket, bupp::tcp_socket>);
+  static_assert(std::is_same_v<bupp::tcp::acceptor, bupp::tcp_acceptor>);
   static_assert(std::is_same_v<bupp::ip::tcp::socket, bupp::tcp_socket>);
   static_assert(std::is_same_v<bupp::ip::tcp::stream, bupp::tcp_socket>);
   static_assert(std::is_same_v<bupp::ip::tcp::acceptor, bupp::tcp_acceptor>);

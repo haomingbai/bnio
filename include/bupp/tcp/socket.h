@@ -11,7 +11,7 @@
 #include <system_error>
 #include <utility>
 
-namespace bupp {
+namespace bupp::tcp {
 
 /**
  * RAII owner for a native TCP stream socket descriptor.
@@ -20,7 +20,7 @@ namespace bupp {
  * duplicating ownership of one descriptor would make close semantics ambiguous.
  * Use view() when an API needs a non-owning async_io stream socket view.
  */
-class BUPP_EXPORT tcp_socket {
+class BUPP_EXPORT socket {
  public:
   /**
    * Native stream socket descriptor type.
@@ -30,38 +30,38 @@ class BUPP_EXPORT tcp_socket {
   /**
    * Creates a closed socket owner.
    */
-  tcp_socket() noexcept = default;
+  socket() noexcept = default;
 
   /**
    * Takes ownership of an existing native stream socket descriptor.
    */
-  explicit tcp_socket(native_handle_type fd) noexcept : fd_(fd) {}
+  explicit socket(native_handle_type fd) noexcept : fd_(fd) {}
 
   /**
    * Closes the owned descriptor, if any.
    */
-  ~tcp_socket() noexcept;
+  ~socket() noexcept;
 
   /**
    * Copy construction is disabled because the socket owns a descriptor.
    */
-  tcp_socket(const tcp_socket&) = delete;
+  socket(const socket&) = delete;
 
   /**
    * Copy assignment is disabled because the socket owns a descriptor.
    */
-  tcp_socket& operator=(const tcp_socket&) = delete;
+  socket& operator=(const socket&) = delete;
 
   /**
    * Moves descriptor ownership from another socket.
    */
-  tcp_socket(tcp_socket&& other) noexcept;
+  socket(socket&& other) noexcept;
 
   /**
    * Closes the current descriptor and moves descriptor ownership from another
    * socket.
    */
-  tcp_socket& operator=(tcp_socket&& other) noexcept;
+  socket& operator=(socket&& other) noexcept;
 
   /**
    * Returns the owned native descriptor, or -1 when closed.
@@ -92,24 +92,22 @@ class BUPP_EXPORT tcp_socket {
   /**
    * Returns this stream's next layer.
    */
-  [[nodiscard]] tcp_socket& next_layer() noexcept { return *this; }
+  [[nodiscard]] socket& next_layer() noexcept { return *this; }
 
   /**
    * Returns this stream's next layer.
    */
-  [[nodiscard]] const tcp_socket& next_layer() const noexcept { return *this; }
+  [[nodiscard]] const socket& next_layer() const noexcept { return *this; }
 
   /**
    * Returns this stream's lowest layer.
    */
-  [[nodiscard]] tcp_socket& lowest_layer() noexcept { return *this; }
+  [[nodiscard]] socket& lowest_layer() noexcept { return *this; }
 
   /**
    * Returns this stream's lowest layer.
    */
-  [[nodiscard]] const tcp_socket& lowest_layer() const noexcept {
-    return *this;
-  }
+  [[nodiscard]] const socket& lowest_layer() const noexcept { return *this; }
 
   /**
    * Creates a sender for one read operation. The operation may complete with
@@ -231,6 +229,6 @@ class BUPP_EXPORT tcp_socket {
   native_handle_type fd_ = -1;
 };
 
-}  // namespace bupp
+}  // namespace bupp::tcp
 
 #endif  // BUPP_TCP_SOCKET_H_

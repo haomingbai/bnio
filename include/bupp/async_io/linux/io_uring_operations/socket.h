@@ -27,7 +27,7 @@ class io_uring_accept_operation
    * Creates an accept operation for a listening socket.
    */
   io_uring_accept_operation(io_uring_context& context,
-                            listening_socket_view socket,
+                            stream_socket_view socket,
                             ip::endpoint& remote_endpoint, int accept_flags,
                             Receiver receiver)
       : detail::io_uring_receiver_operation<Receiver>(context,
@@ -40,7 +40,7 @@ class io_uring_accept_operation
    * Stores an accepted socket without collecting its remote endpoint.
    */
   io_uring_accept_operation(io_uring_context& context,
-                            listening_socket_view socket, int accept_flags,
+                            stream_socket_view socket, int accept_flags,
                             Receiver receiver)
       : detail::io_uring_receiver_operation<Receiver>(context,
                                                       std::move(receiver)),
@@ -88,7 +88,7 @@ class io_uring_accept_operation
   void start() noexcept { this->start_io(*this); }
 
  private:
-  listening_socket_view socket_;
+  stream_socket_view socket_;
   ip::endpoint* remote_endpoint_ = nullptr;
   sockaddr_storage remote_address_{};
   socklen_t remote_address_size_ = 0;
@@ -214,6 +214,66 @@ class io_uring_send_operation
 };
 
 /**
+ * Operation that receives one datagram from a connected default peer.
+ */
+template <class Receiver>
+class io_uring_datagram_receive_operation
+    : public detail::io_uring_receiver_operation<Receiver> {
+ public:
+  io_uring_datagram_receive_operation(io_uring_context& context,
+                                      datagram_socket_view socket,
+                                      const buffer_view& buffer,
+                                      int receive_flags, Receiver receiver)
+      : detail::io_uring_receiver_operation<Receiver>(context,
+                                                      std::move(receiver)),
+        socket_(socket),
+        buffer_(buffer),
+        receive_flags_(receive_flags) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    sqe.prep_recv(socket_.native_handle(), buffer_.data,
+                  detail::bounded_io_size(buffer_.size), receive_flags_);
+  }
+
+  void start() noexcept { this->start_io(*this); }
+
+ private:
+  datagram_socket_view socket_;
+  buffer_view buffer_;
+  int receive_flags_;
+};
+
+/**
+ * Operation that sends one datagram to a connected default peer.
+ */
+template <class Receiver>
+class io_uring_datagram_send_operation
+    : public detail::io_uring_receiver_operation<Receiver> {
+ public:
+  io_uring_datagram_send_operation(io_uring_context& context,
+                                   datagram_socket_view socket,
+                                   const buffer_view& buffer, int send_flags,
+                                   Receiver receiver)
+      : detail::io_uring_receiver_operation<Receiver>(context,
+                                                      std::move(receiver)),
+        socket_(socket),
+        buffer_(buffer),
+        send_flags_(send_flags) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    sqe.prep_send(socket_.native_handle(), buffer_.data,
+                  detail::bounded_io_size(buffer_.size), send_flags_);
+  }
+
+  void start() noexcept { this->start_io(*this); }
+
+ private:
+  datagram_socket_view socket_;
+  buffer_view buffer_;
+  int send_flags_;
+};
+
+/**
  * Operation that submits an io_uring recvmsg request.
  */
 template <class Receiver>
@@ -293,6 +353,102 @@ class io_uring_sendmsg_operation
   stream_socket_view socket_;
   const_message_view message_;
   unsigned message_flags_;
+};
+
+/**
+ * Operation that receives one datagram and captures its source endpoint.
+ */
+template <class Receiver>
+class io_uring_receive_from_operation
+    : public detail::io_uring_receiver_operation<Receiver> {
+ public:
+  io_uring_receive_from_operation(io_uring_context& context,
+                                  datagram_socket_view socket,
+                                  const buffer_view& buffer,
+                                  ip::endpoint& remote_endpoint,
+                                  unsigned receive_flags, Receiver receiver)
+      : detail::io_uring_receiver_operation<Receiver>(context,
+                                                      std::move(receiver)),
+        socket_(socket),
+        buffer_(buffer),
+        remote_endpoint_(&remote_endpoint),
+        receive_flags_(receive_flags) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    remote_address_ = {};
+    buffer_entry_ = {buffer_.data, detail::bounded_io_size(buffer_.size)};
+    message_ = {};
+    message_.msg_name = &remote_address_;
+    message_.msg_namelen = sizeof(remote_address_);
+    message_.msg_iov = &buffer_entry_;
+    message_.msg_iovlen = 1;
+    sqe.prep_recvmsg(socket_.native_handle(), &message_, receive_flags_);
+  }
+
+  void execute() noexcept override {
+    if (this->result >= 0) {
+      const auto endpoint =
+          make_endpoint(reinterpret_cast<const sockaddr*>(&remote_address_),
+                        message_.msg_namelen);
+      if (endpoint.has_value()) {
+        *remote_endpoint_ = *endpoint;
+      } else {
+        remote_endpoint_->reset();
+      }
+    }
+    detail::io_uring_receiver_operation<Receiver>::execute();
+  }
+
+  void start() noexcept { this->start_io(*this); }
+
+ private:
+  datagram_socket_view socket_;
+  buffer_view buffer_;
+  ip::endpoint* remote_endpoint_;
+  sockaddr_storage remote_address_{};
+  iovec buffer_entry_{};
+  msghdr message_{};
+  unsigned receive_flags_;
+};
+
+/**
+ * Operation that sends one datagram to an explicit destination endpoint.
+ */
+template <class Receiver>
+class io_uring_send_to_operation
+    : public detail::io_uring_receiver_operation<Receiver> {
+ public:
+  io_uring_send_to_operation(io_uring_context& context,
+                             datagram_socket_view socket,
+                             const buffer_view& buffer,
+                             const ip::endpoint& remote_endpoint,
+                             unsigned send_flags, Receiver receiver)
+      : detail::io_uring_receiver_operation<Receiver>(context,
+                                                      std::move(receiver)),
+        socket_(socket),
+        buffer_(buffer),
+        remote_address_(remote_endpoint),
+        send_flags_(send_flags) {}
+
+  void prepare(bupp::base::submission_queue_entry& sqe) noexcept {
+    buffer_entry_ = {buffer_.data, detail::bounded_io_size(buffer_.size)};
+    message_ = {};
+    message_.msg_name = const_cast<sockaddr*>(remote_address_.data());
+    message_.msg_namelen = remote_address_.size();
+    message_.msg_iov = &buffer_entry_;
+    message_.msg_iovlen = 1;
+    sqe.prep_sendmsg(socket_.native_handle(), &message_, send_flags_);
+  }
+
+  void start() noexcept { this->start_io(*this); }
+
+ private:
+  datagram_socket_view socket_;
+  buffer_view buffer_;
+  socket_address remote_address_;
+  iovec buffer_entry_{};
+  msghdr message_{};
+  unsigned send_flags_;
 };
 
 }  // namespace bupp::async_io::linux_native

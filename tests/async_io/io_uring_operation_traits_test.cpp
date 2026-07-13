@@ -1,4 +1,3 @@
-#include <array>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -20,6 +19,13 @@ void test_operation_state_concepts() {
   static_assert(bexec::operation_state<io_uring_connect_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_recv_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_send_operation<receiver>>);
+  static_assert(
+      bexec::operation_state<io_uring_datagram_receive_operation<receiver>>);
+  static_assert(
+      bexec::operation_state<io_uring_datagram_send_operation<receiver>>);
+  static_assert(
+      bexec::operation_state<io_uring_receive_from_operation<receiver>>);
+  static_assert(bexec::operation_state<io_uring_send_to_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_recvmsg_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_sendmsg_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_read_operation<receiver>>);
@@ -39,26 +45,35 @@ void test_operation_state_concepts() {
 
   static_assert(
       !std::is_constructible_v<io_uring_accept_operation<receiver>,
-                               io_uring_context&, stream_socket_view,
+                               io_uring_context&, datagram_socket_view,
                                bupp::async_io::ip::endpoint&, int, receiver>);
   static_assert(
       !std::is_constructible_v<io_uring_connect_operation<receiver>,
-                               io_uring_context&, listening_socket_view,
+                               io_uring_context&, datagram_socket_view,
                                const bupp::async_io::ip::endpoint&, receiver>);
   static_assert(
       !std::is_constructible_v<io_uring_recv_operation<receiver>,
-                               io_uring_context&, listening_socket_view,
+                               io_uring_context&, datagram_socket_view,
                                const buffer_view&, int, receiver>);
   static_assert(
       !std::is_constructible_v<io_uring_send_operation<receiver>,
-                               io_uring_context&, listening_socket_view,
+                               io_uring_context&, datagram_socket_view,
+                               const buffer_view&, int, receiver>);
+  static_assert(
+      !std::is_constructible_v<io_uring_datagram_receive_operation<receiver>,
+                               io_uring_context&, stream_socket_view,
+                               const buffer_view&, int, receiver>);
+  static_assert(
+      !std::is_constructible_v<io_uring_datagram_send_operation<receiver>,
+                               io_uring_context&, stream_socket_view,
                                const buffer_view&, int, receiver>);
 }
 
 void test_io_operations_accept_async_io_views() {
   io_uring_context context;
-  listening_socket_view listener(3);
+  stream_socket_view listener(3);
   stream_socket_view stream(4);
+  datagram_socket_view datagram(5);
   descriptor_view descriptor(4);
 
   char data[16]{};
@@ -88,6 +103,14 @@ void test_io_operations_accept_async_io_views() {
       context, stream, buffer, 0, receiver{});
   [[maybe_unused]] io_uring_send_operation send_operation(
       context, stream, buffer, 0, receiver{});
+  [[maybe_unused]] io_uring_datagram_receive_operation
+      datagram_receive_operation(context, datagram, buffer, 0, receiver{});
+  [[maybe_unused]] io_uring_datagram_send_operation datagram_send_operation(
+      context, datagram, buffer, 0, receiver{});
+  [[maybe_unused]] io_uring_receive_from_operation receive_from_operation(
+      context, datagram, buffer, remote_endpoint, 0, receiver{});
+  [[maybe_unused]] io_uring_send_to_operation send_to_operation(
+      context, datagram, buffer, remote_endpoint, 0, receiver{});
   [[maybe_unused]] io_uring_recvmsg_operation recvmsg_operation(
       context, stream, receive_message, 0, receiver{});
   [[maybe_unused]] io_uring_sendmsg_operation sendmsg_operation(

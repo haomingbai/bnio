@@ -13,6 +13,7 @@
 #include <bupp/io_context.h>
 #include <bupp/ssl.h>
 #include <bupp/tcp.h>
+#include <bupp/udp.h>
 #endif
 
 #endif  // BUPP_BUPP_H_

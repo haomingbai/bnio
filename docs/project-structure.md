@@ -97,16 +97,20 @@ High-level async runtime, stream owners, and buffer types.
 - `detail/ssl/async_operations/shutdown.h` — TLS shutdown operation.
 - `detail/ssl/async_operations/state_machine.h` — SSL state machine helpers.
 - `detail/tcp/async_operations.h` — TCP async operation sender factories.
+- `detail/udp/async_operations.h` — UDP datagram sender factories.
 - `buffer/` — buffer types:
   - `basic.h` — `mutable_buffer` and `const_buffer`.
   - `dynamic_string.h` — `dynamic_string_buffer`.
   - `dynamic_byte_vector.h` — `dynamic_byte_vector_buffer`.
   - `holders.h` — owning buffer wrappers.
 - `tcp/` — TCP stream owners and layers:
-  - `socket.h` — `tcp_socket` class.
-  - `acceptor.h` — `tcp_acceptor` class.
+  - `socket.h` — `tcp::socket` class (`tcp_socket` compatibility alias).
+  - `acceptor.h` — `tcp::acceptor` class (`tcp_acceptor` compatibility alias).
   - `async_operations.h` — TCP async sender factories.
   - `layers.h` — TCP layer type list for `ssl_stream`.
+- `udp/` — UDP datagram owner and sender factories:
+  - `socket.h` — `udp::socket` lifecycle and async sender declarations.
+  - `async_operations.h` — connected and endpoint-aware UDP senders.
 - `ssl/` — TLS integration:
   - `context.h` — `ssl_context` class (RAII `SSL_CTX` owner).
   - `stream_class.h` — `ssl_stream<NextLayer>` class definition.
