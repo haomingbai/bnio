@@ -1,3 +1,5 @@
+#include <cerrno>
+
 #include "io_context_runtime_test_support.h"
 
 namespace {
@@ -147,7 +149,7 @@ void test_direct_read_submits_without_queue() {
   assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
 }
 
-void test_queued_write_writes_to_peer() {
+void test_ready_socket_write_completes_without_queue() {
   bupp::io_context_options options;
   options.platform.max_queued_io_operations = 64;
   options.platform.queued_io_flush_after = std::chrono::seconds(30);
@@ -171,14 +173,78 @@ void test_queued_write_writes_to_peer() {
       sender_socket.async_write(scheduler, bupp::buffer(payload), MSG_NOSIGNAL);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
-  assert(scheduler.queued_io_size() == 1);
-  const std::error_code flush_error = scheduler.flush_io_queue();
-  assert(!flush_error);
+  assert(scheduler.queued_io_size() == 0);
   context.run();
 
   assert(state->signal == signal_kind::value);
   assert(state->size == payload.size());
 
+  std::array<char, 32> bytes{};
+  assert(::recv(receiver_socket.native_handle(), bytes.data(), bytes.size(),
+                0) == static_cast<ssize_t>(payload.size()));
+  assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+}
+
+void test_blocked_socket_write_falls_back_to_queue() {
+  bupp::io_context_options options;
+  options.platform.max_queued_io_operations = 64;
+  options.platform.queued_io_flush_after = std::chrono::seconds(30);
+  bupp::io_context context(options);
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  assert(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) == 0);
+  bupp::tcp_socket sender_socket(sockets[0]);
+  bupp::tcp_socket receiver_socket(sockets[1]);
+
+  std::array<char, 4096> filler{};
+  while (true) {
+    const ssize_t result = ::send(sender_socket.native_handle(), filler.data(),
+                                  filler.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+    if (result > 0) {
+      continue;
+    }
+    assert(result < 0);
+    if (errno == EINTR) {
+      continue;
+    }
+    assert(errno == EAGAIN || errno == EWOULDBLOCK);
+    break;
+  }
+
+  constexpr std::string_view payload = "fallback write";
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+  auto sender = sender_socket.async_write_some(scheduler, bupp::buffer(payload),
+                                               MSG_NOSIGNAL);
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  assert(scheduler.queued_io_size() == 1);
+
+  std::array<char, 65536> drain{};
+  while (true) {
+    const ssize_t result = ::recv(receiver_socket.native_handle(), drain.data(),
+                                  drain.size(), MSG_DONTWAIT);
+    if (result > 0) {
+      continue;
+    }
+    assert(result < 0);
+    if (errno == EINTR) {
+      continue;
+    }
+    assert(errno == EAGAIN || errno == EWOULDBLOCK);
+    break;
+  }
+
+  assert(!scheduler.flush_io_queue());
+  context.run();
+
+  assert(state->signal == signal_kind::value);
+  assert(state->size == payload.size());
   std::array<char, 32> bytes{};
   assert(::recv(receiver_socket.native_handle(), bytes.data(), bytes.size(),
                 0) == static_cast<ssize_t>(payload.size()));
@@ -295,7 +361,7 @@ void test_queued_io_auto_flush_timer_read_write_pair() {
 
   bexec::start(read_operation);
   bexec::start(write_operation);
-  assert(scheduler.queued_io_size() == 2);
+  assert(scheduler.queued_io_size() == 1);
 
   context.run();
 
@@ -442,7 +508,8 @@ int main() {
   test_ready_socket_read_completes_without_queue();
   test_manual_flush_reads_queued_io();
   test_direct_read_submits_without_queue();
-  test_queued_write_writes_to_peer();
+  test_ready_socket_write_completes_without_queue();
+  test_blocked_socket_write_falls_back_to_queue();
   test_direct_write_submits_without_queue();
   test_queued_io_auto_flush_timer_reads();
   test_queued_io_auto_flush_timer_read_write_pair();

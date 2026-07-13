@@ -1395,15 +1395,7 @@ class socket_read_model {
         ::recv(socket_.native_handle(), view.data,
                async_io::linux_native::detail::bounded_io_size(view.size),
                flags_ | MSG_DONTWAIT);
-    if (result >= 0) {
-      return static_cast<int>(result);
-    }
-
-    const int error = errno;
-    if (error == EINTR || error == EAGAIN || error == EWOULDBLOCK) {
-      return -EAGAIN;
-    }
-    return -error;
+    return immediate_socket_result(result);
   }
 
   [[nodiscard]] bool is_error_result(int result) const noexcept {
@@ -1442,6 +1434,14 @@ class socket_write_model {
         socket_.native_handle(), buffer_.data(),
         async_io::linux_native::detail::bounded_io_size(buffer_.size()),
         flags_);
+  }
+
+  [[nodiscard]] int try_immediate() noexcept {
+    const ssize_t result =
+        ::send(socket_.native_handle(), buffer_.data(),
+               async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+               flags_ | MSG_DONTWAIT);
+    return immediate_socket_result(result);
   }
 
   [[nodiscard]] bool is_error_result(int result) const noexcept {

@@ -38,11 +38,14 @@ The submission suffix is orthogonal to the read/write semantic. For example,
 `async_write_direct()` is still a write-all operation; it only submits each
 lower-level write directly instead of going through the queued I/O batch.
 
-Read operations first try one non-blocking read in the high-level layer. Socket
-reads use `recv(..., MSG_DONTWAIT)`. Descriptor reads use `preadv2` with
-`RWF_NOWAIT` when the kernel and filesystem support it. If that immediate read
-would block, or if `RWF_NOWAIT` is unsupported, the operation falls back to the
-normal queued/direct io_uring wait path.
+Socket data operations first try one non-blocking syscall in the high-level
+layer. Stream and connected datagram operations use `recv()` or `send()` with
+`MSG_DONTWAIT`; endpoint-aware datagram operations use `recvfrom()` or
+`sendto()`. Descriptor reads use `preadv2` with `RWF_NOWAIT` when the kernel and
+filesystem support it. If an immediate operation would block, or if
+`RWF_NOWAIT` is unsupported, it falls back to the normal queued/direct io_uring
+wait path. Completion is still posted through `io_context`; receivers are not
+called inline from `start()`.
 
 ### Configuration
 

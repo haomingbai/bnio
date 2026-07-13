@@ -63,8 +63,6 @@ void test_socketpair_handshake_is_io_context_driven() {
   bexec::start(server_operation);
   if constexpr (DirectSubmit) {
     assert(scheduler.queued_io_size() == 0);
-  } else {
-    assert(scheduler.queued_io_size() != 0);
   }
   context.run();
 

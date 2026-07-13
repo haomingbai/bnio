@@ -123,8 +123,6 @@ void test_socketpair_read_write_transfers_plaintext() {
       bexec::start(write_operation);
       if constexpr (DirectSubmit) {
         assert(scheduler.queued_io_size() == 0);
-      } else {
-        assert(scheduler.queued_io_size() != 0);
       }
       if (completions != target) {
         context.run();
