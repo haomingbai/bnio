@@ -115,12 +115,8 @@ class io_uring_poll_sender_operation : public io_uring_operation_base {
       return;
     }
 
-    const int submit_result = context_->submit(*this);
-    if (submit_result < 0) {
-      completion_ = completion_kind::error;
-      error_ = std::error_code(-submit_result, std::generic_category());
-      (void)context_->post(*this);
-    }
+    completion_ = completion_kind::submitting;
+    (void)context_->post(*this);
   }
 
   /**
@@ -128,6 +124,16 @@ class io_uring_poll_sender_operation : public io_uring_operation_base {
    */
   void execute() noexcept override {
     switch (completion_) {
+      case completion_kind::submitting: {
+        completion_ = completion_kind::value;
+        const int submit_result = context_->submit(*this);
+        if (submit_result < 0) {
+          completion_ = completion_kind::error;
+          error_ = std::error_code(-submit_result, std::generic_category());
+          (void)context_->post(*this);
+        }
+        break;
+      }
       case completion_kind::value:
         if (result < 0) {
           bexec::set_error(std::move(receiver_),
@@ -147,6 +153,7 @@ class io_uring_poll_sender_operation : public io_uring_operation_base {
 
  private:
   enum class completion_kind {
+    submitting,
     value,
     error,
     stopped,

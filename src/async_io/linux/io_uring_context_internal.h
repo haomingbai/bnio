@@ -6,6 +6,30 @@
 
 namespace bupp::async_io::linux_native {
 
+struct io_uring_context::operation_queue {
+  void push(io_uring_operation_base& operation) noexcept {
+    operation.next = head;
+    head = &operation;
+  }
+
+  void push(io_uring_operation_base* operations) noexcept {
+    while (operations != nullptr) {
+      io_uring_operation_base* operation = operations;
+      operations = operations->next;
+      operation->next = nullptr;
+      push(*operation);
+    }
+  }
+
+  [[nodiscard]] io_uring_operation_base* pop_all() noexcept {
+    io_uring_operation_base* operations = head;
+    head = nullptr;
+    return operations;
+  }
+
+  io_uring_operation_base* head = nullptr;
+};
+
 [[nodiscard]] inline io_uring_operation_base* reverse_tasks(
     io_uring_operation_base* tasks) noexcept {
   io_uring_operation_base* reversed = nullptr;

@@ -12,18 +12,11 @@ namespace bupp {
 
 inline constexpr async_read_t async_read{};
 inline constexpr async_read_some_t async_read_some{};
-inline constexpr async_read_direct_t async_read_direct{};
-inline constexpr async_read_some_direct_t async_read_some_direct{};
 inline constexpr async_write_t async_write{};
 inline constexpr async_write_some_t async_write_some{};
-inline constexpr async_write_direct_t async_write_direct{};
-inline constexpr async_write_some_direct_t async_write_some_direct{};
 inline constexpr async_accept_t async_accept{};
-inline constexpr async_accept_direct_t async_accept_direct{};
 inline constexpr async_connect_t async_connect{};
-inline constexpr async_connect_direct_t async_connect_direct{};
 inline constexpr async_poll_t async_poll{};
-inline constexpr async_poll_direct_t async_poll_direct{};
 inline constexpr async_resolve_t async_resolve{};
 
 }  // namespace bupp

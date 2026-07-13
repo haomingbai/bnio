@@ -13,9 +13,24 @@ namespace bupp::detail {
 
 struct native_context_state {
   explicit native_context_state(
-      const linux_io_context_options& context_options) noexcept
-      : context(context_options.uring), options(context_options) {}
+      const linux_io_context_options& context_options,
+      async_io::linux_native::io_uring_task_queue_state& task_queue) noexcept
+      : context(make_options(context_options, task_queue)),
+        options(context_options) {
+    options.uring.task_queue = &task_queue;
+  }
 
+ private:
+  [[nodiscard]] static async_io::linux_native::io_uring_context_options
+  make_options(
+      const linux_io_context_options& context_options,
+      async_io::linux_native::io_uring_task_queue_state& task_queue) noexcept {
+    auto options = context_options.uring;
+    options.task_queue = &task_queue;
+    return options;
+  }
+
+ public:
   async_io::linux_native::io_uring_context context;
   linux_io_context_options options;
 };
@@ -27,12 +42,6 @@ struct native_worker_state {
   std::atomic<native_worker*> round_robin_cursor{nullptr};
   std::atomic<std::size_t> active_count{1};
   std::atomic<std::size_t> next_run{0};
-};
-
-template <class Operation>
-struct queued_io_state {
-  std::atomic<std::size_t> pending_count{0};
-  std::atomic<Operation*> global_pending_head{nullptr};
 };
 
 /** @endcond */

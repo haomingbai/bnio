@@ -276,18 +276,15 @@ Expected work:
 - introduce `bsd_io_context_options`;
 - make `platform_io_context_options` select Linux or BSD options from
   `config/system.h`;
-- reuse the existing scheduler factory, queued/direct submission policy, timer
-  heap, TCP owner types, SSL stream integration, and CPO surface;
+- reuse the existing scheduler factory, passive I/O queue policy, timer heap,
+  TCP owner types, SSL stream integration, and CPO surface;
 - keep Linux names out of cross-platform public headers.
 
-The queued/direct distinction may need slightly different wording on BSD:
-
-- queued: collect registrations or ready-to-register operations before flushing
-  a changelist to `kevent`;
-- direct: register immediately and wake the loop if needed.
-
-The semantic split still holds: `async_write_some` is one native attempt, while
-`async_write` is the composed write-all loop.
+The BSD backend should likewise keep one passive submission path: collect
+ready-to-register operations, let concurrency accumulate a changelist, and
+wake a sleeping loop when needed. The semantic split remains at the operation
+level: `async_write_some` is one native attempt, while `async_write` is the
+composed write-all loop.
 
 ## Build And Test Plan
 

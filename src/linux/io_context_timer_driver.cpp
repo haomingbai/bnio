@@ -70,23 +70,6 @@ void io_context::on_timer_driver() noexcept {
   post_timer_operations(ready, detail::timer_completion_kind::value);
 }
 
-void io_context::on_queued_io_flush(
-    detail::timer_completion_kind completion) noexcept {
-  {
-    std::lock_guard context_lock(timers_.mutex);
-    timers_.complete_flush_wait();
-  }
-
-  if (completion == detail::timer_completion_kind::value) {
-    (void)flush_io_queue();
-    return;
-  }
-
-  if (queued_io_size() != 0) {
-    arm_flush_timer();
-  }
-}
-
 void io_context::post_timer_driver() noexcept {
   bool should_post = false;
   {

@@ -193,48 +193,29 @@ auto echo_once(Scheduler scheduler, Stream& stream,
 This pattern works for `tcp_socket`, `ssl_stream`, descriptor views, and any
 future type that satisfies the same CPO contract.
 
-## 4. Queued and direct submission
+## 4. Passive I/O submission
 
-Most I/O factories use queued submission by default:
+All I/O factories use one passive submission path:
 
 ```cpp
 auto read = socket.async_read(scheduler, bupp::buffer(bytes));
 auto write = socket.async_write(scheduler, bupp::buffer(payload));
 ```
 
-Queued operations enter the scheduler's queued I/O list, allowing the
-`io_context` implementation to batch submissions to io_uring. This is the
-default path and is usually the right choice for throughput-oriented servers.
+Operations enter the shared, lower-priority I/O queue. A worker always handles
+CPU work first, then takes every I/O operation currently published and prepares
+the SQEs on its own io_uring. There is no queue-length threshold, manual flush,
+queue-size query, or `_direct` variant.
 
-Direct submission uses the `_direct` suffix:
+Under concurrency, operations accumulate naturally while a worker handles CPU
+work and the preceding batch. Under light load, the worker's pre-sleep handshake
+rechecks and drains the I/O queue before it waits on eventfd. A producer that
+publishes after the worker announces sleep wakes one worker, so a lone operation
+does not depend on a timer or a configured batch size.
 
-```cpp
-auto read = socket.async_read_direct(scheduler, bupp::buffer(bytes));
-auto write = socket.async_write_direct(scheduler, bupp::buffer(payload));
-```
-
-Direct operations bypass the queued I/O batch and submit immediately through
-the owning context. This can reduce latency when the caller wants a single
-operation submitted now instead of batched with other pending I/O.
-
-The suffix only changes submission mode. It does not change operation
-semantics:
-
-| Queued API | Direct API | Same semantic |
-|------------|------------|---------------|
-| `async_read()` | `async_read_direct()` | one read chunk |
-| `async_read_some()` | `async_read_some_direct()` | one read chunk |
-| `async_write()` | `async_write_direct()` | write-all |
-| `async_write_some()` | `async_write_some_direct()` | one write attempt |
-| `async_accept()` | `async_accept_direct()` | accept one connection |
-| `async_connect()` | `async_connect_direct()` | connect one stream |
-| `async_send_to()` | `async_send_to_direct()` | send one datagram |
-| `async_receive_from()` | `async_receive_from_direct()` | receive one datagram and source endpoint |
-| `async_poll()` | `async_poll_direct()` | wait for descriptor events |
-
-TLS direct operations keep their TLS-level behavior as well. For example,
-`ssl_stream::async_write_direct()` is still a TLS write-all sender; the direct
-part applies to the lower-level transport I/O used by the TLS state machine.
+Submission policy is therefore no longer part of the API. The semantic suffixes
+remain: `async_write()` is write-all, while `async_write_some()` performs one
+write attempt. The same rule applies to TCP, UDP, descriptors, and TLS.
 
 ## 5. Coroutine support through bexec senders
 

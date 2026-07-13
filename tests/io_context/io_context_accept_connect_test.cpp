@@ -2,12 +2,8 @@
 
 namespace {
 
-template <bool DirectSubmit>
 void test_accept_connect_loopback() {
-  bupp::io_context_options options;
-  options.platform.max_queued_io_operations = 64;
-  options.platform.queued_io_flush_after = std::chrono::seconds(30);
-  bupp::io_context context(options);
+  bupp::io_context context;
   if (!context_available(context)) {
     return;
   }
@@ -37,20 +33,8 @@ void test_accept_connect_loopback() {
   connect_receiver.target = 2;
   auto connect_state = connect_receiver.state;
 
-  auto accept_sender = [&] {
-    if constexpr (DirectSubmit) {
-      return acceptor.async_accept_direct(scheduler, SOCK_CLOEXEC);
-    } else {
-      return acceptor.async_accept(scheduler, SOCK_CLOEXEC);
-    }
-  }();
-  auto connect_sender = [&] {
-    if constexpr (DirectSubmit) {
-      return client.async_connect_direct(scheduler, endpoint);
-    } else {
-      return client.async_connect(scheduler, endpoint);
-    }
-  }();
+  auto accept_sender = acceptor.async_accept(scheduler, SOCK_CLOEXEC);
+  auto connect_sender = client.async_connect(scheduler, endpoint);
 
   auto accept_operation =
       bexec::connect(std::move(accept_sender), std::move(accept_receiver));
@@ -59,13 +43,6 @@ void test_accept_connect_loopback() {
 
   bexec::start(accept_operation);
   bexec::start(connect_operation);
-  if constexpr (DirectSubmit) {
-    assert(scheduler.queued_io_size() == 0);
-  } else {
-    assert(scheduler.queued_io_size() == 2);
-    const std::error_code flush_error = scheduler.flush_io_queue();
-    assert(!flush_error);
-  }
   context.run();
 
   assert(completions == 2);
@@ -78,18 +55,9 @@ void test_accept_connect_loopback() {
   accept_state->fd = -1;
 }
 
-void test_queued_accept_connect_loopback() {
-  test_accept_connect_loopback<false>();
-}
-
-void test_direct_accept_connect_loopback() {
-  test_accept_connect_loopback<true>();
-}
-
 }  // namespace
 
 int main() {
-  test_queued_accept_connect_loopback();
-  test_direct_accept_connect_loopback();
+  test_accept_connect_loopback();
   return 0;
 }

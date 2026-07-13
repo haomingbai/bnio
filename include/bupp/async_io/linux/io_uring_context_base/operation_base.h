@@ -4,9 +4,27 @@
 
 #include <bupp/export.h>
 
+#include <atomic>
+#include <cstddef>
+
 namespace bupp::async_io::linux_native {
 
-struct operation_stack_state;
+class io_uring_operation_base;
+
+/** Shared MPSC CPU/I/O queues and worker wake state. */
+struct BUPP_EXPORT io_uring_task_queue_state {
+  void push_cpu(io_uring_operation_base& operation) noexcept;
+
+  [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
+
+  void push_io(io_uring_operation_base& operation) noexcept;
+
+  [[nodiscard]] io_uring_operation_base* pop_io_all() noexcept;
+
+  std::atomic<io_uring_operation_base*> cpu_head{nullptr};
+  std::atomic<io_uring_operation_base*> io_head{nullptr};
+  std::atomic<std::size_t> awake_workers{0};
+};
 
 /**
  * Base class for operations scheduled by an io_uring_context.
@@ -17,11 +35,6 @@ class BUPP_EXPORT io_uring_operation_base {
    * Intrusive next pointer used by context task queues.
    */
   io_uring_operation_base* next = nullptr;
-
-  /**
-   * Stack state that currently owns or is executing this operation.
-   */
-  operation_stack_state* stack_state = nullptr;
 
   /**
    * Completion result copied from the CQE.
@@ -73,47 +86,33 @@ class BUPP_EXPORT io_uring_operation_base {
   virtual void execute() noexcept = 0;
 };
 
-/**
- * Non-atomic intrusive stack of operations.
- */
-struct BUPP_EXPORT operation_stack_state {
-  /**
-   * Pushes one operation onto this stack.
-   */
-  void push(io_uring_operation_base& operation) noexcept {
+inline void io_uring_task_queue_state::push_cpu(
+    io_uring_operation_base& operation) noexcept {
+  io_uring_operation_base* head = cpu_head.load(std::memory_order_relaxed);
+  do {
     operation.next = head;
-    operation.stack_state = this;
-    head = &operation;
-  }
+  } while (!cpu_head.compare_exchange_weak(
+      head, &operation, std::memory_order_release, std::memory_order_relaxed));
+}
 
-  /**
-   * Pushes a forward-linked operation chain onto this stack.
-   */
-  void push(io_uring_operation_base* operations) noexcept {
-    while (operations != nullptr) {
-      io_uring_operation_base* operation = operations;
-      operations = operations->next;
-      operation->next = nullptr;
-      push(*operation);
-    }
-  }
+inline io_uring_operation_base*
+io_uring_task_queue_state::pop_cpu_all() noexcept {
+  return cpu_head.exchange(nullptr, std::memory_order_acquire);
+}
 
-  /**
-   * Removes and returns all operations currently on this stack.
-   */
-  [[nodiscard]] io_uring_operation_base* pop_all() noexcept {
-    io_uring_operation_base* operations = head;
-    head = nullptr;
-    return operations;
-  }
+inline void io_uring_task_queue_state::push_io(
+    io_uring_operation_base& operation) noexcept {
+  io_uring_operation_base* head = io_head.load(std::memory_order_relaxed);
+  do {
+    operation.next = head;
+  } while (!io_head.compare_exchange_weak(
+      head, &operation, std::memory_order_release, std::memory_order_relaxed));
+}
 
-  /**
-   * Returns whether the stack is empty.
-   */
-  [[nodiscard]] bool empty() const noexcept { return head == nullptr; }
-
-  io_uring_operation_base* head = nullptr;
-};
+inline io_uring_operation_base*
+io_uring_task_queue_state::pop_io_all() noexcept {
+  return io_head.exchange(nullptr, std::memory_order_acquire);
+}
 
 }  // namespace bupp::async_io::linux_native
 

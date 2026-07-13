@@ -28,8 +28,6 @@ constexpr int k_backlog = 512;
 constexpr std::size_t k_buffer_size = 4096;
 constexpr unsigned long k_default_workers = 1;
 constexpr unsigned long k_max_workers = 1024;
-constexpr unsigned long k_default_max_queued_io_operations = 64;
-constexpr unsigned long k_default_flush_after_us = 1000;
 
 [[nodiscard]] unsigned long parse_arg(char** argv, int argc, int index,
                                       unsigned long fallback) {
@@ -40,21 +38,6 @@ constexpr unsigned long k_default_flush_after_us = 1000;
   char* end = nullptr;
   const unsigned long value = std::strtoul(argv[index], &end, 10);
   if (end == argv[index] || *end != '\0' || value == 0) {
-    return fallback;
-  }
-  return value;
-}
-
-[[nodiscard]] unsigned long parse_nonnegative_arg(char** argv, int argc,
-                                                  int index,
-                                                  unsigned long fallback) {
-  if (argc <= index) {
-    return fallback;
-  }
-
-  char* end = nullptr;
-  const unsigned long value = std::strtoul(argv[index], &end, 10);
-  if (end == argv[index] || *end != '\0') {
     return fallback;
   }
   return value;
@@ -104,22 +87,10 @@ class detached_task {
     void unhandled_exception() const noexcept { std::terminate(); }
   };
 
-  detached_task() noexcept = default;
   explicit detached_task(handle_type handle) noexcept : handle_(handle) {}
 
   detached_task(const detached_task&) = delete;
   detached_task& operator=(const detached_task&) = delete;
-
-  detached_task(detached_task&& other) noexcept
-      : handle_(std::exchange(other.handle_, {})) {}
-
-  detached_task& operator=(detached_task&& other) noexcept {
-    if (this != &other) {
-      destroy();
-      handle_ = std::exchange(other.handle_, {});
-    }
-    return *this;
-  }
 
   ~detached_task() { destroy(); }
 
@@ -159,10 +130,9 @@ class await_result {
     return result;
   }
 
-  static await_result error(std::error_code error) {
+  static await_result error(std::error_code) {
     await_result result;
     result.status_ = await_status::error;
-    result.error_ = error;
     return result;
   }
 
@@ -178,19 +148,12 @@ class await_result {
 
   explicit operator bool() const noexcept { return has_value(); }
 
-  [[nodiscard]] bool stopped_completion() const noexcept {
-    return status_ == await_status::stopped;
-  }
-
-  [[nodiscard]] std::error_code error() const noexcept { return error_; }
-
   T& value() noexcept { return *value_; }
   T&& take_value() noexcept { return std::move(*value_); }
 
  private:
   await_status status_ = await_status::stopped;
   std::optional<T> value_;
-  std::error_code error_;
 };
 
 template <>
@@ -202,13 +165,6 @@ class await_result<void> {
     return result;
   }
 
-  static await_result error(std::error_code error) {
-    await_result result;
-    result.status_ = await_status::error;
-    result.error_ = error;
-    return result;
-  }
-
   static await_result stopped() {
     await_result result;
     result.status_ = await_status::stopped;
@@ -221,15 +177,8 @@ class await_result<void> {
 
   explicit operator bool() const noexcept { return has_value(); }
 
-  [[nodiscard]] bool stopped_completion() const noexcept {
-    return status_ == await_status::stopped;
-  }
-
-  [[nodiscard]] std::error_code error() const noexcept { return error_; }
-
  private:
   await_status status_ = await_status::stopped;
-  std::error_code error_;
 };
 
 template <class List>
@@ -393,20 +342,13 @@ int main(int argc, char** argv) {
   const auto port =
       static_cast<std::uint16_t>(parse_arg(argv, argc, 1, k_port));
   const unsigned worker_count = parse_workers(argv, argc, 2);
-  const auto max_queued_io_operations = static_cast<std::size_t>(
-      parse_nonnegative_arg(argv, argc, 3, k_default_max_queued_io_operations));
-  const auto flush_after_us =
-      parse_nonnegative_arg(argv, argc, 4, k_default_flush_after_us);
-  const bool bind_any_v4 = parse_bind_any_v4(argv, argc, 5);
+  const bool bind_any_v4 = parse_bind_any_v4(argv, argc, 3);
 
   io_context_options opts;
   opts.concurrency_hint = worker_count;
   opts.platform.uring.entries = 1024;
   opts.platform.uring.setup_flags =
       bupp::base::detail::io_uring_setup_coop_taskrun;
-  opts.platform.max_queued_io_operations = max_queued_io_operations;
-  opts.platform.queued_io_flush_after =
-      std::chrono::microseconds(flush_after_us);
   io_context ctx(opts);
   if (!ctx.is_open()) {
     std::cerr << "ctx unavailable\n";
@@ -436,8 +378,6 @@ int main(int argc, char** argv) {
   start(accept_loop(ctx, a));
 
   std::cout << "bupp_raw_echo " << port << " workers " << worker_count
-            << " queue " << max_queued_io_operations << " flush_after_us "
-            << flush_after_us << " bind "
-            << (bind_any_v4 ? "0.0.0.0" : "127.0.0.1") << std::endl;
+            << " bind " << (bind_any_v4 ? "0.0.0.0" : "127.0.0.1") << std::endl;
   run_context(ctx, worker_count);
 }

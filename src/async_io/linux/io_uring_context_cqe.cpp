@@ -22,11 +22,10 @@ int io_uring_context::wait_for_cqe_event() noexcept {
   }
 }
 
-bool io_uring_context::collect_ready_cqes(operation_queue& local_tasks,
-                                          unsigned& local_task_budget,
-                                          bool wait_for_gate) noexcept {
+bool io_uring_context::collect_ready_cqes(
+    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   operation_queue cqe_tasks;
-  const unsigned task_count = collect_cqe_tasks(cqe_tasks, wait_for_gate);
+  const unsigned task_count = collect_cqe_tasks(cqe_tasks);
   if (task_count == 0) {
     return false;
   }
@@ -35,21 +34,17 @@ bool io_uring_context::collect_ready_cqes(operation_queue& local_tasks,
   return true;
 }
 
-unsigned io_uring_context::collect_cqe_tasks(operation_queue& cqe_tasks,
-                                             bool wait_for_gate) noexcept {
-  auto lock = wait_for_gate ? lock_uring() : try_lock_uring();
-  if (!lock) {
-    return 0;
-  }
-
+unsigned io_uring_context::collect_cqe_tasks(
+    operation_queue& cqe_tasks) noexcept {
   if (!ring_.is_open()) {
     return 0;
   }
 
   unsigned task_count = 0;
   (void)ring_.consume_ready_cqes(
-      cqe_batch_window_, [this, &cqe_tasks, &task_count](
-                             bupp::base::completion_queue_entry cqe) noexcept {
+      options_.cqe_batch_window,
+      [this, &cqe_tasks,
+       &task_count](bupp::base::completion_queue_entry cqe) noexcept {
         cqe_data data;
         data.user_data = cqe.get_data();
         data.result = cqe.res();
@@ -58,7 +53,7 @@ unsigned io_uring_context::collect_cqe_tasks(operation_queue& cqe_tasks,
         if (data.user_data == eventfd_user_data()) {
           eventfd_poll_pending_ = false;
           drain_eventfd();
-          (void)submit_eventfd_poll_locked();
+          (void)submit_eventfd_poll();
           return;
         }
 
@@ -73,26 +68,26 @@ void io_uring_context::dispatch_cqe_tasks(
     operation_queue& cqe_tasks, unsigned task_count,
     operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   // Tier 1 — inline: small batch, always push to the local queue.
-  if (task_count <= cqe_inline_completion_threshold_) {
+  if (task_count <= options_.cqe_inline_completion_threshold) {
     local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
     return;
   }
 
   // Tier 2 — local queue: within the per-iteration budget.
-  // When local_queue_threshold_ is 0 (default) this tier is unlimited and
-  // CQEs never spill to the posted stack on this path.
-  if (local_queue_threshold_ == 0 ||
+  // When local_queue_threshold is 0 (default) this tier is unlimited and
+  // CQEs never spill to the shared CPU queue on this path.
+  if (options_.local_queue_threshold == 0 ||
       (local_task_budget > 0 && task_count <= local_task_budget)) {
     local_tasks.push(reverse_tasks(cqe_tasks.pop_all()));
-    if (local_queue_threshold_ > 0) {
+    if (options_.local_queue_threshold > 0) {
       local_task_budget -= task_count;
     }
     return;
   }
 
   // Tier 3: local budget exhausted or batch exceeds remaining budget; publish
-  // to the context's posted stack for a later run-loop pass.
-  push_posted_tasks(cqe_tasks);
+  // to the shared CPU queue for a later run-loop pass.
+  push_cpu_tasks(cqe_tasks);
 }
 
 bool io_uring_context::enqueue_cqe_task(const cqe_data& data,

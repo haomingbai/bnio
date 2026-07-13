@@ -9,8 +9,8 @@ under `include/bupp/linux/detail/`).
    one-thread-one-uring model, each thread calling `run()` claims a native worker
    slot with its own `io_uring_context`.
 2. **Scheduler factory** — produces dispatch and post schedulers.
-3. **I/O batching backend** — manages queued vs. direct submission for scheduler
-   I/O senders.
+3. **Passive I/O backend** — publishes scheduler I/O to a shared queue that a
+   worker drains on its owning io_uring thread.
 
 The public class is intentionally a coordinator. It owns a small set of
 cohesive `detail` state objects rather than defining all internal data inline:
@@ -19,8 +19,8 @@ cohesive `detail` state objects rather than defining all internal data inline:
 |---------------------|--------|----------------|
 | `detail::native_context_state` | `linux/detail/io_context_state.h` | Primary native `io_uring_context` plus Linux-specific options. |
 | `detail::native_worker_state` | `linux/detail/io_context_state.h` | Worker linked list, active worker count, and round-robin cursor. |
-| `detail::native_worker` | `linux/detail/io_context_state/native_worker.h` | Per-run-thread native context slot and worker-local pending I/O stack. |
-| `detail::queued_io_state<operation_base>` | `linux/detail/io_context_state.h` | Global queued-I/O count and pending operation stack. |
+| `detail::native_worker` | `linux/detail/io_context_state/native_worker.h` | Per-run-thread native context slot. |
+| `async_io::linux_native::io_uring_task_queue_state` | `async_io/linux/io_uring_context_base/operation_base.h` | Separate shared CPU/I/O queues and the awake-worker count. |
 | `detail::timer_state_data` | `linux/detail/io_context_timer_types.h` | Timer map, heap, reusable timer-operation states, and timeout state machine. |
 
 Template implementation types are grouped by operation family under
@@ -28,38 +28,29 @@ Template implementation types are grouped by operation family under
 after the complete `io_context` declaration, so templates can call private
 context hooks without splitting a class definition across files.
 
-### Submission Modes
+### Passive I/O Submission
 
 ```mermaid
 graph LR
-    subgraph Q["queued"]
-        Q1["operation"] --> Q2["enqueue_io()"]
-        Q2 --> Q3["pending_io list"]
-        Q3 --> Q4["flush (count/timer/manual)"]
-        Q4 --> Q5["batched io_uring submit"]
-    end
-
-    subgraph D["direct"]
-        D1["operation"] --> D2["submit_direct()"]
-        D2 --> D3["immediate io_uring submit"]
-    end
+    I["operation"] --> E["enqueue_io()"]
+    E --> Q["shared lower-priority I/O queue"]
+    Q --> W["worker takes all published I/O"]
+    W --> U["worker-owned io_uring submit"]
 ```
 
-| Mode | API Suffix | Trigger | Use Case |
-|------|-----------|---------|----------|
-| **queued** | `async_read()`, `async_write_some()`, etc. | Count (64), timer (1 ms), or manual `flush_io_queue()` | High throughput |
-| **direct-submission** | `async_read_direct()`, `async_write_some_direct()`, etc. | Immediate submission, bypassing the queued I/O batch | Low latency |
-
-The submission suffix is orthogonal to the read/write semantic. For example,
-`async_write_direct()` is still a write-all operation; it only submits each
-lower-level write directly instead of going through the queued I/O batch.
+There is one submission policy. Producers publish I/O and wake a worker when
+the shared awake count indicates that a worker is sleeping. Workers give the
+CPU queue priority, then atomically take the complete I/O list. Busy workloads
+naturally form larger submission batches; idle workloads reach the same drain
+during the pre-sleep recheck. No count, threshold, explicit flush, or direct
+variant is involved.
 
 Socket data operations first try one non-blocking syscall in the high-level
 layer. Stream and connected datagram operations use `recv()` or `send()` with
 `MSG_DONTWAIT`; endpoint-aware datagram operations use `recvfrom()` or
 `sendto()`. Descriptor reads use `preadv2` with `RWF_NOWAIT` when the kernel and
 filesystem support it. If an immediate operation would block, or if
-`RWF_NOWAIT` is unsupported, it falls back to the normal queued/direct io_uring
+`RWF_NOWAIT` is unsupported, it falls back to the shared io_uring
 wait path. Completion is still posted through `io_context`; receivers are not
 called inline from `start()`.
 
@@ -68,8 +59,6 @@ called inline from `start()`.
 ```cpp
 struct linux_io_context_options {
     async_io::linux_native::io_uring_context_options uring{};
-    std::size_t max_queued_io_operations = 64;
-    async_io::duration queued_io_flush_after = std::chrono::milliseconds(1);
 };
 
 struct io_context_options {
@@ -84,10 +73,20 @@ call `run()`, each thread claims a distinct slot with its own ring — hence
 **one thread, one uring**. Slot 0 always hosts the construction-time primary
 context, so existing code can start work before `run()`.
 
-High-level `post` work is distributed round-robin across active native slots.
-I/O started from a run-loop thread stays on that thread's native slot, keeping a
-connection's read/write loop ring-local after it has been handed off. Timer
-bookkeeping remains on the primary native context (slot 0).
+High-level `post` work is published to the shared CPU queue. Wakeup scans the
+worker slots and writes one waiting worker's eventfd. I/O is published to the
+lower-priority shared I/O queue. The worker that removes an I/O batch owns all
+SQ preparation and submission for that batch, so the high-level queue code does
+not need native ring synchronization. Timer bookkeeping remains on the primary
+native context (slot 0).
+
+Before a worker blocks, it publishes sleeping in two stages: first its local
+waiting flag, then a decrement of the shared awake-worker count. It then
+rechecks CQEs and the CPU queue and takes all published I/O. Finding any work
+reopens the worker and starts another loop pass. Otherwise a producer that
+finds the shared awake count below the worker count writes one waiting worker's
+eventfd. Only a still-empty worker proceeds to eventfd wait. This handshake
+replaces both the former queued-I/O flush timer and queue-length threshold.
 
 ### Sender Factories
 
@@ -147,7 +146,7 @@ separate while preserving a single public class declaration:
 | Header | Contents |
 |--------|----------|
 | `linux/io_context.h` | `io_context`, scheduler handles, operation base, public and private member declarations. |
-| `linux/detail/io_context_state.h` | Non-template grouped runtime state: native context/options, worker-list state, queued-I/O state template. |
+| `linux/detail/io_context_state.h` | Non-template grouped runtime state: native context/options and worker-list state. |
 | `linux/detail/io_context_state/native_worker.h` | Complete `detail::native_worker` definition; included after `io_context` is complete. |
 | `linux/detail/io_context_timer_types.h` | Timer slots, reusable timer operations, timer heap items, and `timer_state_data`. |
 | `linux/detail/io_context_native_io/common.h` | Error/stop helpers plus generic `native_io_operation` and `native_io_sender` templates. |
@@ -221,9 +220,8 @@ by `transferred`. A child result of zero before completion is treated as an
 error to avoid an infinite repeat loop.
 
 This design keeps each native I/O operation simple and single-purpose while
-making full-write behavior explicit, testable, and reusable. It also preserves
-the scheduler's queued/direct policy: the write-all state chooses either
-`async_write_some()` or `async_write_some_direct()` for every child attempt.
+making full-write behavior explicit, testable, and reusable. Every child
+attempt uses `async_write_some()` and enters the same passive I/O path.
 
 #### SSL Use of the Same Pattern
 
@@ -261,9 +259,10 @@ sequenceDiagram
     User->>Op: connect(receiver) → start()
     Op->>Ctx: enqueue_io(*this)
 
-    Note over Ctx: flush triggers (count / timer / manual)
-    Ctx->>Ctx: take_pending_io()
-    Ctx->>Worker: distribute to native slot (round-robin or ring-local)
+    Note over Ctx: publish to shared lower-priority I/O queue
+    Ctx->>Worker: notify one worker if sleeping
+    Worker->>Worker: CPU queue first; then take all published I/O
+    Worker->>Ctx: take_pending_io()
     Worker->>UCtx: submit_batch(fn)
     UCtx->>Ring: get_sqe() + prepare(sqe)
     Ring->>K: io_uring_submit()
@@ -308,11 +307,6 @@ auto s = bupp::async_read(scheduler, socket, buffer);
 | `bupp::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
 | `bupp::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
 | `bupp::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
-
-The `*_direct` suffix is reserved for direct-submission variants that bypass the
-queued I/O batch. It combines with the semantic suffix: `async_write_direct()`
-is full-write/direct-submit, while `async_write_some_direct()` is
-one-attempt/direct-submit.
 
 Provider concepts:
 

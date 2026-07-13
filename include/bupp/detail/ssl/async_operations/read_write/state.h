@@ -26,11 +26,11 @@ enum class ssl_io_phase {
   done,
 };
 
-template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
-          class Receiver, ssl_application_io Application, bool CompleteBuffer>
+template <class Scheduler, class NextLayer, class Holder, class Receiver,
+          ssl_application_io Application, bool CompleteBuffer>
 class ssl_io_operation;
 
-template <class State, bool DirectSubmit, class Receiver>
+template <class State, class Receiver>
 class ssl_io_step_operation;
 
 template <class Scheduler, class NextLayer, class Holder,

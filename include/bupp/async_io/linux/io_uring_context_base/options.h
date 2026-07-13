@@ -7,6 +7,8 @@
 
 namespace bupp::async_io::linux_native {
 
+struct io_uring_task_queue_state;
+
 /**
  * Options used to initialize an io_uring-backed async I/O context.
  */
@@ -53,7 +55,7 @@ struct io_uring_context_options {
   /**
    * Upper bound for CQE tasks dispatched to the local queue per run-loop
    * iteration.  When the cumulative local-queue sink exceeds this value,
-   * remaining CQEs are published to the context's posted stack instead.
+   * remaining CQEs are published to the shared CPU queue instead.
    *
    * 0 (the default) means no limit.
    */
@@ -94,6 +96,9 @@ struct io_uring_context_options {
    * the caller must keep it valid until queue_exit() or context destruction.
    */
   int event_fd = -1;
+
+  /** Optional shared CPU/I/O task queues used by a worker group. */
+  io_uring_task_queue_state* task_queue = nullptr;
 };
 
 }  // namespace bupp::async_io::linux_native

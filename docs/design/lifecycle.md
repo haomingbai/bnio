@@ -245,7 +245,7 @@ graph TB
 
 ```
 async_io::linux_native::io_uring_operation_base   (intrusive node, result/flags)
-    └── io_context::operation_base                (queued-I/O list link, prepare hooks, detail::native_worker pointer)
+    └── io_context::operation_base                (shared-I/O list link and prepare hooks)
         ├── detail::native_io_operation<Model,R>  (read/write/accept/connect/poll)
         └── detail::timer_operation_base          (timer completion posting)
 
@@ -275,12 +275,12 @@ own unique resources:
 | `ssl_stream<NextLayer>` | `SSL*` + `BIO*` + `NextLayer` |
 
 The following types are **non-movable** (both copy and move deleted) because
-they own synchronization primitives and thread-local state:
+they own non-transferable runtime state:
 
 | Type | Reason |
 |------|--------|
 | `io_context` | Owns native worker slots, timer heap, and mutexes. |
-| `linux_native::io_uring_context` | Owns sync primitives and thread-local run-loop state. |
+| `linux_native::io_uring_context` | Owns one ring, normalized options, and single-owner run-loop state. |
 
 ```cpp
 // These are all compile errors:

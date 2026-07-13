@@ -24,21 +24,6 @@ struct async_handshake_t {
 };
 
 /**
- * Customization point object for direct-submission SSL handshake.
- */
-struct async_handshake_direct_t {
-  /**
-   * Invokes async_handshake_direct on a stream.
-   */
-  template <class Provider, class Stream>
-  constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
-                                      ssl_handshake_type type) const {
-    return std::forward<Stream>(stream).async_handshake_direct(
-        std::forward<Provider>(provider), type);
-  }
-};
-
-/**
  * Customization point object for Provider::async_shutdown.
  */
 struct async_shutdown_t {
@@ -54,39 +39,14 @@ struct async_shutdown_t {
 };
 
 /**
- * Customization point object for direct-submission SSL shutdown.
- */
-struct async_shutdown_direct_t {
-  /**
-   * Invokes async_shutdown_direct on a stream.
-   */
-  template <class Provider, class Stream>
-  constexpr decltype(auto) operator()(Provider&& provider,
-                                      Stream&& stream) const {
-    return std::forward<Stream>(stream).async_shutdown_direct(
-        std::forward<Provider>(provider));
-  }
-};
-
-/**
  * Customization point object instance for async_handshake.
  */
 inline constexpr async_handshake_t async_handshake{};
 
 /**
- * Customization point object instance for async_handshake_direct.
- */
-inline constexpr async_handshake_direct_t async_handshake_direct{};
-
-/**
  * Customization point object instance for async_shutdown.
  */
 inline constexpr async_shutdown_t async_shutdown{};
-
-/**
- * Customization point object instance for async_shutdown_direct.
- */
-inline constexpr async_shutdown_direct_t async_shutdown_direct{};
 
 }  // namespace bupp
 

@@ -20,6 +20,8 @@ void io_uring_context::run() noexcept {
   io_uring_context* previous_context = current_context_;
   current_context_ = this;
   this->local_tasks_ = &local_tasks;
+  waiting_.store(false, std::memory_order_release);
+  options_.task_queue->awake_workers.fetch_add(1, std::memory_order_acq_rel);
 
   unsigned local_task_budget = 0;
   run_phase phase = run_phase::run_ready_tasks;
@@ -45,6 +47,7 @@ void io_uring_context::run() noexcept {
 
   this->local_tasks_ = nullptr;
   current_context_ = previous_context;
+  options_.task_queue->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
   run_active_.store(false, std::memory_order_release);
 }
 
@@ -67,7 +70,7 @@ bool io_uring_context::is_in_context() const noexcept {
 io_uring_context::run_phase io_uring_context::handle_run_ready_tasks(
     operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
   // Reset the local-queue budget for this pass through the run loop.
-  local_task_budget = local_queue_threshold_;
+  local_task_budget = options_.local_queue_threshold;
 
   if (io_uring_operation_base* operations =
           reverse_tasks(local_tasks.pop_all())) {
@@ -75,7 +78,11 @@ io_uring_context::run_phase io_uring_context::handle_run_ready_tasks(
     return run_phase::run_ready_tasks;
   }
 
-  if (move_posted_tasks(local_tasks)) {
+  if (move_cpu_tasks(local_tasks)) {
+    return run_phase::run_ready_tasks;
+  }
+
+  if (run_pending_work()) {
     return run_phase::run_ready_tasks;
   }
 
@@ -100,9 +107,9 @@ io_uring_context::run_phase io_uring_context::handle_finish_drain(
 
 io_uring_context::run_phase io_uring_context::spin_for_work(
     operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
-  for (unsigned round = 0; round < wait_spin_count_; ++round) {
+  for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
     if (collect_ready_cqes(local_tasks, local_task_budget) ||
-        move_posted_tasks(local_tasks)) {
+        move_cpu_tasks(local_tasks)) {
       return run_phase::run_ready_tasks;
     }
     if (should_finish()) {
@@ -115,21 +122,25 @@ io_uring_context::run_phase io_uring_context::spin_for_work(
 
 io_uring_context::run_phase io_uring_context::wait_for_io_work(
     operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
+  begin_wait();
+
   if (collect_ready_cqes(local_tasks, local_task_budget) ||
-      move_posted_tasks(local_tasks) || should_finish()) {
+      move_cpu_tasks(local_tasks) || run_pending_work() || should_finish()) {
+    end_wait();
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
   }
 
   (void)submit_eventfd_poll();
   const int wait_result = wait_for_cqe_event();
+  end_wait();
 
   if (wait_result < 0 && !should_finish()) {
     return run_phase::finished;
   }
 
   if (collect_ready_cqes(local_tasks, local_task_budget) ||
-      move_posted_tasks(local_tasks)) {
+      move_cpu_tasks(local_tasks)) {
     return run_phase::run_ready_tasks;
   }
 
@@ -143,9 +154,9 @@ bool io_uring_context::should_finish() const noexcept {
 void io_uring_context::finish(operation_queue& local_tasks,
                               unsigned& local_task_budget) noexcept {
   for (;;) {
-    (void)move_posted_tasks(local_tasks);
-    (void)collect_ready_cqes(local_tasks, local_task_budget, true);
-    (void)move_posted_tasks(local_tasks);
+    (void)move_cpu_tasks(local_tasks);
+    (void)collect_ready_cqes(local_tasks, local_task_budget);
+    (void)move_cpu_tasks(local_tasks);
 
     io_uring_operation_base* operations = reverse_tasks(local_tasks.pop_all());
     if (operations == nullptr) {

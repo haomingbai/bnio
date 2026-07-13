@@ -72,8 +72,9 @@ graph LR
 The primary implementation is Linux with `io_uring`. The library uses a
 **one-thread-one-uring** model: each thread calling `io_context::run()` owns its
 own `io_uring_context` instance, allocated from a pool sized by
-`concurrency_hint`. High-level `post` work is distributed round-robin across
-native slots; per-connection I/O stays ring-local after handoff.
+`concurrency_hint`. Workers share separate CPU and I/O task queues; the worker
+that passively removes I/O owns SQE preparation, submission, and CQ collection
+for its ring.
 
 BSD kqueue **base wrappers** (`base::kqueue`, `base::event`,
 `base::event_list_view`) are already implemented. The full `kqueue_context`

@@ -37,8 +37,7 @@ enum class ssl_output_chunk_state {
   error,
 };
 
-template <class Derived, class Scheduler, class NextLayer, class Receiver,
-          bool DirectSubmit>
+template <class Derived, class Scheduler, class NextLayer, class Receiver>
 class ssl_async_operation_base {
  public:
   using scheduler_type = std::remove_cvref_t<Scheduler>;
@@ -105,16 +104,12 @@ class ssl_async_operation_base {
     ssl_async_operation_base* operation_;
   };
 
-  using read_sender_type =
-      decltype(ssl_make_transport_read_sender<DirectSubmit>(
-          std::declval<scheduler_type&>(),
-          std::declval<ssl_stream<NextLayer>&>(), static_cast<void*>(nullptr),
-          std::size_t{}));
-  using write_sender_type =
-      decltype(ssl_make_transport_write_sender<DirectSubmit>(
-          std::declval<scheduler_type&>(),
-          std::declval<ssl_stream<NextLayer>&>(),
-          static_cast<const void*>(nullptr), std::size_t{}));
+  using read_sender_type = decltype(ssl_make_transport_read_sender(
+      std::declval<scheduler_type&>(), std::declval<ssl_stream<NextLayer>&>(),
+      static_cast<void*>(nullptr), std::size_t{}));
+  using write_sender_type = decltype(ssl_make_transport_write_sender(
+      std::declval<scheduler_type&>(), std::declval<ssl_stream<NextLayer>&>(),
+      static_cast<const void*>(nullptr), std::size_t{}));
   using post_sender_type =
       decltype(bexec::schedule(std::declval<scheduler_type&>()));
   using read_operation_type = decltype(bexec::connect(
@@ -232,8 +227,8 @@ class ssl_async_operation_base {
     transport_size_ = static_cast<std::size_t>(available);
     child_operation_.template emplace_from<read_operation_type>([this] {
       return bexec::connect(
-          ssl_make_transport_read_sender<DirectSubmit>(
-              scheduler_, *stream_, transport_data_, transport_size_),
+          ssl_make_transport_read_sender(scheduler_, *stream_, transport_data_,
+                                         transport_size_),
           child_receiver(*this));
     });
     child_operation_.start();
@@ -243,8 +238,8 @@ class ssl_async_operation_base {
     child_ = ssl_child_io::write;
     child_operation_.template emplace_from<write_operation_type>([this] {
       return bexec::connect(
-          ssl_make_transport_write_sender<DirectSubmit>(
-              scheduler_, *stream_, transport_data_, transport_size_),
+          ssl_make_transport_write_sender(scheduler_, *stream_, transport_data_,
+                                          transport_size_),
           child_receiver(*this));
     });
     child_operation_.start();

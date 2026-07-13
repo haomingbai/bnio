@@ -41,30 +41,14 @@ concept has_sync_datagram_io =
 
 class unique_fd {
  public:
-  unique_fd() noexcept = default;
   explicit unique_fd(int fd) noexcept : fd_(fd) {}
 
   unique_fd(const unique_fd&) = delete;
   unique_fd& operator=(const unique_fd&) = delete;
 
-  unique_fd(unique_fd&& other) noexcept : fd_(other.release()) {}
-
-  unique_fd& operator=(unique_fd&& other) noexcept {
-    if (this != &other) {
-      reset(other.release());
-    }
-    return *this;
-  }
-
   ~unique_fd() { reset(); }
 
   [[nodiscard]] int get() const noexcept { return fd_; }
-
-  [[nodiscard]] int release() noexcept {
-    const int result = fd_;
-    fd_ = -1;
-    return result;
-  }
 
   void reset(int fd = -1) noexcept {
     if (fd_ >= 0) {

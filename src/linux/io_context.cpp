@@ -15,11 +15,10 @@ thread_local detail::native_worker* io_context::current_native_worker_ =
 io_context::io_context() noexcept : io_context(io_context_options{}) {}
 
 io_context::io_context(const io_context_options& options) noexcept
-    : native_(options.platform),
+    : native_(options.platform, task_queue_),
       timer_wakeup_operation_(*this),
       timer_update_operation_(*this),
-      timer_driver_operation_(*this),
-      queued_io_flush_timer_(*this) {
+      timer_driver_operation_(*this) {
   const std::size_t worker_count =
       std::max<std::size_t>(1, options.concurrency_hint);
 
@@ -34,11 +33,11 @@ io_context::io_context(const io_context_options& options) noexcept
 
   native_workers_.head->context.store(&native_.context,
                                       std::memory_order_release);
+  native_.context.set_pending_work(&io_context::drain_pending_io, this);
   native_workers_.round_robin_cursor.store(native_workers_.head,
                                            std::memory_order_release);
   native_workers_.active_count.store(native_.context.is_open() ? 1 : 0,
                                      std::memory_order_release);
-  timers_.queued_io_flush_wait.emplace(*this);
 }
 
 io_context::~io_context() noexcept {
@@ -120,10 +119,6 @@ io_context::post_scheduler io_context::get_post_scheduler() noexcept {
   return post_scheduler(*this);
 }
 
-detail::native_worker& io_context::primary_worker() noexcept {
-  return *native_workers_.head;
-}
-
 detail::native_worker& io_context::select_worker() noexcept {
   native_worker* const head = native_workers_.head;
 
@@ -178,14 +173,6 @@ detail::native_worker& io_context::select_io_worker() noexcept {
   return select_worker();
 }
 
-detail::native_worker& io_context::ensure_operation_worker(
-    operation_base& operation) noexcept {
-  if (operation.native_worker_ == nullptr) {
-    operation.native_worker_ = &select_io_worker();
-  }
-  return *operation.native_worker_;
-}
-
 async_io::linux_native::io_uring_context&
 io_context::select_native_context() noexcept {
   return *select_io_worker().context.load(std::memory_order_acquire);
@@ -238,6 +225,8 @@ detail::native_worker* io_context::register_run_worker() noexcept {
     }
     worker->context.store(worker->owned_context.get(),
                           std::memory_order_release);
+    worker->owned_context->set_pending_work(&io_context::drain_pending_io,
+                                            this);
   }
 
   const std::size_t published_count = index + 1;

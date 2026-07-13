@@ -95,13 +95,6 @@ class BUPP_EXPORT acceptor {
   [[nodiscard]] auto async_accept(Scheduler scheduler, int flags = 0);
 
   /**
-   * Creates a sender that accepts one TCP connection through direct
-   * submission.
-   */
-  template <class Scheduler>
-  [[nodiscard]] auto async_accept_direct(Scheduler scheduler, int flags = 0);
-
-  /**
    * Opens a TCP listening socket for an address family.
    */
   [[nodiscard]] std::error_code open(int family = AF_INET) noexcept;

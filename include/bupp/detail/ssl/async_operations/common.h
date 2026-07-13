@@ -58,30 +58,21 @@ template <class Receiver>
   return token.stop_requested();
 }
 
-template <bool DirectSubmit, class Scheduler, class NextLayer>
+template <class Scheduler, class NextLayer>
 auto ssl_make_transport_read_sender(Scheduler& scheduler,
                                     ssl_stream<NextLayer>& stream, void* data,
                                     std::size_t size) {
   auto buffer = bupp::buffer(data, size);
-  if constexpr (DirectSubmit) {
-    return stream.lowest_layer().async_read_some_direct(scheduler, buffer);
-  } else {
-    return stream.lowest_layer().async_read_some(scheduler, buffer);
-  }
+  return stream.lowest_layer().async_read_some(scheduler, buffer);
 }
 
-template <bool DirectSubmit, class Scheduler, class NextLayer>
+template <class Scheduler, class NextLayer>
 auto ssl_make_transport_write_sender(Scheduler& scheduler,
                                      ssl_stream<NextLayer>& stream,
                                      const void* data, std::size_t size) {
   auto buffer = bupp::buffer(data, size);
-  if constexpr (DirectSubmit) {
-    return stream.lowest_layer().async_write_some_direct(scheduler, buffer,
-                                                         MSG_NOSIGNAL);
-  } else {
-    return stream.lowest_layer().async_write_some(scheduler, buffer,
-                                                  MSG_NOSIGNAL);
-  }
+  return stream.lowest_layer().async_write_some(scheduler, buffer,
+                                                MSG_NOSIGNAL);
 }
 
 }  // namespace detail

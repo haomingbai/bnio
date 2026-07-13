@@ -78,16 +78,16 @@ bupp
 │       ├── io_uring_context              platform event-loop owner (non-movable)
 │       ├── io_uring_context_options      context configuration
 │       ├── io_uring_operation_base       intrusive operation node
+│       ├── io_uring_task_queue_state     shared CPU/I/O queues + wake state
 │       └── io_uring_*_operation          concrete I/O operations
 ├── io_context                            Layer 3: high-level async context
-│   ├── operation_base                    intrusive queued-I/O node
+│   ├── operation_base                    intrusive shared-I/O node
 │   ├── basic_scheduler<Kind>             dispatch/post scheduler handles
 │   └── schedule_sender<Kind>             scheduler sender types
 ├── detail                                Layer 3 internals
 │   ├── native_context_state              primary uring context + options
 │   ├── native_worker_state               worker-list counters and cursors
 │   ├── native_worker                     per-thread io_uring_context slot
-│   ├── queued_io_state<Operation>        global queued-I/O counters/stacks
 │   ├── timer_state_data                  timer map, heap, timeout state
 │   ├── timer_*_operation                 reusable timer operations
 │   ├── native_io_sender<Model>           native I/O sender template
@@ -98,7 +98,6 @@ bupp
 │   ├── endpoint (= async_io::ip::endpoint)
 │   ├── tcp                               protocol tag + socket type aliases
 │   └── udp                               protocol tag + UDP socket alias
-├── submit_mode                           {queued, direct} submission policy
 ├── tcp
 │   ├── socket                            RAII TCP stream socket owner
 │   └── acceptor                          RAII TCP listening socket owner

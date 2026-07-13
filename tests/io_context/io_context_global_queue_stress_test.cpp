@@ -1,6 +1,7 @@
 #include <bupp/base/linux/submission_queue_entry.h>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -53,13 +54,19 @@ struct queued_nop_state {
       return completions.load(std::memory_order_acquire) == target;
     });
   }
+
+  [[nodiscard]] bool wait_for_count(unsigned count,
+                                    std::chrono::milliseconds timeout) {
+    std::unique_lock lock(mutex);
+    return completion_cv.wait_for(lock, timeout, [this, count] {
+      return completions.load(std::memory_order_acquire) >= count;
+    });
+  }
 };
 
 struct queued_nop_operation : public bupp::io_context::operation_base {
   explicit queued_nop_operation(queued_nop_state& state) noexcept
       : state(&state) {}
-
-  [[nodiscard]] int prepare_for_submit() noexcept override { return 0; }
 
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_nop();
@@ -76,10 +83,14 @@ struct queued_nop_operation : public bupp::io_context::operation_base {
       state->errors.fetch_add(1, std::memory_order_relaxed);
     }
 
-    const unsigned completed =
-        state->completions.fetch_add(1, std::memory_order_acq_rel) + 1;
+    unsigned completed = 0;
+    {
+      std::lock_guard lock(state->mutex);
+      completed =
+          state->completions.fetch_add(1, std::memory_order_acq_rel) + 1;
+    }
+    state->completion_cv.notify_all();
     if (completed == state->target && state->context != nullptr) {
-      state->completion_cv.notify_all();
       (void)state->context->stop();
     }
   }
@@ -91,13 +102,13 @@ struct queued_nop_operation : public bupp::io_context::operation_base {
 void wait_for_run_threads(
     bupp::io_context::post_scheduler scheduler, thread_recorder& recorder,
     std::vector<std::unique_ptr<post_record_operation>>& operations,
-    std::size_t expected_threads) {
+    std::size_t post_batch_size) {
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
 
-  while (recorder.unique_thread_count() < expected_threads &&
+  while (recorder.unique_thread_count() == 0 &&
          std::chrono::steady_clock::now() < deadline) {
-    for (std::size_t index = 0; index < expected_threads; ++index) {
+    for (std::size_t index = 0; index < post_batch_size; ++index) {
       operations.emplace_back(
           std::make_unique<post_record_operation>(recorder));
       scheduler.post(*operations.back());
@@ -105,14 +116,8 @@ void wait_for_run_threads(
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
 
-  assert(recorder.unique_thread_count() == expected_threads);
+  assert(recorder.unique_thread_count() != 0);
 }
-
-enum class flush_strategy {
-  timer,
-  manual_once,
-  concurrent_manual,
-};
 
 void enqueue_operation_range(
     bupp::io_context::post_scheduler scheduler,
@@ -124,15 +129,9 @@ void enqueue_operation_range(
 }
 
 void run_global_queue_nop_batch(unsigned worker_count, unsigned producer_count,
-                                unsigned operation_count,
-                                flush_strategy strategy) {
+                                unsigned operation_count) {
   bupp::io_context_options options;
   options.concurrency_hint = worker_count;
-  options.platform.max_queued_io_operations = 0;
-  options.platform.queued_io_flush_after = strategy == flush_strategy::timer
-                                               ? std::chrono::milliseconds(1)
-                                               : std::chrono::seconds(30);
-
   bupp::io_context context(options);
   if (!context_available(context)) {
     return;
@@ -174,37 +173,9 @@ void run_global_queue_nop_batch(unsigned worker_count, unsigned producer_count,
     });
   }
 
-  std::atomic_bool producers_done{false};
-  std::vector<std::thread> flushers;
-  if (strategy == flush_strategy::concurrent_manual) {
-    flushers.reserve(worker_count);
-    for (unsigned index = 0; index < worker_count; ++index) {
-      flushers.emplace_back([scheduler, &producers_done] {
-        while (!producers_done.load(std::memory_order_acquire) ||
-               scheduler.queued_io_size() != 0) {
-          const std::error_code flush_error = scheduler.flush_io_queue();
-          assert(!flush_error);
-          std::this_thread::yield();
-        }
-      });
-    }
-  }
-
   for (std::thread& producer : producers) {
     producer.join();
   }
-  producers_done.store(true, std::memory_order_release);
-
-  if (strategy == flush_strategy::manual_once) {
-    assert(scheduler.queued_io_size() == operation_count);
-    const std::error_code flush_error = scheduler.flush_io_queue();
-    assert(!flush_error);
-  }
-
-  for (std::thread& flusher : flushers) {
-    flusher.join();
-  }
-
   const bool completed = state.wait_for_target(std::chrono::seconds(5));
   if (!completed) {
     (void)context.stop();
@@ -219,36 +190,62 @@ void run_global_queue_nop_batch(unsigned worker_count, unsigned producer_count,
   assert(state.errors.load(std::memory_order_acquire) == 0);
   assert(state.recorder.unique_thread_count() >= 1);
   assert(state.recorder.unique_thread_count() <= worker_count);
-  assert(scheduler.queued_io_size() == 0);
 }
 
-void test_global_queue_balances_queued_io() {
-  run_global_queue_nop_batch(4, 1, 128, flush_strategy::timer);
+void test_global_queue_balances_io() { run_global_queue_nop_batch(4, 1, 128); }
+
+void test_global_queue_pressure_many_io_operations() {
+  run_global_queue_nop_batch(4, 1, 4096);
 }
 
-void test_global_queue_pressure_many_queued_io_operations() {
-  run_global_queue_nop_batch(4, 1, 4096, flush_strategy::timer);
+void test_global_queue_multi_producer_passive_drain() {
+  run_global_queue_nop_batch(4, 8, 4096);
 }
 
-void test_global_queue_multi_producer_timer_flush() {
-  run_global_queue_nop_batch(4, 8, 2048, flush_strategy::timer);
-}
+void test_idle_worker_handoff_does_not_lose_wakeups() {
+  constexpr unsigned worker_count = 4;
+  constexpr unsigned operation_count = 512;
 
-void test_global_queue_multi_producer_manual_flush() {
-  run_global_queue_nop_batch(4, 8, 2048, flush_strategy::manual_once);
-}
+  bupp::io_context_options options;
+  options.concurrency_hint = worker_count;
+  bupp::io_context context(options);
+  if (!context_available(context)) {
+    return;
+  }
 
-void test_global_queue_concurrent_manual_flush_pressure() {
-  run_global_queue_nop_batch(4, 8, 4096, flush_strategy::concurrent_manual);
+  std::vector<std::thread> workers;
+  for (unsigned index = 0; index < worker_count; ++index) {
+    workers.emplace_back([&context] { context.run(); });
+  }
+
+  queued_nop_state state;
+  state.context = &context;
+  state.target = operation_count;
+  std::vector<std::unique_ptr<queued_nop_operation>> operations;
+  operations.reserve(operation_count);
+  for (unsigned index = 0; index < operation_count; ++index) {
+    operations.emplace_back(std::make_unique<queued_nop_operation>(state));
+  }
+
+  auto scheduler = context.get_post_scheduler();
+  for (unsigned index = 0; index < operation_count; ++index) {
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+    scheduler.enqueue_io(*operations[index]);
+    assert(state.wait_for_count(index + 1, std::chrono::seconds(1)));
+  }
+
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
+  assert(state.errors.load(std::memory_order_acquire) == 0);
 }
 
 }  // namespace
 
 int main() {
-  test_global_queue_balances_queued_io();
-  test_global_queue_pressure_many_queued_io_operations();
-  test_global_queue_multi_producer_timer_flush();
-  test_global_queue_multi_producer_manual_flush();
-  test_global_queue_concurrent_manual_flush_pressure();
+  test_global_queue_balances_io();
+  test_global_queue_pressure_many_io_operations();
+  test_global_queue_multi_producer_passive_drain();
+  test_idle_worker_handoff_does_not_lose_wakeups();
   return 0;
 }

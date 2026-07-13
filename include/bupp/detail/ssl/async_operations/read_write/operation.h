@@ -17,14 +17,14 @@ namespace bupp {
 /** @cond BUPP_DETAIL */
 namespace detail {
 
-template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
-          class Receiver, ssl_application_io Application, bool CompleteBuffer>
+template <class Scheduler, class NextLayer, class Holder, class Receiver,
+          ssl_application_io Application, bool CompleteBuffer>
 class ssl_io_operation {
  public:
   using state_type =
       ssl_io_state<Scheduler, NextLayer, Holder, Application, CompleteBuffer>;
   using receiver_type = std::remove_cvref_t<Receiver>;
-  using factory_type = ssl_io_step_factory<state_type, DirectSubmit>;
+  using factory_type = ssl_io_step_factory<state_type>;
   using predicate_type = ssl_io_done_predicate<state_type>;
   using repeat_sender_type = decltype(bexec::repeat_until(
       std::declval<factory_type>(), std::declval<predicate_type>()));
@@ -121,22 +121,19 @@ class ssl_io_operation {
   bexec::detail::manual_lifetime<repeat_operation_type> repeat_operation_;
 };
 
-template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
-          class Receiver>
+template <class Scheduler, class NextLayer, class Holder, class Receiver>
 using ssl_read_operation =
-    ssl_io_operation<Scheduler, NextLayer, Holder, DirectSubmit, Receiver,
+    ssl_io_operation<Scheduler, NextLayer, Holder, Receiver,
                      ssl_application_io::read, false>;
 
-template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
-          class Receiver>
+template <class Scheduler, class NextLayer, class Holder, class Receiver>
 using ssl_write_operation =
-    ssl_io_operation<Scheduler, NextLayer, Holder, DirectSubmit, Receiver,
+    ssl_io_operation<Scheduler, NextLayer, Holder, Receiver,
                      ssl_application_io::write, true>;
 
-template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
-          class Receiver>
+template <class Scheduler, class NextLayer, class Holder, class Receiver>
 using ssl_write_some_operation =
-    ssl_io_operation<Scheduler, NextLayer, Holder, DirectSubmit, Receiver,
+    ssl_io_operation<Scheduler, NextLayer, Holder, Receiver,
                      ssl_application_io::write, false>;
 
 }  // namespace detail

@@ -76,9 +76,9 @@ High-level async runtime, stream owners, and buffer types.
 - `io_context.h` → `linux/io_context.h` plus `io_context_cpo.h`.
 - `linux/io_context.h` — `io_context` class definition and public scheduler
   surface; implementation detail types live under `linux/detail/`.
-- `linux/detail/io_context_options.h` — `io_context_options` and `submit_mode`.
-- `linux/detail/io_context_state.h` — grouped `io_context` native context,
-  queued-I/O, and worker-list state.
+- `linux/detail/io_context_options.h` — `io_context_options`.
+- `linux/detail/io_context_state.h` — grouped `io_context` native-context and
+  worker-list state. Shared CPU/I/O queue state lives in the async-io layer.
 - `linux/detail/io_context_state/native_worker.h` — per-run-thread native
   worker slot.
 - `linux/detail/io_context_timer_types.h` — timer operations, timer state, slot,
@@ -154,11 +154,11 @@ High-level async runtime, stream owners, and buffer types.
   - `io_uring_context_cqe.cpp` — CQE dispatch.
   - `io_uring_context_run_loop.cpp` — main run loop.
   - `io_uring_context_submission.cpp` — submission helpers.
-  - `io_uring_context_task_queue.cpp` — task queue and non-atomic posted stack.
+  - `io_uring_context_task_queue.cpp` — shared CPU queue and eventfd wakeup.
   - `io_uring_context_internal.h` — internal context state.
 - `src/linux/` — high-level Linux `io_context` implementations:
   - `io_context.cpp` — lifecycle, schedulers, native worker slots.
-  - `io_context_queue.cpp` — queued I/O submission.
+  - `io_context_queue.cpp` — passive I/O submission and worker wakeup.
   - `io_context_timer.cpp` — timer operation and slot management.
   - `io_context_timer_driver.cpp` — timer driver and heap.
   - `io_context_timer_state.cpp` — timeout/wakeup state machine.

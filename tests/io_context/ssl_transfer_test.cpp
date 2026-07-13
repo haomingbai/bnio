@@ -2,7 +2,6 @@
 
 namespace {
 
-template <bool DirectSubmit>
 void test_socketpair_read_write_transfers_plaintext() {
   test_certificate_files files;
 
@@ -36,24 +35,10 @@ void test_socketpair_read_write_transfers_plaintext() {
     handshake_receiver client_receiver{state, &context};
     handshake_receiver server_receiver{state, &context};
 
-    auto client_sender = [&] {
-      if constexpr (DirectSubmit) {
-        return client.async_handshake_direct(scheduler,
-                                             bupp::ssl_handshake_type::client);
-      } else {
-        return client.async_handshake(scheduler,
-                                      bupp::ssl_handshake_type::client);
-      }
-    }();
-    auto server_sender = [&] {
-      if constexpr (DirectSubmit) {
-        return server.async_handshake_direct(scheduler,
-                                             bupp::ssl_handshake_type::server);
-      } else {
-        return server.async_handshake(scheduler,
-                                      bupp::ssl_handshake_type::server);
-      }
-    }();
+    auto client_sender =
+        client.async_handshake(scheduler, bupp::ssl_handshake_type::client);
+    auto server_sender =
+        server.async_handshake(scheduler, bupp::ssl_handshake_type::server);
 
     auto client_operation =
         bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -94,25 +79,13 @@ void test_socketpair_read_write_transfers_plaintext() {
 
     auto read_buffer = bupp::buffer(received.data() + received_size,
                                     received.size() - received_size);
-    auto read_sender = [&] {
-      if constexpr (DirectSubmit) {
-        return server.async_read_direct(scheduler, read_buffer);
-      } else {
-        return server.async_read(scheduler, read_buffer);
-      }
-    }();
+    auto read_sender = server.async_read(scheduler, read_buffer);
 
     if (sent < payload.size()) {
       auto write_buffer =
           bupp::buffer(payload.data() + sent, payload.size() - sent);
-      auto write_sender = [&] {
-        if constexpr (DirectSubmit) {
-          return client.async_write_direct(scheduler, write_buffer,
-                                           MSG_NOSIGNAL);
-        } else {
-          return client.async_write(scheduler, write_buffer, MSG_NOSIGNAL);
-        }
-      }();
+      auto write_sender =
+          client.async_write(scheduler, write_buffer, MSG_NOSIGNAL);
 
       auto read_operation =
           bexec::connect(std::move(read_sender), std::move(read_receiver));
@@ -121,9 +94,6 @@ void test_socketpair_read_write_transfers_plaintext() {
 
       bexec::start(read_operation);
       bexec::start(write_operation);
-      if constexpr (DirectSubmit) {
-        assert(scheduler.queued_io_size() == 0);
-      }
       if (completions != target) {
         context.run();
       }
@@ -138,9 +108,6 @@ void test_socketpair_read_write_transfers_plaintext() {
           bexec::connect(std::move(read_sender), std::move(read_receiver));
 
       bexec::start(read_operation);
-      if constexpr (DirectSubmit) {
-        assert(scheduler.queued_io_size() == 0);
-      }
       if (completions != target) {
         context.run();
       }
@@ -163,7 +130,6 @@ void test_socketpair_read_write_transfers_plaintext() {
 }  // namespace
 
 int main() {
-  test_socketpair_read_write_transfers_plaintext<false>();
-  test_socketpair_read_write_transfers_plaintext<true>();
+  test_socketpair_read_write_transfers_plaintext();
   return 0;
 }

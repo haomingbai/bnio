@@ -11,7 +11,7 @@ namespace {
 
 using namespace bupp_async_io_io_uring_test;
 
-void test_cqe_completion_runs_without_uring_lock() {
+void test_cqe_completion_can_prepare_the_next_sqe() {
   fill_nop_operation filler;
   io_uring_context context;
   if (!queue_init_or_skip(context)) {
@@ -67,7 +67,7 @@ void test_cqe_batch_window_drains_multiple_rounds() {
   assert(state->all_in_context);
 }
 
-void test_multithreaded_cqe_dispatch_with_local_queue_threshold() {
+void test_concurrent_start_uses_the_single_run_thread() {
   io_uring_context context;
   io_uring_context_options options;
   options.entries = 1024;
@@ -159,9 +159,9 @@ void test_submit_failure_posts_error_completion() {
 }  // namespace
 
 int main() {
-  test_cqe_completion_runs_without_uring_lock();
+  test_cqe_completion_can_prepare_the_next_sqe();
   test_cqe_batch_window_drains_multiple_rounds();
-  test_multithreaded_cqe_dispatch_with_local_queue_threshold();
+  test_concurrent_start_uses_the_single_run_thread();
   test_submit_failure_posts_error_completion();
   return 0;
 }

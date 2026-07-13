@@ -10,11 +10,9 @@
 #include <bupp/base/linux/ring.h>
 #include <bupp/base/linux/submission_queue_entry.h>
 #include <bupp/export.h>
-#include <emmintrin.h>
 
 #include <atomic>
 #include <cstdint>
-#include <mutex>
 #include <string_view>
 
 namespace bupp::async_io::linux_native {
@@ -80,14 +78,14 @@ class BUPP_EXPORT io_uring_context {
   io_uring_context& operator=(const io_uring_context&) = delete;
 
   /**
-   * Move construction is disabled because the context owns synchronization
-   * primitives and thread-local run-loop state.
+   * Move construction is disabled because the context owns a ring and
+   * thread-local run-loop state.
    */
   io_uring_context(io_uring_context&&) = delete;
 
   /**
-   * Move assignment is disabled because the context owns synchronization
-   * primitives and thread-local run-loop state.
+   * Move assignment is disabled because the context owns a ring and
+   * thread-local run-loop state.
    */
   io_uring_context& operator=(io_uring_context&&) = delete;
 
@@ -160,6 +158,8 @@ class BUPP_EXPORT io_uring_context {
 
   /**
    * Prepares an operation SQE without submitting the ring.
+   *
+   * Call before run() starts or from this context's owning run thread.
    */
   template <class Operation>
   int prepare(Operation& operation) noexcept;
@@ -167,111 +167,29 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Submits all prepared SQEs on the context ring.
    *
+   * Call before run() starts or from this context's owning run thread.
+   *
    * @see io_uring_submit
    */
   int submit() noexcept;
 
   /**
    * Prepares one operation and submits the context ring.
+   *
+   * Call before run() starts or from this context's owning run thread.
    */
   template <class Operation>
   int submit(Operation& operation) noexcept;
 
   /**
-   * Runs a batch of submission work while holding the uring gate once.
+   * Runs a batch of submission work on the context's owning thread.
    *
    * The callback receives two callables: prepare(operation) reserves and fills
    * one SQE, and submit() submits all SQEs prepared so far.
+   * Call before run() starts or from this context's owning run thread.
    */
   template <class Function>
   void submit_batch(Function&& fn) noexcept;
-
-  /**
-   * RAII guard for exclusive access to the io_uring SQ/CQ rings.
-   */
-  class uring_lock {
-   public:
-    uring_lock() noexcept = default;
-
-    uring_lock(const uring_lock&) = delete;
-    uring_lock& operator=(const uring_lock&) = delete;
-
-    uring_lock(uring_lock&& other) noexcept : gate_(other.gate_) {
-      other.gate_ = nullptr;
-    }
-
-    uring_lock& operator=(uring_lock&& other) noexcept {
-      if (this != &other) {
-        reset();
-        gate_ = other.gate_;
-        other.gate_ = nullptr;
-      }
-      return *this;
-    }
-
-    ~uring_lock() noexcept { reset(); }
-
-    [[nodiscard]] explicit operator bool() const noexcept {
-      return gate_ != nullptr;
-    }
-
-    void reset() noexcept {
-      if (gate_ != nullptr) {
-        gate_->store(1U, std::memory_order_release);
-        gate_ = nullptr;
-      }
-    }
-
-   private:
-    friend class io_uring_context;
-
-    explicit uring_lock(std::atomic<unsigned>& gate) noexcept : gate_(&gate) {}
-
-    std::atomic<unsigned>* gate_ = nullptr;
-  };
-
-  /**
-   * Issues a short processor pause while spinning.
-   */
-  static void pause_uring_spin() noexcept { _mm_pause(); }
-
-  /**
-   * Spins until exclusive io_uring access is acquired.
-   */
-  [[nodiscard]] uring_lock lock_uring() const noexcept {
-    for (;;) {
-      if (uring_gate_.load(std::memory_order_acquire) != 0U &&
-          uring_gate_.exchange(0U, std::memory_order_acq_rel) != 0U) {
-        return uring_lock(uring_gate_);
-      }
-      while (uring_gate_.load(std::memory_order_relaxed) == 0U) {
-        pause_uring_spin();
-      }
-    }
-  }
-
-  /**
-   * Attempts to acquire exclusive io_uring access.
-   */
-  [[nodiscard]] uring_lock try_lock_uring() const noexcept {
-    if (uring_gate_.load(std::memory_order_acquire) == 0U ||
-        uring_gate_.exchange(0U, std::memory_order_acq_rel) == 0U) {
-      return uring_lock();
-    }
-    return uring_lock(uring_gate_);
-  }
-
-  /**
-   * Prepares one operation into the submission queue while the caller holds
-   * the io_uring gate.
-   */
-  template <class Operation>
-  int prepare_locked(Operation& operation) noexcept;
-
-  /**
-   * Submits prepared queue entries while the caller holds the io_uring gate.
-   */
-  int submit_locked() noexcept;
 
   /**
    * Wakes the run loop through the context eventfd.
@@ -283,13 +201,26 @@ class BUPP_EXPORT io_uring_context {
    */
   void notify_one_waiter() noexcept;
 
+  /** Returns whether this run-loop worker has published a sleeping state. */
+  [[nodiscard]] bool is_waiting() const noexcept;
+
+  using pending_work_function = bool (*)(void*, io_uring_context&) noexcept;
+
+  /** Installs embedding-layer work drained before this worker parks. */
+  void set_pending_work(pending_work_function function, void* data) noexcept;
+
   /**
    * Posts an operation for execution by the context run loop.
    */
   int post(io_uring_operation_base& operation) noexcept;
 
  private:
-  using operation_queue = operation_stack_state;
+  struct operation_queue;
+
+  template <class Operation>
+  int prepare_sqe(Operation& operation) noexcept;
+
+  int submit_ring() noexcept;
 
   /**
    * Small copy of CQE data used after the CQ head advances.
@@ -316,19 +247,25 @@ class BUPP_EXPORT io_uring_context {
   };
 
   /**
-   * Publishes a single operation to the posted task stack.
+   * Publishes a single operation to the shared CPU-task queue.
    */
-  void push_posted_task(io_uring_operation_base& operation) noexcept;
+  void push_cpu_task(io_uring_operation_base& operation) noexcept;
 
   /**
-   * Publishes all operations from a local queue to the posted task stack.
+   * Publishes all operations from a local queue to the shared CPU-task queue.
    */
-  void push_posted_tasks(operation_queue& operations) noexcept;
+  void push_cpu_tasks(operation_queue& operations) noexcept;
 
   /**
-   * Moves posted tasks into a local queue.
+   * Moves shared CPU tasks into a local queue.
    */
-  [[nodiscard]] bool move_posted_tasks(operation_queue& local_tasks) noexcept;
+  [[nodiscard]] bool move_cpu_tasks(operation_queue& local_tasks) noexcept;
+
+  [[nodiscard]] bool run_pending_work() noexcept;
+
+  void begin_wait() noexcept;
+
+  void end_wait() noexcept;
 
   /**
    * Signals the eventfd used by posted work and stop requests.
@@ -344,11 +281,6 @@ class BUPP_EXPORT io_uring_context {
    * Submits the internal eventfd poll request.
    */
   [[nodiscard]] int submit_eventfd_poll() noexcept;
-
-  /**
-   * Submits the internal eventfd poll request while the uring gate is held.
-   */
-  [[nodiscard]] int submit_eventfd_poll_locked() noexcept;
 
   /**
    * Returns the sentinel user data used for eventfd poll SQEs.
@@ -405,17 +337,15 @@ class BUPP_EXPORT io_uring_context {
    * Collects and dispatches ready CQE-backed tasks.
    */
   [[nodiscard]] bool collect_ready_cqes(operation_queue& local_tasks,
-                                        unsigned& local_task_budget,
-                                        bool wait_for_gate = false) noexcept;
+                                        unsigned& local_task_budget) noexcept;
 
   /**
    * Collects ready CQEs into an operation queue.
    */
-  [[nodiscard]] unsigned collect_cqe_tasks(operation_queue& cqe_tasks,
-                                           bool wait_for_gate) noexcept;
+  [[nodiscard]] unsigned collect_cqe_tasks(operation_queue& cqe_tasks) noexcept;
 
   /**
-   * Dispatches collected CQE tasks locally or through the posted stack.
+   * Dispatches collected CQE tasks locally or through the shared CPU queue.
    */
   void dispatch_cqe_tasks(operation_queue& cqe_tasks, unsigned task_count,
                           operation_queue& local_tasks,
@@ -446,25 +376,24 @@ class BUPP_EXPORT io_uring_context {
    */
   void assert_running() const noexcept;
 
+  /** Verifies that ring access occurs before run or on its owning thread. */
+  void assert_ring_owner() const noexcept;
+
   bupp::base::ring ring_;
-  mutable std::atomic<unsigned> uring_gate_{1U};
+  io_uring_context_options options_{};
   unsigned kernel_features_ = 0;
   std::atomic<context_state> state_{context_state::finished};
   bool queue_initialized_ = false;
 
-  operation_stack_state posted_tasks_;
-  std::mutex posted_tasks_mutex_;
+  io_uring_task_queue_state owned_task_queue_;
   std::atomic_bool run_active_{false};
+  std::atomic_bool waiting_{false};
   int event_fd_ = -1;
   bool owns_event_fd_ = false;
   bool eventfd_poll_pending_ = false;
 
-  unsigned wait_spin_count_ = io_uring_context_options{}.wait_spin_count;
-  unsigned cqe_batch_window_ = io_uring_context_options{}.cqe_batch_window;
-  unsigned cqe_inline_completion_threshold_ =
-      io_uring_context_options{}.cqe_inline_completion_threshold;
-  unsigned local_queue_threshold_ =
-      io_uring_context_options{}.local_queue_threshold;
+  pending_work_function pending_work_ = nullptr;
+  void* pending_work_data_ = nullptr;
 
   static thread_local io_uring_context* current_context_;
   operation_queue* local_tasks_ = nullptr;

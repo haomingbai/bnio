@@ -131,14 +131,6 @@ class ssl_stream {
                                      ssl_handshake_type type);
 
   /**
-   * Creates a handshake sender whose transport I/O is submitted immediately
-   * instead of being placed in the scheduler's queued I/O batch.
-   */
-  template <class Scheduler>
-  [[nodiscard]] auto async_handshake_direct(Scheduler scheduler,
-                                            ssl_handshake_type type);
-
-  /**
    * Creates a sender for one plaintext SSL read operation. The operation may
    * complete with fewer bytes than the buffer size.
    */
@@ -153,21 +145,6 @@ class ssl_stream {
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_read_some(Scheduler scheduler, Buffer&& buffer,
                                      int flags = 0);
-
-  /**
-   * Creates a read sender whose transport I/O is submitted immediately instead
-   * of being placed in the scheduler's queued I/O batch.
-   */
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_read_direct(Scheduler scheduler, Buffer&& buffer,
-                                       int flags = 0);
-
-  /**
-   * Creates a sender for one direct-submission plaintext SSL read operation.
-   */
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_read_some_direct(Scheduler scheduler,
-                                            Buffer&& buffer, int flags = 0);
 
   /**
    * Creates a sender that writes the whole plaintext buffer through SSL.
@@ -185,35 +162,11 @@ class ssl_stream {
                                       int flags = 0);
 
   /**
-   * Creates a write sender that writes the whole plaintext buffer and submits
-   * each lower-level transport I/O immediately instead of placing it in the
-   * scheduler's queued I/O batch.
-   */
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_write_direct(Scheduler scheduler, Buffer&& buffer,
-                                        int flags = 0);
-
-  /**
-   * Creates a sender for one direct-submission plaintext SSL write step without
-   * retrying short SSL_write results.
-   */
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_write_some_direct(Scheduler scheduler,
-                                             Buffer&& buffer, int flags = 0);
-
-  /**
    * Creates a shutdown sender whose transport I/O uses the scheduler's queued
    * submission path.
    */
   template <class Scheduler>
   [[nodiscard]] auto async_shutdown(Scheduler scheduler);
-
-  /**
-   * Creates a shutdown sender whose transport I/O is submitted immediately
-   * instead of being placed in the scheduler's queued I/O batch.
-   */
-  template <class Scheduler>
-  [[nodiscard]] auto async_shutdown_direct(Scheduler scheduler);
 
  private:
   void release() noexcept {

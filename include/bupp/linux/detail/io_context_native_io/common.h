@@ -77,20 +77,13 @@ concept has_immediate_io = requires(Model& model) {
 template <class Model, class Receiver>
 class native_io_operation : public io_context::operation_base {
  public:
-  native_io_operation(io_context& context, Model model, submit_mode mode,
-                      Receiver receiver)
+  native_io_operation(io_context& context, Model model, Receiver receiver)
       : context_(&context),
         model_(std::move(model)),
-        mode_(mode),
         receiver_(std::move(receiver)) {}
 
   void prepare(bupp::base::submission_queue_entry& sqe) noexcept override {
     model_.prepare(sqe);
-  }
-
-  [[nodiscard]] int prepare_for_submit() noexcept override {
-    completion_ = completion_kind::value;
-    return context_->select_native_context().prepare(*this);
   }
 
   void complete_submit_error(int result) noexcept override {
@@ -110,11 +103,7 @@ class native_io_operation : public io_context::operation_base {
     }
 
     completion_ = completion_kind::value;
-    if (mode_ == submit_mode::direct) {
-      context_->submit_direct(*this);
-    } else {
-      context_->enqueue_io(*this);
-    }
+    context_->enqueue_io(*this);
   }
 
   void execute() noexcept override {
@@ -167,7 +156,6 @@ class native_io_operation : public io_context::operation_base {
 
   io_context* context_;
   Model model_;
-  submit_mode mode_;
   std::remove_cvref_t<Receiver> receiver_;
   completion_kind completion_ = completion_kind::value;
   std::error_code error_;
@@ -178,26 +166,25 @@ class native_io_sender {
  public:
   using completion_signatures = typename Model::completion_signatures;
 
-  native_io_sender(io_context& context, Model model, submit_mode mode) noexcept
-      : context_(&context), model_(std::move(model)), mode_(mode) {}
+  native_io_sender(io_context& context, Model model) noexcept
+      : context_(&context), model_(std::move(model)) {}
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return native_io_operation<Model, std::remove_cvref_t<Receiver> >(
-        *context_, std::move(model_), mode_, std::move(receiver));
+        *context_, std::move(model_), std::move(receiver));
   }
 
   template <class Receiver>
     requires std::copy_constructible<Model>
   auto connect(Receiver receiver) const& {
     return native_io_operation<Model, std::remove_cvref_t<Receiver> >(
-        *context_, model_, mode_, std::move(receiver));
+        *context_, model_, std::move(receiver));
   }
 
  private:
   io_context* context_;
   Model model_;
-  submit_mode mode_;
 };
 
 }  // namespace bupp::detail

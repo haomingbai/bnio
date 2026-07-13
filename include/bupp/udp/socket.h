@@ -62,35 +62,16 @@ class BUPP_EXPORT socket {
                                 int flags = 0);
 
   template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_send_direct(Scheduler scheduler, Buffer&& buffer,
-                                       int flags = 0);
-
-  template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_receive(Scheduler scheduler, Buffer&& buffer,
                                    int flags = 0);
-
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_receive_direct(Scheduler scheduler, Buffer&& buffer,
-                                          int flags = 0);
 
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_send_to(Scheduler scheduler, Buffer&& buffer,
                                    const ip::endpoint& endpoint, int flags = 0);
 
   template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_send_to_direct(Scheduler scheduler, Buffer&& buffer,
-                                          const ip::endpoint& endpoint,
-                                          int flags = 0);
-
-  template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_receive_from(Scheduler scheduler, Buffer&& buffer,
                                         ip::endpoint& endpoint, int flags = 0);
-
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_receive_from_direct(Scheduler scheduler,
-                                               Buffer&& buffer,
-                                               ip::endpoint& endpoint,
-                                               int flags = 0);
 
  private:
   native_handle_type fd_ = -1;

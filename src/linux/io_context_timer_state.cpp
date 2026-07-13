@@ -16,18 +16,6 @@ void detail::timer_state_data::complete_driver() noexcept {
   driver = queued_operation_state::idle;
 }
 
-bool detail::timer_state_data::queue_flush_wait() noexcept {
-  if (queued_io_flush == queued_operation_state::posted) {
-    return false;
-  }
-  queued_io_flush = queued_operation_state::posted;
-  return true;
-}
-
-void detail::timer_state_data::complete_flush_wait() noexcept {
-  queued_io_flush = queued_operation_state::idle;
-}
-
 bool detail::timer_state_data::can_submit_wakeup() const noexcept {
   return timeout == timeout_state::idle;
 }

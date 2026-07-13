@@ -16,41 +16,33 @@ namespace bupp::async_io::linux_native {
 template <class Operation>
 int io_uring_context::prepare(Operation& operation) noexcept {
   assert_running();
-  auto lock = lock_uring();
-  return prepare_locked(operation);
+  assert_ring_owner();
+  return prepare_sqe(operation);
 }
 
 template <class Operation>
 int io_uring_context::submit(Operation& operation) noexcept {
   assert_running();
+  assert_ring_owner();
 
-  {
-    auto lock = lock_uring();
-    const int prepare_result = prepare_locked(operation);
-    if (prepare_result < 0) {
-      return prepare_result;
-    }
-    return submit_locked();
-  }
+  const int prepare_result = prepare_sqe(operation);
+  return prepare_result < 0 ? prepare_result : submit_ring();
 }
 
 template <class Function>
 void io_uring_context::submit_batch(Function&& fn) noexcept {
   assert_running();
+  assert_ring_owner();
 
-  {
-    auto lock = lock_uring();
-    auto prepare = [this](auto& operation) noexcept {
-      return prepare_locked(operation);
-    };
-    auto submit = [this]() noexcept { return submit_locked(); };
-
-    std::forward<Function>(fn)(prepare, submit);
-  }
+  auto prepare = [this](auto& operation) noexcept {
+    return this->prepare_sqe(operation);
+  };
+  auto submit = [this]() noexcept { return submit_ring(); };
+  std::forward<Function>(fn)(prepare, submit);
 }
 
 template <class Operation>
-int io_uring_context::prepare_locked(Operation& operation) noexcept {
+int io_uring_context::prepare_sqe(Operation& operation) noexcept {
   if (!ring_.is_open()) {
     return -EINVAL;
   }

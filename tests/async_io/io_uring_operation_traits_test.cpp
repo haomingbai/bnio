@@ -10,6 +10,32 @@ namespace {
 
 using namespace bupp_async_io_io_uring_test;
 
+struct queue_test_operation : io_uring_operation_base {
+  void execute() noexcept override {}
+};
+
+void test_shared_task_queue_separates_cpu_and_io() {
+  bupp::async_io::linux_native::io_uring_task_queue_state queue;
+  queue_test_operation cpu;
+  std::array<queue_test_operation, 3> io;
+
+  for (queue_test_operation& operation : io) {
+    queue.push_io(operation);
+  }
+  queue.push_cpu(cpu);
+
+  assert(queue.pop_cpu_all() == &cpu);
+  assert(queue.pop_cpu_all() == nullptr);
+
+  std::size_t io_count = 0;
+  for (io_uring_operation_base* operation = queue.pop_io_all();
+       operation != nullptr; operation = operation->next) {
+    ++io_count;
+  }
+  assert(io_count == io.size());
+  assert(queue.pop_io_all() == nullptr);
+}
+
 void test_operation_state_concepts() {
   static_assert(bexec::operation_state<io_uring_post_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_nop_operation<receiver>>);
@@ -151,6 +177,7 @@ void test_timeout_operation_prepares_async_io_time() {
 }  // namespace
 
 int main() {
+  test_shared_task_queue_separates_cpu_and_io();
   test_operation_state_concepts();
   test_io_operations_accept_async_io_views();
   test_timeout_operation_prepares_async_io_time();

@@ -111,32 +111,20 @@ void test_sender_concepts() {
   bupp::ip::endpoint endpoint;
 
   using send_sender = decltype(socket.async_send(scheduler, payload));
-  using send_direct_sender =
-      decltype(socket.async_send_direct(scheduler, payload));
   using receive_sender = decltype(socket.async_receive(scheduler, bytes));
-  using receive_direct_sender =
-      decltype(socket.async_receive_direct(scheduler, bytes));
   using send_to_sender =
       decltype(socket.async_send_to(scheduler, payload, endpoint));
-  using send_to_direct_sender =
-      decltype(socket.async_send_to_direct(scheduler, payload, endpoint));
   using receive_from_sender =
       decltype(socket.async_receive_from(scheduler, bytes, endpoint));
-  using receive_from_direct_sender =
-      decltype(socket.async_receive_from_direct(scheduler, bytes, endpoint));
   using low_send_sender =
       decltype(scheduler.async_send(socket.view(), bupp::buffer(payload)));
   using low_receive_sender =
       decltype(scheduler.async_receive(socket.view(), bupp::buffer(bytes)));
 
   static_assert(bexec::sender<send_sender>);
-  static_assert(bexec::sender<send_direct_sender>);
   static_assert(bexec::sender<receive_sender>);
-  static_assert(bexec::sender<receive_direct_sender>);
   static_assert(bexec::sender<send_to_sender>);
-  static_assert(bexec::sender<send_to_direct_sender>);
   static_assert(bexec::sender<receive_from_sender>);
-  static_assert(bexec::sender<receive_from_direct_sender>);
   static_assert(bexec::sender<low_send_sender>);
   static_assert(bexec::sender<low_receive_sender>);
   static_assert(
@@ -199,12 +187,8 @@ void test_protocol_and_lifecycle() {
   assert(::close(fd) == 0);
 }
 
-template <bool Direct>
 void test_async_send_to_receive_from() {
-  bupp::io_context_options options;
-  options.platform.max_queued_io_operations = 16;
-  options.platform.queued_io_flush_after = std::chrono::seconds(30);
-  bupp::io_context context(options);
+  bupp::io_context context;
   if (!context_available(context)) {
     return;
   }
@@ -223,22 +207,9 @@ void test_async_send_to_receive_from() {
   bupp::ip::endpoint source;
   pair_state state;
 
-  auto receive_sender = [&] {
-    if constexpr (Direct) {
-      return server.async_receive_from_direct(
-          scheduler, bupp::dynamic_buffer(received), source);
-    } else {
-      return server.async_receive_from(scheduler,
-                                       bupp::dynamic_buffer(received), source);
-    }
-  }();
-  auto send_sender = [&] {
-    if constexpr (Direct) {
-      return client.async_send_to_direct(scheduler, payload, server_endpoint);
-    } else {
-      return client.async_send_to(scheduler, payload, server_endpoint);
-    }
-  }();
+  auto receive_sender = server.async_receive_from(
+      scheduler, bupp::dynamic_buffer(received), source);
+  auto send_sender = client.async_send_to(scheduler, payload, server_endpoint);
 
   auto receive_operation = bexec::connect(std::move(receive_sender),
                                           receive_receiver{&state, &context});
@@ -247,12 +218,6 @@ void test_async_send_to_receive_from() {
   bexec::start(receive_operation);
   bexec::start(send_operation);
 
-  if constexpr (Direct) {
-    assert(scheduler.queued_io_size() == 0);
-  } else {
-    assert(scheduler.queued_io_size() == 1);
-    assert(!scheduler.flush_io_queue());
-  }
   context.run();
 
   assert(!state.error);
@@ -265,7 +230,6 @@ void test_async_send_to_receive_from() {
   assert(source.port() != 0);
 }
 
-template <bool Direct>
 void test_async_default_peer() {
   bupp::io_context context;
   if (!context_available(context)) {
@@ -290,21 +254,9 @@ void test_async_default_peer() {
   constexpr std::string_view payload = "default-peer";
   std::string received;
   pair_state state;
-  auto receive_sender = [&] {
-    if constexpr (Direct) {
-      return server.async_receive_direct(scheduler,
-                                         bupp::dynamic_buffer(received));
-    } else {
-      return server.async_receive(scheduler, bupp::dynamic_buffer(received));
-    }
-  }();
-  auto send_sender = [&] {
-    if constexpr (Direct) {
-      return client.async_send_direct(scheduler, payload);
-    } else {
-      return client.async_send(scheduler, payload);
-    }
-  }();
+  auto receive_sender =
+      server.async_receive(scheduler, bupp::dynamic_buffer(received));
+  auto send_sender = client.async_send(scheduler, payload);
   auto receive_operation = bexec::connect(std::move(receive_sender),
                                           receive_receiver{&state, &context});
   auto send_operation =
@@ -312,12 +264,6 @@ void test_async_default_peer() {
   bexec::start(receive_operation);
   bexec::start(send_operation);
 
-  if constexpr (Direct) {
-    assert(scheduler.queued_io_size() == 0);
-  } else {
-    assert(scheduler.queued_io_size() == 1);
-    assert(!scheduler.flush_io_queue());
-  }
   context.run();
 
   assert(!state.error);
@@ -366,8 +312,6 @@ void test_async_ipv6_send_to() {
                      send_receiver{&state, &context});
   bexec::start(receive_operation);
   bexec::start(send_operation);
-  assert(scheduler.queued_io_size() == 1);
-  assert(!scheduler.flush_io_queue());
   context.run();
 
   assert(!state.error);
@@ -382,10 +326,8 @@ void test_async_ipv6_send_to() {
 int main() {
   test_sender_concepts();
   test_protocol_and_lifecycle();
-  test_async_send_to_receive_from<false>();
-  test_async_send_to_receive_from<true>();
-  test_async_default_peer<false>();
-  test_async_default_peer<true>();
+  test_async_send_to_receive_from();
+  test_async_default_peer();
   test_async_ipv6_send_to();
   return 0;
 }

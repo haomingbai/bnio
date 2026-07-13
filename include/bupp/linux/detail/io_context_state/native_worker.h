@@ -15,7 +15,6 @@ struct native_worker {
   std::atomic<native_worker*> next{nullptr};
   std::atomic<async_io::linux_native::io_uring_context*> context{nullptr};
   std::unique_ptr<async_io::linux_native::io_uring_context> owned_context;
-  std::atomic<io_context::operation_base*> pending_io_head{nullptr};
 };
 
 /** @endcond */

@@ -2,7 +2,6 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <mutex>
 
 #include "io_uring_context_internal.h"
 
@@ -16,45 +15,33 @@ int io_uring_context::post(io_uring_operation_base& operation) noexcept {
     return 0;
   }
 
-  push_posted_task(operation);
+  push_cpu_task(operation);
   return 0;
 }
 
-void io_uring_context::push_posted_task(
+void io_uring_context::push_cpu_task(
     io_uring_operation_base& operation) noexcept {
-  {
-    std::lock_guard lock(posted_tasks_mutex_);
-    posted_tasks_.push(operation);
-  }
+  options_.task_queue->push_cpu(operation);
   notify_one_waiter();
 }
 
-void io_uring_context::push_posted_tasks(operation_queue& operations) noexcept {
+void io_uring_context::push_cpu_tasks(operation_queue& operations) noexcept {
   io_uring_operation_base* ordered_tasks = reverse_tasks(operations.pop_all());
   if (ordered_tasks == nullptr) {
     return;
   }
 
-  {
-    std::lock_guard lock(posted_tasks_mutex_);
-    while (ordered_tasks != nullptr) {
-      io_uring_operation_base* operation = ordered_tasks;
-      ordered_tasks = ordered_tasks->next;
-
-      operation->next = nullptr;
-      posted_tasks_.push(*operation);
-    }
+  while (ordered_tasks != nullptr) {
+    io_uring_operation_base* operation = ordered_tasks;
+    ordered_tasks = ordered_tasks->next;
+    operation->next = nullptr;
+    options_.task_queue->push_cpu(*operation);
   }
   notify_one_waiter();
 }
 
-bool io_uring_context::move_posted_tasks(
-    operation_queue& local_tasks) noexcept {
-  io_uring_operation_base* incoming = nullptr;
-  {
-    std::lock_guard lock(posted_tasks_mutex_);
-    incoming = posted_tasks_.pop_all();
-  }
+bool io_uring_context::move_cpu_tasks(operation_queue& local_tasks) noexcept {
+  io_uring_operation_base* incoming = options_.task_queue->pop_cpu_all();
   if (incoming == nullptr) {
     return false;
   }
@@ -65,7 +52,37 @@ bool io_uring_context::move_posted_tasks(
 
 void io_uring_context::notify_waiters() noexcept { (void)signal_eventfd(); }
 
-void io_uring_context::notify_one_waiter() noexcept { (void)signal_eventfd(); }
+void io_uring_context::notify_one_waiter() noexcept {
+  if (is_waiting()) {
+    (void)signal_eventfd();
+  }
+}
+
+bool io_uring_context::is_waiting() const noexcept {
+  return waiting_.load(std::memory_order_acquire);
+}
+
+void io_uring_context::set_pending_work(pending_work_function function,
+                                        void* data) noexcept {
+  pending_work_ = function;
+  pending_work_data_ = data;
+}
+
+bool io_uring_context::run_pending_work() noexcept {
+  return pending_work_ != nullptr && pending_work_(pending_work_data_, *this);
+}
+
+void io_uring_context::begin_wait() noexcept {
+  waiting_.store(true, std::memory_order_release);
+  const std::size_t previous = options_.task_queue->awake_workers.fetch_sub(
+      1, std::memory_order_acq_rel);
+  assert(previous != 0);
+}
+
+void io_uring_context::end_wait() noexcept {
+  options_.task_queue->awake_workers.fetch_add(1, std::memory_order_acq_rel);
+  waiting_.store(false, std::memory_order_release);
+}
 
 int io_uring_context::signal_eventfd() noexcept {
   if (event_fd_ < 0) {
@@ -115,11 +132,6 @@ void io_uring_context::drain_eventfd() noexcept {
 }
 
 int io_uring_context::submit_eventfd_poll() noexcept {
-  auto lock = lock_uring();
-  return submit_eventfd_poll_locked();
-}
-
-int io_uring_context::submit_eventfd_poll_locked() noexcept {
   if (!ring_.is_open() || event_fd_ < 0) {
     return -EINVAL;
   }

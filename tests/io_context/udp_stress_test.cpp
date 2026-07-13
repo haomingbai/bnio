@@ -65,12 +65,9 @@ struct stress_receiver {
   }
 };
 
-template <bool Direct>
 void run_stress_test() {
   bupp::io_context_options options;
   options.platform.uring.entries = 512;
-  options.platform.max_queued_io_operations = 512;
-  options.platform.queued_io_flush_after = std::chrono::seconds(30);
   bupp::io_context context(options);
   if (!context_available(context)) {
     return;
@@ -99,22 +96,12 @@ void run_stress_test() {
   }
 
   auto make_receive_sender = [&](std::size_t index) {
-    if constexpr (Direct) {
-      return receiver_socket.async_receive_from_direct(
-          scheduler, received[index], sources[index]);
-    } else {
-      return receiver_socket.async_receive_from(scheduler, received[index],
-                                                sources[index]);
-    }
+    return receiver_socket.async_receive_from(scheduler, received[index],
+                                              sources[index]);
   };
   auto make_send_sender = [&](std::size_t index) {
-    if constexpr (Direct) {
-      return sender_socket.async_send_to_direct(scheduler, sent[index],
-                                                receiver_endpoint);
-    } else {
-      return sender_socket.async_send_to(scheduler, sent[index],
-                                         receiver_endpoint);
-    }
+    return sender_socket.async_send_to(scheduler, sent[index],
+                                       receiver_endpoint);
   };
 
   using receive_sender_type = decltype(make_receive_sender(0));
@@ -143,12 +130,6 @@ void run_stress_test() {
     bexec::start(*send_operations[index]);
   }
 
-  if constexpr (Direct) {
-    assert(scheduler.queued_io_size() == 0);
-  } else {
-    assert(scheduler.queued_io_size() == datagram_count);
-    assert(!scheduler.flush_io_queue());
-  }
   context.run();
 
   assert(state.completions == datagram_count * 2);
@@ -178,7 +159,6 @@ void run_stress_test() {
 }  // namespace
 
 int main() {
-  run_stress_test<false>();
-  run_stress_test<true>();
+  run_stress_test();
   return 0;
 }

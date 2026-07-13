@@ -10,13 +10,8 @@ class socket_write_all_state {
  public:
   socket_write_all_state(io_context& context,
                          async_io::stream_socket_view socket,
-                         const_buffer buffer, int flags,
-                         submit_mode mode) noexcept
-      : context(&context),
-        socket(socket),
-        buffer(buffer),
-        flags(flags),
-        mode(mode) {}
+                         const_buffer buffer, int flags) noexcept
+      : context(&context), socket(socket), buffer(buffer), flags(flags) {}
 
   [[nodiscard]] std::size_t remaining() const noexcept {
     return buffer.size() - transferred;
@@ -31,7 +26,7 @@ class socket_write_all_state {
 
   [[nodiscard]] auto make_sender() noexcept {
     return native_io_sender<socket_write_model>(
-        *context, socket_write_model(socket, current_buffer(), flags), mode);
+        *context, socket_write_model(socket, current_buffer(), flags));
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -45,7 +40,6 @@ class socket_write_all_state {
   async_io::stream_socket_view socket;
   const_buffer buffer;
   int flags;
-  submit_mode mode;
   std::size_t transferred = 0;
   bool done = false;
 };
@@ -54,13 +48,11 @@ class descriptor_write_all_state {
  public:
   descriptor_write_all_state(io_context& context,
                              async_io::descriptor_view descriptor,
-                             const_buffer buffer, std::uint64_t offset,
-                             submit_mode mode) noexcept
+                             const_buffer buffer, std::uint64_t offset) noexcept
       : context(&context),
         descriptor(descriptor),
         buffer(buffer),
-        offset(offset),
-        mode(mode) {}
+        offset(offset) {}
 
   [[nodiscard]] std::size_t remaining() const noexcept {
     return buffer.size() - transferred;
@@ -76,7 +68,7 @@ class descriptor_write_all_state {
   [[nodiscard]] auto make_sender() noexcept {
     return native_io_sender<write_model>(
         *context,
-        write_model(descriptor, current_buffer(), offset + transferred), mode);
+        write_model(descriptor, current_buffer(), offset + transferred));
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -90,7 +82,6 @@ class descriptor_write_all_state {
   async_io::descriptor_view descriptor;
   const_buffer buffer;
   std::uint64_t offset;
-  submit_mode mode;
   std::size_t transferred = 0;
   bool done = false;
 };

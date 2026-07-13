@@ -126,21 +126,6 @@ class BUPP_EXPORT socket {
                                      int flags = 0);
 
   /**
-   * Creates a sender for one read operation and submits it immediately instead
-   * of placing it in the scheduler's queued I/O batch.
-   */
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_read_direct(Scheduler scheduler, Buffer&& buffer,
-                                       int flags = 0);
-
-  /**
-   * Creates a sender for one direct-submission read operation.
-   */
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_read_some_direct(Scheduler scheduler,
-                                            Buffer&& buffer, int flags = 0);
-
-  /**
    * Creates a sender that writes the whole buffer, retrying short writes until
    * the buffer is fully transferred or an error/stopped signal occurs.
    */
@@ -156,37 +141,12 @@ class BUPP_EXPORT socket {
                                       int flags = 0);
 
   /**
-   * Creates a sender that writes the whole buffer and submits each lower-level
-   * write immediately instead of placing it in the scheduler's queued I/O
-   * batch.
-   */
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_write_direct(Scheduler scheduler, Buffer&& buffer,
-                                        int flags = 0);
-
-  /**
-   * Creates a sender for one direct-submission write operation without retrying
-   * short writes.
-   */
-  template <class Scheduler, class Buffer>
-  [[nodiscard]] auto async_write_some_direct(Scheduler scheduler,
-                                             Buffer&& buffer, int flags = 0);
-
-  /**
    * Creates a sender that connects this socket to an endpoint through the
    * scheduler's queued submission path.
    */
   template <class Scheduler>
   [[nodiscard]] auto async_connect(Scheduler scheduler,
                                    const ip::endpoint& endpoint);
-
-  /**
-   * Creates a sender that connects this socket to an endpoint through direct
-   * submission.
-   */
-  template <class Scheduler>
-  [[nodiscard]] auto async_connect_direct(Scheduler scheduler,
-                                          const ip::endpoint& endpoint);
 
   /**
    * Opens a TCP stream socket for an address family.

@@ -17,7 +17,7 @@
 
 namespace bupp::detail {
 
-template <class Scheduler, class Holder, bool Direct, bool From, class Receiver>
+template <class Scheduler, class Holder, bool From, class Receiver>
 class udp_receive_operation {
  public:
   using scheduler_type = std::remove_cvref_t<Scheduler>;
@@ -53,13 +53,8 @@ class udp_receive_operation {
                                 async_io::datagram_socket_view socket,
                                 mutable_buffer buffer, ip::endpoint* endpoint,
                                 int flags) {
-    if constexpr (From && Direct) {
-      return scheduler.async_receive_from_direct(socket, buffer, *endpoint,
-                                                 flags);
-    } else if constexpr (From) {
+    if constexpr (From) {
       return scheduler.async_receive_from(socket, buffer, *endpoint, flags);
-    } else if constexpr (Direct) {
-      return scheduler.async_receive_direct(socket, buffer, flags);
     } else {
       return scheduler.async_receive(socket, buffer, flags);
     }
@@ -106,7 +101,7 @@ class udp_receive_operation {
   bexec::detail::manual_lifetime<child_operation_type> child_operation_;
 };
 
-template <class Scheduler, class Holder, bool Direct, bool From>
+template <class Scheduler, class Holder, bool From>
 class udp_receive_sender {
  public:
   using completion_signatures =
@@ -124,7 +119,7 @@ class udp_receive_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return udp_receive_operation<Scheduler, Holder, Direct, From,
+    return udp_receive_operation<Scheduler, Holder, From,
                                  std::remove_cvref_t<Receiver>>(
         std::move(scheduler_), socket_, std::move(holder_), endpoint_, flags_,
         std::move(receiver));
@@ -138,7 +133,7 @@ class udp_receive_sender {
   int flags_;
 };
 
-template <class Scheduler, class Holder, bool Direct, bool To, class Receiver>
+template <class Scheduler, class Holder, bool To, class Receiver>
 class udp_send_operation {
  public:
   using scheduler_type = std::remove_cvref_t<Scheduler>;
@@ -171,12 +166,8 @@ class udp_send_operation {
                                 async_io::datagram_socket_view socket,
                                 const_buffer buffer,
                                 const ip::endpoint& endpoint, int flags) {
-    if constexpr (To && Direct) {
-      return scheduler.async_send_to_direct(socket, buffer, endpoint, flags);
-    } else if constexpr (To) {
+    if constexpr (To) {
       return scheduler.async_send_to(socket, buffer, endpoint, flags);
-    } else if constexpr (Direct) {
-      return scheduler.async_send_direct(socket, buffer, flags);
     } else {
       return scheduler.async_send(socket, buffer, flags);
     }
@@ -224,7 +215,7 @@ class udp_send_operation {
   bexec::detail::manual_lifetime<child_operation_type> child_operation_;
 };
 
-template <class Scheduler, class Holder, bool Direct, bool To>
+template <class Scheduler, class Holder, bool To>
 class udp_send_sender {
  public:
   using completion_signatures =
@@ -242,7 +233,7 @@ class udp_send_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return udp_send_operation<Scheduler, Holder, Direct, To,
+    return udp_send_operation<Scheduler, Holder, To,
                               std::remove_cvref_t<Receiver>>(
         std::move(scheduler_), socket_, std::move(holder_), endpoint_, flags_,
         std::move(receiver));

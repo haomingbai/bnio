@@ -12,15 +12,15 @@ namespace bupp {
 /** @cond BUPP_DETAIL */
 namespace detail {
 
-template <class Scheduler, class NextLayer, bool DirectSubmit, class Receiver>
+template <class Scheduler, class NextLayer, class Receiver>
 class ssl_shutdown_operation
     : public ssl_async_operation_base<
-          ssl_shutdown_operation<Scheduler, NextLayer, DirectSubmit, Receiver>,
-          Scheduler, NextLayer, Receiver, DirectSubmit> {
+          ssl_shutdown_operation<Scheduler, NextLayer, Receiver>, Scheduler,
+          NextLayer, Receiver> {
  public:
   using base = ssl_async_operation_base<
-      ssl_shutdown_operation<Scheduler, NextLayer, DirectSubmit, Receiver>,
-      Scheduler, NextLayer, Receiver, DirectSubmit>;
+      ssl_shutdown_operation<Scheduler, NextLayer, Receiver>, Scheduler,
+      NextLayer, Receiver>;
 
   ssl_shutdown_operation(Scheduler scheduler, ssl_stream<NextLayer>& stream,
                          Receiver receiver)

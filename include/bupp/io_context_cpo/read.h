@@ -55,58 +55,6 @@ struct async_read_some_t {
   }
 };
 
-/**
- * Customization point object for an asynchronous read that bypasses the
- * scheduler's queued I/O batch and submits immediately.
- */
-struct async_read_direct_t {
-  /**
-   * Invokes async_read_direct on a stream when that direct-submission
-   * customization exists, otherwise on a provider.
-   */
-  template <class Provider, class Source, class Buffer, class Mode = int>
-  constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
-                                      Buffer&& buffer, Mode mode = 0) const {
-    if constexpr (requires {
-                    std::forward<Source>(source).async_read_direct(
-                        std::forward<Provider>(provider),
-                        std::forward<Buffer>(buffer), mode);
-                  }) {
-      return std::forward<Source>(source).async_read_direct(
-          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
-    } else {
-      return std::forward<Provider>(provider).async_read_direct(
-          std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
-    }
-  }
-};
-
-/**
- * Customization point object for one direct-submission asynchronous read
- * operation.
- */
-struct async_read_some_direct_t {
-  /**
-   * Invokes async_read_some_direct on a stream when available, otherwise on a
-   * provider.
-   */
-  template <class Provider, class Source, class Buffer, class Mode = int>
-  constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
-                                      Buffer&& buffer, Mode mode = 0) const {
-    if constexpr (requires {
-                    std::forward<Source>(source).async_read_some_direct(
-                        std::forward<Provider>(provider),
-                        std::forward<Buffer>(buffer), mode);
-                  }) {
-      return std::forward<Source>(source).async_read_some_direct(
-          std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
-    } else {
-      return std::forward<Provider>(provider).async_read_some_direct(
-          std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
-    }
-  }
-};
-
 }  // namespace bupp
 
 #endif  // BUPP_IO_CONTEXT_CPO_READ_H_

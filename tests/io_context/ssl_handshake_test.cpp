@@ -2,7 +2,6 @@
 
 namespace {
 
-template <bool DirectSubmit>
 void test_socketpair_handshake_is_io_context_driven() {
   bupp::io_context context;
   if (!context.is_open()) {
@@ -35,24 +34,10 @@ void test_socketpair_handshake_is_io_context_driven() {
   handshake_receiver client_receiver{state, &context};
   handshake_receiver server_receiver{state, &context};
 
-  auto client_sender = [&] {
-    if constexpr (DirectSubmit) {
-      return client.async_handshake_direct(scheduler,
-                                           bupp::ssl_handshake_type::client);
-    } else {
-      return client.async_handshake(scheduler,
-                                    bupp::ssl_handshake_type::client);
-    }
-  }();
-  auto server_sender = [&] {
-    if constexpr (DirectSubmit) {
-      return server.async_handshake_direct(scheduler,
-                                           bupp::ssl_handshake_type::server);
-    } else {
-      return server.async_handshake(scheduler,
-                                    bupp::ssl_handshake_type::server);
-    }
-  }();
+  auto client_sender =
+      client.async_handshake(scheduler, bupp::ssl_handshake_type::client);
+  auto server_sender =
+      server.async_handshake(scheduler, bupp::ssl_handshake_type::server);
 
   auto client_operation =
       bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -61,9 +46,6 @@ void test_socketpair_handshake_is_io_context_driven() {
 
   bexec::start(client_operation);
   bexec::start(server_operation);
-  if constexpr (DirectSubmit) {
-    assert(scheduler.queued_io_size() == 0);
-  }
   context.run();
 
   assert(state->values == 2);
@@ -74,7 +56,6 @@ void test_socketpair_handshake_is_io_context_driven() {
 }  // namespace
 
 int main() {
-  test_socketpair_handshake_is_io_context_driven<false>();
-  test_socketpair_handshake_is_io_context_driven<true>();
+  test_socketpair_handshake_is_io_context_driven();
   return 0;
 }

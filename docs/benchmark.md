@@ -124,11 +124,14 @@ Error summary:
 
 - No bupp or Asio result row reported client errors.
 
-### 4.8 bupp Queue/Flush Tuning Sweep
+### 4.8 Legacy Queue/Timer-Flush Tuning Sweep
 
 ![Queue Tuning Sweep](benchmark_charts/queue_tuning_sweep.png)
 
-The focused sweep used the same 10 s warmup and 60 s measurement window as the main matrix. It checks whether bupp's queue length and timer flush values change the 4-worker small-message/high-concurrency behavior.
+This archived sweep predates the passive worker-drain queue. It used the same
+10 s warmup and 60 s measurement window as the main matrix to measure the old
+queue-length/timer-flush implementation. The timer column is historical and is
+not a configuration option in the current runtime.
 
 | Queue / flush | Connections | Size | req/s | errors | p50 | p99 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -145,17 +148,22 @@ The focused sweep used the same 10 s warmup and 60 s measurement window as the m
 | 64 / 1000 us | 1024 | 64 B | 83,428 | 0 | 12,383 us | 13,600 us |
 | 64 / 1000 us | 1024 | 1 KB | 77,657 | 0 | 13,330 us | 14,204 us |
 
-All sweep rows completed with zero client errors. No single queue/flush pair won every point: the default `64 / 1000 us` setting was strongest at 256 connections, `32 / 250 us` was materially better for 1024 connections / 64 B, and `16 / 100 us` was slightly ahead for 1024 connections / 1 KB. The practical takeaway is that flush cadence matters most for high-concurrency small messages; the default remains a balanced baseline, but shorter flush intervals can reduce waiting time in specific ping-pong shapes.
+All legacy sweep rows completed with zero client errors. These numbers remain
+as historical evidence only. The current implementation has neither a queue
+threshold nor a flush timer: workers passively take all published I/O after CPU
+work and repeat that check during the pre-sleep handshake.
 
 ## 5. Interpretation
 
 These are plausible explanations from the implementation model and the observed benchmark shape; they were not separately validated with profiling in this run.
 
 1. The current bupp single-worker and multi-worker paths are stable across the tested matrix. The absence of client errors on every bupp row is the most important stability signal in this run.
-2. bupp's advantage on 64 B through 4 KB at the reference point is consistent with batching io_uring submissions after the queued I/O path has enough work. The fixed ping-pong workload gives repeated read/write pairs that can benefit from lower submission overhead.
+2. bupp's advantage on 64 B through 4 KB at the reference point is consistent with naturally accumulated io_uring submission batches. The fixed ping-pong workload gives repeated read/write pairs that can benefit from lower submission overhead.
 3. The 64 KB rows are near parity because the bottleneck shifts away from event-loop dispatch and toward payload movement through TCP buffers, memory copies, and the Python client.
 4. Worker scaling is intentionally read as a shape, not a linear speedup claim. At 4 KB / 256 connections, adding server workers does not raise bupp throughput after one worker, which suggests the single-host client/kernel path is already the limiting factor.
-5. Queue/flush tuning affects small-message high-concurrency rows because it changes how long queued I/O waits before submission. Shorter intervals can help latency-sensitive ping-pong traffic, while the default is still competitive on the 256-connection points.
+5. The legacy queue/timer sweep is not directly comparable to the current
+   passive-drain state machine and should be rerun before drawing current
+   tuning conclusions.
 
 ## 6. Key Logs and Checks
 

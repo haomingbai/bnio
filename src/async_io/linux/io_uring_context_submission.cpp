@@ -6,14 +6,11 @@ namespace bupp::async_io::linux_native {
 
 int io_uring_context::submit() noexcept {
   assert_running();
-
-  {
-    auto lock = lock_uring();
-    return submit_locked();
-  }
+  assert_ring_owner();
+  return submit_ring();
 }
 
-int io_uring_context::submit_locked() noexcept {
+int io_uring_context::submit_ring() noexcept {
   if (!ring_.is_open()) {
     return -EINVAL;
   }
@@ -23,6 +20,13 @@ int io_uring_context::submit_locked() noexcept {
 void io_uring_context::assert_running() const noexcept {
 #ifndef NDEBUG
   assert(state_.load(std::memory_order_acquire) == context_state::running);
+#endif
+}
+
+void io_uring_context::assert_ring_owner() const noexcept {
+#ifndef NDEBUG
+  assert(!run_active_.load(std::memory_order_acquire) ||
+         current_context_ == this);
 #endif
 }
 

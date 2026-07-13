@@ -96,14 +96,9 @@ class BUPP_EXPORT io_context {
     ~operation_base() override = default;
 
     /**
-     * Intrusive next pointer used by queued-I/O stacks.
+     * Intrusive next pointer used by the shared I/O queue.
      */
     operation_base* pending_next = nullptr;
-
-    /**
-     * Prepares the native operation for submission.
-     */
-    [[nodiscard]] virtual int prepare_for_submit() noexcept = 0;
 
     /**
      * Fills one native submission queue entry for this operation.
@@ -114,11 +109,6 @@ class BUPP_EXPORT io_context {
      * Completes the operation when submission preparation fails.
      */
     virtual void complete_submit_error(int result) noexcept = 0;
-
-   private:
-    friend class io_context;
-
-    detail::native_worker* native_worker_ = nullptr;
   };
 
   /**
@@ -285,16 +275,6 @@ class BUPP_EXPORT io_context {
     }
 
     /**
-     * Submits all operations currently waiting in the queued I/O list.
-     */
-    [[nodiscard]] std::error_code flush_io_queue() const noexcept;
-
-    /**
-     * Returns the number of operations waiting in the queued I/O list.
-     */
-    [[nodiscard]] std::size_t queued_io_size() const noexcept;
-
-    /**
      * Returns the context that owns this scheduler.
      */
     [[nodiscard]] io_context& context() const noexcept { return *context_; }
@@ -308,14 +288,7 @@ class BUPP_EXPORT io_context {
     }
 
     /**
-     * Submits one prepared operation immediately through the owning context.
-     */
-    void submit_direct(operation_base& operation) const noexcept {
-      context_->submit_direct(operation);
-    }
-
-    /**
-     * Queues one operation for batched io_uring submission.
+     * Publishes one operation for passive io_uring submission by a worker.
      */
     void enqueue_io(operation_base& operation) const noexcept {
       context_->enqueue_io(operation);
@@ -330,7 +303,7 @@ class BUPP_EXPORT io_context {
     }
 
     /**
-     * Creates a queued sender for one socket read operation.
+     * Creates a sender for one socket read operation.
      */
     [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
                                   mutable_buffer buffer, int flags = 0) const;
@@ -343,21 +316,7 @@ class BUPP_EXPORT io_context {
                                        int flags = 0) const;
 
     /**
-     * Creates a direct-submission sender for one socket read operation.
-     */
-    [[nodiscard]] auto async_read_direct(async_io::stream_socket_view socket,
-                                         mutable_buffer buffer,
-                                         int flags = 0) const;
-
-    /**
-     * Creates a sender for one direct-submission socket read operation.
-     */
-    [[nodiscard]] auto async_read_some_direct(
-        async_io::stream_socket_view socket, mutable_buffer buffer,
-        int flags = 0) const;
-
-    /**
-     * Creates a queued sender that writes the whole buffer to a socket.
+     * Creates a sender that writes the whole buffer to a socket.
      */
     [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
                                    const_buffer buffer, int flags = 0) const;
@@ -370,50 +329,21 @@ class BUPP_EXPORT io_context {
                                         const_buffer buffer,
                                         int flags = 0) const;
 
-    /**
-     * Creates a direct-submission sender that writes the whole buffer to a
-     * socket.
-     */
-    [[nodiscard]] auto async_write_direct(async_io::stream_socket_view socket,
-                                          const_buffer buffer,
-                                          int flags = 0) const;
-
-    /**
-     * Creates a sender for one direct-submission socket write operation
-     * without retrying short writes.
-     */
-    [[nodiscard]] auto async_write_some_direct(
-        async_io::stream_socket_view socket, const_buffer buffer,
-        int flags = 0) const;
-
     [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
                                      mutable_buffer buffer,
                                      int flags = 0) const;
-    [[nodiscard]] auto async_receive_direct(
-        async_io::datagram_socket_view socket, mutable_buffer buffer,
-        int flags = 0) const;
     [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
                                   const_buffer buffer, int flags = 0) const;
-    [[nodiscard]] auto async_send_direct(async_io::datagram_socket_view socket,
-                                         const_buffer buffer,
-                                         int flags = 0) const;
     [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
                                           mutable_buffer buffer,
                                           ip::endpoint& endpoint,
                                           int flags = 0) const;
-    [[nodiscard]] auto async_receive_from_direct(
-        async_io::datagram_socket_view socket, mutable_buffer buffer,
-        ip::endpoint& endpoint, int flags = 0) const;
     [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                      const_buffer buffer,
                                      const ip::endpoint& endpoint,
                                      int flags = 0) const;
-    [[nodiscard]] auto async_send_to_direct(
-        async_io::datagram_socket_view socket, const_buffer buffer,
-        const ip::endpoint& endpoint, int flags = 0) const;
-
     /**
-     * Creates a queued sender for one descriptor read operation at an offset.
+     * Creates a sender for one descriptor read operation at an offset.
      */
     [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
                                   mutable_buffer buffer,
@@ -427,23 +357,7 @@ class BUPP_EXPORT io_context {
                                        std::uint64_t offset = 0) const;
 
     /**
-     * Creates a direct-submission sender for one descriptor read operation at
-     * an offset.
-     */
-    [[nodiscard]] auto async_read_direct(async_io::descriptor_view descriptor,
-                                         mutable_buffer buffer,
-                                         std::uint64_t offset = 0) const;
-
-    /**
-     * Creates a sender for one direct-submission descriptor read operation at
-     * an offset.
-     */
-    [[nodiscard]] auto async_read_some_direct(
-        async_io::descriptor_view descriptor, mutable_buffer buffer,
-        std::uint64_t offset = 0) const;
-
-    /**
-     * Creates a queued sender that writes the whole buffer to a descriptor.
+     * Creates a sender that writes the whole buffer to a descriptor.
      */
     [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
                                    const_buffer buffer,
@@ -458,57 +372,22 @@ class BUPP_EXPORT io_context {
                                         std::uint64_t offset = 0) const;
 
     /**
-     * Creates a direct-submission sender that writes the whole buffer to a
-     * descriptor.
-     */
-    [[nodiscard]] auto async_write_direct(async_io::descriptor_view descriptor,
-                                          const_buffer buffer,
-                                          std::uint64_t offset = 0) const;
-
-    /**
-     * Creates a sender for one direct-submission descriptor write operation at
-     * an offset without retrying short writes.
-     */
-    [[nodiscard]] auto async_write_some_direct(
-        async_io::descriptor_view descriptor, const_buffer buffer,
-        std::uint64_t offset = 0) const;
-
-    /**
-     * Creates a queued sender that accepts one connection.
+     * Creates a sender that accepts one connection.
      */
     [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                     int flags = 0) const;
 
     /**
-     * Creates a direct-submission sender that accepts one connection.
-     */
-    [[nodiscard]] auto async_accept_direct(async_io::stream_socket_view socket,
-                                           int flags = 0) const;
-
-    /**
-     * Creates a queued sender that connects a socket to an endpoint.
+     * Creates a sender that connects a socket to an endpoint.
      */
     [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                      const ip::endpoint& endpoint) const;
 
     /**
-     * Creates a direct-submission sender that connects a socket to an
-     * endpoint.
-     */
-    [[nodiscard]] auto async_connect_direct(async_io::stream_socket_view socket,
-                                            const ip::endpoint& endpoint) const;
-
-    /**
-     * Creates a queued sender that waits for descriptor events.
+     * Creates a sender that waits for descriptor events.
      */
     [[nodiscard]] auto async_poll(async_io::descriptor_view descriptor,
                                   unsigned poll_mask) const;
-
-    /**
-     * Creates a direct-submission sender that waits for descriptor events.
-     */
-    [[nodiscard]] auto async_poll_direct(async_io::descriptor_view descriptor,
-                                         unsigned poll_mask) const;
 
     /**
      * Creates a sender that resolves a DNS query into caller-provided storage.
@@ -560,9 +439,7 @@ class BUPP_EXPORT io_context {
    */
   explicit io_context(const io_context_options& options) noexcept;
 
-  /**
-   * Stops the flush timer and releases context resources.
-   */
+  /** Releases worker, timer, and native context resources. */
   ~io_context() noexcept;
 
   /**
@@ -626,26 +503,10 @@ class BUPP_EXPORT io_context {
   friend class detail::timer_wakeup_operation;
   friend class detail::timer_update_operation;
   friend class detail::timer_driver_operation;
-  friend class detail::queued_io_flush_operation;
   template <class Receiver>
   friend class detail::timer_wait_operation;
   template <class Model, class Receiver>
   friend class detail::native_io_operation;
-
-  /**
-   * Submits all operations currently waiting in the queued I/O list.
-   */
-  [[nodiscard]] std::error_code flush_io_queue() noexcept;
-
-  /**
-   * Submits queued I/O, optionally waiting for exclusive io_uring access.
-   */
-  [[nodiscard]] std::error_code flush_io_queue(bool wait_for_gate) noexcept;
-
-  /**
-   * Returns the number of operations waiting in the queued I/O list.
-   */
-  [[nodiscard]] std::size_t queued_io_size() const noexcept;
 
   /**
    * Returns the underlying Linux native async I/O context.
@@ -653,14 +514,6 @@ class BUPP_EXPORT io_context {
   [[nodiscard]] async_io::linux_native::io_uring_context&
   native_context() noexcept {
     return select_native_context();
-  }
-
-  /**
-   * Returns the underlying Linux native async I/O context.
-   */
-  [[nodiscard]] const async_io::linux_native::io_uring_context& native_context()
-      const noexcept {
-    return native_.context;
   }
 
   /**
@@ -678,7 +531,7 @@ class BUPP_EXPORT io_context {
   }
 
   /**
-   * Creates a queued sender that reads bytes from a non-owning stream socket
+   * Creates a sender that reads bytes from a non-owning stream socket
    * view and completes with bytes transferred.
    */
   [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
@@ -688,46 +541,21 @@ class BUPP_EXPORT io_context {
                                      mutable_buffer buffer, int flags = 0);
 
   /**
-   * Creates a direct-submission sender that reads bytes from a non-owning
-   * stream socket view and completes with bytes transferred.
-   */
-  [[nodiscard]] auto async_read_direct(async_io::stream_socket_view socket,
-                                       mutable_buffer buffer, int flags = 0);
-
-  [[nodiscard]] auto async_read_some_direct(async_io::stream_socket_view socket,
-                                            mutable_buffer buffer,
-                                            int flags = 0);
-
-  /**
-   * Creates a queued sender that writes the whole buffer through a non-owning
+   * Creates a sender that writes the whole buffer through a non-owning
    * stream socket view.
    */
   [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
                                  const_buffer buffer, int flags = 0);
 
   /**
-   * Creates a queued sender for one write operation through a non-owning
+   * Creates a sender for one write operation through a non-owning
    * stream socket view.
    */
   [[nodiscard]] auto async_write_some(async_io::stream_socket_view socket,
                                       const_buffer buffer, int flags = 0);
 
   /**
-   * Creates a direct-submission sender that writes the whole buffer through a
-   * non-owning stream socket view.
-   */
-  [[nodiscard]] auto async_write_direct(async_io::stream_socket_view socket,
-                                        const_buffer buffer, int flags = 0);
-
-  /**
-   * Creates a direct-submission sender for one write operation through a
-   * non-owning stream socket view.
-   */
-  [[nodiscard]] auto async_write_some_direct(
-      async_io::stream_socket_view socket, const_buffer buffer, int flags = 0);
-
-  /**
-   * Creates a queued sender that reads bytes from a file descriptor.
+   * Creates a sender that reads bytes from a file descriptor.
    */
   [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
                                 mutable_buffer buffer,
@@ -738,105 +566,46 @@ class BUPP_EXPORT io_context {
                                      std::uint64_t offset = 0);
 
   /**
-   * Creates a direct-submission sender that reads bytes from a file descriptor.
-   */
-  [[nodiscard]] auto async_read_direct(async_io::descriptor_view descriptor,
-                                       mutable_buffer buffer,
-                                       std::uint64_t offset = 0);
-
-  [[nodiscard]] auto async_read_some_direct(
-      async_io::descriptor_view descriptor, mutable_buffer buffer,
-      std::uint64_t offset = 0);
-
-  /**
-   * Creates a queued sender that writes the whole buffer to a file descriptor.
+   * Creates a sender that writes the whole buffer to a file descriptor.
    */
   [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
                                  const_buffer buffer, std::uint64_t offset = 0);
 
   /**
-   * Creates a queued sender for one write operation to a file descriptor.
+   * Creates a sender for one write operation to a file descriptor.
    */
   [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
                                       const_buffer buffer,
                                       std::uint64_t offset = 0);
 
-  /**
-   * Creates a direct-submission sender that writes the whole buffer to a file
-   * descriptor.
-   */
-  [[nodiscard]] auto async_write_direct(async_io::descriptor_view descriptor,
-                                        const_buffer buffer,
-                                        std::uint64_t offset = 0);
-
-  /**
-   * Creates a direct-submission sender for one write operation to a file
-   * descriptor.
-   */
-  [[nodiscard]] auto async_write_some_direct(
-      async_io::descriptor_view descriptor, const_buffer buffer,
-      std::uint64_t offset = 0);
-
   [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
                                    mutable_buffer buffer, int flags = 0);
-  [[nodiscard]] auto async_receive_direct(async_io::datagram_socket_view socket,
-                                          mutable_buffer buffer, int flags = 0);
   [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
                                 const_buffer buffer, int flags = 0);
-  [[nodiscard]] auto async_send_direct(async_io::datagram_socket_view socket,
-                                       const_buffer buffer, int flags = 0);
   [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
                                         mutable_buffer buffer,
                                         ip::endpoint& endpoint, int flags = 0);
-  [[nodiscard]] auto async_receive_from_direct(
-      async_io::datagram_socket_view socket, mutable_buffer buffer,
-      ip::endpoint& endpoint, int flags = 0);
   [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                    const_buffer buffer,
                                    const ip::endpoint& endpoint, int flags = 0);
-  [[nodiscard]] auto async_send_to_direct(async_io::datagram_socket_view socket,
-                                          const_buffer buffer,
-                                          const ip::endpoint& endpoint,
-                                          int flags = 0);
-
   /**
-   * Creates a queued sender that accepts one connection from a non-owning
+   * Creates a sender that accepts one connection from a non-owning
    * listening socket view.
    */
   [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                   int flags = 0);
 
   /**
-   * Creates a direct-submission sender that accepts one connection from a
-   * non-owning listening socket view.
-   */
-  [[nodiscard]] auto async_accept_direct(async_io::stream_socket_view socket,
-                                         int flags = 0);
-
-  /**
-   * Creates a queued sender that connects a non-owning stream socket view.
+   * Creates a sender that connects a non-owning stream socket view.
    */
   [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                    const ip::endpoint& endpoint);
 
   /**
-   * Creates a direct-submission sender that connects a non-owning stream
-   * socket view.
-   */
-  [[nodiscard]] auto async_connect_direct(async_io::stream_socket_view socket,
-                                          const ip::endpoint& endpoint);
-
-  /**
-   * Creates a queued sender that waits for events on a file descriptor.
+   * Creates a sender that waits for events on a file descriptor.
    */
   [[nodiscard]] auto async_poll(async_io::descriptor_view descriptor,
                                 unsigned poll_mask);
-
-  /**
-   * Creates a direct-submission sender that waits for descriptor events.
-   */
-  [[nodiscard]] auto async_poll_direct(async_io::descriptor_view descriptor,
-                                       unsigned poll_mask);
 
   /**
    * Creates a sender that resolves a DNS query into caller-provided result
@@ -854,14 +623,9 @@ class BUPP_EXPORT io_context {
                                    async_io::dns_result_view result);
 
   /**
-   * Queues an operation for batched io_uring submission.
+   * Publishes an operation for passive io_uring submission by a worker.
    */
   void enqueue_io(operation_base& operation) noexcept;
-
-  /**
-   * Submits an operation immediately through the native context.
-   */
-  void submit_direct(operation_base& operation) noexcept;
 
   /**
    * Posts an operation for execution on the context run loop.
@@ -869,34 +633,23 @@ class BUPP_EXPORT io_context {
   void post(
       async_io::linux_native::io_uring_operation_base& operation) noexcept;
 
-  [[nodiscard]] detail::native_worker& primary_worker() noexcept;
-
   [[nodiscard]] detail::native_worker& select_worker() noexcept;
 
   [[nodiscard]] detail::native_worker& select_io_worker() noexcept;
 
-  [[nodiscard]] detail::native_worker& ensure_operation_worker(
-      operation_base& operation) noexcept;
-
   [[nodiscard]] detail::native_worker* register_run_worker() noexcept;
 
-  [[nodiscard]] std::error_code flush_operations(
+  void submit_operations(
       operation_base* operations,
-      async_io::linux_native::io_uring_context& native_context,
-      async_io::linux_native::io_uring_context::uring_lock& lock) noexcept;
+      async_io::linux_native::io_uring_context& native_context) noexcept;
 
-  [[nodiscard]] std::error_code flush_io_queue(detail::native_worker& worker,
-                                               bool wait_for_gate) noexcept;
+  [[nodiscard]] static bool drain_pending_io(
+      void* owner,
+      async_io::linux_native::io_uring_context& native_context) noexcept;
 
-  [[nodiscard]] operation_base* take_pending_io(
-      detail::native_worker& worker) noexcept;
+  [[nodiscard]] operation_base* take_pending_io() noexcept;
 
-  void move_global_io_to_worker(detail::native_worker& worker) noexcept;
-
-  [[nodiscard]] operation_base* take_worker_pending_io(
-      detail::native_worker& worker) noexcept;
-
-  void arm_flush_timer() noexcept;
+  void wake_one_worker() noexcept;
 
   void register_timer(detail::timer_slot& timer) noexcept;
 
@@ -918,8 +671,6 @@ class BUPP_EXPORT io_context {
   void on_timer_update() noexcept;
 
   void on_timer_driver() noexcept;
-
-  void on_queued_io_flush(detail::timer_completion_kind completion) noexcept;
 
   void post_timer_driver() noexcept;
 
@@ -947,17 +698,16 @@ class BUPP_EXPORT io_context {
 
   void submit_timer_update_locked(time_point deadline) noexcept;
 
+  async_io::linux_native::io_uring_task_queue_state task_queue_;
   detail::native_context_state native_;
   detail::timer_wakeup_operation timer_wakeup_operation_;
   detail::timer_update_operation timer_update_operation_;
   detail::timer_driver_operation timer_driver_operation_;
 
-  detail::queued_io_state<operation_base> queued_io_;
   detail::native_worker_state native_workers_;
   std::atomic_bool stop_requested_{false};
 
   detail::timer_state_data timers_;
-  steady_timer queued_io_flush_timer_;
 
   static thread_local detail::native_worker* current_native_worker_;
 };

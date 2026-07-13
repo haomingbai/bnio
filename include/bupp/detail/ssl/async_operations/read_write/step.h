@@ -18,7 +18,7 @@ namespace bupp {
 /** @cond BUPP_DETAIL */
 namespace detail {
 
-template <class State, bool DirectSubmit>
+template <class State>
 class ssl_io_step_sender {
  public:
   using completion_signatures =
@@ -30,8 +30,7 @@ class ssl_io_step_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) const {
-    return ssl_io_step_operation<State, DirectSubmit,
-                                 std::remove_cvref_t<Receiver>>(
+    return ssl_io_step_operation<State, std::remove_cvref_t<Receiver>>(
         state_, std::move(receiver));
   }
 
@@ -39,13 +38,13 @@ class ssl_io_step_sender {
   State* state_;
 };
 
-template <class State, bool DirectSubmit>
+template <class State>
 class ssl_io_step_factory {
  public:
   explicit ssl_io_step_factory(State* state) noexcept : state_(state) {}
 
   [[nodiscard]] auto operator()() const noexcept {
-    return ssl_io_step_sender<State, DirectSubmit>(state_);
+    return ssl_io_step_sender<State>(state_);
   }
 
  private:
@@ -66,7 +65,7 @@ class ssl_io_done_predicate {
   State* state_;
 };
 
-template <class State, bool DirectSubmit, class Receiver>
+template <class State, class Receiver>
 class ssl_io_step_operation {
  public:
   using receiver_type = std::remove_cvref_t<Receiver>;
@@ -94,16 +93,14 @@ class ssl_io_step_operation {
     ssl_io_step_operation* operation_;
   };
 
-  using read_sender_type =
-      decltype(ssl_make_transport_read_sender<DirectSubmit>(
-          std::declval<typename State::scheduler_type&>(),
-          std::declval<ssl_stream<typename State::next_layer_type>&>(),
-          static_cast<void*>(nullptr), std::size_t{}));
-  using write_sender_type =
-      decltype(ssl_make_transport_write_sender<DirectSubmit>(
-          std::declval<typename State::scheduler_type&>(),
-          std::declval<ssl_stream<typename State::next_layer_type>&>(),
-          static_cast<const void*>(nullptr), std::size_t{}));
+  using read_sender_type = decltype(ssl_make_transport_read_sender(
+      std::declval<typename State::scheduler_type&>(),
+      std::declval<ssl_stream<typename State::next_layer_type>&>(),
+      static_cast<void*>(nullptr), std::size_t{}));
+  using write_sender_type = decltype(ssl_make_transport_write_sender(
+      std::declval<typename State::scheduler_type&>(),
+      std::declval<ssl_stream<typename State::next_layer_type>&>(),
+      static_cast<const void*>(nullptr), std::size_t{}));
   using read_operation_type = decltype(bexec::connect(
       std::declval<read_sender_type>(), std::declval<child_receiver>()));
   using write_operation_type = decltype(bexec::connect(
@@ -264,7 +261,7 @@ class ssl_io_step_operation {
     state_->transport_data = data;
     state_->transport_size = static_cast<std::size_t>(available);
     child_operation_.template emplace_from<read_operation_type>([this] {
-      return bexec::connect(ssl_make_transport_read_sender<DirectSubmit>(
+      return bexec::connect(ssl_make_transport_read_sender(
                                 state_->scheduler, *state_->stream,
                                 state_->transport_data, state_->transport_size),
                             child_receiver(*this));
@@ -274,7 +271,7 @@ class ssl_io_step_operation {
 
   void submit_transport_write() noexcept {
     child_operation_.template emplace_from<write_operation_type>([this] {
-      return bexec::connect(ssl_make_transport_write_sender<DirectSubmit>(
+      return bexec::connect(ssl_make_transport_write_sender(
                                 state_->scheduler, *state_->stream,
                                 state_->transport_data, state_->transport_size),
                             child_receiver(*this));

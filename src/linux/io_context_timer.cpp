@@ -60,14 +60,6 @@ void detail::timer_driver_operation::execute() noexcept {
   context_->on_timer_driver();
 }
 
-detail::queued_io_flush_operation::queued_io_flush_operation(
-    io_context& context) noexcept
-    : timer_operation_base(context) {}
-
-void detail::queued_io_flush_operation::execute() noexcept {
-  timer_context_->on_queued_io_flush(timer_completion());
-}
-
 void io_context::register_timer(detail::timer_slot& timer) noexcept {
   std::lock_guard context_lock(timers_.mutex);
   std::lock_guard timer_lock(timer.mutex);

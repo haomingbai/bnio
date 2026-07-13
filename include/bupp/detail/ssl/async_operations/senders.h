@@ -17,7 +17,7 @@ namespace bupp {
 /** @cond BUPP_DETAIL */
 namespace detail {
 
-template <class Scheduler, class NextLayer, bool DirectSubmit>
+template <class Scheduler, class NextLayer>
 class ssl_handshake_sender {
  public:
   using completion_signatures =
@@ -31,7 +31,7 @@ class ssl_handshake_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) const {
-    return ssl_handshake_operation<Scheduler, NextLayer, DirectSubmit,
+    return ssl_handshake_operation<Scheduler, NextLayer,
                                    std::remove_cvref_t<Receiver>>(
         scheduler_, *stream_, type_, std::move(receiver));
   }
@@ -42,7 +42,7 @@ class ssl_handshake_sender {
   ssl_handshake_type type_;
 };
 
-template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit>
+template <class Scheduler, class NextLayer, class Holder>
 class ssl_read_sender {
  public:
   using completion_signatures =
@@ -58,7 +58,7 @@ class ssl_read_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return ssl_read_operation<Scheduler, NextLayer, Holder, DirectSubmit,
+    return ssl_read_operation<Scheduler, NextLayer, Holder,
                               std::remove_cvref_t<Receiver>>(
         std::move(scheduler_), *stream_, std::move(buffer_),
         std::move(receiver));
@@ -70,8 +70,7 @@ class ssl_read_sender {
   Holder buffer_;
 };
 
-template <class Scheduler, class NextLayer, class Holder, bool DirectSubmit,
-          bool CompleteBuffer>
+template <class Scheduler, class NextLayer, class Holder, bool CompleteBuffer>
 class ssl_write_sender {
  public:
   using completion_signatures =
@@ -87,7 +86,7 @@ class ssl_write_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return ssl_io_operation<Scheduler, NextLayer, Holder, DirectSubmit,
+    return ssl_io_operation<Scheduler, NextLayer, Holder,
                             std::remove_cvref_t<Receiver>,
                             ssl_application_io::write, CompleteBuffer>(
         std::move(scheduler_), *stream_, std::move(buffer_),
@@ -100,7 +99,7 @@ class ssl_write_sender {
   Holder buffer_;
 };
 
-template <class Scheduler, class NextLayer, bool DirectSubmit>
+template <class Scheduler, class NextLayer>
 class ssl_shutdown_sender {
  public:
   using completion_signatures =
@@ -113,7 +112,7 @@ class ssl_shutdown_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) const {
-    return ssl_shutdown_operation<Scheduler, NextLayer, DirectSubmit,
+    return ssl_shutdown_operation<Scheduler, NextLayer,
                                   std::remove_cvref_t<Receiver>>(
         scheduler_, *stream_, std::move(receiver));
   }

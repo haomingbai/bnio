@@ -6,7 +6,6 @@
 #include <bupp/async_io/time.h>
 
 #include <atomic>
-#include <bexec/detail/manual_lifetime.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -113,13 +112,6 @@ class timer_driver_operation
   io_context* context_;
 };
 
-class queued_io_flush_operation : public timer_operation_base {
- public:
-  explicit queued_io_flush_operation(io_context& context) noexcept;
-
-  void execute() noexcept override;
-};
-
 struct timer_state_data {
   enum class queued_operation_state {
     idle,
@@ -136,10 +128,6 @@ struct timer_state_data {
   [[nodiscard]] bool queue_driver() noexcept;
 
   void complete_driver() noexcept;
-
-  [[nodiscard]] bool queue_flush_wait() noexcept;
-
-  void complete_flush_wait() noexcept;
 
   [[nodiscard]] bool can_submit_wakeup() const noexcept;
 
@@ -168,12 +156,9 @@ struct timer_state_data {
                                     std::size_t second) const noexcept;
 
   mutable std::mutex mutex;
-  bexec::detail::manual_lifetime<queued_io_flush_operation>
-      queued_io_flush_wait;
   std::unordered_map<std::uint64_t, timer_slot*> timers;
   std::vector<timer_heap_item> heap;
   std::uint64_t next_timer_id = 1;
-  queued_operation_state queued_io_flush = queued_operation_state::idle;
   queued_operation_state driver = queued_operation_state::idle;
   timeout_state timeout = timeout_state::idle;
   async_io::time_point armed_deadline{};
