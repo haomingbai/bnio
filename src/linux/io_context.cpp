@@ -7,14 +7,15 @@
 
 namespace bupp {
 
-thread_local io_context::native_worker* io_context::current_native_worker_ =
+using detail::native_worker;
+
+thread_local detail::native_worker* io_context::current_native_worker_ =
     nullptr;
 
 io_context::io_context() noexcept : io_context(io_context_options{}) {}
 
 io_context::io_context(const io_context_options& options) noexcept
-    : native_context_(options.platform.uring),
-      linux_options_(options.platform),
+    : native_(options.platform),
       timer_wakeup_operation_(*this),
       timer_update_operation_(*this),
       timer_driver_operation_(*this),
@@ -23,19 +24,20 @@ io_context::io_context(const io_context_options& options) noexcept
       std::max<std::size_t>(1, options.concurrency_hint);
 
   // Manually manage worker memory as an intrusive singly-linked list.
-  native_workers_head_ = new native_worker(*this);
-  native_worker* current = native_workers_head_;
+  native_workers_.head = new native_worker(*this);
+  native_worker* current = native_workers_.head;
   for (std::size_t index = 1; index < worker_count; ++index) {
     auto* new_worker = new native_worker(*this);
     current->next.store(new_worker, std::memory_order_release);
     current = new_worker;
   }
 
-  native_workers_head_->context.store(&native_context_,
+  native_workers_.head->context.store(&native_.context,
                                       std::memory_order_release);
-  round_robin_cursor_.store(native_workers_head_, std::memory_order_release);
-  active_native_worker_count_.store(native_context_.is_open() ? 1 : 0,
-                                    std::memory_order_release);
+  native_workers_.round_robin_cursor.store(native_workers_.head,
+                                           std::memory_order_release);
+  native_workers_.active_count.store(native_.context.is_open() ? 1 : 0,
+                                     std::memory_order_release);
   timers_.queued_io_flush_wait.emplace(*this);
 }
 
@@ -55,7 +57,7 @@ io_context::~io_context() noexcept {
   timers_.heap.clear();
 
   // Manually delete all workers in the intrusive singly-linked list.
-  native_worker* current = native_workers_head_;
+  native_worker* current = native_workers_.head;
   while (current != nullptr) {
     native_worker* next = current->next.load(std::memory_order_acquire);
     delete current;
@@ -63,7 +65,7 @@ io_context::~io_context() noexcept {
   }
 }
 
-bool io_context::is_open() const noexcept { return native_context_.is_open(); }
+bool io_context::is_open() const noexcept { return native_.context.is_open(); }
 
 void io_context::run() noexcept {
   native_worker* worker = register_run_worker();
@@ -88,8 +90,8 @@ int io_context::stop() noexcept {
 
   int first_error = 0;
   const std::size_t worker_count =
-      active_native_worker_count_.load(std::memory_order_acquire);
-  native_worker* worker = native_workers_head_;
+      native_workers_.active_count.load(std::memory_order_acquire);
+  native_worker* worker = native_workers_.head;
   for (std::size_t index = 0; index < worker_count && worker != nullptr;
        ++index) {
     async_io::linux_native::io_uring_context* native_context =
@@ -118,14 +120,15 @@ io_context::post_scheduler io_context::get_post_scheduler() noexcept {
   return post_scheduler(*this);
 }
 
-io_context::native_worker& io_context::primary_worker() noexcept {
-  return *native_workers_head_;
+detail::native_worker& io_context::primary_worker() noexcept {
+  return *native_workers_.head;
 }
 
-io_context::native_worker& io_context::select_worker() noexcept {
-  native_worker* const head = native_workers_head_;
+detail::native_worker& io_context::select_worker() noexcept {
+  native_worker* const head = native_workers_.head;
 
-  native_worker* selected = round_robin_cursor_.load(std::memory_order_acquire);
+  native_worker* selected =
+      native_workers_.round_robin_cursor.load(std::memory_order_acquire);
   if (selected == nullptr) {
     selected = head;
   }
@@ -135,7 +138,7 @@ io_context::native_worker& io_context::select_worker() noexcept {
   if (next == nullptr) {
     next = head;
   }
-  round_robin_cursor_.store(next, std::memory_order_release);
+  native_workers_.round_robin_cursor.store(next, std::memory_order_release);
 
   // Return the selected worker if it has a valid open context.
   async_io::linux_native::io_uring_context* selected_context =
@@ -163,7 +166,7 @@ io_context::native_worker& io_context::select_worker() noexcept {
   return *head;
 }
 
-io_context::native_worker& io_context::select_io_worker() noexcept {
+detail::native_worker& io_context::select_io_worker() noexcept {
   if (current_native_worker_ != nullptr &&
       current_native_worker_->owner == this) {
     async_io::linux_native::io_uring_context* native_context =
@@ -175,7 +178,7 @@ io_context::native_worker& io_context::select_io_worker() noexcept {
   return select_worker();
 }
 
-io_context::native_worker& io_context::ensure_operation_worker(
+detail::native_worker& io_context::ensure_operation_worker(
     operation_base& operation) noexcept {
   if (operation.native_worker_ == nullptr) {
     operation.native_worker_ = &select_io_worker();
@@ -188,17 +191,17 @@ io_context::select_native_context() noexcept {
   return *select_io_worker().context.load(std::memory_order_acquire);
 }
 
-io_context::native_worker* io_context::register_run_worker() noexcept {
+detail::native_worker* io_context::register_run_worker() noexcept {
   if (stop_requested_.load(std::memory_order_acquire)) {
     return nullptr;
   }
 
   const std::size_t index =
-      next_run_worker_.fetch_add(1, std::memory_order_acq_rel);
+      native_workers_.next_run.fetch_add(1, std::memory_order_acq_rel);
 
   // Walk (or dynamically extend) the intrusive singly-linked list to reach
   // the worker at position `index`.
-  native_worker* worker = native_workers_head_;
+  native_worker* worker = native_workers_.head;
   for (std::size_t i = 0; i < index; ++i) {
     native_worker* next = worker->next.load(std::memory_order_acquire);
     if (next == nullptr) {
@@ -228,7 +231,7 @@ io_context::native_worker* io_context::register_run_worker() noexcept {
   } else if (worker->context.load(std::memory_order_acquire) == nullptr) {
     worker->owned_context =
         std::make_unique<async_io::linux_native::io_uring_context>(
-            linux_options_.uring);
+            native_.options.uring);
     if (!worker->owned_context->is_open()) {
       worker->owned_context.reset();
       return nullptr;
@@ -239,9 +242,9 @@ io_context::native_worker* io_context::register_run_worker() noexcept {
 
   const std::size_t published_count = index + 1;
   std::size_t current_count =
-      active_native_worker_count_.load(std::memory_order_acquire);
+      native_workers_.active_count.load(std::memory_order_acquire);
   while (current_count < published_count &&
-         !active_native_worker_count_.compare_exchange_weak(
+         !native_workers_.active_count.compare_exchange_weak(
              current_count, published_count, std::memory_order_acq_rel,
              std::memory_order_acquire)) {
   }

@@ -74,15 +74,24 @@ Platform-neutral vocabulary types and the platform-native event-loop context.
 High-level async runtime, stream owners, and buffer types.
 
 - `io_context.h` → `linux/io_context.h` plus `io_context_cpo.h`.
-- `linux/io_context.h` — `io_context` class definition.
+- `linux/io_context.h` — `io_context` class definition and public scheduler
+  surface; implementation detail types live under `linux/detail/`.
 - `linux/detail/io_context_options.h` — `io_context_options` and `submit_mode`.
-- `linux/detail/io_context_timer_types.h` — timer state and heap types.
+- `linux/detail/io_context_state.h` — grouped `io_context` native context,
+  queued-I/O, and worker-list state.
+- `linux/detail/io_context_state/native_worker.h` — per-run-thread native
+  worker slot.
+- `linux/detail/io_context_timer_types.h` — timer operations, timer state, slot,
+  and heap types.
 - `linux/detail/steady_timer.h` — `steady_timer` class definition.
 - `linux/detail/io_context_native_io.h` — umbrella for native I/O operation templates.
-- `linux/detail/io_context_native_io/common.h` — shared native-I/O helpers.
-- `linux/detail/io_context_native_io/file.h` — descriptor read/write operations.
+- `linux/detail/io_context_native_io/common.h` — shared native-I/O helpers and
+  the generic native operation/sender templates.
+- `linux/detail/io_context_native_io/file.h` — descriptor read/write operation
+  models.
 - `linux/detail/io_context_native_io/poll.h` — poll operations.
-- `linux/detail/io_context_native_io/socket.h` — socket accept/connect/read/write operations.
+- `linux/detail/io_context_native_io/socket.h` — stream and datagram socket
+  accept/connect/read/write/send/receive operation models.
 - `linux/detail/io_context_native_io/timer_wait.h` — timer wait operations.
 - `linux/detail/io_context_native_io/write_all.h` — composed write-all sender.
 - `detail/io_context/scheduler_operations.h` — scheduler-level I/O senders.
@@ -150,7 +159,7 @@ High-level async runtime, stream owners, and buffer types.
 - `src/linux/` — high-level Linux `io_context` implementations:
   - `io_context.cpp` — lifecycle, schedulers, native worker slots.
   - `io_context_queue.cpp` — queued I/O submission.
-  - `io_context_timer.cpp` — timer slot management.
+  - `io_context_timer.cpp` — timer operation and slot management.
   - `io_context_timer_driver.cpp` — timer driver and heap.
   - `io_context_timer_state.cpp` — timeout/wakeup state machine.
 - `src/tcp.cpp` — TCP socket and acceptor methods.

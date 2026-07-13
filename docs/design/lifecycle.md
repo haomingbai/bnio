@@ -245,9 +245,9 @@ graph TB
 
 ```
 async_io::linux_native::io_uring_operation_base   (intrusive node, result/flags)
-    └── io_context::operation_base                (queued-I/O list link, prepare hooks, native_worker pointer)
-        ├── native_io_operation<Model,R>          (read/write/accept/connect/poll)
-        └── timer_operation_base                  (timer completion posting)
+    └── io_context::operation_base                (queued-I/O list link, prepare hooks, detail::native_worker pointer)
+        ├── detail::native_io_operation<Model,R>  (read/write/accept/connect/poll)
+        └── detail::timer_operation_base          (timer completion posting)
 
 Composite operations are not necessarily derived from `operation_base`
 themselves. For example, the write-all sender owns a

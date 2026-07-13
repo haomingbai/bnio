@@ -14,8 +14,13 @@ bupp/bupp.h  (umbrella)
 ├── bupp/io_context.h
 │   └── linux/io_context.h
 │       ├── linux/detail/io_context_options.h
+│       ├── linux/detail/io_context_state.h
+│       ├── linux/detail/io_context_state/native_worker.h
 │       ├── linux/detail/io_context_timer_types.h
 │       ├── linux/detail/steady_timer.h
+│       ├── linux/detail/io_context_native_io.h
+│       │   └── linux/detail/io_context_native_io/{common, file, poll,
+│       │       socket, timer_wait, write_all}.h
 │       └── async_io/linux/io_uring_context.h
 │           ├── async_io/linux/io_uring_context_base.h
 │           │   ├── async_io/linux/io_uring_context_base/context.h
@@ -77,8 +82,17 @@ bupp
 ├── io_context                            Layer 3: high-level async context
 │   ├── operation_base                    intrusive queued-I/O node
 │   ├── basic_scheduler<Kind>             dispatch/post scheduler handles
-│   ├── schedule_sender<Kind>             scheduler sender types
-│   └── native_worker                     per-thread io_uring_context slot
+│   └── schedule_sender<Kind>             scheduler sender types
+├── detail                                Layer 3 internals
+│   ├── native_context_state              primary uring context + options
+│   ├── native_worker_state               worker-list counters and cursors
+│   ├── native_worker                     per-thread io_uring_context slot
+│   ├── queued_io_state<Operation>        global queued-I/O counters/stacks
+│   ├── timer_state_data                  timer map, heap, timeout state
+│   ├── timer_*_operation                 reusable timer operations
+│   ├── native_io_sender<Model>           native I/O sender template
+│   ├── native_io_operation<Model, R>     native I/O operation template
+│   └── *_model / *_write_all_state       socket/file/poll/write-all models
 ├── ip
 │   ├── address (= async_io::ip::address)
 │   ├── endpoint (= async_io::ip::endpoint)

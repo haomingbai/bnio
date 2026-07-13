@@ -12,6 +12,22 @@ under `include/bupp/linux/detail/`).
 3. **I/O batching backend** — manages queued vs. direct submission for scheduler
    I/O senders.
 
+The public class is intentionally a coordinator. It owns a small set of
+cohesive `detail` state objects rather than defining all internal data inline:
+
+| State / Detail Type | Header | Responsibility |
+|---------------------|--------|----------------|
+| `detail::native_context_state` | `linux/detail/io_context_state.h` | Primary native `io_uring_context` plus Linux-specific options. |
+| `detail::native_worker_state` | `linux/detail/io_context_state.h` | Worker linked list, active worker count, and round-robin cursor. |
+| `detail::native_worker` | `linux/detail/io_context_state/native_worker.h` | Per-run-thread native context slot and worker-local pending I/O stack. |
+| `detail::queued_io_state<operation_base>` | `linux/detail/io_context_state.h` | Global queued-I/O count and pending operation stack. |
+| `detail::timer_state_data` | `linux/detail/io_context_timer_types.h` | Timer map, heap, reusable timer-operation states, and timeout state machine. |
+
+Template implementation types are grouped by operation family under
+`linux/detail/io_context_native_io/`. The aggregate detail header is included
+after the complete `io_context` declaration, so templates can call private
+context hooks without splitting a class definition across files.
+
 ### Submission Modes
 
 ```mermaid
@@ -122,6 +138,30 @@ calling `start()` begins the asynchronous I/O.
 | `scheduler.async_poll(descriptor, mask)` | `descriptor_view` | `unsigned` ready-event mask |
 
 All senders also complete with `set_error(std::error_code)` or `set_stopped()`.
+
+### Internal Header Layout
+
+The Linux `io_context` layer uses detail headers to keep operation families
+separate while preserving a single public class declaration:
+
+| Header | Contents |
+|--------|----------|
+| `linux/io_context.h` | `io_context`, scheduler handles, operation base, public and private member declarations. |
+| `linux/detail/io_context_state.h` | Non-template grouped runtime state: native context/options, worker-list state, queued-I/O state template. |
+| `linux/detail/io_context_state/native_worker.h` | Complete `detail::native_worker` definition; included after `io_context` is complete. |
+| `linux/detail/io_context_timer_types.h` | Timer slots, reusable timer operations, timer heap items, and `timer_state_data`. |
+| `linux/detail/io_context_native_io/common.h` | Error/stop helpers plus generic `native_io_operation` and `native_io_sender` templates. |
+| `linux/detail/io_context_native_io/file.h` | Descriptor read/write operation models. |
+| `linux/detail/io_context_native_io/socket.h` | Stream and datagram read/write/send/receive/accept/connect operation models. |
+| `linux/detail/io_context_native_io/poll.h` | Poll operation model. |
+| `linux/detail/io_context_native_io/timer_wait.h` | Timer wait sender and operation templates. |
+| `linux/detail/io_context_native_io/write_all.h` | Write-all state, step sender, and composed operation templates. |
+| `linux/detail/io_context_native_io.h` | Aggregates the native-I/O detail headers and defines inline scheduler/context forwarding functions. |
+
+Detail headers are still installable because public inline templates reference
+them. They remain implementation headers: user code should normally include
+`bupp/io_context.h` or `bupp/linux/io_context.h`, not the detail headers
+directly.
 
 ### Read/Write Semantic Split
 
