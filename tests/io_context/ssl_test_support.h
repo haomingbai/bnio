@@ -21,13 +21,6 @@
 
 namespace {
 
-void test_require(bool condition) noexcept {
-  assert(condition);
-  if (!condition) {
-    std::abort();
-  }
-}
-
 struct void_receiver {
   void set_value() noexcept {}
   void set_error(std::error_code) noexcept {}
