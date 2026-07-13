@@ -20,6 +20,13 @@ if(BUPP_PLATFORM_LINUX)
   bupp_add_async_io_test(socket_view socket_view_test.cpp)
   bupp_add_async_io_test(udp_io_uring udp_io_uring_test.cpp)
 endif()
+if(BUPP_PLATFORM_BSD)
+  bupp_add_async_io_test(kqueue_helper kqueue_helper_test.cpp)
+  bupp_add_async_io_test(kqueue_operation_traits
+                         kqueue_operation_traits_test.cpp)
+  bupp_add_async_io_test(kqueue_run_loop kqueue_run_loop_test.cpp)
+  bupp_add_async_io_test(kqueue_sender kqueue_sender_test.cpp)
+endif()
 bupp_add_async_io_test(tcp_endpoint tcp_endpoint_test.cpp)
 bupp_add_async_io_test(time time_test.cpp)
 
@@ -54,6 +61,12 @@ if(BUPP_PLATFORM_LINUX)
     linux_io_uring_context BUPP_HEADER_TEST_LINUX_IO_URING_CONTEXT)
   bupp_add_async_io_header_self_contained_test(
     linux_socket_address BUPP_HEADER_TEST_LINUX_SOCKET_ADDRESS)
+endif()
+if(BUPP_PLATFORM_BSD)
+  bupp_add_async_io_header_self_contained_test(
+    bsd_kqueue_context BUPP_HEADER_TEST_BSD_KQUEUE_CONTEXT)
+  bupp_add_async_io_header_self_contained_test(
+    bsd_kqueue_helper BUPP_HEADER_TEST_BSD_KQUEUE_HELPER)
 endif()
 bupp_add_async_io_header_self_contained_test(socket_view
                                              BUPP_HEADER_TEST_SOCKET_VIEW)

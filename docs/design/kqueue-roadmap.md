@@ -41,7 +41,7 @@ The platform split should evolve from the current Linux-only shape into this:
 | Layer | Linux | macOS / BSD |
 |-------|-------|-------------|
 | `base` | `include/bupp/base/linux/`, `src/base/linux/` ✅ | `include/bupp/base/bsd/`, `src/base/bsd/` ✅ |
-| `async_io` native backend | `async_io::linux_native::io_uring_context` ✅ | `async_io::bsd_native::kqueue_context` (planned) |
+| `async_io` native backend | `async_io::linux_native::io_uring_context` ✅ | `async_io::bsd_native::kqueue_context` ✅ |
 | high-level runtime | `include/bupp/linux/io_context.h`, `src/linux/` ✅ | `include/bupp/bsd/io_context.h`, `src/bsd/` (planned) |
 | system macros | `BUPP_SYSTEM_LINUX` ✅ | `BUPP_SYSTEM_DARWIN`, `BUPP_SYSTEM_FREEBSD`, `BUPP_SYSTEM_BSD` ✅ |
 
@@ -106,6 +106,21 @@ syscall and chooses one of:
 This keeps the unresolved "who is responsible for I/O" question localized to
 the operation/context interface. If the final design moves more work into the
 context, only that interface should need to change.
+
+The implemented first-stage boundary keeps readiness preparation in
+`kqueue_helper` and performs simple buffer-based `read(2)` / `write(2)` calls
+inside `kqueue_context`. Operations expose non-owning storage through a
+by-value `buffer_view get_data()` hook; non-buffered operations return an empty
+view. This preserves the buffer capacity at the syscall site without adding
+allocation or ownership. Specialized socket operations can still use the
+hybrid hook described above when their syscall state does not fit a single
+`buffer_view`.
+
+Descriptor, task, and filter state is held in fixed-capacity preparation and
+active-registration tables owned by `kqueue_context`; it is not stored in
+`kqueue_operation_base`. The backend currently permits one active waiter per
+descriptor/filter pair and reports `EBUSY` instead of allowing a later
+`EV_ADD` to silently replace an earlier operation.
 
 ## Base Layer Work
 
@@ -291,15 +306,17 @@ The semantic split still holds: `async_write_some` is one native attempt, while
   `tests/base/bsd/`.
 - [x] Keep this phase independent from senders and high-level runtime code.
 
-### Phase 3: Native kqueue Context
+### Phase 3: Native kqueue Context ✅
 
-- Add `bsd_native::kqueue_context`.
-- Implement post queue, wakeup event, stop handling, event wait, and operation
-  dispatch.
-- Add context-level tests using simple posted operations and `EVFILT_USER`.
+- [x] Add `bsd_native::kqueue_context`.
+- [x] Implement post queue, wakeup event, stop handling, event wait, and
+  operation dispatch.
+- [x] Add context-level tests using posted operations, `EVFILT_USER`, poll, and
+  context-owned buffer I/O.
 
 ### Phase 4: Socket Readiness Operations
 
+- [x] Implement descriptor read, write, and poll readiness operations.
 - Implement nonblocking accept, connect, read_some, write_some, and poll.
 - Add tests mirroring existing Linux socket tests where possible.
 - Validate EOF, cancellation, short write, and `EWOULDBLOCK` rearm paths.

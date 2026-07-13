@@ -16,3 +16,14 @@ if(BUPP_PLATFORM_LINUX)
             linux/socket_address.cpp
             socket_view.cpp)
 endif()
+
+if(BUPP_PLATFORM_BSD)
+  target_sources(
+    bupp
+    PRIVATE bsd/kqueue_context.cpp
+            bsd/kqueue_context_events.cpp
+            bsd/kqueue_context_run_loop.cpp
+            bsd/kqueue_context_submission.cpp
+            bsd/kqueue_context_task_queue.cpp
+            bsd/kqueue_helper.cpp)
+endif()

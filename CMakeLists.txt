@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   bupp
-  DESCRIPTION "A small io_uring wrapper"
+  DESCRIPTION "A small native asynchronous I/O library"
   LANGUAGES CXX)
 
 include(CTest)
@@ -12,10 +12,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/cmake/bexec.cmake")
 
 # ---- Platform detection ----
 #
-# bupp currently implements its async I/O backend on Linux using io_uring.
-# On other platforms (e.g. macOS) only the platform-neutral vocabulary types
-# and build scaffolding are compiled; the Linux-only backend, headers, and the
-# liburing dependency are excluded entirely.
+# bupp uses io_uring on Linux and kqueue on Darwin/FreeBSD. Platform-native
+# headers and dependencies are compiled only for their matching backend.
 set(BUPP_PLATFORM_LINUX_DEFAULT OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(BUPP_PLATFORM_LINUX_DEFAULT ON)

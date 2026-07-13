@@ -20,6 +20,10 @@
 #include <bupp/async_io/linux/io_uring_context.h>
 #elif defined(BUPP_HEADER_TEST_LINUX_SOCKET_ADDRESS)
 #include <bupp/async_io/linux/socket_address.h>
+#elif defined(BUPP_HEADER_TEST_BSD_KQUEUE_CONTEXT)
+#include <bupp/async_io/bsd/kqueue_context.h>
+#elif defined(BUPP_HEADER_TEST_BSD_KQUEUE_HELPER)
+#include <bupp/async_io/bsd/kqueue_helper.h>
 #elif defined(BUPP_HEADER_TEST_SOCKET_VIEW)
 #include <bupp/async_io/socket_view.h>
 #elif defined(BUPP_HEADER_TEST_TCP_ENDPOINT)

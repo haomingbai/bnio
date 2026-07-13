@@ -10,7 +10,12 @@
 #define BUPP_HAS_ASYNC_IO_LINUX 1
 #endif
 
-#if defined(BUPP_HAS_ASYNC_IO_LINUX)
+#if defined(BUPP_SYSTEM_BSD) && defined(BUPP_HAS_BASE_BSD) && \
+    !defined(BUPP_DISABLE_ASYNC_IO_BSD)
+#define BUPP_HAS_ASYNC_IO_BSD 1
+#endif
+
+#if defined(BUPP_HAS_ASYNC_IO_LINUX) || defined(BUPP_HAS_ASYNC_IO_BSD)
 #define BUPP_HAS_ASYNC_IO 1
 #endif
 

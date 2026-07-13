@@ -115,6 +115,18 @@ endif()
 set(BUPP_BSD_PUBLIC_HEADERS "" PARENT_SCOPE)
 if(BUPP_PLATFORM_BSD)
   set(BUPP_BSD_PUBLIC_HEADERS
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/detail/kqueue_receiver_operation.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base/context.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base/operation_base.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base/options.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base/submission.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_helper.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_operations.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_operations/core.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_operations/file.h
+      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_operations/poll.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/bsd/event.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/bsd/event_list_view.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/base/bsd/kqueue.h
