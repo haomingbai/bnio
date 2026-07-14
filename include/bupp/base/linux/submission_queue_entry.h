@@ -2,11 +2,15 @@
 #ifndef BUPP_BASE_LINUX_SUBMISSION_QUEUE_ENTRY_H_
 #define BUPP_BASE_LINUX_SUBMISSION_QUEUE_ENTRY_H_
 
-#include <bupp/base/linux/liburing.h>
 #include <bupp/export.h>
+#include <sys/socket.h>
 
 #include <cstddef>
 #include <cstdint>
+
+struct __kernel_timespec;
+struct io_uring_sqe;
+struct iovec;
 
 namespace bupp::base {
 

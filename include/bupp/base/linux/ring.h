@@ -3,9 +3,13 @@
 #define BUPP_BASE_LINUX_RING_H_
 
 #include <bupp/base/linux/completion_queue_entry.h>
-#include <bupp/base/linux/params.h>
 #include <bupp/base/linux/submission_queue_entry.h>
 #include <bupp/export.h>
+#include <liburing.h>
+
+namespace bupp::base {
+class params;
+}  // namespace bupp::base
 
 namespace bupp::base {
 

@@ -2,8 +2,13 @@
 #ifndef BUPP_BASE_LINUX_PROBE_H_
 #define BUPP_BASE_LINUX_PROBE_H_
 
-#include <bupp/base/linux/ring.h>
 #include <bupp/export.h>
+
+struct io_uring_probe;
+
+namespace bupp::base {
+class ring;
+}  // namespace bupp::base
 
 namespace bupp::base {
 

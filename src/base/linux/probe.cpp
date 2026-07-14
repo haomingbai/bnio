@@ -1,6 +1,9 @@
 #include <bupp/base/linux/probe.h>
+#include <liburing.h>
 
 #include <utility>
+
+#include "bupp/base/linux/ring.h"
 
 namespace bupp::base {
 

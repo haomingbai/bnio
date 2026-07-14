@@ -2,6 +2,7 @@
 #ifndef BUPP_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPTIONS_H_
 #define BUPP_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPTIONS_H_
 
+#include <bupp/base/linux/liburing.h>
 #include <bupp/base/linux/params.h>
 #include <bupp/base/linux/ring.h>
 

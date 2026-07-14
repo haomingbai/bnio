@@ -1,7 +1,10 @@
 #include <bupp/base/linux/completion_queue_entry.h>
+#include <liburing.h>
 
 #include <cassert>
 #include <cstdint>
+
+#include "bupp/base/linux/liburing.h"
 
 int main() {
   int marker = 0;

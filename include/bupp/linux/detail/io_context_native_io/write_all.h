@@ -4,6 +4,9 @@
 #else
 #define BUPP_LINUX_DETAIL_IO_CONTEXT_NATIVE_IO_WRITE_ALL_H_
 
+#include <bexec/detail/manual_lifetime.hpp>
+#include <bexec/repeat_until.hpp>
+
 namespace bupp::detail {
 
 class socket_write_all_state {

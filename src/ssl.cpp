@@ -1,8 +1,13 @@
 #include <bupp/ssl.h>
 #include <openssl/err.h>
+#include <openssl/ssl.h>
 
 #include <array>
+#include <string>
+#include <system_error>
 #include <utility>
+
+#include "bupp/ssl/context.h"
 
 namespace bupp {
 

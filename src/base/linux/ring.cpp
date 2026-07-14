@@ -1,9 +1,14 @@
 #include <bupp/base/linux/ring.h>
+#include <liburing.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
 #include <cerrno>
 #include <utility>
+
+#include "bupp/base/linux/completion_queue_entry.h"
+#include "bupp/base/linux/params.h"
+#include "bupp/base/linux/submission_queue_entry.h"
 
 namespace bupp::base {
 

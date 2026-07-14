@@ -1,4 +1,7 @@
 #include <bupp/base/linux/completion_queue_entry.h>
+#include <liburing.h>
+
+#include "bupp/base/linux/liburing.h"
 
 namespace bupp::base {
 

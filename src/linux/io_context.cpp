@@ -4,6 +4,15 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "bupp/async_io/linux/io_uring_context_base/context.h"
+#include "bupp/linux/detail/io_context_options.h"
+#include "bupp/linux/detail/io_context_state.h"
+#include "bupp/linux/detail/io_context_state/native_worker.h"
+#include "bupp/linux/detail/io_context_timer_types.h"
 
 namespace bupp {
 

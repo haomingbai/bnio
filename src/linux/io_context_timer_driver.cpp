@@ -1,8 +1,15 @@
 #include <bupp/linux/io_context.h>
 
 #include <algorithm>
-#include <cerrno>
+#include <atomic>
+#include <cstddef>
 #include <mutex>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "bupp/async_io/linux/io_uring_context_base/context.h"
+#include "bupp/linux/detail/io_context_timer_types.h"
 
 namespace bupp {
 

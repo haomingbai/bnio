@@ -15,31 +15,19 @@
 #include <bupp/linux/detail/io_context_state.h>
 #include <bupp/linux/detail/io_context_timer_types.h>
 #include <bupp/linux/detail/steady_timer.h>
-#include <linux/fs.h>
-#include <sys/socket.h>
-#include <sys/syscall.h>
-#include <sys/uio.h>
-#include <unistd.h>
 
 #include <atomic>
 #include <bexec/completion_signatures.hpp>
-#include <bexec/detail/manual_lifetime.hpp>
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
-#include <bexec/repeat_until.hpp>
-#include <cerrno>
-#include <chrono>
-#include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
-#include <mutex>
 #include <string_view>
-#include <system_error>
 #include <type_traits>
-#include <unordered_map>
 #include <utility>
-#include <vector>
+
+#include "bupp/async_io/dns/query.h"
+#include "bupp/async_io/linux/io_uring_context_base/operation_base.h"
 
 namespace bupp {
 

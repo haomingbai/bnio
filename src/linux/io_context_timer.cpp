@@ -1,7 +1,16 @@
 #include <bupp/linux/io_context.h>
 
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <unordered_map>
+#include <utility>
+
+#include "bupp/async_io/linux/io_uring_operations/helpers.h"
+#include "bupp/async_io/time.h"
+#include "bupp/linux/detail/io_context_timer_types.h"
+#include "bupp/linux/detail/steady_timer.h"
 
 namespace bupp {
 
