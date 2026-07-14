@@ -51,7 +51,7 @@ void test_operation_state_concepts() {
   static_assert(bexec::operation_state<kqueue_write_operation<receiver>>);
 }
 
-void test_buffer_operations_expose_buffer_view_by_value() {
+void test_buffer_operations_own_their_native_io_step() {
   kqueue_context context;
   std::array<char, 16> storage{};
   buffer_view buffer{storage.data(), storage.size()};
@@ -61,12 +61,15 @@ void test_buffer_operations_expose_buffer_view_by_value() {
   kqueue_write_operation write_operation(context, descriptor_view(1), buffer,
                                          receiver{});
 
-  const buffer_view read_data = read_operation.get_data();
-  const buffer_view write_data = write_operation.get_data();
-  assert(read_data.data == storage.data());
-  assert(read_data.size == storage.size());
-  assert(write_data.data == storage.data());
-  assert(write_data.size == storage.size());
+  assert(read_operation.owns_io_step());
+  assert(write_operation.owns_io_step());
+
+  kqueue_helper read_helper;
+  kqueue_helper write_helper;
+  read_operation.prepare(read_helper);
+  write_operation.prepare(write_helper);
+  assert(read_helper.descriptor() == 1);
+  assert(write_helper.descriptor() == 1);
 }
 
 }  // namespace
@@ -74,6 +77,6 @@ void test_buffer_operations_expose_buffer_view_by_value() {
 int main() {
   test_shared_task_queue_separates_cpu_and_io();
   test_operation_state_concepts();
-  test_buffer_operations_expose_buffer_view_by_value();
+  test_buffer_operations_own_their_native_io_step();
   return 0;
 }

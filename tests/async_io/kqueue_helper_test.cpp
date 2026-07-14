@@ -1,6 +1,7 @@
 #include <bupp/async_io/bsd/kqueue_helper.h>
 
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 
 namespace {

@@ -25,12 +25,15 @@ set(BUPP_PLATFORM_BSD_DEFAULT OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
   set(BUPP_PLATFORM_BSD_DEFAULT ON)
 endif()
-option(BUPP_PLATFORM_BSD "Build the BSD kqueue base backend"
+option(BUPP_PLATFORM_BSD "Build the BSD kqueue backend"
        ${BUPP_PLATFORM_BSD_DEFAULT})
+
+if(BUPP_PLATFORM_LINUX OR BUPP_PLATFORM_BSD)
+  find_package(OpenSSL REQUIRED)
+endif()
 
 if(BUPP_PLATFORM_LINUX)
   find_package(PkgConfig REQUIRED)
-  find_package(OpenSSL REQUIRED)
   pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.1)
 endif()
 

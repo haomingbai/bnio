@@ -114,7 +114,6 @@ std::error_code resolve_dns_platform(dns_query_view query,
   errno = 0;
   const int result = ::getaddrinfo(query.host, query.service, &hints, &results);
   const int system_errno = errno;
-
   if (result != 0) {
     return make_resolve_error(result, system_errno);
   }
@@ -127,8 +126,7 @@ std::error_code resolve_dns_platform(dns_query_view query,
       if (count >= output.size()) {
         break;
       }
-      output[count] = *endpoint;
-      ++count;
+      output[count++] = *endpoint;
     }
   }
 
@@ -137,5 +135,4 @@ std::error_code resolve_dns_platform(dns_query_view query,
 }
 
 }  // namespace detail
-
 }  // namespace bupp::async_io

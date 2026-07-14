@@ -1,3 +1,4 @@
+#include <bupp/async_io/bsd/kqueue_context_base/operation_base.h>
 #include <bupp/async_io/bsd/kqueue_helper.h>
 
 #include <cerrno>

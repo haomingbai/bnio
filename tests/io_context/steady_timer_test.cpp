@@ -5,6 +5,40 @@
 
 namespace {
 
+struct ordered_timer_receiver {
+  std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
+  bupp::io_context* context = nullptr;
+  std::atomic<unsigned>* next_order = nullptr;
+  std::atomic<unsigned>* observed_order = nullptr;
+  std::atomic<unsigned>* completions = nullptr;
+
+  void set_value() noexcept {
+    state->signal = signal_kind::value;
+    observed_order->store(
+        next_order->fetch_add(1, std::memory_order_acq_rel) + 1,
+        std::memory_order_release);
+    complete();
+  }
+
+  void set_error(std::error_code error) noexcept {
+    state->signal = signal_kind::error;
+    state->error = error;
+    complete();
+  }
+
+  void set_stopped() noexcept {
+    state->signal = signal_kind::stopped;
+    complete();
+  }
+
+ private:
+  void complete() noexcept {
+    if (completions->fetch_add(1, std::memory_order_acq_rel) + 1 == 2) {
+      (void)context->stop();
+    }
+  }
+};
+
 void test_steady_timer_completes() {
   bupp::io_context context;
   if (!context_available(context)) {
@@ -172,7 +206,7 @@ void test_steady_timer_pre_stopped_token_stops_wait() {
   assert(state->signal == signal_kind::stopped);
 }
 
-void test_timer_update_stays_on_primary_ring_with_multiple_workers() {
+void test_timer_update_stays_on_primary_context_with_multiple_workers() {
   constexpr unsigned worker_count = 4;
   bupp::io_context_options options;
   options.concurrency_hint = worker_count;
@@ -181,14 +215,18 @@ void test_timer_update_stays_on_primary_ring_with_multiple_workers() {
     return;
   }
 
-  unsigned completions = 0;
+  std::atomic<unsigned> completions{0};
+  std::atomic<unsigned> next_order{0};
+  std::atomic<unsigned> first_order{0};
+  std::atomic<unsigned> second_order{0};
   bupp::steady_timer first_timer(context);
   assert(first_timer.expires_after(std::chrono::milliseconds(60)) == 0);
 
-  void_receiver first_receiver;
+  ordered_timer_receiver first_receiver;
   first_receiver.context = &context;
   first_receiver.completions = &completions;
-  first_receiver.target = 2;
+  first_receiver.next_order = &next_order;
+  first_receiver.observed_order = &first_order;
   auto first_state = first_receiver.state;
   auto first_operation =
       bexec::connect(first_timer.async_wait(), std::move(first_receiver));
@@ -204,10 +242,11 @@ void test_timer_update_stays_on_primary_ring_with_multiple_workers() {
   bupp::steady_timer second_timer(context);
   assert(second_timer.expires_after(std::chrono::milliseconds(5)) == 0);
 
-  void_receiver second_receiver;
+  ordered_timer_receiver second_receiver;
   second_receiver.context = &context;
   second_receiver.completions = &completions;
-  second_receiver.target = 2;
+  second_receiver.next_order = &next_order;
+  second_receiver.observed_order = &second_order;
   auto second_state = second_receiver.state;
   auto second_operation =
       bexec::connect(second_timer.async_wait(), std::move(second_receiver));
@@ -217,9 +256,11 @@ void test_timer_update_stays_on_primary_ring_with_multiple_workers() {
     worker.join();
   }
 
-  assert(completions == 2);
+  assert(completions.load(std::memory_order_acquire) == 2);
   assert(first_state->signal == signal_kind::value);
   assert(second_state->signal == signal_kind::value);
+  assert(second_order.load(std::memory_order_acquire) == 1);
+  assert(first_order.load(std::memory_order_acquire) == 2);
 }
 
 }  // namespace
@@ -231,6 +272,6 @@ int main() {
   test_steady_timer_multiple_waits_complete();
   test_steady_timer_move_stops_old_wait();
   test_steady_timer_pre_stopped_token_stops_wait();
-  test_timer_update_stays_on_primary_ring_with_multiple_workers();
+  test_timer_update_stays_on_primary_context_with_multiple_workers();
   return 0;
 }

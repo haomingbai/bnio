@@ -12,6 +12,8 @@
 
 namespace bupp::async_io::bsd_native {
 
+class kqueue_io_operation_base;
+
 /**
  * Native action selected for a kqueue operation.
  */

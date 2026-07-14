@@ -1,10 +1,9 @@
+#include <bupp/async_io/bsd/socket_address.h>
 #include <bupp/async_io/ip/endpoint.h>
-#include <bupp/async_io/linux/socket_address.h>
 #include <bupp/async_io/socket_view.h>
 #include <sys/socket.h>
 
 #include <cerrno>
-#include <optional>
 #include <system_error>
 
 namespace bupp::async_io {
@@ -15,48 +14,37 @@ std::error_code last_error() noexcept {
 }
 
 std::error_code result_to_error_code(int result) noexcept {
-  if (result == 0) {
-    return {};
-  }
-  return last_error();
+  return result == 0 ? std::error_code{} : last_error();
 }
 
-std::error_code bind_socket(int fd, const ip::endpoint& endpoint) noexcept {
-  const linux_native::socket_address address(endpoint);
-  return result_to_error_code(::bind(fd, address.data(), address.size()));
-}
-
-std::error_code connect_socket(int fd, const ip::endpoint& endpoint) noexcept {
-  const linux_native::socket_address address(endpoint);
-  return result_to_error_code(::connect(fd, address.data(), address.size()));
-}
-
-std::error_code listen_socket(int fd, int backlog) noexcept {
-  return result_to_error_code(::listen(fd, backlog));
-}
-
-std::error_code shutdown_socket(int fd, int how) noexcept {
-  return result_to_error_code(::shutdown(fd, how));
-}
-
-std::error_code set_socket_reuse_address(int fd, bool enabled) noexcept {
-  const int value = enabled ? 1 : 0;
+std::error_code bind_socket(int descriptor,
+                            const ip::endpoint& endpoint) noexcept {
+  const bsd_native::socket_address address(endpoint);
   return result_to_error_code(
-      ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)));
+      ::bind(descriptor, address.data(), address.size()));
 }
 
-std::error_code get_socket_endpoint(int fd, bool peer,
+std::error_code connect_socket(int descriptor,
+                               const ip::endpoint& endpoint) noexcept {
+  const bsd_native::socket_address address(endpoint);
+  return result_to_error_code(
+      ::connect(descriptor, address.data(), address.size()));
+}
+
+std::error_code get_socket_endpoint(int descriptor, bool peer,
                                     ip::endpoint& endpoint) noexcept {
   sockaddr_storage address{};
   socklen_t size = sizeof(address);
   const int result =
-      peer ? ::getpeername(fd, reinterpret_cast<sockaddr*>(&address), &size)
-           : ::getsockname(fd, reinterpret_cast<sockaddr*>(&address), &size);
+      peer ? ::getpeername(descriptor, reinterpret_cast<sockaddr*>(&address),
+                           &size)
+           : ::getsockname(descriptor, reinterpret_cast<sockaddr*>(&address),
+                           &size);
   if (result != 0) {
     endpoint.reset();
     return last_error();
   }
-  const auto converted = linux_native::make_endpoint(
+  const auto converted = bsd_native::make_endpoint(
       reinterpret_cast<const sockaddr*>(&address), size);
   if (!converted.has_value()) {
     endpoint.reset();
@@ -74,7 +62,7 @@ std::error_code stream_socket_view::bind(
 }
 
 std::error_code stream_socket_view::listen(int backlog) noexcept {
-  return listen_socket(native_handle(), backlog);
+  return result_to_error_code(::listen(native_handle(), backlog));
 }
 
 std::error_code stream_socket_view::connect(
@@ -83,11 +71,13 @@ std::error_code stream_socket_view::connect(
 }
 
 std::error_code stream_socket_view::shutdown(int how) noexcept {
-  return shutdown_socket(native_handle(), how);
+  return result_to_error_code(::shutdown(native_handle(), how));
 }
 
 std::error_code stream_socket_view::set_reuse_address(bool enabled) noexcept {
-  return set_socket_reuse_address(native_handle(), enabled);
+  const int value = enabled ? 1 : 0;
+  return result_to_error_code(::setsockopt(
+      native_handle(), SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)));
 }
 
 std::error_code datagram_socket_view::bind(
@@ -101,11 +91,13 @@ std::error_code datagram_socket_view::connect(
 }
 
 std::error_code datagram_socket_view::shutdown(int how) noexcept {
-  return shutdown_socket(native_handle(), how);
+  return result_to_error_code(::shutdown(native_handle(), how));
 }
 
 std::error_code datagram_socket_view::set_reuse_address(bool enabled) noexcept {
-  return set_socket_reuse_address(native_handle(), enabled);
+  const int value = enabled ? 1 : 0;
+  return result_to_error_code(::setsockopt(
+      native_handle(), SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)));
 }
 
 std::error_code datagram_socket_view::local_endpoint(

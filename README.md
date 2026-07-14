@@ -5,9 +5,9 @@ scheduler-based async model — every I/O operation is a lazy sender that compos
 with the standard receiver pattern. TCP, TLS (OpenSSL), DNS resolution, timers,
 and composed writes all ship out of the box.
 
-> **Status:** Linux (io_uring) is the primary platform. BSD kqueue base wrappers
-> are available; a full kqueue backend is in progress. OpenSSL ≥ 1.1 is required
-> for TLS support.
+> **Status:** Linux uses io_uring; macOS and BSD use kqueue. Both backends expose
+> the same high-level `io_context`, TCP, UDP, DNS, timer, and TLS interfaces.
+> OpenSSL ≥ 1.1 is required for TLS support.
 
 ---
 
@@ -41,7 +41,7 @@ and composed writes all ship out of the box.
 | ------------- | --------------- | ------------------------------------ |
 | C++ compiler  | C++20           | GCC 12+ or Clang 16+                 |
 | CMake         | 3.20            |                                      |
-| liburing      | 2.1             | `pkg-config` required                |
+| liburing      | 2.1             | Linux only; `pkg-config` required    |
 | OpenSSL       | 1.1             | `pkg-config` required; TLS feature   |
 | bexec         | —               | Fetched automatically from GitHub    |
 
@@ -241,7 +241,7 @@ cmake --build build-asio --target bupp_asio_echo_server
 ├─────────────────────────────────────────────────┤
 │  bupp::async_io  (non-owning views + DNS)        │
 │  buffer/descriptor/stream/datagram socket views  │
-│  linux_native::io_uring_context                  │
+│  Linux: io_uring_context  BSD: kqueue_context    │
 ├─────────────────────────────────────────────────┤
 │  bupp::base  (thin system call wrappers)         │
 │  Linux: ring  submission_queue_entry             │
@@ -256,11 +256,11 @@ cmake --build build-asio --target bupp_asio_echo_server
 - **`bupp::async_io`** — platform-neutral vocabulary types. Non-owning views
   for descriptors, buffers, socket views, IP addresses/endpoints, and DNS
   queries. This layer intentionally has no RAII owners.
-  `linux_native::io_uring_context` provides the platform-level event loop (one
-  per run-loop thread under the one-thread-one-uring model).
+  `linux_native::io_uring_context` and `bsd_native::kqueue_context` provide the
+  platform-level event loop selected by the target system.
 - **`bupp::io_context`** — the high-level async runtime. Uses
   `concurrency_hint` to allocate native run-loop slots; each thread entering
-  `run()` claims a slot with its own `io_uring_context`. Produces schedulers
+  `run()` claims a slot with its own native context. Produces schedulers
   (dispatch and post semantics), and provides sender factories for socket views,
   descriptors, DNS, polling, and timers. Stream owners build their higher-level
   senders on top.

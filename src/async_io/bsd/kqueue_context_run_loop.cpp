@@ -1,3 +1,6 @@
+#include <chrono>
+#include <limits>
+
 #include "kqueue_context_internal.h"
 
 namespace bupp::async_io::bsd_native {
@@ -65,18 +68,22 @@ bool kqueue_context::is_in_context() const noexcept {
 kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
   local_task_budget_ = options_.local_queue_threshold;
 
-  if (kqueue_operation_base* operations =
-          reverse_tasks(local_tasks_.pop_all())) {
-    execute_tasks(operations);
+  if (consume_local_state()) {
     return run_phase::run_ready_tasks;
   }
-  if (move_cpu_tasks()) {
-    return run_phase::run_ready_tasks;
-  }
-  if (consume_io_tasks()) {
+  if (consume_global_state()) {
     return run_phase::run_ready_tasks;
   }
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
+}
+
+bool kqueue_context::consume_local_state() noexcept {
+  if (kqueue_operation_base* operations =
+          reverse_tasks(local_state_.cpu.pop_all())) {
+    execute_tasks(operations);
+    return true;
+  }
+  return consume_io_tasks();
 }
 
 kqueue_context::run_phase kqueue_context::handle_wait_for_work() noexcept {
@@ -94,7 +101,7 @@ kqueue_context::run_phase kqueue_context::handle_finish_drain() noexcept {
 
 kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
-    if (collect_ready_events(false) || move_cpu_tasks()) {
+    if (collect_ready_events(false) || consume_global_state()) {
       return run_phase::run_ready_tasks;
     }
     if (should_finish()) {
@@ -107,17 +114,48 @@ kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
 kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   begin_wait();
 
-  if (collect_ready_events(false) || move_cpu_tasks() || consume_io_tasks() ||
-      should_finish()) {
+  if (collect_ready_events(false) || consume_global_state() ||
+      consume_local_state() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
   }
 
-  const bool collected_events = collect_ready_events(true);
+  timespec timeout{};
+  const timespec* timeout_pointer = nullptr;
+  if (global_state_ != nullptr && global_state_->timeout_heap != nullptr &&
+      global_state_->try_fetch_timeout_operations != nullptr) {
+    async_io::time_point deadline{};
+    bool fetched_timeout_operations = false;
+    if (global_state_->try_fetch_timeout_operations(
+            global_state_->timeout_heap, deadline,
+            fetched_timeout_operations)) {
+      if (fetched_timeout_operations || consume_global_state() ||
+          consume_local_state() || should_finish()) {
+        end_wait();
+        return should_finish() ? run_phase::finish_drain
+                               : run_phase::run_ready_tasks;
+      }
+      if (deadline != async_io::time_point::max()) {
+        const auto remaining = std::max(deadline - async_io::clock::now(),
+                                        async_io::duration::zero());
+        const auto nanoseconds =
+            std::chrono::ceil<std::chrono::nanoseconds>(remaining);
+        constexpr auto billion = std::chrono::nanoseconds::period::den;
+        timeout.tv_sec = static_cast<time_t>(nanoseconds.count() / billion);
+        timeout.tv_nsec = static_cast<long>(nanoseconds.count() % billion);
+        timeout_pointer = &timeout;
+      }
+    }
+  }
+
+  const bool collected_events = collect_ready_events(true, timeout_pointer);
   end_wait();
 
-  if (collected_events || move_cpu_tasks() || consume_io_tasks()) {
+  // A timeout is only a reason to become running. The normal ready phase
+  // performs another complete work/timer decision before this worker sleeps.
+  if (collected_events || timeout_pointer != nullptr ||
+      consume_global_state() || consume_local_state()) {
     return run_phase::run_ready_tasks;
   }
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
@@ -131,15 +169,13 @@ bool kqueue_context::should_finish() const noexcept {
 
 void kqueue_context::finish() noexcept {
   for (;;) {
-    (void)move_cpu_tasks();
+    (void)consume_global_state();
     (void)collect_ready_events(false);
-    (void)move_cpu_tasks();
+    (void)consume_global_state();
 
-    kqueue_operation_base* operations = reverse_tasks(local_tasks_.pop_all());
-    if (operations == nullptr) {
+    if (!consume_local_state()) {
       break;
     }
-    execute_tasks(operations);
   }
   state_.store(context_state::finished, std::memory_order_release);
 }

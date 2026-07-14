@@ -14,16 +14,20 @@ if(BUPP_PLATFORM_LINUX)
             linux/io_uring_context_run_loop.cpp
             linux/io_uring_context_task_queue.cpp
             linux/socket_address.cpp
-            socket_view.cpp)
+            linux/socket_view.cpp)
 endif()
 
 if(BUPP_PLATFORM_BSD)
   target_sources(
     bupp
-    PRIVATE bsd/kqueue_context.cpp
+    PRIVATE bsd/address.cpp
+            bsd/dns.cpp
+            bsd/kqueue_context.cpp
             bsd/kqueue_context_events.cpp
             bsd/kqueue_context_io_tasks.cpp
             bsd/kqueue_context_run_loop.cpp
             bsd/kqueue_context_task_queue.cpp
-            bsd/kqueue_helper.cpp)
+            bsd/kqueue_helper.cpp
+            bsd/socket_address.cpp
+            bsd/socket_view.cpp)
 endif()

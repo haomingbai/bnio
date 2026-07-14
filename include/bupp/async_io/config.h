@@ -19,7 +19,7 @@
 #define BUPP_HAS_ASYNC_IO 1
 #endif
 
-#if defined(BUPP_HAS_ASYNC_IO_LINUX) && \
+#if defined(BUPP_HAS_ASYNC_IO) && \
     !defined(BUPP_DISABLE_ASYNC_IO_IP_ADDRESS_PARSER)
 #define BUPP_HAS_ASYNC_IO_IP_ADDRESS_PARSER 1
 #endif

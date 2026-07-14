@@ -147,6 +147,11 @@ void test_blocked_socket_write_falls_back_to_queue() {
   bupp::tcp_socket sender_socket(sockets[0]);
   bupp::tcp_socket receiver_socket(sockets[1]);
 
+  const int sender_flags = ::fcntl(sender_socket.native_handle(), F_GETFL, 0);
+  assert(sender_flags >= 0);
+  assert(::fcntl(sender_socket.native_handle(), F_SETFL,
+                 sender_flags | O_NONBLOCK) == 0);
+
   std::array<char, 4096> filler{};
   while (true) {
     const ssize_t result = ::send(sender_socket.native_handle(), filler.data(),
@@ -274,6 +279,54 @@ void test_io_idle_drain_read_write_pair() {
   assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
 }
 
+void test_descriptor_pipe_read_write_pair() {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int descriptors[2] = {-1, -1};
+  assert(::pipe(descriptors) == 0);
+  constexpr std::string_view payload = "descriptor pipe";
+  std::array<char, 32> bytes{};
+  unsigned completions = 0;
+
+  pair_byte_receiver read_receiver;
+  read_receiver.context = &context;
+  read_receiver.completions = &completions;
+  read_receiver.target = 2;
+  auto read_state = read_receiver.state;
+
+  pair_byte_receiver write_receiver;
+  write_receiver.context = &context;
+  write_receiver.completions = &completions;
+  write_receiver.target = 2;
+  auto write_state = write_receiver.state;
+
+  auto read_sender = scheduler.async_read(
+      bupp::async_io::descriptor_view(descriptors[0]), bupp::buffer(bytes));
+  auto write_sender = scheduler.async_write(
+      bupp::async_io::descriptor_view(descriptors[1]), bupp::buffer(payload));
+  auto read_operation =
+      bexec::connect(std::move(read_sender), std::move(read_receiver));
+  auto write_operation =
+      bexec::connect(std::move(write_sender), std::move(write_receiver));
+
+  bexec::start(read_operation);
+  bexec::start(write_operation);
+  context.run();
+
+  assert(completions == 2);
+  assert(read_state->signal == signal_kind::value);
+  assert(read_state->size == payload.size());
+  assert(write_state->signal == signal_kind::value);
+  assert(write_state->size == payload.size());
+  assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+  assert(::close(descriptors[0]) == 0);
+  assert(::close(descriptors[1]) == 0);
+}
+
 void test_file_write_and_read() {
   std::string path = "/tmp/bupp-io-context-file-XXXXXX";
   const int fd = ::mkstemp(path.data());
@@ -299,6 +352,15 @@ void test_file_write_and_read() {
                           bupp::buffer(payload), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
+
+    assert(state->signal == signal_kind::none);
+#if defined(BUPP_SYSTEM_BSD)
+    std::array<char, 64> started_bytes{};
+    assert(::pread(fd, started_bytes.data(), started_bytes.size(), 0) ==
+           static_cast<ssize_t>(payload.size()));
+    assert(std::memcmp(started_bytes.data(), payload.data(), payload.size()) ==
+           0);
+#endif
     context.run();
 
     assert(state->signal == signal_kind::value);
@@ -322,6 +384,10 @@ void test_file_write_and_read() {
         scheduler, bupp::async_io::descriptor_view(fd), bupp::buffer(bytes), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
+    assert(state->signal == signal_kind::none);
+#if defined(BUPP_SYSTEM_BSD)
+    assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+#endif
     context.run();
 
     assert(state->signal == signal_kind::value);
@@ -341,6 +407,7 @@ int main() {
   test_blocked_socket_write_falls_back_to_queue();
   test_io_idle_drain_reads();
   test_io_idle_drain_read_write_pair();
+  test_descriptor_pipe_read_write_pair();
   test_file_write_and_read();
   return 0;
 }

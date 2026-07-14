@@ -8,6 +8,7 @@
 #include <bexec/sender.hpp>
 #include <cassert>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <system_error>
 
@@ -244,7 +245,7 @@ void test_read_never_exceeds_buffer_view_size() {
   assert(::close(descriptors[1]) == 0);
 }
 
-void test_duplicate_filter_waiter_reports_busy() {
+void test_duplicate_filter_waiters_are_queued() {
   kqueue_context context;
   assert(context.queue_init() == 0);
 
@@ -255,6 +256,7 @@ void test_duplicate_filter_waiter_reports_busy() {
 
   receiver first_completion;
   first_completion.context = &context;
+  auto first_state = first_completion.state;
   kqueue_read_operation first_operation(
       context, descriptor_view(descriptors[0]),
       buffer_view{first_buffer.data(), first_buffer.size()},
@@ -271,11 +273,17 @@ void test_duplicate_filter_waiter_reports_busy() {
 
   bexec::start(first_operation);
   bexec::start(second_operation);
+  constexpr std::array<char, 2> input{'a', 'b'};
+  assert(::write(descriptors[1], input.data(), input.size()) ==
+         static_cast<ssize_t>(input.size()));
   context.run();
 
-  assert(second_state->signal == signal_kind::error);
-  assert(second_state->error ==
-         std::error_code(EBUSY, std::generic_category()));
+  assert(first_state->signal == signal_kind::value);
+  assert(first_state->result == 1);
+  assert(second_state->signal == signal_kind::value);
+  assert(second_state->result == 1);
+  assert(first_buffer[0] == input[0]);
+  assert(second_buffer[0] == input[1]);
   assert(::close(descriptors[0]) == 0);
   assert(::close(descriptors[1]) == 0);
 }
@@ -312,7 +320,7 @@ int main() {
   test_context_performs_bounded_pipe_read_and_write();
   test_read_reports_clean_pipe_eof();
   test_read_never_exceeds_buffer_view_size();
-  test_duplicate_filter_waiter_reports_busy();
+  test_duplicate_filter_waiters_are_queued();
   test_stop_token_completes_before_native_registration();
   return 0;
 }

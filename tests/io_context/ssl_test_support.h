@@ -19,6 +19,10 @@
 #include <utility>
 #include <vector>
 
+#if !defined(SOCK_CLOEXEC)
+#define SOCK_CLOEXEC 0
+#endif
+
 namespace {
 
 [[maybe_unused]] void test_require(bool condition) noexcept {

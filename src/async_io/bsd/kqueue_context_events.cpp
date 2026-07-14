@@ -1,18 +1,17 @@
 #include <bupp/async_io/bsd/kqueue_context.h>
-#include <unistd.h>
 
-#include <algorithm>
 #include <cerrno>
-#include <climits>
 #include <cstddef>
 
 #include "kqueue_context_internal.h"
 
 namespace bupp::async_io::bsd_native {
 
-bool kqueue_context::collect_ready_events(bool wait) noexcept {
+bool kqueue_context::collect_ready_events(
+    bool wait, const timespec* wait_timeout) noexcept {
   operation_queue event_tasks;
-  const unsigned task_count = collect_event_tasks(event_tasks, wait);
+  const unsigned task_count =
+      collect_event_tasks(event_tasks, wait, wait_timeout);
   if (task_count == 0) {
     return false;
   }
@@ -21,14 +20,15 @@ bool kqueue_context::collect_ready_events(bool wait) noexcept {
   return true;
 }
 
-unsigned kqueue_context::collect_event_tasks(operation_queue& event_tasks,
-                                             bool wait) noexcept {
+unsigned kqueue_context::collect_event_tasks(
+    operation_queue& event_tasks, bool wait,
+    const timespec* wait_timeout) noexcept {
   if (!queue_.is_open() || !event_buffer_) {
     return 0;
   }
 
   timespec no_wait{};
-  const timespec* timeout = wait ? nullptr : &no_wait;
+  const timespec* timeout = wait ? wait_timeout : &no_wait;
   int ready_count = 0;
   for (;;) {
     ready_count =
@@ -55,13 +55,13 @@ unsigned kqueue_context::collect_event_tasks(operation_queue& event_tasks,
 void kqueue_context::dispatch_event_tasks(operation_queue& event_tasks,
                                           unsigned task_count) noexcept {
   if (task_count <= options_.event_inline_completion_threshold) {
-    local_tasks_.push(reverse_tasks(event_tasks.pop_all()));
+    local_state_.push_cpu(reverse_tasks(event_tasks.pop_all()));
     return;
   }
 
   if (options_.local_queue_threshold == 0 ||
       (local_task_budget_ > 0 && task_count <= local_task_budget_)) {
-    local_tasks_.push(reverse_tasks(event_tasks.pop_all()));
+    local_state_.push_cpu(reverse_tasks(event_tasks.pop_all()));
     if (options_.local_queue_threshold > 0) {
       local_task_budget_ -= task_count;
     }
@@ -82,6 +82,8 @@ bool kqueue_context::process_event(const bupp::base::event& event,
       registration.operation == nullptr) {
     return false;
   }
+  arm_next_registration(registration.event.ident(),
+                        registration.event.filter());
 
   kqueue_io_operation_base& operation = *registration.operation;
   operation.flags = event.flags();
@@ -95,16 +97,17 @@ bool kqueue_context::process_event(const bupp::base::event& event,
     operation.result =
         event.fflags() == 0 ? -EPIPE : -static_cast<int>(event.fflags());
   } else {
-    operation.result = perform_io(operation, registration.task,
-                                  static_cast<int>(registration.descriptor));
+    operation.result =
+        operation.owns_io_step() ? operation.perform_io() : -EOPNOTSUPP;
     if (operation.result == -EAGAIN || operation.result == -EWOULDBLOCK) {
       prepared_operation rearm;
       rearm.operation = &operation;
       rearm.event_count = 1;
       rearm.task = registration.task;
       rearm.poll_mask = registration.poll_mask;
-      rearm.events[0].set(registration.descriptor, registration.filter,
-                          EV_ADD | EV_ONESHOT, 0, 0, &operation);
+      rearm.events[0].set(registration.event.ident(),
+                          registration.event.filter(), EV_ADD | EV_ONESHOT, 0,
+                          0, &operation);
       const int rearm_result = register_operation(rearm);
       if (rearm_result >= 0) {
         return false;
@@ -116,35 +119,6 @@ bool kqueue_context::process_event(const bupp::base::event& event,
   unregister_operation(operation);
   tasks.push(operation);
   return true;
-}
-
-int kqueue_context::perform_io(kqueue_io_operation_base& operation,
-                               kqueue_task task, int descriptor) noexcept {
-  const buffer_view data = operation.get_data();
-  if (data.size > 0 && data.data == nullptr) {
-    return -EFAULT;
-  }
-
-  const std::size_t size =
-      std::min(data.size, static_cast<std::size_t>(INT_MAX));
-  for (;;) {
-    ssize_t result = -1;
-    if (task == kqueue_task::read) {
-      result = ::read(descriptor, data.data, size);
-    } else if (task == kqueue_task::write) {
-      result = ::write(descriptor, data.data, size);
-    } else {
-      return -EINVAL;
-    }
-
-    if (result >= 0) {
-      return static_cast<int>(result);
-    }
-    if (errno == EINTR) {
-      continue;
-    }
-    return -errno;
-  }
 }
 
 unsigned kqueue_context::poll_result(

@@ -29,6 +29,27 @@ kqueue_context::operation_queue::pop_all() noexcept {
   return operations;
 }
 
+inline void kqueue_context::local_task_queue_state::push_cpu(
+    kqueue_operation_base& operation) noexcept {
+  cpu.push(operation);
+}
+
+inline void kqueue_context::local_task_queue_state::push_cpu(
+    kqueue_operation_base* operations) noexcept {
+  cpu.push(operations);
+}
+
+inline void kqueue_context::local_task_queue_state::push_io(
+    kqueue_io_operation_base& operation) noexcept {
+  operation.io_next = io;
+  io = &operation;
+}
+
+inline void kqueue_context::local_task_queue_state::clear() noexcept {
+  (void)cpu.pop_all();
+  io = nullptr;
+}
+
 [[nodiscard]] inline kqueue_operation_base* reverse_tasks(
     kqueue_operation_base* tasks) noexcept {
   kqueue_operation_base* reversed = nullptr;

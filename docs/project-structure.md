@@ -65,7 +65,7 @@ Platform-neutral vocabulary types and the platform-native event-loop context.
 - `linux/io_uring_operations/socket.h` — socket accept/connect/read/write operations.
 - `linux/io_uring_operations/views.h` — view-based I/O operations.
 - `linux/io_uring_operations/helpers.h` — operation traits and helpers.
-- `linux/socket_address.h` — Linux socket address storage.
+- `linux/socket_address.h` — Linux-native socket address storage and endpoint conversion.
 - `linux/detail/io_uring_receiver_operation.h` — receiver-based operation adapter.
 - `bsd/kqueue_context.h` — umbrella for the BSD native context.
 - `bsd/kqueue_context_base.h` — umbrella for context, operation bases, and options.
@@ -75,15 +75,18 @@ Platform-neutral vocabulary types and the platform-native event-loop context.
 - `bsd/kqueue_helper.h` — readiness registration builder used by passive I/O operations.
 - `bsd/kqueue_operations.h` — umbrella for concrete kqueue operation types.
 - `bsd/kqueue_operations/core.h` — post, nop, and raw operations.
-- `bsd/kqueue_operations/file.h` — readiness-backed descriptor read/write operations.
+- `bsd/kqueue_operations/file.h` — start-time positioned file I/O operations and low-level readiness operations.
 - `bsd/kqueue_operations/poll.h` — descriptor poll operations and sender.
+- `bsd/kqueue_operations/resolve.h` — DNS resolution operations.
+- `bsd/kqueue_operations/socket.h` — objectized nonblocking socket operations and typed senders.
+- `bsd/socket_address.h` — BSD-native socket address storage and endpoint conversion.
 - `bsd/detail/kqueue_receiver_operation.h` — receiver-based I/O operation adapter.
 
 ### Layer 3 — `bupp`
 
 High-level async runtime, stream owners, and buffer types.
 
-- `io_context.h` → `linux/io_context.h` plus `io_context_cpo.h`.
+- `io_context.h` → the selected `linux/io_context.h` or `bsd/io_context.h`.
 - `linux/io_context.h` — `io_context` class definition and public scheduler
   surface; implementation detail types live under `linux/detail/`.
 - `linux/detail/io_context_options.h` — `io_context_options`.
@@ -104,6 +107,9 @@ High-level async runtime, stream owners, and buffer types.
   accept/connect/read/write/send/receive operation models.
 - `linux/detail/io_context_native_io/timer_wait.h` — timer wait operations.
 - `linux/detail/io_context_native_io/write_all.h` — composed write-all sender.
+- `bsd/io_context.h` and `bsd/detail/` — the matching kqueue-backed runtime,
+  timer, scheduler, and readiness-operation implementation with the same
+  public surface.
 - `detail/io_context/scheduler_operations.h` — scheduler-level I/O senders.
 - `detail/ssl/async_operations.h` — umbrella for SSL async operations.
 - `detail/ssl/async_operations/common.h` — shared SSL operation helpers.
@@ -157,9 +163,9 @@ High-level async runtime, stream owners, and buffer types.
 - `src/base/bsd/` — base-layer BSD method implementations:
   - `kqueue.cpp`, `event.cpp`, `event_list_view.cpp`.
 - `src/async_io/` — platform-neutral async_io implementations:
-  - `address.cpp`, `socket_view.cpp`, `tcp_endpoint.cpp`.
+  - `address.cpp`, `tcp_endpoint.cpp`.
 - `src/async_io/linux/` — Linux-specific async_io implementations:
-  - `address.cpp`, `dns.cpp`, `socket_address.cpp`.
+  - `address.cpp`, `dns.cpp`, `socket_address.cpp`, `socket_view.cpp` — Linux-native address, DNS, and socket adapters.
   - `io_uring_context.cpp` — lifecycle and queue init/exit.
   - `io_uring_context_cqe.cpp` — CQE dispatch.
   - `io_uring_context_run_loop.cpp` — main run loop.
@@ -167,6 +173,7 @@ High-level async runtime, stream owners, and buffer types.
   - `io_uring_context_task_queue.cpp` — shared CPU queue and eventfd wakeup.
   - `io_uring_context_internal.h` — internal context state.
 - `src/async_io/bsd/` — BSD-specific async_io implementations:
+  - `address.cpp`, `dns.cpp`, `socket_address.cpp`, `socket_view.cpp` — BSD-native address, DNS, and socket adapters.
   - `kqueue_context.cpp` — lifecycle and queue init/exit.
   - `kqueue_context_events.cpp` — readiness collection and completion dispatch.
   - `kqueue_context_io_tasks.cpp` — run-loop-only passive I/O preparation and registration.
@@ -180,6 +187,8 @@ High-level async runtime, stream owners, and buffer types.
   - `io_context_timer.cpp` — timer operation and slot management.
   - `io_context_timer_driver.cpp` — timer driver and heap.
   - `io_context_timer_state.cpp` — timeout/wakeup state machine.
+- `src/bsd/` — the parallel high-level kqueue `io_context` lifecycle, queue,
+  timer driver, timer operations, and timeout state machine implementations.
 - `src/tcp.cpp` — TCP socket and acceptor methods.
 - `src/ssl.cpp` — SSL context and stream methods.
 

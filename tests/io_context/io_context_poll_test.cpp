@@ -10,7 +10,13 @@ void test_poll_observes_pipe_readiness() {
   auto scheduler = context.get_post_scheduler();
 
   int descriptors[2] = {-1, -1};
+#if defined(BUPP_SYSTEM_LINUX)
   assert(::pipe2(descriptors, O_CLOEXEC) == 0);
+#else
+  assert(::pipe(descriptors) == 0);
+  assert(::fcntl(descriptors[0], F_SETFD, FD_CLOEXEC) == 0);
+  assert(::fcntl(descriptors[1], F_SETFD, FD_CLOEXEC) == 0);
+#endif
 
   poll_receiver receiver;
   receiver.context = &context;

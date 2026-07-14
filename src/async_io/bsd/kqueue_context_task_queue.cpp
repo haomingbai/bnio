@@ -11,11 +11,12 @@ int kqueue_context::post(kqueue_operation_base& operation) noexcept {
   if (current_context_ == this || global_state_ == nullptr) {
     assert(!run_active_.load(std::memory_order_acquire) ||
            current_context_ == this);
-    local_tasks_.push(operation);
+    local_state_.push_cpu(operation);
     return 0;
   }
 
-  push_cpu_task(operation);
+  global_state_->push_cpu(operation);
+  notify_one_waiter();
   return 0;
 }
 
@@ -29,19 +30,12 @@ void kqueue_context::publish_io(kqueue_io_operation_base& operation) noexcept {
 
   assert(!run_active_.load(std::memory_order_acquire) ||
          current_context_ == this);
-  operation.io_next = local_io_tasks_;
-  local_io_tasks_ = &operation;
-}
-
-void kqueue_context::push_cpu_task(kqueue_operation_base& operation) noexcept {
-  assert(global_state_ != nullptr);
-  global_state_->push_cpu(operation);
-  notify_one_waiter();
+  local_state_.push_io(operation);
 }
 
 void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {
   if (global_state_ == nullptr) {
-    local_tasks_.push(reverse_tasks(operations.pop_all()));
+    local_state_.push_cpu(reverse_tasks(operations.pop_all()));
     return;
   }
   kqueue_operation_base* ordered_tasks = reverse_tasks(operations.pop_all());
@@ -58,17 +52,26 @@ void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {
   notify_one_waiter();
 }
 
-bool kqueue_context::move_cpu_tasks() noexcept {
+bool kqueue_context::consume_global_state() noexcept {
   if (global_state_ == nullptr) {
     return false;
   }
-  kqueue_operation_base* incoming = global_state_->pop_cpu_all();
-  if (incoming == nullptr) {
-    return false;
-  }
 
-  local_tasks_.push(reverse_tasks(incoming));
-  return true;
+  bool consumed = false;
+  if (kqueue_operation_base* incoming = global_state_->pop_cpu_all()) {
+    local_state_.push_cpu(reverse_tasks(incoming));
+    consumed = true;
+  }
+  if (kqueue_io_operation_base* incoming = global_state_->pop_io_all()) {
+    kqueue_io_operation_base** tail = &incoming;
+    while (*tail != nullptr) {
+      tail = &(*tail)->io_next;
+    }
+    *tail = incoming_io_tasks_;
+    incoming_io_tasks_ = incoming;
+    consumed = true;
+  }
+  return consumed;
 }
 
 void kqueue_context::notify_one_waiter() noexcept {

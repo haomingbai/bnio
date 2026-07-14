@@ -12,23 +12,23 @@ bupp/bupp.h  (umbrella)
 │   ├── async_io/ip/{address, endpoint, tcp, udp}.h
 │   └── async_io/dns/{query, result, resolve, types}.h
 ├── bupp/io_context.h
-│   └── linux/io_context.h
-│       ├── linux/detail/io_context_options.h
-│       ├── linux/detail/io_context_state.h
-│       ├── linux/detail/io_context_state/native_worker.h
-│       ├── linux/detail/io_context_timer_types.h
-│       ├── linux/detail/steady_timer.h
-│       ├── linux/detail/io_context_native_io.h
-│       │   └── linux/detail/io_context_native_io/{common, file, poll,
-│       │       socket, timer_wait, write_all}.h
-│       └── async_io/linux/io_uring_context.h
-│           ├── async_io/linux/io_uring_context_base.h
-│           │   ├── async_io/linux/io_uring_context_base/context.h
-│           │   ├── async_io/linux/io_uring_context_base/operation_base.h
-│           │   └── async_io/linux/io_uring_context_base/options.h
-│           └── async_io/linux/io_uring_operations.h
-│               └── async_io/linux/io_uring_operations/{core, file,
-│                   helpers, poll, resolve, socket, views}.h
+│   ├── linux/io_context.h → linux/detail/* → async_io/linux/io_uring_context.h
+│   └── bsd/io_context.h → bsd/detail/* → async_io/bsd/kqueue_context.h
+│       └── bsd/detail/io_context_native_io/{common, timer_wait,
+│           write_all}.h
+├── bupp/async_io/linux/io_uring_context.h
+│   ├── async_io/linux/io_uring_context_base.h
+│   │   ├── async_io/linux/io_uring_context_base/context.h
+│   │   ├── async_io/linux/io_uring_context_base/operation_base.h
+│   │   └── async_io/linux/io_uring_context_base/options.h
+│   └── async_io/linux/io_uring_operations.h
+│       └── async_io/linux/io_uring_operations/{core, file,
+│           helpers, poll, resolve, socket, views}.h
+├── bupp/async_io/bsd/kqueue_context.h
+│   ├── async_io/bsd/kqueue_context_base.h
+│   ├── async_io/bsd/kqueue_helper.h
+│   └── async_io/bsd/kqueue_operations/{core, file, poll, resolve,
+│       socket}.h
 ├── bupp/ip.h
 ├── bupp/buffer.h
 │   └── buffer/{basic, dynamic_string, dynamic_byte_vector, holders}.h
@@ -73,25 +73,31 @@ bupp
 │   │   └── udp                           UDP protocol tag
 │   ├── dns_query                         DNS query description
 │   ├── dns_result_view                   DNS result storage view
-│   └── linux_native                      Linux-specific event loop
-│       ├── io_uring_context              platform event-loop owner (non-movable)
-│       ├── io_uring_context_options      context configuration
-│       ├── io_uring_operation_base       intrusive operation node
-│       ├── io_uring_task_queue_state     shared queues + wake/closing state
-│       └── io_uring_*_operation          concrete I/O operations
+│   ├── linux_native                      Linux-specific event loop
+│   │   ├── socket_address                Linux-native sockaddr storage
+│   │   ├── io_uring_context              platform event-loop owner (non-movable)
+│   │   ├── io_uring_context_options      context configuration
+│   │   ├── io_uring_operation_base       intrusive operation node
+│   │   ├── io_uring_task_queue_state     shared queues + wake/closing state
+│   │   └── io_uring_*_operation          concrete I/O operations
+│   └── bsd_native                        BSD-specific event loop
+│       ├── socket_address                BSD-native sockaddr storage
+│       ├── kqueue_context                platform event-loop owner
+│       ├── kqueue_context_options        context configuration
+│       ├── kqueue_operation_base         intrusive CPU operation node
+│       ├── kqueue_io_operation_base      readiness operation node
+│       └── kqueue_task_queue_state       shared queues + wake/closing state
 ├── io_context                            Layer 3: high-level async context
 │   ├── operation_base                    intrusive shared-I/O node
 │   ├── basic_scheduler<Kind>             dispatch/post scheduler handles
 │   └── schedule_sender<Kind>             scheduler sender types
 ├── detail                                Layer 3 internals
-│   ├── native_context_state              primary uring context + options
+│   ├── native_context_state              primary native context + options
 │   ├── native_worker_state               worker-list counters and cursors
-│   ├── native_worker                     per-thread io_uring_context slot
+│   ├── native_worker                     per-thread native context slot
 │   ├── timer_state_data                  timer map, heap, timeout state
 │   ├── timer_*_operation                 reusable timer operations
-│   ├── native_io_sender<Model>           native I/O sender template
-│   ├── native_io_operation<Model, R>     native I/O operation template
-│   └── *_model / *_write_all_state       socket/file/poll/write-all models
+│   └── *_write_all_state                 layer-2 sender compositions
 ├── ip
 │   ├── address (= async_io::ip::address)
 │   ├── endpoint (= async_io::ip::endpoint)

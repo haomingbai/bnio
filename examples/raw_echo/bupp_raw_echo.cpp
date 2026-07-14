@@ -20,6 +20,10 @@
 #include <utility>
 #include <vector>
 
+#if !defined(SOCK_CLOEXEC)
+#define SOCK_CLOEXEC 0
+#endif
+
 using namespace bupp;
 namespace {
 
@@ -346,9 +350,13 @@ int main(int argc, char** argv) {
 
   io_context_options opts;
   opts.concurrency_hint = worker_count;
+#if defined(BUPP_HAS_IO_CONTEXT_LINUX)
   opts.platform.uring.entries = 1024;
   opts.platform.uring.setup_flags =
       bupp::base::detail::io_uring_setup_coop_taskrun;
+#elif defined(BUPP_HAS_IO_CONTEXT_BSD)
+  opts.platform.kqueue.entries = 1024;
+#endif
   io_context ctx(opts);
   if (!ctx.is_open()) {
     std::cerr << "ctx unavailable\n";

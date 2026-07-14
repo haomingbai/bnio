@@ -2,6 +2,7 @@
 #include <bupp/async_io/buffer_view.h>
 #include <bupp/async_io/ip/tcp.h>
 #include <bupp/async_io/socket_view.h>
+#include <bupp/config/system.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -11,6 +12,10 @@
 #include <system_error>
 #include <type_traits>
 #include <utility>
+
+#if !defined(SOCK_CLOEXEC)
+#define SOCK_CLOEXEC 0
+#endif
 
 namespace {
 
@@ -144,8 +149,12 @@ void test_loopback_setup() {
   bupp::async_io::stream_socket_view client(client_fd.get());
   assert(!client.connect(remote));
 
+#if defined(BUPP_SYSTEM_LINUX) || defined(BUPP_SYSTEM_FREEBSD)
   unique_fd accepted_fd(
       ::accept4(listener.native_handle(), nullptr, nullptr, SOCK_CLOEXEC));
+#else
+  unique_fd accepted_fd(::accept(listener.native_handle(), nullptr, nullptr));
+#endif
   assert(accepted_fd.get() >= 0);
 
   bupp::async_io::stream_socket_view accepted(accepted_fd.get());

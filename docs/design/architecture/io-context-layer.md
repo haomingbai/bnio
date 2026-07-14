@@ -1,32 +1,33 @@
 # Layer 3: `bupp::io_context` — High-Level Async I/O Context
 
-Namespace `bupp`. Header `include/bupp/linux/io_context.h` (plus sub-headers
-under `include/bupp/linux/detail/`).
+Namespace `bupp`. Public umbrella `include/bupp/io_context.h` selects
+`include/bupp/linux/io_context.h` or `include/bupp/bsd/io_context.h`, with
+matching detail headers under the platform directory.
 
 `io_context` is the event-loop owner and scheduler factory:
 
-1. **Event loop host** — `run()` drives the io_uring completion loop. Under the
-   one-thread-one-uring model, each thread calling `run()` claims a native worker
-   slot with its own `io_uring_context`.
+1. **Event loop host** — `run()` drives the selected io_uring or kqueue loop.
+   Each thread calling `run()` claims a native worker slot with its own native
+   context.
 2. **Scheduler factory** — produces dispatch and post schedulers.
 3. **Passive I/O backend** — publishes scheduler I/O to a shared queue that a
-   worker drains on its owning io_uring thread.
+   worker drains on its owning native-context thread.
 
 The public class is intentionally a coordinator. It owns a small set of
 cohesive `detail` state objects rather than defining all internal data inline:
 
 | State / Detail Type | Header | Responsibility |
 |---------------------|--------|----------------|
-| `detail::native_context_state` | `linux/detail/io_context_state.h` | Primary native `io_uring_context` plus Linux-specific options. |
-| `detail::native_worker_state` | `linux/detail/io_context_state.h` | Worker linked list, active worker count, and round-robin cursor. |
-| `detail::native_worker` | `linux/detail/io_context_state/native_worker.h` | Per-run-thread native context slot. |
-| `async_io::linux_native::io_uring_task_queue_state` | `async_io/linux/io_uring_context_base/operation_base.h` | Shared CPU/I/O queues, awake-worker count, and worker-group closing state. |
-| `detail::timer_state_data` | `linux/detail/io_context_timer_types.h` | Timer map, heap, reusable timer-operation states, and timeout state machine. |
+| `detail::native_context_state` | `{linux,bsd}/detail/io_context_state.h` | Primary native context plus platform options. |
+| `detail::native_worker_state` | `{linux,bsd}/detail/io_context_state.h` | Worker linked list, active worker count, and round-robin cursor. |
+| `detail::native_worker` | `{linux,bsd}/detail/io_context_state/native_worker.h` | Per-run-thread native context slot. |
+| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, awake-worker count, and worker-group closing state. |
+| `detail::timer_state_data` | `{linux,bsd}/detail/io_context_timer_types.h` | Timer map, heap, reusable timer-operation states, and timeout state machine. |
 
-Template implementation types are grouped by operation family under
-`linux/detail/io_context_native_io/`. The aggregate detail header is included
-after the complete `io_context` declaration, so templates can call private
-context hooks without splitting a class definition across files.
+Template implementation types are grouped by operation family under the
+platform's `detail/io_context_native_io/`. The aggregate detail header is
+included after the complete `io_context` declaration, so templates can call
+private context hooks without splitting a class definition across files.
 
 ### Passive I/O Publication
 
@@ -34,8 +35,8 @@ context hooks without splitting a class definition across files.
 graph LR
     I["operation"] --> E["publish_io()"]
     E --> Q["shared lower-priority I/O queue"]
-    Q --> W["io_uring_context::run() takes all I/O"]
-    W --> U["prepare SQEs + private ring submit"]
+    Q --> W["native context run loop takes all I/O"]
+    W --> U["prepare SQEs or readiness registrations"]
 ```
 
 There is one publication policy. Producers publish I/O and wake a worker when
@@ -45,14 +46,19 @@ naturally form larger kernel submission batches; idle workloads reach the same
 drain during the pre-sleep recheck. No count, threshold, explicit flush, or
 direct variant is involved.
 
-Socket data operations first try one non-blocking syscall in the high-level
-layer. Stream and connected datagram operations use `recv()` or `send()` with
-`MSG_DONTWAIT`; endpoint-aware datagram operations use `recvfrom()` or
-`sendto()`. Descriptor reads use `preadv2` with `RWF_NOWAIT` when the kernel and
-filesystem support it. If an immediate operation would block, or if
-`RWF_NOWAIT` is unsupported, it falls back to the shared io_uring
-wait path. Completion is still posted through `io_context`; receivers are not
-called inline from `start()`.
+Layer 3 does not issue native I/O calls. It converts high-level buffers and
+owners to layer-2 views, then returns the platform-native sender. On BSD, each
+layer-2 socket request first attempts its nonblocking call and registers the
+matching kqueue filter only when it would block. The request repeats the call
+after readiness. On Linux, immediate attempts and SQE preparation likewise
+remain platform-native implementation details.
+
+BSD regular-file requests use a documented blocking-at-start fallback:
+`start()` performs one positioned `pread()` or `pwrite()`, then posts the
+receiver completion through the selected kqueue context. Thus data transfer is
+finished when `start()` returns, but no receiver is called inline. This keeps
+the public sender interface aligned with Linux without pretending that kqueue
+provides asynchronous regular-file kernel work.
 
 ### Configuration
 
@@ -155,8 +161,8 @@ All senders also complete with `set_error(std::error_code)` or `set_stopped()`.
 
 ### Internal Header Layout
 
-The Linux `io_context` layer uses detail headers to keep operation families
-separate while preserving a single public class declaration:
+Each platform `io_context` layer uses the same detail-header layout to keep
+operation families separate while preserving a single public class declaration:
 
 | Header | Contents |
 |--------|----------|
@@ -172,10 +178,12 @@ separate while preserving a single public class declaration:
 | `linux/detail/io_context_native_io/write_all.h` | Write-all state, step sender, and composed operation templates. |
 | `linux/detail/io_context_native_io.h` | Aggregates the native-I/O detail headers and defines inline scheduler/context forwarding functions. |
 
-Detail headers are still installable because public inline templates reference
-them. They remain implementation headers: user code should normally include
-`bupp/io_context.h` or `bupp/linux/io_context.h`, not the detail headers
-directly.
+BSD keeps only `common.h`, `timer_wait.h`, and `write_all.h` in the layer-3
+detail directory. Its native file, socket, poll, and DNS requests live under
+`async_io/bsd/kqueue_operations/`; the high-level forwarding functions select
+and compose those layer-2 senders. Detail headers are installable because
+public inline templates reference them. User code should normally include
+`bupp/io_context.h`, not the detail headers directly.
 
 ### Read/Write Semantic Split
 

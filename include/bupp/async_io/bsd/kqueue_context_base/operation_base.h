@@ -2,7 +2,7 @@
 #ifndef BUPP_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPERATION_BASE_H_
 #define BUPP_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPERATION_BASE_H_
 
-#include <bupp/async_io/buffer_view.h>
+#include <bupp/async_io/time.h>
 #include <bupp/export.h>
 
 #include <atomic>
@@ -16,6 +16,8 @@ class kqueue_io_operation_base;
 
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BUPP_EXPORT kqueue_task_queue_state {
+  using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
+                                        bool&) noexcept;
   void push_cpu(kqueue_operation_base& operation) noexcept;
 
   [[nodiscard]] kqueue_operation_base* pop_cpu_all() noexcept;
@@ -28,6 +30,9 @@ struct BUPP_EXPORT kqueue_task_queue_state {
   std::atomic<kqueue_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
   std::atomic_bool closing{false};
+  /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */
+  void* timeout_heap = nullptr;
+  try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
 };
 
 /**
@@ -77,8 +82,17 @@ class BUPP_EXPORT kqueue_io_operation_base : public kqueue_operation_base {
   /** Selects error completion when preparation or registration fails. */
   virtual void complete_submit_error(int result) noexcept = 0;
 
-  /** Returns the non-owning buffer used by context-owned read/write work. */
-  [[nodiscard]] virtual buffer_view get_data() noexcept { return {}; }
+  /**
+   * Returns whether this operation owns the syscall performed after a
+   * readiness notification.
+   *
+   * Objectized layer-2 read/write requests override this hook. The context
+   * itself never issues their native I/O calls.
+   */
+  [[nodiscard]] virtual bool owns_io_step() const noexcept { return false; }
+
+  /** Performs one bounded nonblocking syscall after readiness. */
+  [[nodiscard]] virtual int perform_io() noexcept { return 0; }
 };
 
 inline void kqueue_task_queue_state::push_cpu(
@@ -90,10 +104,6 @@ inline void kqueue_task_queue_state::push_cpu(
       head, &operation, std::memory_order_release, std::memory_order_relaxed));
 }
 
-inline kqueue_operation_base* kqueue_task_queue_state::pop_cpu_all() noexcept {
-  return cpu_head.exchange(nullptr, std::memory_order_acquire);
-}
-
 inline void kqueue_task_queue_state::push_io(
     kqueue_io_operation_base& operation) noexcept {
   kqueue_io_operation_base* head = io_head.load(std::memory_order_relaxed);
@@ -101,6 +111,10 @@ inline void kqueue_task_queue_state::push_io(
     operation.io_next = head;
   } while (!io_head.compare_exchange_weak(
       head, &operation, std::memory_order_release, std::memory_order_relaxed));
+}
+
+inline kqueue_operation_base* kqueue_task_queue_state::pop_cpu_all() noexcept {
+  return cpu_head.exchange(nullptr, std::memory_order_acquire);
 }
 
 inline kqueue_io_operation_base*

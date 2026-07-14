@@ -4,7 +4,8 @@ This document describes the `io_context` timer subsystem. The design is built
 around one rule: timer operations are ordinary operations; the important logic
 is when they are moved between queues and posted.
 
-Timer implementation types live in `include/bupp/linux/detail/`:
+Timer implementation types live in the matching
+`include/bupp/{linux,bsd}/detail/` directory:
 
 - `io_context_timer_types.h` contains `timer_slot`, `timer_heap_item`,
   `timer_operation_base`, the reusable timer operations, and
@@ -67,9 +68,9 @@ inspected.
 
 ### `timer_operation_base`
 
-Timer waits derive from `timer_operation_base`, which is also an
-`io_uring_operation_base`. It is posted to the native context when completion is
-known.
+Timer waits derive from `timer_operation_base`, which is also the selected
+native context's CPU-operation base. It is posted to the native context when
+completion is known.
 
 The base stores:
 
@@ -123,7 +124,7 @@ sequenceDiagram
     participant T as timer_slot
     participant D as timer_driver_operation
     participant H as context heap
-    participant K as io_uring timeout
+    participant K as native kernel timeout
     participant R as receiver
 
     U->>T: push to submitted_head
@@ -196,8 +197,8 @@ The timer subsystem reuses several internal operation objects:
 | Operation | Purpose | Reuse Rule |
 |-----------|---------|------------|
 | `timer_driver_operation_` | Drains submitted waits, completes due waits, schedules kernel timeout. | Only posted when driver state is idle. |
-| `timer_wakeup_operation_` | The active io_uring timeout request. | Queued on the primary run loop only when timeout state is idle. |
-| `timer_update_operation_` | Retargets the active io_uring timeout. | Queued on the primary run loop only when timeout state is armed and the root deadline changed. |
+| `timer_wakeup_operation_` | The active native timeout request (io_uring timeout or `EVFILT_TIMER`). | Queued on the primary run loop only when timeout state is idle. |
+| `timer_update_operation_` | Retargets the active native timeout. | Queued on the primary run loop only when timeout state is armed and the root deadline changed. |
 
 These objects must not be posted or queued twice while already in flight.
 The state machines below exist to protect that reuse, not to protect ordinary
@@ -223,7 +224,7 @@ This is the main repeated-posting rule.
 
 ## Kernel Timeout State
 
-`timer_state_data::timeout_state` describes the single reusable io_uring timeout
+`timer_state_data::timeout_state` describes the single reusable native timeout
 request owned by the context.
 
 ```mermaid
@@ -246,7 +247,7 @@ The states mean:
 | `updating` | A timeout update is queued or active for the wakeup. |
 | `update_pending` | The old wakeup completed while the update SQE was still in flight. |
 
-The `update_pending` state handles completion reordering. io_uring can report
+The `update_pending` state handles completion reordering. A backend can report
 the old timeout completion before the timeout update completion. In that case
 there is no active wakeup left after the update CQE arrives, so the state moves
 to `idle`.
@@ -267,7 +268,7 @@ The function looks only at the heap root:
 
 Queuing a wakeup or update stores the new `armed_deadline`. The next run-loop
 pass prepares it together with other passive I/O; timer code never reserves an
-SQE or submits the ring directly.
+SQE, calls `kevent()`, or submits native work directly.
 
 ## Invariants
 

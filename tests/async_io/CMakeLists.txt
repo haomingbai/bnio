@@ -8,8 +8,9 @@ endfunction()
 bupp_add_async_io_test(address address_test.cpp)
 bupp_add_async_io_test(buffer_view buffer_view_test.cpp)
 bupp_add_async_io_test(descriptor_view descriptor_view_test.cpp)
+bupp_add_async_io_test(dns dns_test.cpp)
+bupp_add_async_io_test(socket_view socket_view_test.cpp)
 if(BUPP_PLATFORM_LINUX)
-  bupp_add_async_io_test(dns dns_test.cpp)
   bupp_add_async_io_test(io_uring_cqe_dispatch
                          io_uring_cqe_dispatch_test.cpp)
   bupp_add_async_io_test(io_uring_operation_traits
@@ -17,10 +18,10 @@ if(BUPP_PLATFORM_LINUX)
   bupp_add_async_io_test(io_uring_run_loop io_uring_run_loop_test.cpp)
   bupp_add_async_io_test(io_uring_sender io_uring_sender_test.cpp)
   bupp_add_async_io_test(linux_socket_address linux_socket_address_test.cpp)
-  bupp_add_async_io_test(socket_view socket_view_test.cpp)
   bupp_add_async_io_test(udp_io_uring udp_io_uring_test.cpp)
 endif()
 if(BUPP_PLATFORM_BSD)
+  bupp_add_async_io_test(bsd_socket_address bsd_socket_address_test.cpp)
   bupp_add_async_io_test(kqueue_helper kqueue_helper_test.cpp)
   bupp_add_async_io_test(kqueue_operation_traits
                          kqueue_operation_traits_test.cpp)
@@ -67,6 +68,8 @@ if(BUPP_PLATFORM_BSD)
     bsd_kqueue_context BUPP_HEADER_TEST_BSD_KQUEUE_CONTEXT)
   bupp_add_async_io_header_self_contained_test(
     bsd_kqueue_helper BUPP_HEADER_TEST_BSD_KQUEUE_HELPER)
+  bupp_add_async_io_header_self_contained_test(
+    bsd_socket_address BUPP_HEADER_TEST_BSD_SOCKET_ADDRESS)
 endif()
 bupp_add_async_io_header_self_contained_test(socket_view
                                              BUPP_HEADER_TEST_SOCKET_VIEW)

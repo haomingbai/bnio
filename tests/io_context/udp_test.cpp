@@ -6,9 +6,8 @@
 #include <bupp/buffer/basic.h>
 #include <bupp/buffer/dynamic_string.h>
 #include <bupp/buffer/holders.h>
+#include <bupp/io_context.h>
 #include <bupp/ip.h>
-#include <bupp/linux/detail/io_context_options.h>
-#include <bupp/linux/io_context.h>
 #include <bupp/udp.h>
 #include <unistd.h>
 

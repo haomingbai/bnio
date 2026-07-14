@@ -2,8 +2,11 @@
 
 include(CMakeFindDependencyMacro)
 
-if(@BUPP_PLATFORM_LINUX@)
+if(@BUPP_PLATFORM_LINUX@ OR @BUPP_PLATFORM_BSD@)
   find_dependency(OpenSSL)
+endif()
+
+if(@BUPP_PLATFORM_LINUX@)
   find_dependency(PkgConfig)
   pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.1)
 endif()

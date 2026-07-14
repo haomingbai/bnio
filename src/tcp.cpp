@@ -1,4 +1,5 @@
 #include <bupp/tcp.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -41,6 +42,24 @@ namespace {
   return make_errno_error(errno);
 }
 
+[[nodiscard]] int open_socket(int family, int type, int protocol) noexcept {
+#if defined(SOCK_CLOEXEC)
+  return ::socket(family, type | SOCK_CLOEXEC, protocol);
+#else
+  const int descriptor = ::socket(family, type, protocol);
+  if (descriptor < 0) {
+    return -1;
+  }
+  if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) != 0) {
+    const int error = errno;
+    (void)::close(descriptor);
+    errno = error;
+    return -1;
+  }
+  return descriptor;
+#endif
+}
+
 }  // namespace
 
 socket::~socket() noexcept { (void)close(); }
@@ -59,7 +78,7 @@ std::error_code socket::open(int family) noexcept {
   if (is_open()) {
     return {};
   }
-  const int fd = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  const int fd = open_socket(family, SOCK_STREAM, 0);
   if (fd < 0) {
     return make_errno_error(errno);
   }
@@ -116,7 +135,7 @@ std::error_code acceptor::open(int family) noexcept {
   if (is_open()) {
     return {};
   }
-  const int fd = ::socket(family, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  const int fd = open_socket(family, SOCK_STREAM, 0);
   if (fd < 0) {
     return make_errno_error(errno);
   }

@@ -48,6 +48,9 @@ void test_accept_connect_loopback() {
   assert(completions == 2);
   assert(accept_state->signal == signal_kind::value);
   assert(accept_state->fd >= 0);
+#if defined(BUPP_HAS_IO_CONTEXT_BSD)
+  assert((::fcntl(accept_state->fd, F_GETFL, 0) & O_NONBLOCK) != 0);
+#endif
   assert(connect_state->signal == signal_kind::value);
   assert(client.is_open());
 

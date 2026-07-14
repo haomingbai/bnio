@@ -64,7 +64,7 @@ graph LR
     L1 -->|"uses"| LIB["liburing"]
     L3 -->|"uses"| SSL["OpenSSL"]
     L2 -->|"uses"| LIB2["Linux: liburing<br/>(linux_native operations)"]
-    L2 -.->|"planned"| BSD["BSD: kqueue<br/>(bsd_native operations)"]
+    L2 --> BSD["BSD: kqueue<br/>(bsd_native operations)"]
 ```
 
 ## Platform Native Backends
@@ -76,9 +76,13 @@ own `io_uring_context` instance, allocated from a pool sized by
 that passively removes I/O owns SQE preparation, submission, and CQ collection
 for its ring.
 
-BSD kqueue **base wrappers** (`base::kqueue`, `base::event`,
-`base::event_list_view`) are already implemented. The full `kqueue_context`
-backend and high-level `io_context` integration remain in progress.
+BSD kqueue base wrappers (`base::kqueue`, `base::event`,
+`base::event_list_view`), the passive `kqueue_context`, and high-level
+`io_context` integration are implemented. Layer-2 kqueue request objects own
+all native nonblocking socket calls and retry them after the corresponding
+filter fires. Positioned regular-file requests run in `start()` and post only
+their completion. The timer heap root is represented by a passive one-shot
+`EVFILT_TIMER` registration.
 
 See [`kqueue-roadmap.md`](../kqueue-roadmap.md) for the macOS/BSD technical route.
 

@@ -20,6 +20,10 @@
 #include <utility>
 #include <vector>
 
+#if !defined(SOCK_CLOEXEC)
+#define SOCK_CLOEXEC 0
+#endif
+
 namespace {
 
 enum class signal_kind {

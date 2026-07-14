@@ -30,9 +30,9 @@ that an fd is ready, and bupp must then perform the actual `accept`, `connect`,
 - Do not emulate `io_uring` at the base layer.
 - Do not add executors, coroutines, or sender abstractions to `base`.
 - Do not require `async_io` vocabulary types to own descriptors or buffers.
-- Do not promise fully asynchronous regular-file I/O through `kqueue` in the
-  first port. Network sockets, timers, polling, DNS, and high-level TCP/TLS are
-  the priority.
+- Do not describe regular-file I/O through `kqueue` as asynchronous kernel
+  work. The supported fallback performs positioned I/O in `start()` and posts
+  only the completion.
 
 ## Platform Shape
 
@@ -42,7 +42,7 @@ The platform split should evolve from the current Linux-only shape into this:
 |-------|-------|-------------|
 | `base` | `include/bupp/base/linux/`, `src/base/linux/` ✅ | `include/bupp/base/bsd/`, `src/base/bsd/` ✅ |
 | `async_io` native backend | `async_io::linux_native::io_uring_context` ✅ | `async_io::bsd_native::kqueue_context` ✅ |
-| high-level runtime | `include/bupp/linux/io_context.h`, `src/linux/` ✅ | `include/bupp/bsd/io_context.h`, `src/bsd/` (planned) |
+| high-level runtime | `include/bupp/linux/io_context.h`, `src/linux/` ✅ | `include/bupp/bsd/io_context.h`, `src/bsd/` ✅ |
 | system macros | `BUPP_SYSTEM_LINUX` ✅ | `BUPP_SYSTEM_DARWIN`, `BUPP_SYSTEM_FREEBSD`, `BUPP_SYSTEM_BSD` ✅ |
 
 The public umbrella headers should eventually select the platform runtime
@@ -118,10 +118,10 @@ hybrid hook described above when their syscall state does not fit a single
 
 Descriptor, task, and filter state is built in a run-loop-local preparation
 record and retained only in the fixed-capacity active-registration table owned
-by `kqueue_context`; it is not stored in `kqueue_operation_base`. The backend
-currently permits one active waiter per descriptor/filter pair and reports
-`EBUSY` instead of allowing a later `EV_ADD` to silently replace an earlier
-operation.
+by `kqueue_context`; it is not stored in `kqueue_operation_base`. One native
+one-shot registration is armed per descriptor/filter pair. Additional waiters
+are retained in FIFO order and the next waiter is armed when the current one is
+dispatched, so a later `EV_ADD` never replaces an earlier operation.
 
 ## Base Layer Work
 
@@ -245,7 +245,8 @@ natural batches.
 
 ### Socket Operations
 
-`kqueue` socket operations should map readiness filters to nonblocking syscalls:
+Layer-2 kqueue request objects map readiness filters to nonblocking syscalls;
+layer 3 only selects and composes those senders:
 
 | Operation | Readiness | I/O step after event |
 |-----------|-----------|----------------------|
@@ -262,32 +263,28 @@ through `SO_ERROR`.
 ### Descriptor I/O
 
 `io_uring` can perform file I/O as true asynchronous kernel work. `kqueue`
-cannot provide the same guarantee for regular files. The first macOS/BSD port
-should therefore document descriptor I/O support in two tiers:
-
-- socket-like descriptors: supported through readiness and nonblocking syscalls;
-- regular files: deferred, or implemented through an explicitly documented
-  blocking/fallback path later.
-
-This avoids accidentally making `io_context::run()` block on large file reads or
-writes while the public API still looks asynchronous.
+cannot provide that guarantee for regular files. BSD therefore uses an
+explicit blocking-at-start fallback: the layer-2 operation calls positioned
+`pread()` or `pwrite()` from `start()`, stores the result, and posts itself to
+the context. The receiver is invoked by `run()`, never inline from `start()`.
+This supports the same sender surface while making the blocking point precise;
+applications must not call `start()` for potentially slow files on a latency
+sensitive thread.
 
 ### Timers And Wakeups
 
-The current high-level timer design should stay mostly intact: `io_context`
-owns timer state and posts operations when expiry/cancellation is known. The
-BSD native backend only needs a way to sleep until the next deadline and wake
-early when new work arrives.
+The high-level timer design stays shared: `io_context` owns the timer heap and
+posts user operations only when expiry or cancellation is known. The BSD
+native backend represents the heap root with one reusable, one-shot
+`EVFILT_TIMER` registration. If the root changes, the passive timeout-update
+operation re-arms that same registration. Both operations enter the owning
+kqueue context through `publish_io()` and are prepared by its run loop; timer
+code never calls `kevent()` directly and never submits work actively to a
+worker thread.
 
-Candidate implementation:
-
-- use `kevent`'s timeout parameter for the nearest deadline;
-- use `EVFILT_USER` as the cross-thread wakeup mechanism for `post()`, `stop()`,
-  and timer rescheduling;
-- keep timer heap ownership in high-level `io_context`, not in `base`.
-
-If this becomes awkward for reusable internal waits, an `EVFILT_TIMER` helper
-can be added later, but it should not be the first dependency.
+`EVFILT_USER` remains the cross-thread wakeup mechanism for newly published
+CPU/I/O work and stop requests. Timer heap ownership stays in high-level
+`io_context`, not in `base` or `kqueue_context`.
 
 ## High-Level io_context Work
 
@@ -332,21 +329,26 @@ attempt, while `async_write` is the composed write-all loop.
 - [x] Implement passive CPU/I/O queues, waiting-aware wakeup, stop handling,
   event wait, and operation dispatch.
 - [x] Add context-level tests using posted operations, `EVFILT_USER`, poll, and
-  context-owned buffer I/O.
+  operation-owned buffer I/O.
 
-### Phase 4: Socket Readiness Operations
+### Phase 4: Socket Readiness Operations ✅
 
 - [x] Implement descriptor read, write, and poll readiness operations.
-- Implement nonblocking accept, connect, read_some, write_some, and poll.
-- Add tests mirroring existing Linux socket tests where possible.
-- Validate EOF, cancellation, short write, and `EWOULDBLOCK` rearm paths.
+- [x] Implement nonblocking accept, connect, read_some, write_some, datagram,
+  and poll operations.
+- [x] Queue concurrent waiters for the same descriptor/filter without replacing
+  an active registration.
+- [x] Add tests mirroring existing Linux socket tests where possible.
+- [x] Validate EOF, cancellation, blocked-write, and `EWOULDBLOCK` rearm paths.
 
-### Phase 5: High-Level Runtime Integration
+### Phase 5: High-Level Runtime Integration ✅
 
-- Wire `bupp::io_context` to the BSD native backend.
-- Reuse TCP, TLS, DNS, timers, and write-all composition.
-- Run existing `io_context`, TCP, SSL, mini_curl, and raw echo tests/examples on
-  macOS.
+- [x] Wire `bupp::io_context` to the BSD native backend.
+- [x] Reuse the public scheduler/CPO surface, TCP/TLS owners, DNS vocabulary,
+  timer heap, and write-all composition.
+- [x] Implement the passive kernel deadline with `EVFILT_TIMER`.
+- [x] Build the existing `io_context`, TCP, SSL, mini_curl, and raw echo
+  tests/examples on macOS.
 
 ### Phase 6: FreeBSD Follow-Up
 

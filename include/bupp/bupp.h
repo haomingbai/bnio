@@ -9,7 +9,7 @@
 #include <bupp/io_context/config.h>
 #include <bupp/ip.h>
 
-#if defined(BUPP_HAS_IO_CONTEXT_LINUX)
+#if defined(BUPP_HAS_IO_CONTEXT)
 #include <bupp/io_context.h>
 #include <bupp/ssl.h>
 #include <bupp/tcp.h>

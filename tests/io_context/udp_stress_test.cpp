@@ -1,9 +1,7 @@
 #include <bupp/async_io/ip/address.h>
 #include <bupp/async_io/ip/endpoint.h>
-#include <bupp/async_io/linux/io_uring_context_base/options.h>
+#include <bupp/io_context.h>
 #include <bupp/ip.h>
-#include <bupp/linux/detail/io_context_options.h>
-#include <bupp/linux/io_context.h>
 #include <bupp/udp.h>
 
 #include <array>
@@ -74,7 +72,11 @@ void run_stress_test() {
   bupp::io_context_options options;
   constexpr unsigned worker_count = 4;
   options.concurrency_hint = worker_count;
+#if defined(BUPP_SYSTEM_LINUX)
   options.platform.uring.entries = 512;
+#else
+  options.platform.kqueue.entries = 512;
+#endif
   bupp::io_context context(options);
   if (!context_available(context)) {
     return;

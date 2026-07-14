@@ -58,10 +58,7 @@ socket_address::socket_address(const ip::endpoint& endpoint) noexcept {
 bool socket_address::valid() const noexcept { return size_ != 0; }
 
 int socket_address::family() const noexcept {
-  if (!valid()) {
-    return AF_UNSPEC;
-  }
-  return static_cast<int>(storage_.ss_family);
+  return valid() ? static_cast<int>(storage_.ss_family) : AF_UNSPEC;
 }
 
 sockaddr* socket_address::data() noexcept {

@@ -4,11 +4,12 @@
 
 #include <bupp/io_context/config.h>
 
-// io_context is implemented only when the Linux io_uring backend is enabled.
 #if defined(BUPP_HAS_IO_CONTEXT_LINUX)
 #include <bupp/linux/io_context.h>
+#elif defined(BUPP_HAS_IO_CONTEXT_BSD)
+#include <bupp/bsd/io_context.h>
 #else
-#error "bupp::io_context requires BUPP_HAS_IO_CONTEXT_LINUX."
+#error "bupp::io_context requires a supported native backend."
 #endif
 
 #endif  // BUPP_IO_CONTEXT_H_

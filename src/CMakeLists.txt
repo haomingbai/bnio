@@ -24,14 +24,24 @@ if(BUPP_PLATFORM_LINUX)
 else()
   target_compile_definitions(
     bupp
-    PUBLIC BUPP_DISABLE_ASYNC_IO_IP_ADDRESS_PARSER=1
-           BUPP_DISABLE_ASYNC_IO_LINUX=1
+    PUBLIC BUPP_DISABLE_ASYNC_IO_LINUX=1
            BUPP_DISABLE_BASE_LINUX=1
            BUPP_DISABLE_IO_CONTEXT_LINUX=1)
 endif()
 
 if(BUPP_PLATFORM_BSD)
   add_subdirectory(base/bsd)
+  target_link_libraries(bupp PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+  target_sources(
+    bupp
+    PRIVATE bsd/io_context.cpp
+            bsd/io_context_queue.cpp
+            bsd/io_context_timer.cpp
+            bsd/io_context_timer_driver.cpp
+            bsd/io_context_timer_state.cpp
+            ssl.cpp
+            tcp.cpp
+            udp.cpp)
 else()
   target_compile_definitions(bupp PUBLIC BUPP_DISABLE_BASE_BSD=1)
 endif()
@@ -54,9 +64,7 @@ target_sources(
          BASE_DIRS
          ${PROJECT_SOURCE_DIR}/include
          FILES
-         ${BUPP_PUBLIC_HEADERS}
-         ${BUPP_LINUX_PUBLIC_HEADERS}
-         ${BUPP_BSD_PUBLIC_HEADERS})
+         ${BUPP_PUBLIC_HEADERS})
 
 bupp_set_project_warnings(bupp)
 

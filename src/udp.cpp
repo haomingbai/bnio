@@ -1,6 +1,7 @@
 #include <bupp/async_io/socket_view.h>
 #include <bupp/ip.h>
 #include <bupp/udp/socket.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -28,6 +29,24 @@ namespace {
   return AF_UNSPEC;
 }
 
+[[nodiscard]] int open_socket(int family) noexcept {
+#if defined(SOCK_CLOEXEC)
+  return ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+#else
+  const int descriptor = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);
+  if (descriptor < 0) {
+    return -1;
+  }
+  if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) != 0) {
+    const int error = errno;
+    (void)::close(descriptor);
+    errno = error;
+    return -1;
+  }
+  return descriptor;
+#endif
+}
+
 }  // namespace
 
 socket::~socket() noexcept { (void)close(); }
@@ -46,7 +65,7 @@ std::error_code socket::open(int family) noexcept {
   if (is_open()) {
     return {};
   }
-  const int fd = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+  const int fd = open_socket(family);
   if (fd < 0) {
     return make_errno_error(errno);
   }

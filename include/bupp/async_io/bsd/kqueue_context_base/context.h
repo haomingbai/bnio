@@ -5,7 +5,11 @@
 #include <bupp/async_io/bsd/kqueue_context_base/operation_base.h>
 #include <bupp/async_io/bsd/kqueue_context_base/options.h>
 #include <bupp/async_io/bsd/kqueue_helper.h>
+#include <bupp/async_io/buffer_view.h>
 #include <bupp/async_io/descriptor_view.h>
+#include <bupp/async_io/dns.h>
+#include <bupp/async_io/ip/endpoint.h>
+#include <bupp/async_io/socket_view.h>
 #include <bupp/async_io/time.h>
 #include <bupp/base/bsd/kqueue.h>
 #include <bupp/export.h>
@@ -15,6 +19,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 namespace bupp::async_io::bsd_native {
 
@@ -53,6 +58,56 @@ class BUPP_EXPORT kqueue_context {
 
   /** Creates a typed poll sender. */
   [[nodiscard]] auto async_poll(descriptor_view descriptor, unsigned poll_mask);
+
+  /** Creates a regular-file read sender whose start performs pread. */
+  [[nodiscard]] auto async_read(descriptor_view descriptor, buffer_view buffer,
+                                std::uint64_t offset = 0);
+
+  /** Creates a regular-file write sender whose start performs pwrite. */
+  [[nodiscard]] auto async_write(descriptor_view descriptor, const void* data,
+                                 std::size_t size, std::uint64_t offset = 0);
+
+  /** Creates one nonblocking stream receive sender. */
+  [[nodiscard]] auto async_receive(stream_socket_view socket,
+                                   buffer_view buffer, int flags = 0);
+
+  /** Creates one nonblocking stream send sender. */
+  [[nodiscard]] auto async_send(stream_socket_view socket, const void* data,
+                                std::size_t size, int flags = 0);
+
+  /** Creates one nonblocking connected-datagram receive sender. */
+  [[nodiscard]] auto async_receive(datagram_socket_view socket,
+                                   buffer_view buffer, int flags = 0);
+
+  /** Creates one nonblocking connected-datagram send sender. */
+  [[nodiscard]] auto async_send(datagram_socket_view socket, const void* data,
+                                std::size_t size, int flags = 0);
+
+  /** Creates one endpoint-aware datagram receive sender. */
+  [[nodiscard]] auto async_receive_from(datagram_socket_view socket,
+                                        buffer_view buffer,
+                                        ip::endpoint& endpoint, int flags = 0);
+
+  /** Creates one endpoint-aware datagram send sender. */
+  [[nodiscard]] auto async_send_to(datagram_socket_view socket,
+                                   const void* data, std::size_t size,
+                                   const ip::endpoint& endpoint, int flags = 0);
+
+  /** Creates one nonblocking accept sender. */
+  [[nodiscard]] auto async_accept(stream_socket_view socket, int flags = 0);
+
+  /** Creates one nonblocking connect sender. */
+  [[nodiscard]] auto async_connect(stream_socket_view socket,
+                                   const ip::endpoint& endpoint);
+
+  /** Creates a DNS sender completed on the context run loop. */
+  [[nodiscard]] auto async_resolve(bupp::async_io::dns_query query,
+                                   bupp::async_io::dns_result_view result);
+
+  /** Creates a DNS sender from host and service strings. */
+  [[nodiscard]] auto async_resolve(std::string_view host,
+                                   std::string_view service,
+                                   bupp::async_io::dns_result_view result);
 
   /** Runs posted work and readiness completions until stopped. */
   void run() noexcept;
@@ -94,6 +149,16 @@ class BUPP_EXPORT kqueue_context {
     kqueue_operation_base* head = nullptr;
   };
 
+  struct local_task_queue_state {
+    void push_cpu(kqueue_operation_base& operation) noexcept;
+    void push_cpu(kqueue_operation_base* operations) noexcept;
+    void push_io(kqueue_io_operation_base& operation) noexcept;
+    void clear() noexcept;
+
+    operation_queue cpu;
+    kqueue_io_operation_base* io = nullptr;
+  };
+
   struct prepared_operation {
     kqueue_io_operation_base* operation = nullptr;
     std::array<bupp::base::event, 2> events{};
@@ -104,10 +169,11 @@ class BUPP_EXPORT kqueue_context {
 
   struct active_registration {
     kqueue_io_operation_base* operation = nullptr;
-    std::uintptr_t descriptor = 0;
-    std::int16_t filter = 0;
+    bupp::base::event event{};
     kqueue_task task = kqueue_task::none;
     unsigned poll_mask = 0;
+    bool armed = false;
+    std::uint64_t sequence = 0;
   };
 
   enum class context_state {
@@ -126,11 +192,11 @@ class BUPP_EXPORT kqueue_context {
   void apply_context_options(const kqueue_context_options& options) noexcept;
   void assert_running() const noexcept;
 
-  void push_cpu_task(kqueue_operation_base& operation) noexcept;
   void push_cpu_tasks(operation_queue& operations) noexcept;
-  [[nodiscard]] bool move_cpu_tasks() noexcept;
+  [[nodiscard]] bool consume_global_state() noexcept;
+  [[nodiscard]] bool consume_local_state() noexcept;
 
-  /** Consumes every local and shared I/O task after ready CPU work. */
+  /** Consumes staged local I/O tasks after ready CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;
 
   [[nodiscard]] int prepare_io(kqueue_io_operation_base& operation,
@@ -150,9 +216,11 @@ class BUPP_EXPORT kqueue_context {
   [[nodiscard]] bool should_finish() const noexcept;
   void finish() noexcept;
 
-  [[nodiscard]] bool collect_ready_events(bool wait) noexcept;
+  [[nodiscard]] bool collect_ready_events(
+      bool wait, const timespec* timeout = nullptr) noexcept;
   [[nodiscard]] unsigned collect_event_tasks(operation_queue& event_tasks,
-                                             bool wait) noexcept;
+                                             bool wait,
+                                             const timespec* timeout) noexcept;
   void dispatch_event_tasks(operation_queue& event_tasks,
                             unsigned task_count) noexcept;
   [[nodiscard]] bool process_event(const bupp::base::event& event,
@@ -160,12 +228,14 @@ class BUPP_EXPORT kqueue_context {
 
   [[nodiscard]] int register_operation(
       const prepared_operation& operation) noexcept;
+  [[nodiscard]] int arm_registration(
+      active_registration& registration) noexcept;
+  void arm_next_registration(std::uintptr_t descriptor,
+                             std::int16_t filter) noexcept;
   void unregister_operation(kqueue_io_operation_base& operation) noexcept;
   [[nodiscard]] bool take_registration(
       const bupp::base::event& event,
       active_registration& registration) noexcept;
-  [[nodiscard]] int perform_io(kqueue_io_operation_base& operation,
-                               kqueue_task task, int descriptor) noexcept;
   [[nodiscard]] unsigned poll_result(
       unsigned poll_mask, const bupp::base::event& event) const noexcept;
 
@@ -176,6 +246,7 @@ class BUPP_EXPORT kqueue_context {
 
   std::unique_ptr<active_registration[]> active_registrations_;
   std::size_t active_registration_capacity_ = 0;
+  std::uint64_t next_registration_sequence_ = 0;
 
   std::unique_ptr<bupp::base::event[]> event_buffer_;
   std::atomic_bool run_active_{false};
@@ -183,8 +254,8 @@ class BUPP_EXPORT kqueue_context {
 
   static thread_local kqueue_context* current_context_;
   kqueue_task_queue_state* global_state_ = nullptr;
-  operation_queue local_tasks_;
-  kqueue_io_operation_base* local_io_tasks_ = nullptr;
+  local_task_queue_state local_state_;
+  kqueue_io_operation_base* incoming_io_tasks_ = nullptr;
   unsigned local_task_budget_ = 0;
 };
 
