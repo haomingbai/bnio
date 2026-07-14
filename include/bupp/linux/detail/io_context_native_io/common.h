@@ -38,8 +38,9 @@ concept has_immediate_io = requires(Model& model) {
   return -error;
 }
 
-[[nodiscard]] inline bool should_defer_nowait_read_error(int error) noexcept {
-  return error == ENOSYS || error == EOPNOTSUPP || error == EINVAL;
+[[nodiscard]] inline bool should_defer_nowait_error(int error) noexcept {
+  return error == ENOSYS || error == EOPNOTSUPP || error == EINVAL ||
+         error == ESPIPE;
 }
 
 [[nodiscard]] constexpr int nowait_read_flag() noexcept {
@@ -54,13 +55,39 @@ concept has_immediate_io = requires(Model& model) {
                                           std::size_t size,
                                           std::uint64_t offset) noexcept {
 #ifdef SYS_preadv2
-  struct iovec view{data, size};
+  struct iovec view {
+    data, size
+  };
   const auto low = static_cast<unsigned long>(offset);
   unsigned long high = 0;
   if constexpr (sizeof(unsigned long) < sizeof(std::uint64_t)) {
     high = static_cast<unsigned long>(offset >> (sizeof(unsigned long) * 8U));
   }
   return ::syscall(SYS_preadv2, descriptor, &view, 1, low, high,
+                   nowait_read_flag());
+#else
+  (void)descriptor;
+  (void)data;
+  (void)size;
+  (void)offset;
+  errno = ENOSYS;
+  return -1;
+#endif
+}
+
+[[nodiscard]] inline ssize_t pwrite_nowait(int descriptor, const void* data,
+                                           std::size_t size,
+                                           std::uint64_t offset) noexcept {
+#ifdef SYS_pwritev2
+  struct iovec view {
+    const_cast<void*>(data), size
+  };
+  const auto low = static_cast<unsigned long>(offset);
+  unsigned long high = 0;
+  if constexpr (sizeof(unsigned long) < sizeof(std::uint64_t)) {
+    high = static_cast<unsigned long>(offset >> (sizeof(unsigned long) * 8U));
+  }
+  return ::syscall(SYS_pwritev2, descriptor, &view, 1, low, high,
                    nowait_read_flag());
 #else
   (void)descriptor;

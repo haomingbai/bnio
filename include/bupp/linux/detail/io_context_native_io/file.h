@@ -35,7 +35,7 @@ class read_model {
 
     const int error = errno;
     if (error == EAGAIN || error == EWOULDBLOCK ||
-        should_defer_nowait_read_error(error)) {
+        should_defer_nowait_error(error)) {
       return -EAGAIN;
     }
     return -error;
@@ -77,6 +77,23 @@ class write_model {
         descriptor_.native_handle(), buffer_.data(),
         async_io::linux_native::detail::bounded_io_size(buffer_.size()),
         offset_);
+  }
+
+  [[nodiscard]] int try_immediate() noexcept {
+    const ssize_t result = pwrite_nowait(
+        descriptor_.native_handle(), buffer_.data(),
+        async_io::linux_native::detail::bounded_io_size(buffer_.size()),
+        offset_);
+    if (result >= 0) {
+      return static_cast<int>(result);
+    }
+
+    const int error = errno;
+    if (error == EAGAIN || error == EWOULDBLOCK ||
+        should_defer_nowait_error(error)) {
+      return -EAGAIN;
+    }
+    return -error;
   }
 
   [[nodiscard]] bool is_error_result(int result) const noexcept {
