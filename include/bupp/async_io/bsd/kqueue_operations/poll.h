@@ -40,7 +40,9 @@ class kqueue_poll_operation
                                                     std::move(receiver)),
         request_(descriptor, poll_mask) {}
 
-  void prepare(kqueue_helper& helper) noexcept { request_.prepare(helper); }
+  void prepare(kqueue_helper& helper) noexcept override {
+    request_.prepare(helper);
+  }
 
   void start() noexcept { this->start_io(*this); }
 
@@ -50,7 +52,7 @@ class kqueue_poll_operation
 
 /** Operation state used by the typed kqueue poll sender. */
 template <class Receiver>
-class kqueue_poll_sender_operation : public kqueue_operation_base {
+class kqueue_poll_sender_operation : public kqueue_io_operation_base {
  public:
   kqueue_poll_sender_operation(kqueue_context& context,
                                descriptor_view descriptor, unsigned poll_mask,
@@ -66,7 +68,14 @@ class kqueue_poll_sender_operation : public kqueue_operation_base {
   kqueue_poll_sender_operation& operator=(kqueue_poll_sender_operation&&) =
       delete;
 
-  void prepare(kqueue_helper& helper) noexcept { request_.prepare(helper); }
+  void prepare(kqueue_helper& helper) noexcept override {
+    request_.prepare(helper);
+  }
+
+  void complete_submit_error(int result_code) noexcept override {
+    completion_ = completion_kind::error;
+    error_ = std::error_code(-result_code, std::generic_category());
+  }
 
   void start() noexcept {
     if (stop_requested()) {
@@ -75,12 +84,8 @@ class kqueue_poll_sender_operation : public kqueue_operation_base {
       return;
     }
 
-    const int submit_result = context_->submit(*this);
-    if (submit_result < 0) {
-      completion_ = completion_kind::error;
-      error_ = std::error_code(-submit_result, std::generic_category());
-      (void)context_->post(*this);
-    }
+    completion_ = completion_kind::value;
+    context_->publish_io(*this);
   }
 
   void execute() noexcept override {

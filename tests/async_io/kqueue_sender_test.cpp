@@ -52,6 +52,32 @@ void test_nop_operation_completes_on_context_thread() {
   assert(state->in_context);
 }
 
+void test_io_preparation_is_deferred_to_the_run_loop() {
+  kqueue_context context;
+  assert(context.queue_init() == 0);
+
+  receiver completion;
+  completion.context = &context;
+  completion.stop_on_completion = true;
+  auto state = completion.state;
+  bool prepared = false;
+
+  auto prepare = [&context, &prepared](kqueue_helper& helper) noexcept {
+    prepared = context.is_in_context();
+    helper.prep_nop();
+  };
+  kqueue_raw_operation operation(context, std::move(prepare),
+                                 std::move(completion));
+  bexec::start(operation);
+
+  assert(!prepared);
+  context.run();
+
+  assert(prepared);
+  assert(state->signal == signal_kind::value);
+  assert(state->in_context);
+}
+
 void test_poll_sender_observes_pipe_readiness() {
   kqueue_context context;
   assert(context.queue_init() == 0);
@@ -279,6 +305,7 @@ void test_stop_token_completes_before_native_registration() {
 int main() {
   test_post_operation_runs_on_context_thread();
   test_nop_operation_completes_on_context_thread();
+  test_io_preparation_is_deferred_to_the_run_loop();
   test_poll_sender_observes_pipe_readiness();
   test_poll_sender_reports_bad_descriptor();
   test_poll_sender_accepts_read_and_write_filters();

@@ -120,7 +120,6 @@ if(BUPP_PLATFORM_BSD)
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base/context.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base/operation_base.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base/options.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_context_base/submission.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_helper.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_operations.h
       ${CMAKE_CURRENT_SOURCE_DIR}/bupp/async_io/bsd/kqueue_operations/core.h

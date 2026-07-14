@@ -5,6 +5,7 @@
 #include <array>
 #include <cerrno>
 #include <climits>
+#include <utility>
 
 #include "kqueue_context_internal.h"
 
@@ -22,33 +23,60 @@ namespace {
   return ::fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) < 0 ? -errno : 0;
 }
 
-}  // namespace
-
-int kqueue_context::submit() noexcept {
-  assert_running();
-  std::lock_guard lock(submission_mutex_);
-  return submit_locked();
+// MPSC publication is LIFO; restore producer order before registering events.
+[[nodiscard]] kqueue_io_operation_base* reverse_io_tasks(
+    kqueue_io_operation_base* tasks) noexcept {
+  kqueue_io_operation_base* reversed = nullptr;
+  while (tasks != nullptr) {
+    kqueue_io_operation_base* next = tasks->io_next;
+    tasks->io_next = reversed;
+    reversed = tasks;
+    tasks = next;
+  }
+  return reversed;
 }
 
-int kqueue_context::submit_locked() noexcept {
-  if (!queue_.is_open()) {
-    return -EINVAL;
+}  // namespace
+
+bool kqueue_context::consume_io_tasks() noexcept {
+  kqueue_io_operation_base* queue_local =
+      std::exchange(local_io_tasks_, nullptr);
+  kqueue_io_operation_base* global_io =
+      global_state_ == nullptr ? nullptr : global_state_->pop_io_all();
+
+  kqueue_io_operation_base* operations = reverse_io_tasks(queue_local);
+  kqueue_io_operation_base** tail = &operations;
+  while (*tail != nullptr) {
+    tail = &(*tail)->io_next;
+  }
+  *tail = reverse_io_tasks(global_io);
+  if (operations == nullptr) {
+    return false;
   }
 
-  const std::size_t submission_count = prepared_count_;
-  operation_queue completed;
-  for (std::size_t index = 0; index < submission_count; ++index) {
-    prepared_operation& prepared = prepared_operations_[index];
-    kqueue_operation_base& operation = *prepared.operation;
-    operation.result = 0;
-    operation.flags = 0;
+  while (operations != nullptr) {
+    kqueue_io_operation_base* operation = operations;
+    operations = operation->io_next;
+    operation->io_next = nullptr;
+    operation->result = 0;
+    operation->flags = 0;
+
+    prepared_operation prepared;
+    const int prepare_result = prepare_io(*operation, prepared);
+    if (prepare_result < 0) {
+      operation->result = prepare_result;
+      operation->complete_submit_error(prepare_result);
+      local_tasks_.push(*operation);
+      continue;
+    }
 
     bool complete_immediately = prepared.task == kqueue_task::nop;
     if (prepared.task == kqueue_task::read ||
         prepared.task == kqueue_task::write) {
-      const buffer_view data = operation.get_data();
+      const buffer_view data = operation->get_data();
       if (data.size > 0 && data.data == nullptr) {
-        operation.result = -EFAULT;
+        operation->result = -EFAULT;
+        operation->complete_submit_error(-EFAULT);
         complete_immediately = true;
       } else if (data.size == 0) {
         complete_immediately = true;
@@ -58,22 +86,44 @@ int kqueue_context::submit_locked() noexcept {
     if (!complete_immediately) {
       const int register_result = register_operation(prepared);
       if (register_result < 0) {
-        operation.result = register_result;
+        operation->result = register_result;
+        operation->complete_submit_error(register_result);
         complete_immediately = true;
       }
     }
 
     if (complete_immediately) {
-      completed.push(operation);
+      local_tasks_.push(*operation);
     }
-    prepared = {};
   }
-  prepared_count_ = 0;
 
-  if (!completed.empty()) {
-    push_posted_tasks(completed);
+  return true;
+}
+
+int kqueue_context::prepare_io(kqueue_io_operation_base& operation,
+                               prepared_operation& prepared) noexcept {
+  if (!queue_.is_open()) {
+    return -EINVAL;
   }
-  return static_cast<int>(submission_count);
+
+  kqueue_helper helper;
+  operation.prepare(helper);
+  if (helper.error() < 0) {
+    return helper.error();
+  }
+  if (helper.task() == kqueue_task::none) {
+    return -EINVAL;
+  }
+
+  helper.set_udata(&operation);
+  prepared.operation = &operation;
+  prepared.event_count = helper.event_count();
+  prepared.task = helper.task();
+  prepared.poll_mask = helper.poll_mask();
+  for (std::size_t index = 0; index < helper.event_count(); ++index) {
+    prepared.events[index] = helper.event(index);
+  }
+  return 0;
 }
 
 int kqueue_context::register_operation(
@@ -104,43 +154,40 @@ int kqueue_context::register_operation(
     changes[index].set_flags(changes[index].flags() | EV_RECEIPT);
   }
 
-  {
-    std::lock_guard lock(registrations_mutex_);
-    for (std::size_t index = 0; index < prepared.event_count; ++index) {
-      for (std::size_t active_index = 0;
-           active_index < active_registration_capacity_; ++active_index) {
-        const active_registration& active = active_registrations_[active_index];
-        if (active.operation != nullptr &&
-            active.descriptor == changes[index].ident() &&
-            active.filter == changes[index].filter()) {
-          return -EBUSY;
-        }
+  for (std::size_t index = 0; index < prepared.event_count; ++index) {
+    for (std::size_t active_index = 0;
+         active_index < active_registration_capacity_; ++active_index) {
+      const active_registration& active = active_registrations_[active_index];
+      if (active.operation != nullptr &&
+          active.descriptor == changes[index].ident() &&
+          active.filter == changes[index].filter()) {
+        return -EBUSY;
       }
     }
+  }
 
-    for (std::size_t index = 0; index < prepared.event_count; ++index) {
-      active_registration* slot = nullptr;
+  for (std::size_t index = 0; index < prepared.event_count; ++index) {
+    active_registration* slot = nullptr;
+    for (std::size_t active_index = 0;
+         active_index < active_registration_capacity_; ++active_index) {
+      if (active_registrations_[active_index].operation == nullptr) {
+        slot = &active_registrations_[active_index];
+        break;
+      }
+    }
+    if (slot == nullptr) {
       for (std::size_t active_index = 0;
            active_index < active_registration_capacity_; ++active_index) {
-        if (active_registrations_[active_index].operation == nullptr) {
-          slot = &active_registrations_[active_index];
-          break;
+        active_registration& active = active_registrations_[active_index];
+        if (active.operation == prepared.operation) {
+          active = {};
         }
       }
-      if (slot == nullptr) {
-        for (std::size_t active_index = 0;
-             active_index < active_registration_capacity_; ++active_index) {
-          active_registration& active = active_registrations_[active_index];
-          if (active.operation == prepared.operation) {
-            active = {};
-          }
-        }
-        return -EAGAIN;
-      }
-      *slot = active_registration{prepared.operation, changes[index].ident(),
-                                  changes[index].filter(), prepared.task,
-                                  prepared.poll_mask};
+      return -EAGAIN;
     }
+    *slot = active_registration{prepared.operation, changes[index].ident(),
+                                changes[index].filter(), prepared.task,
+                                prepared.poll_mask};
   }
 
   timespec no_wait{};
@@ -159,10 +206,8 @@ int kqueue_context::register_operation(
   for (int index = 0; index < receipt_count; ++index) {
     const bupp::base::event& receipt =
         receipts[static_cast<std::size_t>(index)];
-    if (receipt.has_error() && receipt.data() != 0) {
-      if (first_error == 0) {
-        first_error = -static_cast<int>(receipt.data());
-      }
+    if (receipt.has_error() && receipt.data() != 0 && first_error == 0) {
+      first_error = -static_cast<int>(receipt.data());
     }
   }
 
@@ -174,8 +219,7 @@ int kqueue_context::register_operation(
 }
 
 void kqueue_context::unregister_operation(
-    kqueue_operation_base& operation) noexcept {
-  std::lock_guard lock(registrations_mutex_);
+    kqueue_io_operation_base& operation) noexcept {
   for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
     active_registration& active = active_registrations_[index];
     if (active.operation != &operation) {
@@ -191,7 +235,6 @@ void kqueue_context::unregister_operation(
 bool kqueue_context::take_registration(
     const bupp::base::event& event,
     active_registration& registration) noexcept {
-  std::lock_guard lock(registrations_mutex_);
   for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
     active_registration& active = active_registrations_[index];
     if (active.operation == event.udata() &&

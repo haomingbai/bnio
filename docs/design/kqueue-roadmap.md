@@ -116,11 +116,12 @@ allocation or ownership. Specialized socket operations can still use the
 hybrid hook described above when their syscall state does not fit a single
 `buffer_view`.
 
-Descriptor, task, and filter state is held in fixed-capacity preparation and
-active-registration tables owned by `kqueue_context`; it is not stored in
-`kqueue_operation_base`. The backend currently permits one active waiter per
-descriptor/filter pair and reports `EBUSY` instead of allowing a later
-`EV_ADD` to silently replace an earlier operation.
+Descriptor, task, and filter state is built in a run-loop-local preparation
+record and retained only in the fixed-capacity active-registration table owned
+by `kqueue_context`; it is not stored in `kqueue_operation_base`. The backend
+currently permits one active waiter per descriptor/filter pair and reports
+`EBUSY` instead of allowing a later `EV_ADD` to silently replace an earlier
+operation.
 
 ## Base Layer Work
 
@@ -193,8 +194,10 @@ Planned native objects:
 
 | Object | Role |
 |--------|------|
-| `bsd_native::kqueue_context` | Owns `base::kqueue`, pending post queue, changelist/event buffers, and run-loop state. |
-| `bsd_native::kqueue_operation_base` | Intrusive operation base with readiness dispatch and terminal `execute()` behavior. |
+| `bsd_native::kqueue_context` | Owns `base::kqueue`, local queues, active registrations, event buffers, and run-loop state. |
+| `bsd_native::kqueue_operation_base` | Intrusive CPU/completion operation base with terminal `execute()` behavior. |
+| `bsd_native::kqueue_io_operation_base` | Passive I/O operation base with a separate MPSC link and run-loop preparation contract. |
+| `bsd_native::kqueue_task_queue_state` | Externally owned shared CPU/I/O queues plus worker wake/closing state. |
 | `bsd_native::*_operation` | Read, write, accept, connect, poll, timer/wakeup, and post operations. |
 
 The context needs these responsibilities:
@@ -205,7 +208,7 @@ The context needs these responsibilities:
 - wake the run loop for `post()` and `stop()`;
 - dispatch readiness events to operations;
 - provide `run()`, `stop()`, `is_open()`, and `is_in_context()`;
-- support queued and direct scheduling paths used by high-level `io_context`;
+- passively consume published I/O without exposing direct registration APIs;
 - convert platform errors to `std::error_code` at operation completion.
 
 Operations need these responsibilities:
@@ -218,6 +221,27 @@ Operations need these responsibilities:
 - rearm when readiness was insufficient;
 - preserve existing `async_read_some`, `async_write_some`, and write-all
   semantics.
+
+### Passive Publication Model
+
+The kqueue backend follows the same publication boundary as the io_uring
+backend. CPU completions derive from `kqueue_operation_base`; readiness work
+derives from `kqueue_io_operation_base`. Starting an I/O operation only calls
+`publish_io()`. It never invokes `kevent()` and never mutates the active
+registration table on the producer thread.
+
+A standalone context uses non-atomic local CPU and I/O queues. A worker group
+supplies a `kqueue_task_queue_state`, whose CPU and I/O heads are independent
+MPSC stacks. The run loop drains CPU work first, atomically takes all published
+I/O, restores producer order, calls each operation's `prepare(kqueue_helper&)`,
+and registers the resulting filters. There is no public `prepare()`,
+`submit()`, or `submit_batch()` interface and no submission mutex.
+
+Before blocking in `kevent()`, a worker publishes its waiting state and repeats
+the event/CPU/I/O checks. A producer only triggers the context's `EVFILT_USER`
+wakeup after observing that waiting state. This closes the lost-wakeup window
+without an active submission timer and lets concurrent publication form
+natural batches.
 
 ### Socket Operations
 
@@ -280,11 +304,10 @@ Expected work:
   TCP owner types, SSL stream integration, and CPO surface;
 - keep Linux names out of cross-platform public headers.
 
-The BSD backend should likewise keep one passive submission path: collect
-ready-to-register operations, let concurrency accumulate a changelist, and
-wake a sleeping loop when needed. The semantic split remains at the operation
-level: `async_write_some` is one native attempt, while `async_write` is the
-composed write-all loop.
+The BSD backend keeps one passive publication path: collect ready-to-register
+operations in the shared I/O queue and wake a sleeping loop when needed. The
+semantic split remains at the operation level: `async_write_some` is one native
+attempt, while `async_write` is the composed write-all loop.
 
 ## Build And Test Plan
 
@@ -306,8 +329,8 @@ composed write-all loop.
 ### Phase 3: Native kqueue Context ✅
 
 - [x] Add `bsd_native::kqueue_context`.
-- [x] Implement post queue, wakeup event, stop handling, event wait, and
-  operation dispatch.
+- [x] Implement passive CPU/I/O queues, waiting-aware wakeup, stop handling,
+  event wait, and operation dispatch.
 - [x] Add context-level tests using posted operations, `EVFILT_USER`, poll, and
   context-owned buffer I/O.
 

@@ -67,6 +67,17 @@ Platform-neutral vocabulary types and the platform-native event-loop context.
 - `linux/io_uring_operations/helpers.h` — operation traits and helpers.
 - `linux/socket_address.h` — Linux socket address storage.
 - `linux/detail/io_uring_receiver_operation.h` — receiver-based operation adapter.
+- `bsd/kqueue_context.h` — umbrella for the BSD native context.
+- `bsd/kqueue_context_base.h` — umbrella for context, operation bases, and options.
+- `bsd/kqueue_context_base/context.h` — `kqueue_context` class definition.
+- `bsd/kqueue_context_base/operation_base.h` — intrusive CPU/I/O operation bases and shared queues.
+- `bsd/kqueue_context_base/options.h` — `kqueue_context_options`.
+- `bsd/kqueue_helper.h` — readiness registration builder used by passive I/O operations.
+- `bsd/kqueue_operations.h` — umbrella for concrete kqueue operation types.
+- `bsd/kqueue_operations/core.h` — post, nop, and raw operations.
+- `bsd/kqueue_operations/file.h` — readiness-backed descriptor read/write operations.
+- `bsd/kqueue_operations/poll.h` — descriptor poll operations and sender.
+- `bsd/detail/kqueue_receiver_operation.h` — receiver-based I/O operation adapter.
 
 ### Layer 3 — `bupp`
 
@@ -155,6 +166,14 @@ High-level async runtime, stream owners, and buffer types.
   - `io_uring_context_io_tasks.cpp` — run-loop-only local/global I/O queue consumption and SQE preparation.
   - `io_uring_context_task_queue.cpp` — shared CPU queue and eventfd wakeup.
   - `io_uring_context_internal.h` — internal context state.
+- `src/async_io/bsd/` — BSD-specific async_io implementations:
+  - `kqueue_context.cpp` — lifecycle and queue init/exit.
+  - `kqueue_context_events.cpp` — readiness collection and completion dispatch.
+  - `kqueue_context_io_tasks.cpp` — run-loop-only passive I/O preparation and registration.
+  - `kqueue_context_run_loop.cpp` — main run loop.
+  - `kqueue_context_task_queue.cpp` — shared CPU/I/O publication and `EVFILT_USER` wakeup.
+  - `kqueue_context_internal.h` — internal local task queue helpers.
+  - `kqueue_helper.cpp` — readiness registration builder implementation.
 - `src/linux/` — high-level Linux `io_context` implementations:
   - `io_context.cpp` — lifecycle, schedulers, native worker slots.
   - `io_context_queue.cpp` — passive I/O publication and worker wakeup.
@@ -176,6 +195,10 @@ High-level async runtime, stream owners, and buffer types.
   - `io_uring_operation_traits_test.cpp` — operation trait tests.
   - `io_uring_run_loop_test.cpp` — run loop lifecycle tests.
   - `io_uring_sender_test.cpp` — sender-based operation tests.
+  - `kqueue_context_test_support.h` — shared test support for `kqueue_context`.
+  - `kqueue_operation_traits_test.cpp` — passive queue and operation trait tests.
+  - `kqueue_run_loop_test.cpp` — passive publication and run-loop lifecycle tests.
+  - `kqueue_sender_test.cpp` — readiness-backed sender tests.
 - `tests/io_context/` — high-level `io_context` tests:
   - `io_context_test.cpp`, `io_context_scheduler_test.cpp`,
     `io_context_sender_concept_test.cpp`, `io_context_accept_connect_test.cpp`,

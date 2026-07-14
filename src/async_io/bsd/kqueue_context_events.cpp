@@ -10,16 +10,14 @@
 
 namespace bupp::async_io::bsd_native {
 
-bool kqueue_context::collect_ready_events(operation_queue& local_tasks,
-                                          unsigned& local_task_budget,
-                                          bool wait) noexcept {
+bool kqueue_context::collect_ready_events(bool wait) noexcept {
   operation_queue event_tasks;
   const unsigned task_count = collect_event_tasks(event_tasks, wait);
   if (task_count == 0) {
     return false;
   }
 
-  dispatch_event_tasks(event_tasks, task_count, local_tasks, local_task_budget);
+  dispatch_event_tasks(event_tasks, task_count);
   return true;
 }
 
@@ -35,7 +33,7 @@ unsigned kqueue_context::collect_event_tasks(operation_queue& event_tasks,
   for (;;) {
     ready_count =
         queue_.control(nullptr, 0, event_buffer_.get(),
-                       static_cast<int>(event_batch_window_), timeout);
+                       static_cast<int>(options_.event_batch_window), timeout);
     if (ready_count != -EINTR || !wait || should_finish()) {
       break;
     }
@@ -54,24 +52,23 @@ unsigned kqueue_context::collect_event_tasks(operation_queue& event_tasks,
   return task_count;
 }
 
-void kqueue_context::dispatch_event_tasks(
-    operation_queue& event_tasks, unsigned task_count,
-    operation_queue& local_tasks, unsigned& local_task_budget) noexcept {
-  if (task_count <= event_inline_completion_threshold_) {
-    local_tasks.push(reverse_tasks(event_tasks.pop_all()));
+void kqueue_context::dispatch_event_tasks(operation_queue& event_tasks,
+                                          unsigned task_count) noexcept {
+  if (task_count <= options_.event_inline_completion_threshold) {
+    local_tasks_.push(reverse_tasks(event_tasks.pop_all()));
     return;
   }
 
-  if (local_queue_threshold_ == 0 ||
-      (local_task_budget > 0 && task_count <= local_task_budget)) {
-    local_tasks.push(reverse_tasks(event_tasks.pop_all()));
-    if (local_queue_threshold_ > 0) {
-      local_task_budget -= task_count;
+  if (options_.local_queue_threshold == 0 ||
+      (local_task_budget_ > 0 && task_count <= local_task_budget_)) {
+    local_tasks_.push(reverse_tasks(event_tasks.pop_all()));
+    if (options_.local_queue_threshold > 0) {
+      local_task_budget_ -= task_count;
     }
     return;
   }
 
-  push_posted_tasks(event_tasks);
+  push_cpu_tasks(event_tasks);
 }
 
 bool kqueue_context::process_event(const bupp::base::event& event,
@@ -86,7 +83,7 @@ bool kqueue_context::process_event(const bupp::base::event& event,
     return false;
   }
 
-  kqueue_operation_base& operation = *registration.operation;
+  kqueue_io_operation_base& operation = *registration.operation;
   operation.flags = event.flags();
 
   if (registration.task == kqueue_task::poll) {
@@ -121,7 +118,7 @@ bool kqueue_context::process_event(const bupp::base::event& event,
   return true;
 }
 
-int kqueue_context::perform_io(kqueue_operation_base& operation,
+int kqueue_context::perform_io(kqueue_io_operation_base& operation,
                                kqueue_task task, int descriptor) noexcept {
   const buffer_view data = operation.get_data();
   if (data.size > 0 && data.data == nullptr) {

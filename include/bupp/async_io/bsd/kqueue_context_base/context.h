@@ -15,11 +15,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 
 namespace bupp::async_io::bsd_native {
 
-/** Run loop and submission context backed by a BSD kqueue. */
+/** Single-threaded run loop backed by a BSD kqueue. */
 class BUPP_EXPORT kqueue_context {
  public:
   using steady_clock = bupp::async_io::steady_clock;
@@ -64,42 +63,39 @@ class BUPP_EXPORT kqueue_context {
   /** Returns whether this context is running on the current thread. */
   [[nodiscard]] bool is_in_context() const noexcept;
 
-  /** Prepares an operation without registering it yet. */
-  template <class Operation>
-  int prepare(Operation& operation) noexcept;
-
-  /** Registers all prepared operations. */
-  int submit() noexcept;
-
-  /** Prepares and registers one operation. */
-  template <class Operation>
-  int submit(Operation& operation) noexcept;
-
-  /** Runs batched preparation while holding the submission gate once. */
-  template <class Function>
-  void submit_batch(Function&& function) noexcept;
-
-  /** Prepares one operation while the submission gate is held. */
-  template <class Operation>
-  int prepare_locked(Operation& operation) noexcept;
-
-  /** Registers prepared operations while the submission gate is held. */
-  int submit_locked() noexcept;
-
-  /** Wakes all run-loop waiters. */
-  void notify_waiters() noexcept;
+  /**
+   * Selects externally owned shared state for a worker group.
+   *
+   * A null pointer selects this context's single-threaded local queues. The
+   * state must remain valid until this context stops running.
+   */
+  void set_global_state(kqueue_task_queue_state* state) noexcept;
 
   /** Wakes one run-loop waiter. */
   void notify_one_waiter() noexcept;
 
+  /** Returns whether this run-loop worker has published a sleeping state. */
+  [[nodiscard]] bool is_waiting() const noexcept;
+
   /** Posts an operation to the context run loop. */
   int post(kqueue_operation_base& operation) noexcept;
 
+  /** Publishes I/O for passive preparation by the context run loop. */
+  void publish_io(kqueue_io_operation_base& operation) noexcept;
+
  private:
-  using operation_queue = kqueue_operation_stack_state;
+  struct operation_queue {
+    void push(kqueue_operation_base& operation) noexcept;
+
+    void push(kqueue_operation_base* operations) noexcept;
+
+    [[nodiscard]] kqueue_operation_base* pop_all() noexcept;
+
+    kqueue_operation_base* head = nullptr;
+  };
 
   struct prepared_operation {
-    kqueue_operation_base* operation = nullptr;
+    kqueue_io_operation_base* operation = nullptr;
     std::array<bupp::base::event, 2> events{};
     std::size_t event_count = 0;
     kqueue_task task = kqueue_task::none;
@@ -107,7 +103,7 @@ class BUPP_EXPORT kqueue_context {
   };
 
   struct active_registration {
-    kqueue_operation_base* operation = nullptr;
+    kqueue_io_operation_base* operation = nullptr;
     std::uintptr_t descriptor = 0;
     std::int16_t filter = 0;
     kqueue_task task = kqueue_task::none;
@@ -130,77 +126,66 @@ class BUPP_EXPORT kqueue_context {
   void apply_context_options(const kqueue_context_options& options) noexcept;
   void assert_running() const noexcept;
 
-  void push_posted_task(kqueue_operation_base& operation) noexcept;
-  void push_posted_tasks(operation_queue& operations) noexcept;
-  [[nodiscard]] bool move_posted_tasks(operation_queue& local_tasks) noexcept;
+  void push_cpu_task(kqueue_operation_base& operation) noexcept;
+  void push_cpu_tasks(operation_queue& operations) noexcept;
+  [[nodiscard]] bool move_cpu_tasks() noexcept;
+
+  /** Consumes every local and shared I/O task after ready CPU work. */
+  [[nodiscard]] bool consume_io_tasks() noexcept;
+
+  [[nodiscard]] int prepare_io(kqueue_io_operation_base& operation,
+                               prepared_operation& prepared) noexcept;
+
+  void begin_wait() noexcept;
+  void end_wait() noexcept;
 
   [[nodiscard]] int trigger_wakeup() noexcept;
   [[nodiscard]] static void* wakeup_user_data() noexcept;
 
-  [[nodiscard]] run_phase handle_run_ready_tasks(
-      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
-  [[nodiscard]] run_phase handle_wait_for_work(
-      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
-  [[nodiscard]] run_phase handle_finish_drain(
-      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
-  [[nodiscard]] run_phase spin_for_work(operation_queue& local_tasks,
-                                        unsigned& local_task_budget) noexcept;
-  [[nodiscard]] run_phase wait_for_io_work(
-      operation_queue& local_tasks, unsigned& local_task_budget) noexcept;
+  [[nodiscard]] run_phase handle_run_ready_tasks() noexcept;
+  [[nodiscard]] run_phase handle_wait_for_work() noexcept;
+  [[nodiscard]] run_phase handle_finish_drain() noexcept;
+  [[nodiscard]] run_phase spin_for_work() noexcept;
+  [[nodiscard]] run_phase wait_for_io_work() noexcept;
   [[nodiscard]] bool should_finish() const noexcept;
-  void finish(operation_queue& local_tasks,
-              unsigned& local_task_budget) noexcept;
+  void finish() noexcept;
 
-  [[nodiscard]] bool collect_ready_events(operation_queue& local_tasks,
-                                          unsigned& local_task_budget,
-                                          bool wait) noexcept;
+  [[nodiscard]] bool collect_ready_events(bool wait) noexcept;
   [[nodiscard]] unsigned collect_event_tasks(operation_queue& event_tasks,
                                              bool wait) noexcept;
-  void dispatch_event_tasks(operation_queue& event_tasks, unsigned task_count,
-                            operation_queue& local_tasks,
-                            unsigned& local_task_budget) noexcept;
+  void dispatch_event_tasks(operation_queue& event_tasks,
+                            unsigned task_count) noexcept;
   [[nodiscard]] bool process_event(const bupp::base::event& event,
                                    operation_queue& tasks) noexcept;
 
   [[nodiscard]] int register_operation(
       const prepared_operation& operation) noexcept;
-  void unregister_operation(kqueue_operation_base& operation) noexcept;
+  void unregister_operation(kqueue_io_operation_base& operation) noexcept;
   [[nodiscard]] bool take_registration(
       const bupp::base::event& event,
       active_registration& registration) noexcept;
-  [[nodiscard]] int perform_io(kqueue_operation_base& operation,
+  [[nodiscard]] int perform_io(kqueue_io_operation_base& operation,
                                kqueue_task task, int descriptor) noexcept;
   [[nodiscard]] unsigned poll_result(
       unsigned poll_mask, const bupp::base::event& event) const noexcept;
 
   bupp::base::kqueue queue_;
+  kqueue_context_options options_{};
   std::atomic<context_state> state_{context_state::finished};
   bool queue_initialized_ = false;
 
-  std::unique_ptr<prepared_operation[]> prepared_operations_;
-  std::size_t prepared_count_ = 0;
-  std::size_t prepared_capacity_ = 0;
-  std::mutex submission_mutex_;
-
   std::unique_ptr<active_registration[]> active_registrations_;
   std::size_t active_registration_capacity_ = 0;
-  std::mutex registrations_mutex_;
 
   std::unique_ptr<bupp::base::event[]> event_buffer_;
-  unsigned event_batch_window_ = kqueue_context_options{}.event_batch_window;
-  unsigned wait_spin_count_ = kqueue_context_options{}.wait_spin_count;
-  unsigned event_inline_completion_threshold_ =
-      kqueue_context_options{}.event_inline_completion_threshold;
-  unsigned local_queue_threshold_ =
-      kqueue_context_options{}.local_queue_threshold;
-  std::uintptr_t wakeup_ident_ = kqueue_context_options{}.wakeup_ident;
-
-  operation_queue posted_tasks_;
-  std::mutex posted_tasks_mutex_;
   std::atomic_bool run_active_{false};
+  std::atomic_bool waiting_{false};
 
   static thread_local kqueue_context* current_context_;
-  operation_queue* local_tasks_ = nullptr;
+  kqueue_task_queue_state* global_state_ = nullptr;
+  operation_queue local_tasks_;
+  kqueue_io_operation_base* local_io_tasks_ = nullptr;
+  unsigned local_task_budget_ = 0;
 };
 
 }  // namespace bupp::async_io::bsd_native

@@ -10,6 +10,39 @@ namespace {
 
 using namespace bupp_async_io_kqueue_test;
 
+struct queue_test_operation : kqueue_operation_base {
+  void execute() noexcept override {}
+};
+
+struct io_queue_test_operation : kqueue_io_operation_base {
+  void prepare(bupp::async_io::bsd_native::kqueue_helper&) noexcept override {}
+  void complete_submit_error(int) noexcept override {}
+  void execute() noexcept override {}
+};
+
+void test_shared_task_queue_separates_cpu_and_io() {
+  kqueue_task_queue_state queue;
+  queue_test_operation cpu;
+  std::array<io_queue_test_operation, 3> io;
+
+  for (io_queue_test_operation& operation : io) {
+    queue.push_io(operation);
+  }
+  queue.push_cpu(cpu);
+
+  assert(queue.pop_cpu_all() == &cpu);
+  assert(queue.pop_cpu_all() == nullptr);
+
+  std::size_t io_count = 0;
+  for (auto* operation = queue.pop_io_all(); operation != nullptr;
+       operation = operation->io_next) {
+    ++io_count;
+  }
+  assert(io_count == io.size());
+  assert(queue.pop_io_all() == nullptr);
+  assert(!queue.closing.load(std::memory_order_acquire));
+}
+
 void test_operation_state_concepts() {
   static_assert(bexec::operation_state<kqueue_post_operation<receiver>>);
   static_assert(bexec::operation_state<kqueue_nop_operation<receiver>>);
@@ -39,6 +72,7 @@ void test_buffer_operations_expose_buffer_view_by_value() {
 }  // namespace
 
 int main() {
+  test_shared_task_queue_separates_cpu_and_io();
   test_operation_state_concepts();
   test_buffer_operations_expose_buffer_view_by_value();
   return 0;

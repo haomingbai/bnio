@@ -50,6 +50,9 @@ struct batch_receiver {
 
   void set_value(int result, unsigned /*flags*/) noexcept {
     assert(result == 0);
+    if (context == nullptr || !context->is_in_context()) {
+      state->all_in_context.store(false, std::memory_order_release);
+    }
     const unsigned completed =
         state->completed.fetch_add(1, std::memory_order_acq_rel) + 1;
     if (completed == target && context != nullptr) {
@@ -72,7 +75,7 @@ struct batch_receiver {
   }
 };
 
-void test_submit_batch_registers_all_prepared_operations() {
+void test_passive_io_queue_registers_all_published_operations() {
   kqueue_context context;
   kqueue_context_options options;
   options.entries = 8;
@@ -90,22 +93,79 @@ void test_submit_batch_registers_all_prepared_operations() {
         context, std::move(completion)));
   }
 
-  context.submit_batch([&operations](auto prepare, auto submit) noexcept {
-    for (auto& operation : operations) {
-      assert(prepare(*operation) == 0);
-    }
-    assert(submit() == static_cast<int>(operations.size()));
-  });
+  for (auto& operation : operations) {
+    bexec::start(*operation);
+  }
   context.run();
 
   assert(state->completed.load(std::memory_order_acquire) == operation_count);
   assert(state->stopped.load(std::memory_order_acquire) == 0);
+  assert(state->all_in_context.load(std::memory_order_acquire));
 }
 
-void test_concurrent_external_posts_are_drained() {
+void test_concurrent_external_io_publication_is_drained() {
+  kqueue_task_queue_state global_tasks;
   kqueue_context context;
   kqueue_context_options options;
   options.wait_spin_count = 1;
+  context.set_global_state(&global_tasks);
+  assert(context.queue_init(options) == 0);
+
+  constexpr unsigned thread_count = 4;
+  constexpr unsigned operations_per_thread = 128;
+  constexpr unsigned operation_count = thread_count * operations_per_thread;
+  auto state = std::make_shared<concurrent_state>();
+
+  std::vector<std::unique_ptr<kqueue_nop_operation<batch_receiver>>> operations;
+  operations.reserve(operation_count);
+  for (unsigned index = 0; index < operation_count; ++index) {
+    batch_receiver completion{state, &context, operation_count};
+    operations.push_back(std::make_unique<kqueue_nop_operation<batch_receiver>>(
+        context, std::move(completion)));
+  }
+
+  std::thread runner([&context] { context.run(); });
+  std::barrier ready(static_cast<std::ptrdiff_t>(thread_count + 1));
+  std::vector<std::thread> producers;
+  producers.reserve(thread_count);
+  for (unsigned thread = 0; thread < thread_count; ++thread) {
+    producers.emplace_back([&operations, &ready, thread] {
+      ready.arrive_and_wait();
+      const unsigned first = thread * operations_per_thread;
+      const unsigned last = first + operations_per_thread;
+      for (unsigned index = first; index < last; ++index) {
+        bexec::start(*operations[index]);
+      }
+    });
+  }
+
+  ready.arrive_and_wait();
+  for (std::thread& producer : producers) {
+    producer.join();
+  }
+
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (state->completed.load(std::memory_order_acquire) != operation_count &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (state->completed.load(std::memory_order_acquire) != operation_count) {
+    (void)context.stop();
+  }
+  runner.join();
+
+  assert(state->completed.load(std::memory_order_acquire) == operation_count);
+  assert(state->stopped.load(std::memory_order_acquire) == 0);
+  assert(state->all_in_context.load(std::memory_order_acquire));
+}
+
+void test_concurrent_external_posts_are_drained() {
+  kqueue_task_queue_state global_tasks;
+  kqueue_context context;
+  kqueue_context_options options;
+  options.wait_spin_count = 1;
+  context.set_global_state(&global_tasks);
   assert(context.queue_init(options) == 0);
 
   constexpr unsigned thread_count = 4;
@@ -159,10 +219,24 @@ void test_concurrent_external_posts_are_drained() {
   assert(state->all_in_context.load(std::memory_order_acquire));
 }
 
+void test_shared_closing_state_finishes_the_worker() {
+  kqueue_task_queue_state global_state;
+  kqueue_context context;
+  context.set_global_state(&global_state);
+  assert(context.queue_init() == 0);
+
+  global_state.closing.store(true, std::memory_order_release);
+  context.run();
+
+  assert(global_state.awake_workers.load(std::memory_order_acquire) == 0);
+}
+
 }  // namespace
 
 int main() {
-  test_submit_batch_registers_all_prepared_operations();
+  test_passive_io_queue_registers_all_published_operations();
+  test_concurrent_external_io_publication_is_drained();
   test_concurrent_external_posts_are_drained();
+  test_shared_closing_state_finishes_the_worker();
   return 0;
 }

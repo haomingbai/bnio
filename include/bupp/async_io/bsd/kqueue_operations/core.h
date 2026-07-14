@@ -54,7 +54,7 @@ class kqueue_nop_operation
       : detail::kqueue_receiver_operation<Receiver>(context,
                                                     std::move(receiver)) {}
 
-  void prepare(kqueue_helper& helper) noexcept { helper.prep_nop(); }
+  void prepare(kqueue_helper& helper) noexcept override { helper.prep_nop(); }
 
   void start() noexcept { this->start_io(*this); }
 };
@@ -70,7 +70,7 @@ class kqueue_raw_operation
                                                     std::move(receiver)),
         prepare_(std::move(prepare)) {}
 
-  void prepare(kqueue_helper& helper) noexcept { prepare_(helper); }
+  void prepare(kqueue_helper& helper) noexcept override { prepare_(helper); }
 
   void start() noexcept { this->start_io(*this); }
 

@@ -190,4 +190,48 @@ increments `awake_workers`, reopens locally, and resumes. A producer that sees
 a waiting worker writes that worker's eventfd, closing the lost-wakeup window
 without a timer.
 
+### `bsd_native::kqueue_context` — Passive Readiness Event Loop
+
+The BSD backend uses the same CPU/I/O publication split. A
+`kqueue_task_queue_state` owns separate MPSC heads, `awake_workers`, and the
+worker-group `closing` flag. With no shared state selected, a standalone
+`kqueue_context` keeps non-atomic local CPU and I/O queues.
+
+```cpp
+class kqueue_context {
+public:
+    int queue_init(const kqueue_context_options& opts = {}) noexcept;
+    void queue_exit() noexcept;
+    [[nodiscard]] bool is_open() const noexcept;
+    void set_global_state(kqueue_task_queue_state* state) noexcept;
+
+    int post(kqueue_operation_base& op) noexcept;
+    void publish_io(kqueue_io_operation_base& op) noexcept;
+    void notify_one_waiter() noexcept;
+    [[nodiscard]] bool is_waiting() const noexcept;
+
+    void run() noexcept;
+    int stop() noexcept;
+    [[nodiscard]] bool is_in_context() const noexcept;
+};
+```
+
+Starting readiness-backed work only publishes a
+`kqueue_io_operation_base`. The run-loop thread is the sole owner of
+`kqueue_helper` preparation, `kevent()` registration, and the active
+registration table. The backend consequently exposes no public `prepare()`,
+`submit()`, or batch-submit API and has no submission or registration mutex.
+
+CPU completions run before I/O publication is consumed. Immediately before a
+blocking `kevent()` call, the worker marks itself waiting, updates the shared
+awake count, and rechecks events, CPU work, I/O work, and shutdown. Producers
+that observe a waiting worker trigger `EVFILT_USER`; no active submission timer
+is involved.
+
+The reactor-specific completion path remains distinct from io_uring: after a
+read or write filter fires, the context performs one bounded nonblocking I/O
+attempt. `EAGAIN` rearms the one-shot filter; a terminal result is queued as a
+CPU completion. Poll operations translate filter readiness to poll masks
+without performing an extra data syscall.
+
 ---

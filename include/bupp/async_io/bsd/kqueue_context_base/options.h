@@ -8,7 +8,7 @@ namespace bupp::async_io::bsd_native {
 
 /** Options used to initialize a kqueue-backed async I/O context. */
 struct kqueue_context_options {
-  /** Maximum number of operations prepared before a submit is required. */
+  /** Capacity hint; the context reserves two readiness slots per entry. */
   unsigned entries = 256;
 
   /** Maximum number of ready kevents collected in one batch. */

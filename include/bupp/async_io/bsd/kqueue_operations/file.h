@@ -22,7 +22,7 @@ class kqueue_read_operation
         descriptor_(descriptor),
         buffer_(buffer) {}
 
-  void prepare(kqueue_helper& helper) noexcept {
+  void prepare(kqueue_helper& helper) noexcept override {
     helper.prep_read(descriptor_.native_handle());
   }
 
@@ -47,7 +47,7 @@ class kqueue_write_operation
         descriptor_(descriptor),
         buffer_(buffer) {}
 
-  void prepare(kqueue_helper& helper) noexcept {
+  void prepare(kqueue_helper& helper) noexcept override {
     helper.prep_write(descriptor_.native_handle());
   }
 

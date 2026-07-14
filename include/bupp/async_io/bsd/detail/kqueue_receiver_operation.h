@@ -20,7 +20,7 @@ enum class kqueue_receiver_completion {
 
 /** Translates kqueue context results into receiver completion signals. */
 template <class Receiver>
-class kqueue_receiver_operation : public kqueue_operation_base {
+class kqueue_receiver_operation : public kqueue_io_operation_base {
  public:
   kqueue_receiver_operation(const kqueue_receiver_operation&) = delete;
   kqueue_receiver_operation& operator=(const kqueue_receiver_operation&) =
@@ -47,6 +47,10 @@ class kqueue_receiver_operation : public kqueue_operation_base {
         bexec::set_stopped(std::move(receiver_));
         break;
     }
+  }
+
+  void complete_submit_error(int result_code) noexcept override {
+    complete_with_error(result_code);
   }
 
  protected:
@@ -81,11 +85,7 @@ class kqueue_receiver_operation : public kqueue_operation_base {
     }
 
     complete_with_value();
-    const int result_code = context_->submit(operation);
-    if (result_code < 0) {
-      complete_with_error(result_code);
-      (void)context_->post(operation);
-    }
+    context_->publish_io(operation);
   }
 
   kqueue_context* context_;

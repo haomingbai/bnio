@@ -68,7 +68,8 @@ bool io_uring_context::is_in_context() const noexcept {
   return current_context_ == this;
 }
 
-io_uring_context::run_phase io_uring_context::handle_run_ready_tasks() noexcept {
+io_uring_context::run_phase
+io_uring_context::handle_run_ready_tasks() noexcept {
   // Reset the local-queue budget for this pass through the run loop.
   local_task_budget_ = options_.local_queue_threshold;
 
@@ -153,8 +154,7 @@ void io_uring_context::finish() noexcept {
     (void)collect_ready_cqes();
     (void)move_cpu_tasks();
 
-    io_uring_operation_base* operations =
-        reverse_tasks(local_tasks_.pop_all());
+    io_uring_operation_base* operations = reverse_tasks(local_tasks_.pop_all());
     if (operations == nullptr) {
       break;
     }

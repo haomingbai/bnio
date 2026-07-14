@@ -5,9 +5,30 @@
 #include <bupp/async_io/buffer_view.h>
 #include <bupp/export.h>
 
+#include <atomic>
+#include <cstddef>
+
 namespace bupp::async_io::bsd_native {
 
-struct kqueue_operation_stack_state;
+class kqueue_helper;
+class kqueue_operation_base;
+class kqueue_io_operation_base;
+
+/** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
+struct BUPP_EXPORT kqueue_task_queue_state {
+  void push_cpu(kqueue_operation_base& operation) noexcept;
+
+  [[nodiscard]] kqueue_operation_base* pop_cpu_all() noexcept;
+
+  void push_io(kqueue_io_operation_base& operation) noexcept;
+
+  [[nodiscard]] kqueue_io_operation_base* pop_io_all() noexcept;
+
+  std::atomic<kqueue_operation_base*> cpu_head{nullptr};
+  std::atomic<kqueue_io_operation_base*> io_head{nullptr};
+  std::atomic<std::size_t> awake_workers{0};
+  std::atomic_bool closing{false};
+};
 
 /**
  * Base class for operations scheduled by a kqueue_context.
@@ -19,9 +40,6 @@ class BUPP_EXPORT kqueue_operation_base {
  public:
   /** Intrusive next pointer used by context task queues. */
   kqueue_operation_base* next = nullptr;
-
-  /** Stack state that currently owns or executes this operation. */
-  kqueue_operation_stack_state* stack_state = nullptr;
 
   /** Native completion result, or a negative errno. */
   int result = 0;
@@ -38,43 +56,57 @@ class BUPP_EXPORT kqueue_operation_base {
 
   /** Completes the operation on the context run loop. */
   virtual void execute() noexcept = 0;
+};
 
-  /**
-   * Returns the buffer used by context-owned read/write work.
-   *
-   * Non-buffered operations return an empty view. Returning the view by value
-   * keeps the interface non-owning and allocation-free.
-   */
+/** I/O operation passively prepared by a kqueue_context run loop. */
+class BUPP_EXPORT kqueue_io_operation_base : public kqueue_operation_base {
+ public:
+  kqueue_io_operation_base() noexcept = default;
+  kqueue_io_operation_base(const kqueue_io_operation_base&) = delete;
+  kqueue_io_operation_base& operator=(const kqueue_io_operation_base&) = delete;
+  kqueue_io_operation_base(kqueue_io_operation_base&&) = delete;
+  kqueue_io_operation_base& operator=(kqueue_io_operation_base&&) = delete;
+  ~kqueue_io_operation_base() override = default;
+
+  /** Intrusive link used by local and shared I/O queues. */
+  kqueue_io_operation_base* io_next = nullptr;
+
+  /** Describes the native registration after the run loop takes this task. */
+  virtual void prepare(kqueue_helper& helper) noexcept = 0;
+
+  /** Selects error completion when preparation or registration fails. */
+  virtual void complete_submit_error(int result) noexcept = 0;
+
+  /** Returns the non-owning buffer used by context-owned read/write work. */
   [[nodiscard]] virtual buffer_view get_data() noexcept { return {}; }
 };
 
-/** Non-atomic intrusive stack of kqueue operations. */
-struct BUPP_EXPORT kqueue_operation_stack_state {
-  void push(kqueue_operation_base& operation) noexcept {
+inline void kqueue_task_queue_state::push_cpu(
+    kqueue_operation_base& operation) noexcept {
+  kqueue_operation_base* head = cpu_head.load(std::memory_order_relaxed);
+  do {
     operation.next = head;
-    operation.stack_state = this;
-    head = &operation;
-  }
+  } while (!cpu_head.compare_exchange_weak(
+      head, &operation, std::memory_order_release, std::memory_order_relaxed));
+}
 
-  void push(kqueue_operation_base* operations) noexcept {
-    while (operations != nullptr) {
-      kqueue_operation_base* operation = operations;
-      operations = operations->next;
-      operation->next = nullptr;
-      push(*operation);
-    }
-  }
+inline kqueue_operation_base* kqueue_task_queue_state::pop_cpu_all() noexcept {
+  return cpu_head.exchange(nullptr, std::memory_order_acquire);
+}
 
-  [[nodiscard]] kqueue_operation_base* pop_all() noexcept {
-    kqueue_operation_base* operations = head;
-    head = nullptr;
-    return operations;
-  }
+inline void kqueue_task_queue_state::push_io(
+    kqueue_io_operation_base& operation) noexcept {
+  kqueue_io_operation_base* head = io_head.load(std::memory_order_relaxed);
+  do {
+    operation.io_next = head;
+  } while (!io_head.compare_exchange_weak(
+      head, &operation, std::memory_order_release, std::memory_order_relaxed));
+}
 
-  [[nodiscard]] bool empty() const noexcept { return head == nullptr; }
-
-  kqueue_operation_base* head = nullptr;
-};
+inline kqueue_io_operation_base*
+kqueue_task_queue_state::pop_io_all() noexcept {
+  return io_head.exchange(nullptr, std::memory_order_acquire);
+}
 
 }  // namespace bupp::async_io::bsd_native
 

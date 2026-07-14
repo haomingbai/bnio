@@ -14,11 +14,15 @@ using bupp::async_io::buffer_view;
 using bupp::async_io::descriptor_view;
 using bupp::async_io::bsd_native::kqueue_context;
 using bupp::async_io::bsd_native::kqueue_context_options;
+using bupp::async_io::bsd_native::kqueue_helper;
+using bupp::async_io::bsd_native::kqueue_io_operation_base;
 using bupp::async_io::bsd_native::kqueue_nop_operation;
 using bupp::async_io::bsd_native::kqueue_operation_base;
 using bupp::async_io::bsd_native::kqueue_poll_operation;
 using bupp::async_io::bsd_native::kqueue_post_operation;
+using bupp::async_io::bsd_native::kqueue_raw_operation;
 using bupp::async_io::bsd_native::kqueue_read_operation;
+using bupp::async_io::bsd_native::kqueue_task_queue_state;
 using bupp::async_io::bsd_native::kqueue_write_operation;
 
 enum class signal_kind {

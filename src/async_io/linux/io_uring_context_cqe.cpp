@@ -63,8 +63,8 @@ unsigned io_uring_context::collect_cqe_tasks(
   return task_count;
 }
 
-void io_uring_context::dispatch_cqe_tasks(
-    operation_queue& cqe_tasks, unsigned task_count) noexcept {
+void io_uring_context::dispatch_cqe_tasks(operation_queue& cqe_tasks,
+                                          unsigned task_count) noexcept {
   // Tier 1 — inline: small batch, always push to the local queue.
   if (task_count <= options_.cqe_inline_completion_threshold) {
     local_tasks_.push(reverse_tasks(cqe_tasks.pop_all()));
