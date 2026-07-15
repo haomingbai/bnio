@@ -81,7 +81,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cmake -E make_directory coverage
-          gcovr --config gcovr.cfg --gcov-executable gcov build
+          gcovr --config gcovr.cfg \
+            --gcov-executable gcov \
+            --gcov-ignore-parse-errors=negative_hits.warn_once_per_file \
+            build
 
       - name: Generate macOS coverage report
         if: runner.os == 'macOS'
