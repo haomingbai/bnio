@@ -317,6 +317,7 @@ bounded write attempt and returns that attempt's byte count.
 | `BUPP_BUILD_TESTS`        | `ON`     | Build and enable CTest                      |
 | `BUPP_BUILD_EXAMPLES`     | `ON`     | Build example executables                   |
 | `BUPP_BUILD_ASIO_EXAMPLES`| `OFF`    | Build Asio-based examples (fetches Asio)    |
+| `BUPP_ENABLE_COVERAGE`    | `OFF`    | Instrument GCC/Clang builds for coverage    |
 | `BUPP_BEXEC_SOURCE_DIR`   | —        | Path to a local `bexec` checkout            |
 
 ### Using a local bexec checkout
@@ -331,6 +332,35 @@ cmake -S . -B build -DBUPP_BEXEC_SOURCE_DIR=/path/to/bexec
 cmake -S . -B build-shared -DBUILD_SHARED_LIBS=ON
 cmake --build build-shared
 ```
+
+### Coverage report
+
+Install `gcovr` 8.6 in a Python 3.10+ virtual environment, then configure an
+instrumented build and run the tests:
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install gcovr==8.6
+cmake -S . -B build-coverage \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DBUPP_BUILD_EXAMPLES=OFF \
+  -DBUPP_ENABLE_COVERAGE=ON
+cmake --build build-coverage
+ctest --test-dir build-coverage --output-on-failure
+cmake -E make_directory coverage
+.venv/bin/gcovr --config gcovr.cfg build-coverage
+```
+
+On macOS, use AppleClang's gcov-compatible LLVM frontend for the final command:
+
+```sh
+.venv/bin/gcovr --config gcovr.cfg \
+  --gcov-executable "xcrun llvm-cov gcov" build-coverage
+```
+
+The reports are written to `coverage/` as a text summary, detailed HTML, and
+Cobertura XML. The GitHub Actions matrix uploads a separate artifact for the
+Linux/io_uring and macOS/kqueue runs.
 
 ---
 

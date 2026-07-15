@@ -42,6 +42,7 @@ option(BUPP_BUILD_EXAMPLES "Build bupp examples" ON)
 option(BUPP_BUILD_ASIO_EXAMPLES "Build standalone Asio echo server example (auto-fetches Asio)" OFF)
 option(BUPP_ENABLE_WARNINGS "Enable compiler warnings for bupp targets" ON)
 option(BUPP_ENABLE_TSAN "Build bupp targets with ThreadSanitizer" OFF)
+option(BUPP_ENABLE_COVERAGE "Instrument bupp targets for coverage reporting" OFF)
 
 bupp_resolve_bexec_dependency()
 
@@ -107,6 +108,19 @@ if(BUPP_ENABLE_TSAN)
     add_link_options(-fsanitize=thread)
   else()
     message(FATAL_ERROR "BUPP_ENABLE_TSAN requires GCC or Clang")
+  endif()
+endif()
+
+if(BUPP_ENABLE_COVERAGE)
+  if(BUPP_ENABLE_TSAN)
+    message(FATAL_ERROR
+            "BUPP_ENABLE_COVERAGE cannot be combined with BUPP_ENABLE_TSAN")
+  elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-O0 -g --coverage)
+    add_link_options(--coverage)
+  else()
+    message(FATAL_ERROR
+            "BUPP_ENABLE_COVERAGE requires GCC, Clang, or AppleClang")
   endif()
 endif()
 

@@ -25,7 +25,8 @@ bupp_add_io_context_test(steady_timer steady_timer_test.cpp)
 bupp_add_io_context_test(tcp tcp_test.cpp)
 bupp_add_io_context_test(udp udp_test.cpp)
 bupp_add_io_context_test(udp_stress udp_stress_test.cpp)
-set_tests_properties(bupp.io_context.udp_stress PROPERTIES TIMEOUT 10)
+set_tests_properties(bupp.io_context.udp_stress
+                     PROPERTIES LABELS stress TIMEOUT 10)
 
 function(bupp_add_io_context_header_test name definition)
   add_executable(bupp_io_context_header_${name}_test
