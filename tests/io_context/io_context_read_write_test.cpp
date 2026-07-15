@@ -41,6 +41,12 @@ struct pair_byte_receiver {
   }
 };
 
+struct stopped_byte_receiver : byte_receiver {
+  stop_env env;
+
+  [[nodiscard]] stop_env get_env() const noexcept { return env; }
+};
+
 void test_ready_socket_read_completes_without_queue() {
   bupp::io_context context;
   if (!context_available(context)) {
@@ -327,6 +333,99 @@ void test_descriptor_pipe_read_write_pair() {
   assert(::close(descriptors[1]) == 0);
 }
 
+void test_invalid_descriptor_read_reports_bad_file_descriptor() {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  std::array<char, 8> bytes{};
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = scheduler.async_read(bupp::async_io::descriptor_view(),
+                                     bupp::buffer(bytes));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  assert(state->signal == signal_kind::error);
+  assert(state->error == std::error_code(EBADF, std::generic_category()));
+}
+
+void test_invalid_descriptor_write_reports_bad_file_descriptor() {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  constexpr std::string_view payload = "invalid descriptor";
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = scheduler.async_write(bupp::async_io::descriptor_view(),
+                                      bupp::buffer(payload));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  assert(state->signal == signal_kind::error);
+  assert(state->error == std::error_code(EBADF, std::generic_category()));
+}
+
+void test_pre_stopped_descriptor_read_reports_stopped() {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  bexec::inplace_stop_source source;
+  assert(source.request_stop());
+
+  std::array<char, 8> bytes{};
+  stopped_byte_receiver receiver;
+  receiver.context = &context;
+  receiver.env = stop_env{source.get_token()};
+  auto state = receiver.state;
+
+  auto sender = scheduler.async_read(bupp::async_io::descriptor_view(),
+                                     bupp::buffer(bytes));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  assert(state->signal == signal_kind::stopped);
+}
+
+void test_pre_stopped_descriptor_write_reports_stopped() {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  bexec::inplace_stop_source source;
+  assert(source.request_stop());
+
+  constexpr std::string_view payload = "cancelled write";
+  stopped_byte_receiver receiver;
+  receiver.context = &context;
+  receiver.env = stop_env{source.get_token()};
+  auto state = receiver.state;
+
+  auto sender = scheduler.async_write(bupp::async_io::descriptor_view(),
+                                      bupp::buffer(payload));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+
+  assert(state->signal == signal_kind::stopped);
+}
+
 void test_file_write_and_read() {
   std::string path = "/tmp/bupp-io-context-file-XXXXXX";
   const int fd = ::mkstemp(path.data());
@@ -408,6 +507,10 @@ int main() {
   test_io_idle_drain_reads();
   test_io_idle_drain_read_write_pair();
   test_descriptor_pipe_read_write_pair();
+  test_invalid_descriptor_read_reports_bad_file_descriptor();
+  test_invalid_descriptor_write_reports_bad_file_descriptor();
+  test_pre_stopped_descriptor_read_reports_stopped();
+  test_pre_stopped_descriptor_write_reports_stopped();
   test_file_write_and_read();
   return 0;
 }
