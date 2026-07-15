@@ -1,6 +1,13 @@
+#include <openssl/err.h>
+
 #include "ssl_test_support.h"
 
 namespace {
+
+template <class Owner>
+void self_move_assign(Owner& owner) {
+  owner = std::move(owner);
+}
 
 void test_ssl_sender_concepts() {
   using stream_type = bupp::ssl_stream<bupp::tcp_socket>;
@@ -55,10 +62,55 @@ void test_ssl_raii_objects_construct() {
   assert(stream.lowest_layer().get_native_handle() == -1);
 }
 
+void test_ssl_context_errors_and_ownership() {
+  const std::error_code synthetic_error = bupp::make_openssl_error(1);
+  assert(synthetic_error.value() == 1);
+  assert(synthetic_error.category() == bupp::openssl_error_category());
+  assert(std::string_view(synthetic_error.category().name()) == "openssl");
+  assert(!synthetic_error.message().empty());
+
+  bupp::ssl_context generic_context(bupp::ssl_context_method::tls);
+  bupp::ssl_context client_context(bupp::ssl_context_method::tls_client);
+  bupp::ssl_context server_context(bupp::ssl_context_method::tls_server);
+  assert(generic_context.valid());
+  assert(client_context.valid());
+  assert(server_context.valid());
+
+  SSL_CTX* const client_handle = client_context.native_handle();
+  bupp::ssl_context moved_context(std::move(client_context));
+  assert(!client_context.valid());
+  assert(moved_context.native_handle() == client_handle);
+
+  generic_context = std::move(moved_context);
+  assert(!moved_context.valid());
+  assert(generic_context.native_handle() == client_handle);
+  self_move_assign(generic_context);
+  assert(generic_context.native_handle() == client_handle);
+
+  ERR_clear_error();
+  const std::error_code certificate_error =
+      server_context.use_certificate_chain_file(
+          "/bupp-test/path-that-does-not-exist/cert.pem");
+  assert(certificate_error);
+  assert(certificate_error.category() == bupp::openssl_error_category());
+
+  ERR_clear_error();
+  const std::error_code key_error = server_context.use_private_key_file(
+      "/bupp-test/path-that-does-not-exist/key.pem");
+  assert(key_error);
+  assert(key_error.category() == bupp::openssl_error_category());
+
+  ERR_clear_error();
+  const std::error_code mismatch_error = server_context.check_private_key();
+  assert(mismatch_error);
+  assert(mismatch_error.category() == bupp::openssl_error_category());
+}
+
 }  // namespace
 
 int main() {
   test_ssl_sender_concepts();
   test_ssl_raii_objects_construct();
+  test_ssl_context_errors_and_ownership();
   return 0;
 }

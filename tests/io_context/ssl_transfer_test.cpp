@@ -132,6 +132,27 @@ void test_socketpair_read_write_transfers_plaintext() {
   assert(sent == payload.size());
   assert(received_size == payload.size());
   assert(std::memcmp(received.data(), payload.data(), payload.size()) == 0);
+
+  test_require(!client.lowest_layer().close());
+  bupp::io_context error_context;
+  if (!error_context.is_open()) {
+    return;
+  }
+  auto error_scheduler = error_context.get_post_scheduler();
+  std::array<unsigned char, 1> trailing_byte{};
+  unsigned completions = 0;
+  auto error_state = std::make_shared<transfer_state>();
+  auto read_operation = bexec::connect(
+      server.async_read(error_scheduler, trailing_byte),
+      transfer_receiver{error_state, &error_context, &completions, 1});
+  bexec::start(read_operation);
+  error_context.run();
+
+  assert(completions == 1);
+  assert(error_state->values == 0);
+  assert(error_state->errors == 1);
+  assert(error_state->stopped == 0);
+  assert(error_state->error == std::errc::connection_reset);
 }
 
 }  // namespace

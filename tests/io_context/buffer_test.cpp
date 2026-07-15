@@ -28,6 +28,8 @@ int main() {
   assert(dynamic_storage == "abcde");
   dynamic.consume(3);
   assert(dynamic_storage == "de");
+  dynamic.consume(dynamic.size());
+  assert(dynamic_storage.empty());
 
   std::vector<std::byte> bytes;
   auto byte_buffer = bupp::dynamic_buffer(bytes);

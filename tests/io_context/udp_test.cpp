@@ -9,6 +9,7 @@
 #include <bupp/io_context.h>
 #include <bupp/ip.h>
 #include <bupp/udp.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <array>
@@ -27,6 +28,23 @@
 #include "io_context_runtime_test_support.h"
 
 namespace {
+
+template <class Owner>
+void self_move_assign(Owner& owner) {
+  owner = std::move(owner);
+}
+
+void assert_descriptor_closed(int fd) {
+  errno = 0;
+  assert(::fcntl(fd, F_GETFD) == -1);
+  assert(errno == EBADF);
+}
+
+void assert_close_on_exec(int fd) {
+  const int flags = ::fcntl(fd, F_GETFD);
+  assert(flags >= 0);
+  assert((flags & FD_CLOEXEC) != 0);
+}
 
 template <class Scheduler, class Socket, class Buffer>
 concept scheduler_can_send_datagram =
@@ -186,6 +204,77 @@ void test_protocol_and_lifecycle() {
   assert(::close(fd) == 0);
 }
 
+void test_socket_ownership_and_error_paths() {
+  bupp::udp::socket socket;
+  assert(!socket.close());
+  assert(!socket.open(bupp::ip::udp::v4()));
+  const int transferred_fd = socket.native_handle();
+  assert_close_on_exec(transferred_fd);
+  assert(!socket.open(bupp::ip::udp::v4()));
+  assert(socket.native_handle() == transferred_fd);
+  self_move_assign(socket);
+  assert(socket.native_handle() == transferred_fd);
+
+  bupp::udp::socket destination;
+  assert(!destination.open(bupp::ip::udp::v4()));
+  const int replaced_fd = destination.native_handle();
+  destination = std::move(socket);
+  assert(!socket.is_open());
+  assert(destination.native_handle() == transferred_fd);
+  assert_descriptor_closed(replaced_fd);
+
+  bupp::udp::socket replacement;
+  assert(!replacement.open(bupp::ip::udp::v4()));
+  const int replacement_fd = replacement.release();
+  destination.assign(replacement_fd);
+  assert(destination.native_handle() == replacement_fd);
+  assert_descriptor_closed(transferred_fd);
+  destination.assign(replacement_fd);
+  assert(::fcntl(replacement_fd, F_GETFD) >= 0);
+  assert(!destination.set_reuse_address(true));
+  assert(!destination.set_reuse_address(false));
+  assert(!destination.close());
+  assert_descriptor_closed(replacement_fd);
+  assert(!destination.close());
+
+  bupp::udp::socket invalid_family;
+  assert(invalid_family.open(AF_UNSPEC));
+  assert(!invalid_family.is_open());
+}
+
+void test_socket_destructor_and_invalid_descriptor_errors() {
+  int owned_fd = -1;
+  {
+    bupp::udp::socket owned;
+    assert(!owned.open(bupp::ip::udp::v4()));
+    owned_fd = owned.native_handle();
+  }
+  assert_descriptor_closed(owned_fd);
+
+  bupp::udp::socket externally_closed;
+  assert(!externally_closed.open(bupp::ip::udp::v4()));
+  const int fd = externally_closed.native_handle();
+  assert(::close(fd) == 0);
+  const std::error_code close_error = externally_closed.close();
+  assert(close_error == std::error_code(EBADF, std::generic_category()));
+  assert(!externally_closed.is_open());
+
+  bupp::udp::socket closed;
+  assert(closed.shutdown(SHUT_RDWR) ==
+         std::error_code(EBADF, std::generic_category()));
+  assert(closed.set_reuse_address(true) ==
+         std::error_code(EBADF, std::generic_category()));
+
+  bupp::ip::endpoint endpoint = bupp::ip::endpoint::loopback_v4(1234);
+  assert(closed.local_endpoint(endpoint) ==
+         std::error_code(EBADF, std::generic_category()));
+  assert(endpoint.version() == bupp::ip::address::version::unspecified);
+  endpoint = bupp::ip::endpoint::loopback_v4(1234);
+  assert(closed.remote_endpoint(endpoint) ==
+         std::error_code(EBADF, std::generic_category()));
+  assert(endpoint.version() == bupp::ip::address::version::unspecified);
+}
+
 void test_async_send_to_receive_from() {
   bupp::io_context context;
   if (!context_available(context)) {
@@ -325,6 +414,8 @@ void test_async_ipv6_send_to() {
 int main() {
   test_sender_concepts();
   test_protocol_and_lifecycle();
+  test_socket_ownership_and_error_paths();
+  test_socket_destructor_and_invalid_descriptor_errors();
   test_async_send_to_receive_from();
   test_async_default_peer();
   test_async_ipv6_send_to();

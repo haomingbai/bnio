@@ -99,6 +99,7 @@ struct handshake_state {
   unsigned values = 0;
   unsigned errors = 0;
   unsigned stopped = 0;
+  std::error_code error;
 };
 
 struct handshake_receiver {
@@ -112,8 +113,9 @@ struct handshake_receiver {
     }
   }
 
-  void set_error(std::error_code) noexcept {
+  void set_error(std::error_code error) noexcept {
     ++state->errors;
+    state->error = error;
     if (context != nullptr) {
       (void)context->stop();
     }
@@ -132,6 +134,7 @@ struct transfer_state {
   unsigned errors = 0;
   unsigned stopped = 0;
   std::size_t bytes = 0;
+  std::error_code error;
 };
 
 struct transfer_receiver {
@@ -146,8 +149,9 @@ struct transfer_receiver {
     complete();
   }
 
-  void set_error(std::error_code) noexcept {
+  void set_error(std::error_code error) noexcept {
     ++state->errors;
+    state->error = error;
     complete();
   }
 

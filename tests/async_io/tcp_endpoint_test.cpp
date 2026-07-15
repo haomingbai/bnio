@@ -64,6 +64,25 @@ int main() {
   endpoint.set_port(9002);
   check_v6_endpoint(endpoint, 9002, k_loopback_v6);
 
+  endpoint.set_v4_address(k_any_v4);
+  check_v6_endpoint(endpoint, 9002, k_loopback_v6);
+  endpoint.set_v6_address(k_any_v6);
+  check_v6_endpoint(endpoint, 9002, k_any_v6);
+
+  endpoint.set_address(bupp::async_io::ip::address{});
+  assert(endpoint.version() == address::version::unspecified);
+  assert(endpoint.port() == 0);
+  endpoint.set_port(9003);
+  endpoint.set_v4_address(k_loopback_v4);
+  endpoint.set_v6_address(k_loopback_v6);
+  assert(endpoint.version() == address::version::unspecified);
+  assert(endpoint.port() == 0);
+
+  endpoint.set_address(bupp::async_io::ip::address::loopback_v4());
+  endpoint.set_port(9004);
+  endpoint.set_v6_address(k_loopback_v6);
+  check_v4_endpoint(endpoint, 9004, k_loopback_v4);
+
   endpoint.reset();
   assert(endpoint.version() == address::version::unspecified);
   assert(endpoint.port() == 0);

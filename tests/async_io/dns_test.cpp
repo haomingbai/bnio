@@ -3,6 +3,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <string_view>
 #include <system_error>
 #include <type_traits>
 #include <vector>
@@ -56,6 +57,38 @@ void test_result_view() {
 void test_dns_category() {
   std::error_code error = bupp::async_io::make_dns_error_code(-2);
   assert(error.category() == bupp::async_io::dns_category());
+  assert(std::string_view(error.category().name()) == "bupp.dns");
+  assert(!error.message().empty());
+}
+
+void test_resolve_rejects_invalid_inputs() {
+  std::array<bupp::async_io::ip::endpoint, 2> results{};
+
+  bupp::async_io::basic_dns_query<4, 4> oversized_query("toolong", "80");
+  assert(!oversized_query.valid());
+  std::size_t count = 7;
+  std::error_code error = bupp::async_io::resolve_dns(
+      oversized_query, bupp::async_io::dns_result_view(results), count);
+  assert(error == std::errc::invalid_argument);
+  assert(count == 0);
+
+  bupp::async_io::dns_query valid_query("127.0.0.1", "80");
+  count = 7;
+  error = bupp::async_io::resolve_dns(
+      valid_query, bupp::async_io::dns_result_view(nullptr, 1), count);
+  assert(error == std::errc::invalid_argument);
+  assert(count == 0);
+}
+
+void test_resolve_honors_zero_capacity_output() {
+  bupp::async_io::dns_query query("127.0.0.1", "8080");
+  query.set_address_version(bupp::async_io::ip::address::version::v4);
+
+  std::size_t count = 7;
+  const std::error_code error = bupp::async_io::resolve_dns(
+      query, bupp::async_io::dns_result_view(), count);
+  assert(!error);
+  assert(count == 0);
 }
 
 void test_resolve_numeric_v4_endpoint() {
@@ -88,6 +121,8 @@ int main() {
   test_query_defaults_and_setters();
   test_result_view();
   test_dns_category();
+  test_resolve_rejects_invalid_inputs();
+  test_resolve_honors_zero_capacity_output();
   test_resolve_numeric_v4_endpoint();
   return 0;
 }

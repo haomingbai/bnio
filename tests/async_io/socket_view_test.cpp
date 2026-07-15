@@ -97,6 +97,16 @@ void test_invalid_socket() {
   assert(datagram.native_handle() == -1);
   check_error(datagram.bind(endpoint), EBADF);
   check_error(datagram.connect(endpoint), EBADF);
+  check_error(datagram.shutdown(SHUT_RDWR), EBADF);
+  check_error(datagram.set_reuse_address(true), EBADF);
+
+  bupp::async_io::ip::endpoint stale =
+      bupp::async_io::ip::endpoint::loopback_v4(1234);
+  check_error(datagram.local_endpoint(stale), EBADF);
+  assert(stale.version() == bupp::async_io::ip::address::version::unspecified);
+  stale = bupp::async_io::ip::endpoint::loopback_v4(1234);
+  check_error(datagram.remote_endpoint(stale), EBADF);
+  assert(stale.version() == bupp::async_io::ip::address::version::unspecified);
 }
 
 void test_datagram_lifecycle() {
