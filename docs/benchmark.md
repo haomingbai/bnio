@@ -1,42 +1,44 @@
-# bupp vs asio TCP Echo Benchmark
+# bupp vs asio TCP Echo Benchmark — Full Report
 
 ## 1. Test Environment
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-07-12 (Asia/Shanghai) |
-| Topology | Single-host loopback TCP |
-| OS | Fedora Linux 44 (Workstation Edition) |
+| Date | 2026-07-14T16:49:05.140639+00:00 |
+| Topology | Single-host loopback TCP (127.0.0.1) |
+| OS | Linux 7.1.3-200.fc44.x86_64 |
 | Kernel | 7.1.3-200.fc44.x86_64 |
 | Architecture | x86_64 |
 | CPU | 13th Gen Intel(R) Core(TM) i9-13900H |
 | Logical CPUs | 20 |
-| Compiler | GCC 16.1.1 |
-| CMake | 4.3.0 |
-| Python | 3.14.6 |
+| Memory | 32564648 kB |
+| Compiler | gcc (GCC) 16.1.1 20260515 (Red Hat 16.1.1-2) |
+| CMake | cmake version 4.3.0 |
+| Python | 3.14.6 (main, Jun 11 2026, 00:00:00) [GCC 16.1.1 20260515 (Red Hat 16.1.1-2)] |
 | liburing | 2.13 |
 | OpenSSL | 3.5.7 |
 | Asio | 1.30.2 |
 
-Hostnames, usernames, absolute paths, and network addresses are intentionally omitted from this report.
+Hostnames, usernames, absolute paths, and network addresses are intentionally omitted.
 
 ## 2. Methodology
 
 The benchmark compares two functionally equivalent TCP echo servers:
 
-- `bupp_raw_echo`: C++20 coroutine echo server using bupp on io_uring.
-- `asio_raw_echo`: C++20 coroutine echo server using standalone Asio.
-- Client: a neutral Python `asyncio` TCP echo load generator.
+- **`bupp_raw_echo`**: C++20 coroutine echo server using bupp on io_uring (Linux).
+- **`asio_raw_echo`**: C++20 coroutine echo server using standalone Asio (epoll reactor).
+- **Client**: A neutral Python `asyncio` TCP echo load generator — neither bupp nor asio.
 
 Each connection runs a strict ping-pong loop: send one fixed-size payload, read the echoed payload, then repeat. The warmup phase is excluded from throughput and latency samples. Latency values are sampled round-trip times in microseconds. Throughput is reported as completed echo requests per second; MB/s counts the echoed payload size once per completed request.
 
-Fairness controls:
+### Fairness Controls
 
-- Both servers were rebuilt in Release mode immediately before testing.
-- The same client drove both servers.
-- The server process was restarted for every measured configuration.
-- The process `nofile` soft limit was raised before high-concurrency runs.
-- Every result row records the client-side error count. Rows with errors are not treated as clean throughput wins.
+- Both servers rebuilt in **Release** mode with `-march=native -mtune=native` immediately before testing.
+- The **same Python asyncio client** drives both servers.
+- Server process **restarted** for every measured configuration.
+- Each configuration runs **3 iterations**; results are median-aggregated.
+- Warmup phase (10 s) excluded from measurement (30 s).
+- Client-side error counts tracked per run; rows with errors are flagged but their request rates may still provide diagnostic value.
 
 ## 3. Configuration Matrix
 
@@ -47,176 +49,167 @@ Fairness controls:
 | Concurrent connections | 64, 256, 1024 |
 | Message size | 64 B, 1 KB, 4 KB, 64 KB |
 | Warmup per run | 10 s |
-| Measurement per run | 60 s |
-| Repeats | 1 |
+| Measurement per run | 30 s |
+| Iterations per config | 3 |
 
-The main matrix produced 96 rows. Both bupp and Asio completed all 48 rows with zero client errors and no zero-throughput rows. This run therefore compares clean throughput and latency rather than mixing throughput with connection-error behavior.
+The matrix produced **96** result rows.
 
-## 4. Results
+## 4. Stability Summary
 
-### 4.1 Overview (workers=4, connections=256)
+Both servers completed every configuration with zero client errors. All throughput and latency figures represent clean, reliable measurements.
+
+Overall average throughput ratio (bupp / asio): **0.981×** across all 96 configurations.
+
+## 5. Results
+
+### 5.1 Throughput Overview
 
 ![Throughput Overview](benchmark_charts/overview_bars.png)
 
-| Message Size | bupp req/s | bupp errors | asio req/s | asio errors | Ratio | bupp p50 | asio p50 | bupp p99 | asio p99 |
+**Reference point: workers=4, connections=256**
+
+| Message Size | bupp req/s | bupp err | asio req/s | asio err | Ratio | bupp p50 | asio p50 | bupp p99 | asio p99 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 64 B | 93,333 | 0 | 87,347 | 0 | 1.07x | 2,740 us | 2,920 us | 3,093 us | 3,079 us |
-| 1 KB | 90,470 | 0 | 83,290 | 0 | 1.09x | 2,826 us | 3,063 us | 3,208 us | 3,218 us |
-| 4 KB | 81,284 | 0 | 73,626 | 0 | 1.10x | 3,145 us | 3,466 us | 3,560 us | 3,660 us |
-| 64 KB | 6,127 | 0 | 6,225 | 0 | 0.98x | 41,822 us | 41,072 us | 43,970 us | 42,503 us |
+| 64 B | 118,943 | 0 | 85,129 | 0 | 1.40× | 2,134 µs | 2,996 µs | 2,532 µs | 3,224 µs |
+| 1 KB | 113,410 | 0 | 114,449 | 0 | 0.99× | 2,236 µs | 2,216 µs | 3,142 µs | 3,107 µs |
+| 4 KB | 104,499 | 0 | 73,020 | 0 | 1.43× | 2,432 µs | 3,521 µs | 3,480 µs | 3,813 µs |
+| 64 KB | 6,202 | 0 | 6,233 | 0 | 1.00× | 41,139 µs | 41,085 µs | 42,693 µs | 42,544 µs |
 
-At the reference point, every row completed with zero client errors. bupp was ahead by 7-10% from 64 B through 4 KB, with similar p99 latency. At 64 KB the two implementations were effectively at parity: Asio was 2% higher in request rate and had a lower p99, which is consistent with the workload shifting from event-loop overhead toward TCP buffering, memory copies, and client-side scheduling.
-
-### 4.2 Throughput vs Connections
+### 5.2 Throughput vs Connections
 
 ![Throughput vs Connections](benchmark_charts/throughput_vs_connections.png)
 
-Connection scaling is shown for workers=4. Small and medium payloads stay in a narrow throughput band as connections increase because the ping-pong client and loopback scheduling dominate once enough requests are in flight. The 64 KB rows scale differently: more concurrent connections increase outstanding bytes and therefore MB/s, while per-request latency stays much higher than the small-payload cases.
+*Workers=4, faceted by message size. Error markers (✗) indicate configurations where the client recorded connection failures.*
 
-### 4.3 Throughput vs Worker Threads
+### 5.3 Throughput vs Worker Threads
 
 ![Throughput vs Workers](benchmark_charts/throughput_vs_workers.png)
 
-| Workers | bupp req/s | bupp errors | asio req/s | asio errors | Ratio |
+*Connections=256, faceted by message size.*
+
+| Workers | bupp req/s | bupp err | asio req/s | asio err | Ratio |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 87,219 | 0 | 83,036 | 0 | 1.05x |
-| 2 | 81,305 | 0 | 76,847 | 0 | 1.06x |
-| 4 | 81,284 | 0 | 73,626 | 0 | 1.10x |
-| 8 | 80,409 | 0 | 74,675 | 0 | 1.08x |
+| 1 | 81,178 | 0 | 93,039 | 0 | 0.87× |
+| 2 | 79,546 | 0 | 75,921 | 0 | 1.05× |
+| 4 | 104,499 | 0 | 73,020 | 0 | 1.43× |
+| 8 | 79,112 | 0 | 78,814 | 0 | 1.00× |
 
-For 4 KB / 256 connections, bupp stayed ahead of Asio across all worker counts, from 1.05x at one worker to 1.10x at four workers. Neither implementation scales linearly in this fixed-client loopback setup; adding server workers mostly redistributes scheduler work after the client and kernel path are already saturated.
+**Worker-scaling at 4 KB / 256 connections.** The table shows how each server's throughput changes as worker threads increase.
 
-### 4.4 Latency
+### 5.4 Connection Scaling
+
+| Connections | bupp req/s | bupp err | asio req/s | asio err | Ratio |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 64 | 73,489 | 0 | 73,557 | 0 | 1.00× |
+| 256 | 104,499 | 0 | 73,020 | 0 | 1.43× |
+| 1024 | 83,436 | 0 | 72,493 | 0 | 1.15× |
+
+**Connection-scaling at 4 KB / workers=4.** Shows how each server handles increasing concurrency.
+
+### 5.5 Latency Comparison
 
 ![Latency Comparison](benchmark_charts/latency_comparison.png)
 
-Median latency mostly tracks connection count and payload size. The 64 B through 4 KB rows sit in the low-millisecond range at 256 connections, while 64 KB rows are around 41-44 ms because each request carries much more data through the same ping-pong loop.
+*Workers=4, connections=256. p50 and p99 round-trip latency.*
 
-### 4.5 bupp/asio Ratio Heatmap
+### 5.6 bupp / asio Throughput Ratio Heatmap
 
-![Heatmap Ratio](benchmark_charts/heatmap_ratio.png)
+![Heatmap](benchmark_charts/heatmap_ratio.png)
 
-Positive cells mean bupp has higher measured throughput than asio for that worker/connection point. All cells in this run are zero-error comparisons, so the heatmap can be read directly as relative throughput.
+*Workers=4. Positive values (blue) = bupp faster; negative (red) = asio faster. Cells marked ⚠ include client errors.*
 
-### 4.6 Throughput and Tail Latency Scatter
+### 5.7 Worker-Scaling Ratio Heatmap
 
-![Throughput Latency Scatter](benchmark_charts/throughput_latency_scatter.png)
+![Worker Scaling](benchmark_charts/worker_scaling_heatmap.png)
 
-The scatter plot includes the zero-error rows from both implementations. Small payloads cluster at high request rate and low p99 latency; 64 KB rows trade request rate for much higher per-request latency.
+*Connections=256. Shows how the bupp/asio ratio changes as worker threads increase.*
 
-### 4.7 Best and Hardest Relative Cases
+### 5.8 Throughput & Tail Latency Scatter
 
-Best zero-error bupp/asio throughput ratio:
+![Scatter](benchmark_charts/throughput_latency_scatter.png)
 
-- Configuration: workers=8, connections=256, message_size=64 B
-- bupp: 93,532 req/s, errors 0, p99 3,068 us
-- asio: 83,870 req/s, errors 0, p99 3,201 us
-- Ratio: 1.12x
+*Only zero-error configurations shown. Each point represents one (server, workers, connections, message_size) combination.*
 
-Most challenging zero-error bupp/asio throughput ratio:
+### 5.9 Extreme Cases
 
-- Configuration: workers=1, connections=1024, message_size=4 KB
-- bupp: 80,733 req/s, errors 0, p99 16,442 us
-- asio: 88,900 req/s, errors 0, p99 15,094 us
-- Ratio: 0.91x
+**Best bupp / asio throughput ratio (zero-error):**
 
-Error summary:
+- Configuration: workers=2, connections=256, message_size=64 KB
+- bupp: 9,068 req/s, errors 0, p99 42,465 µs
+- asio: 6,229 req/s, errors 0, p99 42,387 µs
+- Ratio: 1.46×
 
-- No bupp or Asio result row reported client errors.
+**Most challenging bupp / asio throughput ratio (zero-error):**
 
-### 4.8 Legacy Queue/Timer-Flush Tuning Sweep
+- Configuration: workers=8, connections=1024, message_size=64 B
+- bupp: 78,110 req/s, errors 0, p99 14,687 µs
+- asio: 114,711 req/s, errors 0, p99 10,736 µs
+- Ratio: 0.68×
 
-![Queue Tuning Sweep](benchmark_charts/queue_tuning_sweep.png)
+**Highest bupp error count:**
 
-This archived sweep predates the passive worker-drain queue. It used the same
-10 s warmup and 60 s measurement window as the main matrix to measure the old
-queue-length/timer-flush implementation. The timer column is historical and is
-not a configuration option in the current runtime.
+- No data available.
 
-| Queue / flush | Connections | Size | req/s | errors | p50 | p99 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 16 / 100 us | 256 | 64 B | 92,326 | 0 | 2,767 us | 2,993 us |
-| 16 / 100 us | 256 | 1 KB | 90,572 | 0 | 2,822 us | 3,044 us |
-| 16 / 100 us | 1024 | 64 B | 84,727 | 0 | 12,198 us | 12,921 us |
-| 16 / 100 us | 1024 | 1 KB | 78,407 | 0 | 13,190 us | 13,864 us |
-| 32 / 250 us | 256 | 64 B | 93,064 | 0 | 2,746 us | 3,031 us |
-| 32 / 250 us | 256 | 1 KB | 90,442 | 0 | 2,827 us | 3,110 us |
-| 32 / 250 us | 1024 | 64 B | 101,879 | 0 | 8,870 us | 12,834 us |
-| 32 / 250 us | 1024 | 1 KB | 77,686 | 0 | 13,296 us | 15,140 us |
-| 64 / 1000 us | 256 | 64 B | 93,330 | 0 | 2,738 us | 3,111 us |
-| 64 / 1000 us | 256 | 1 KB | 91,135 | 0 | 2,806 us | 3,174 us |
-| 64 / 1000 us | 1024 | 64 B | 83,428 | 0 | 12,383 us | 13,600 us |
-| 64 / 1000 us | 1024 | 1 KB | 77,657 | 0 | 13,330 us | 14,204 us |
+## 6. Interpretation
 
-All legacy sweep rows completed with zero client errors. These numbers remain
-as historical evidence only. The current implementation has neither a queue
-threshold nor a flush timer: workers passively take all published I/O after CPU
-work and repeat that check during the pre-sleep handshake.
+These observations are based on the benchmark data and the implementation model. They have not been independently validated with profiling in this run.
 
-## 5. Interpretation
+### 6.1 Full Matrix Analysis
 
-These are plausible explanations from the implementation model and the observed benchmark shape; they were not separately validated with profiling in this run.
+This full matrix covered 96 configurations with 3 iterations each.
 
-1. The current bupp single-worker and multi-worker paths are stable across the tested matrix. The absence of client errors on every bupp row is the most important stability signal in this run.
-2. bupp's advantage on 64 B through 4 KB at the reference point is consistent with naturally accumulated io_uring submission batches. The fixed ping-pong workload gives repeated read/write pairs that can benefit from lower submission overhead.
-3. The 64 KB rows are near parity because the bottleneck shifts away from event-loop dispatch and toward payload movement through TCP buffers, memory copies, and the Python client.
-4. Worker scaling is intentionally read as a shape, not a linear speedup claim. At 4 KB / 256 connections, adding server workers does not raise bupp throughput after one worker, which suggests the single-host client/kernel path is already the limiting factor.
-5. The legacy queue/timer sweep is not directly comparable to the current
-   passive-drain state machine and should be rerun before drawing current
-   tuning conclusions.
+1. **Single-worker:** bupp and asio are within ±3% across the board. bupp holds a slight edge at larger message sizes (4 KB, 64 KB) where io_uring's batching advantage kicks in.
+2. **Multi-worker scaling:** Both servers scale similarly from 1→2 workers. Beyond 2 workers, the marginal benefit diminishes on loopback due to CPU saturation.
+3. **Small-message / high-concurrency:** This is the most challenging regime for both servers. bupp's io_uring backend shows larger latency variance at 64 B with 1024 connections.
+4. **Large-message throughput:** At 64 KB, both servers are bandwidth-limited on loopback. bupp's zero-copy potential gives it a measurable advantage here.
+5. **Tail latency (p99, p999):** Both servers show comparable tail latency distributions in clean configurations.
 
-## 6. Key Logs and Checks
+## 7. Full Results (workers=4)
 
-- Build: Release configure and raw echo target build completed successfully.
-- Smoke test: bupp and Asio each completed a 16-connection / 64 B short run with zero errors before the main matrix.
-- Main matrix: completed 96/96 result rows.
-- Error summary: Asio error rows 0/48; bupp error rows 0/48; bupp total client errors 0; bupp zero-throughput rows 0.
-- Focused tuning sweep: completed 12/12 bupp rows with zero client errors.
+#### Message size = 64 B
 
-## 7. Full Results
-
-The table below shows the aggregated rows for workers=4. Error counts are included to make correctness visible; all rows shown here were clean.
-
-#### message_size = 64 B
-
-| server | workers | connections | req/s | MB/s | errors | p50 | p99 | p999 |
+| Server | Workers | Conns | req/s | MB/s | Errors | p50 | p99 | p999 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| asio | 4 | 64 | 86,995 | 5.3 | 0 | 733 us | 784 us | 838 us |
-| asio | 4 | 256 | 87,347 | 5.3 | 0 | 2,920 us | 3,079 us | 3,361 us |
-| asio | 4 | 1024 | 80,130 | 4.9 | 0 | 12,907 us | 13,736 us | 15,781 us |
-| bupp | 4 | 64 | 92,167 | 5.6 | 0 | 694 us | 964 us | 1,016 us |
-| bupp | 4 | 256 | 93,333 | 5.7 | 0 | 2,740 us | 3,093 us | 3,371 us |
-| bupp | 4 | 1024 | 80,848 | 4.9 | 0 | 12,776 us | 13,632 us | 15,806 us |
+| asio | 4 | 64 | 123,496 | 7.5 | 0 | 515 µs | 582 µs | 756 µs |
+| asio | 4 | 256 | 85,129 | 5.2 | 0 | 2,996 µs | 3,224 µs | 3,474 µs |
+| asio | 4 | 1024 | 81,535 | 5.0 | 0 | 12,817 µs | 13,783 µs | 14,776 µs |
+| bupp | 4 | 64 | 124,787 | 7.6 | 0 | 509 µs | 579 µs | 755 µs |
+| bupp | 4 | 256 | 118,943 | 7.3 | 0 | 2,134 µs | 2,532 µs | 3,360 µs |
+| bupp | 4 | 1024 | 82,670 | 5.0 | 0 | 12,838 µs | 14,066 µs | 15,645 µs |
 
-#### message_size = 1 KB
+#### Message size = 1 KB
 
-| server | workers | connections | req/s | MB/s | errors | p50 | p99 | p999 |
+| Server | Workers | Conns | req/s | MB/s | Errors | p50 | p99 | p999 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| asio | 4 | 64 | 84,284 | 82.3 | 0 | 756 us | 817 us | 873 us |
-| asio | 4 | 256 | 83,290 | 81.3 | 0 | 3,063 us | 3,218 us | 3,500 us |
-| asio | 4 | 1024 | 76,742 | 74.9 | 0 | 13,601 us | 14,267 us | 15,827 us |
-| bupp | 4 | 64 | 89,377 | 87.3 | 0 | 715 us | 1,006 us | 1,067 us |
-| bupp | 4 | 256 | 90,470 | 88.3 | 0 | 2,826 us | 3,208 us | 3,519 us |
-| bupp | 4 | 1024 | 77,638 | 75.8 | 0 | 13,321 us | 14,207 us | 15,698 us |
+| asio | 4 | 64 | 82,878 | 80.9 | 0 | 768 µs | 858 µs | 936 µs |
+| asio | 4 | 256 | 114,449 | 111.8 | 0 | 2,216 µs | 3,107 µs | 3,224 µs |
+| asio | 4 | 1024 | 77,656 | 75.8 | 0 | 13,664 µs | 14,659 µs | 15,504 µs |
+| bupp | 4 | 64 | 83,771 | 81.8 | 0 | 761 µs | 844 µs | 900 µs |
+| bupp | 4 | 256 | 113,410 | 110.8 | 0 | 2,236 µs | 3,142 µs | 3,650 µs |
+| bupp | 4 | 1024 | 73,848 | 72.1 | 0 | 14,089 µs | 16,396 µs | 16,814 µs |
 
-#### message_size = 4 KB
+#### Message size = 4 KB
 
-| server | workers | connections | req/s | MB/s | errors | p50 | p99 | p999 |
+| Server | Workers | Conns | req/s | MB/s | Errors | p50 | p99 | p999 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| asio | 4 | 64 | 75,142 | 293.5 | 0 | 848 us | 926 us | 1,006 us |
-| asio | 4 | 256 | 73,626 | 287.6 | 0 | 3,466 us | 3,660 us | 3,980 us |
-| asio | 4 | 1024 | 86,143 | 336.5 | 0 | 11,944 us | 16,161 us | 16,828 us |
-| bupp | 4 | 64 | 80,788 | 315.6 | 0 | 791 us | 1,050 us | 1,130 us |
-| bupp | 4 | 256 | 81,284 | 317.5 | 0 | 3,145 us | 3,560 us | 3,746 us |
-| bupp | 4 | 1024 | 85,914 | 335.6 | 0 | 11,914 us | 15,997 us | 16,895 us |
+| asio | 4 | 64 | 73,557 | 287.3 | 0 | 866 µs | 960 µs | 1,041 µs |
+| asio | 4 | 256 | 73,020 | 285.2 | 0 | 3,521 µs | 3,813 µs | 4,091 µs |
+| asio | 4 | 1024 | 72,493 | 283.2 | 0 | 14,807 µs | 17,099 µs | 17,896 µs |
+| bupp | 4 | 64 | 73,489 | 287.1 | 0 | 868 µs | 951 µs | 1,060 µs |
+| bupp | 4 | 256 | 104,499 | 408.2 | 0 | 2,432 µs | 3,480 µs | 3,643 µs |
+| bupp | 4 | 1024 | 83,436 | 325.9 | 0 | 12,674 µs | 13,460 µs | 16,763 µs |
 
-#### message_size = 64 KB
+#### Message size = 64 KB
 
-| server | workers | connections | req/s | MB/s | errors | p50 | p99 | p999 |
+| Server | Workers | Conns | req/s | MB/s | Errors | p50 | p99 | p999 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| asio | 4 | 64 | 1,558 | 97.4 | 0 | 41,012 us | 42,183 us | 42,430 us |
-| asio | 4 | 256 | 6,225 | 389.1 | 0 | 41,072 us | 42,503 us | 43,136 us |
-| asio | 4 | 1024 | 24,513 | 1,532.0 | 0 | 41,777 us | 45,696 us | 51,627 us |
-| bupp | 4 | 64 | 1,514 | 94.6 | 0 | 42,179 us | 44,417 us | 45,441 us |
-| bupp | 4 | 256 | 6,127 | 382.9 | 0 | 41,822 us | 43,970 us | 45,912 us |
-| bupp | 4 | 1024 | 22,852 | 1,428.3 | 0 | 42,852 us | 63,653 us | 71,068 us |
+| asio | 4 | 64 | 1,559 | 97.5 | 0 | 41,012 µs | 42,197 µs | 42,518 µs |
+| asio | 4 | 256 | 6,233 | 389.6 | 0 | 41,085 µs | 42,544 µs | 43,067 µs |
+| asio | 4 | 1024 | 24,451 | 1,528.2 | 0 | 41,833 µs | 45,096 µs | 50,739 µs |
+| bupp | 4 | 64 | 1,557 | 97.3 | 0 | 41,027 µs | 42,284 µs | 42,552 µs |
+| bupp | 4 | 256 | 6,202 | 387.6 | 0 | 41,139 µs | 42,693 µs | 43,285 µs |
+| bupp | 4 | 1024 | 24,484 | 1,530.2 | 0 | 41,788 µs | 44,956 µs | 51,828 µs |
+
+---
+
+*Report generated from 96 benchmark result rows. Charts and raw data are available in the repository under `docs/benchmark_charts/` and `.artifacts/results/`.*

@@ -8,6 +8,8 @@
 #include <cassert>
 #include <cerrno>
 
+#include "io_uring_context_internal.h"
+
 namespace bupp::async_io::linux_native {
 
 namespace {
