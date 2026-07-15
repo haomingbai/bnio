@@ -4,7 +4,9 @@ add_library(bupp::bupp ALIAS bupp)
 add_subdirectory(async_io)
 
 target_compile_features(bupp PUBLIC cxx_std_20)
-target_link_libraries(bupp PUBLIC $<BUILD_INTERFACE:bexec::bexec>)
+target_link_libraries(
+  bupp PUBLIC $<BUILD_INTERFACE:bexec::bexec>
+              $<INSTALL_INTERFACE:bexec::bexec>)
 
 if(BUPP_PLATFORM_LINUX)
   add_subdirectory(base/linux)
@@ -55,28 +57,30 @@ get_target_property(BUPP_TARGET_TYPE bupp TYPE)
 if(BUPP_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
   target_compile_definitions(bupp PUBLIC BUPP_SHARED_LIBRARY)
   target_compile_definitions(bupp PRIVATE BUPP_BUILDING_LIBRARY)
+  set_target_properties(
+    bupp
+    PROPERTIES VERSION "${PROJECT_VERSION}"
+               SOVERSION "${PROJECT_VERSION_MAJOR}"
+               CXX_VISIBILITY_PRESET hidden
+               VISIBILITY_INLINES_HIDDEN YES)
 endif()
 
-target_sources(
-  bupp
-  PUBLIC FILE_SET
-         HEADERS
-         BASE_DIRS
-         ${PROJECT_SOURCE_DIR}/include
-         FILES
-         ${BUPP_PUBLIC_HEADERS})
+target_sources(bupp PRIVATE ${BUPP_PUBLIC_HEADERS})
 
 bupp_set_project_warnings(bupp)
 
-install(
-  TARGETS bupp
-  EXPORT buppTargets
-  FILE_SET HEADERS DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-
-install(
-  EXPORT buppTargets
-  NAMESPACE bupp::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/bupp)
+if(BUPP_INSTALL)
+  install(
+    TARGETS bupp
+    EXPORT buppTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+  install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/bupp"
+          DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+  install(
+    EXPORT buppTargets
+    FILE buppTargets.cmake
+    NAMESPACE bupp::
+    DESTINATION "${BUPP_INSTALL_CMAKEDIR}")
+endif()

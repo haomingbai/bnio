@@ -29,8 +29,14 @@ and composed writes all ship out of the box.
   - [Architecture](#architecture)
     - [Read and write semantics](#read-and-write-semantics)
   - [Build Options](#build-options)
+    - [bexec dependency providers](#bexec-dependency-providers)
     - [Using a local bexec checkout](#using-a-local-bexec-checkout)
     - [Shared library build](#shared-library-build)
+    - [Use bupp as a dependency](#use-bupp-as-a-dependency)
+      - [Installed CMake package](#installed-cmake-package)
+      - [pkg-config](#pkg-config)
+      - [Source tree](#source-tree)
+    - [Coverage report](#coverage-report)
   - [License](#license)
 
 ---
@@ -43,7 +49,7 @@ and composed writes all ship out of the box.
 | CMake         | 3.20            |                                      |
 | liburing      | 2.1             | Linux only; `pkg-config` required    |
 | OpenSSL       | 1.1             | `pkg-config` required; TLS feature   |
-| bexec         | —               | Fetched automatically from GitHub    |
+| bexec         | 0.0.1           | Package, source tree, or FetchContent |
 
 ---
 
@@ -311,19 +317,52 @@ bounded write attempt and returns that attempt's byte count.
 
 ## Build Options
 
-| Option                    | Default  | Description                                 |
-| ------------------------- | -------- | ------------------------------------------- |
-| `BUILD_SHARED_LIBS`       | `OFF`    | Build `bupp` as a shared library            |
-| `BUPP_BUILD_TESTS`        | `ON`     | Build and enable CTest                      |
-| `BUPP_BUILD_EXAMPLES`     | `ON`     | Build example executables                   |
-| `BUPP_BUILD_ASIO_EXAMPLES`| `OFF`    | Build Asio-based examples (fetches Asio)    |
-| `BUPP_ENABLE_COVERAGE`    | `OFF`    | Instrument GCC/Clang builds for coverage    |
-| `BUPP_BEXEC_SOURCE_DIR`   | —        | Path to a local `bexec` checkout            |
+| Option                     | Default   | Description                              |
+| -------------------------- | --------- | ---------------------------------------- |
+| `BUILD_SHARED_LIBS`        | `OFF`     | Build `bupp` as a shared library         |
+| `BUPP_BUILD_TESTS`         | top-level | Build and enable CTest                   |
+| `BUPP_BUILD_EXAMPLES`      | top-level | Build example executables                |
+| `BUPP_BUILD_ASIO_EXAMPLES` | `OFF`     | Build Asio examples and fetch Asio       |
+| `BUPP_INSTALL`             | top-level | Generate installation and package files  |
+| `BUPP_ENABLE_COVERAGE`     | `OFF`     | Instrument GCC/Clang builds for coverage |
+| `BUPP_BEXEC_PROVIDER`      | `AUTO`    | `AUTO`, `FIND_PACKAGE`, `SOURCE`, `FETCH` |
+| `BUPP_BEXEC_SOURCE_DIR`    | empty     | Path used by the `SOURCE` provider       |
+| `BUPP_BEXEC_GIT_TAG`       | `main`    | Git ref used by the `FETCH` provider     |
+
+When `bupp` is included with `add_subdirectory()` or `FetchContent`, tests,
+examples, and installation rules default to off so they do not modify the
+parent project's build.
+
+### bexec dependency providers
+
+`bupp` always exposes the same `bupp::bupp` target, independently of how
+`bexec` is supplied:
+
+```sh
+# Use an installed bexecConfig.cmake.
+cmake -S . -B build \
+  -DBUPP_BEXEC_PROVIDER=FIND_PACKAGE \
+  -DCMAKE_PREFIX_PATH=/path/to/bexec
+
+# Use a local bexec source checkout.
+cmake -S . -B build \
+  -DBUPP_BEXEC_PROVIDER=SOURCE \
+  -DBUPP_BEXEC_SOURCE_DIR=/path/to/bexec
+
+# Clone bexec during configuration.
+cmake -S . -B build -DBUPP_BEXEC_PROVIDER=FETCH
+```
+
+`AUTO` first accepts an existing `bexec::bexec` target, then uses
+`BUPP_BEXEC_SOURCE_DIR` when set, tries `find_package(bexec CONFIG)`, and
+finally falls back to `FETCH`.
 
 ### Using a local bexec checkout
 
 ```sh
-cmake -S . -B build -DBUPP_BEXEC_SOURCE_DIR=/path/to/bexec
+cmake -S . -B build \
+  -DBUPP_BEXEC_PROVIDER=SOURCE \
+  -DBUPP_BEXEC_SOURCE_DIR=/path/to/bexec
 ```
 
 ### Shared library build
@@ -332,6 +371,64 @@ cmake -S . -B build -DBUPP_BEXEC_SOURCE_DIR=/path/to/bexec
 cmake -S . -B build-shared -DBUILD_SHARED_LIBS=ON
 cmake --build build-shared
 ```
+
+Shared builds export the `BUPP_SHARED_LIBRARY` usage requirement, hide
+non-public symbols, and install versioned library names with ABI version `0`.
+
+### Use bupp as a dependency
+
+All three consumption modes provide the `bupp::bupp` CMake target or equivalent
+pkg-config link information.
+
+#### Installed CMake package
+
+Install `bexec` first, then build and install `bupp` against that package:
+
+```sh
+cmake -S . -B build-install \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUPP_BEXEC_PROVIDER=FIND_PACKAGE \
+  -DCMAKE_PREFIX_PATH=/install/prefix
+cmake --build build-install
+cmake --install build-install --prefix /install/prefix
+```
+
+A CMake consumer can then use:
+
+```cmake
+find_package(bupp 0.0.1 CONFIG REQUIRED)
+target_link_libraries(your_target PRIVATE bupp::bupp)
+```
+
+#### pkg-config
+
+The installation provides `bupp.pc`. On Linux it carries the required
+`bexec`, OpenSSL, and liburing metadata:
+
+```sh
+c++ app.cpp $(pkg-config --cflags --libs bupp)
+```
+
+It can also be consumed as an imported CMake target:
+
+```cmake
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(BUPP REQUIRED IMPORTED_TARGET bupp>=0.0.1)
+target_link_libraries(your_target PRIVATE PkgConfig::BUPP)
+```
+
+#### Source tree
+
+Direct source inclusion keeps the same namespaced target:
+
+```cmake
+add_subdirectory(path/to/bupp)
+target_link_libraries(your_target PRIVATE bupp::bupp)
+```
+
+The parent may provide `bexec::bexec` first, select an installed package with
+`BUPP_BEXEC_PROVIDER=FIND_PACKAGE`, point to a checkout with `SOURCE`, or allow
+`bupp` to fetch it.
 
 ### Coverage report
 

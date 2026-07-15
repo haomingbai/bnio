@@ -1,14 +1,22 @@
 cmake_minimum_required(VERSION 3.20)
 
+set(BUPP_VERSION "0.0.1" CACHE STRING "bupp package version")
+
 project(
   bupp
+  VERSION "${BUPP_VERSION}"
   DESCRIPTION "A small native asynchronous I/O library"
   LANGUAGES CXX)
 
-include(CTest)
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/bexec.cmake")
+
+if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
+  set(BUPP_IS_TOP_LEVEL ON)
+else()
+  set(BUPP_IS_TOP_LEVEL OFF)
+endif()
 
 # ---- Platform detection ----
 #
@@ -38,11 +46,25 @@ if(BUPP_PLATFORM_LINUX)
 endif()
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
-option(BUPP_BUILD_EXAMPLES "Build bupp examples" ON)
+option(BUPP_BUILD_TESTS "Build bupp tests" ${BUPP_IS_TOP_LEVEL})
+option(BUPP_BUILD_EXAMPLES "Build bupp examples" ${BUPP_IS_TOP_LEVEL})
 option(BUPP_BUILD_ASIO_EXAMPLES "Build standalone Asio echo server example (auto-fetches Asio)" OFF)
 option(BUPP_ENABLE_WARNINGS "Enable compiler warnings for bupp targets" ON)
 option(BUPP_ENABLE_TSAN "Build bupp targets with ThreadSanitizer" OFF)
 option(BUPP_ENABLE_COVERAGE "Instrument bupp targets for coverage reporting" OFF)
+option(BUPP_INSTALL "Generate bupp installation rules" ${BUPP_IS_TOP_LEVEL})
+
+if(BUPP_INSTALL)
+  set(
+    BUPP_INSTALL_CMAKEDIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/bupp"
+    CACHE STRING "Directory in which to install the bupp CMake package")
+endif()
+
+if(BUPP_BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+endif()
 
 bupp_resolve_bexec_dependency()
 
@@ -131,15 +153,47 @@ if(BUPP_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
-if(BUILD_TESTING)
+if(BUPP_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
-configure_package_config_file(
-  ${PROJECT_SOURCE_DIR}/cmake/buppConfig.cmake.in
-  ${PROJECT_BINARY_DIR}/buppConfig.cmake
-  INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/bupp)
+if(BUPP_INSTALL)
+  configure_package_config_file(
+    cmake/buppConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/buppConfig.cmake"
+    INSTALL_DESTINATION "${BUPP_INSTALL_CMAKEDIR}")
+  write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/buppConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion)
+  install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/buppConfig.cmake"
+          "${CMAKE_CURRENT_BINARY_DIR}/buppConfigVersion.cmake"
+    DESTINATION "${BUPP_INSTALL_CMAKEDIR}")
 
-install(
-  FILES ${PROJECT_BINARY_DIR}/buppConfig.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/bupp)
+  if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
+    file(
+      RELATIVE_PATH BUPP_PC_PREFIX_RELATIVE
+      "${CMAKE_INSTALL_LIBDIR}/pkgconfig" "${CMAKE_INSTALL_PREFIX}")
+  else()
+    file(
+      RELATIVE_PATH BUPP_PC_PREFIX_RELATIVE
+      "/${CMAKE_INSTALL_LIBDIR}/pkgconfig" "/")
+  endif()
+
+  set(BUPP_PC_REQUIRES "bexec >= ${BUPP_BEXEC_MIN_VERSION}, openssl")
+  if(BUPP_PLATFORM_LINUX)
+    string(APPEND BUPP_PC_REQUIRES ", liburing >= 2.1")
+  endif()
+  if(BUILD_SHARED_LIBS)
+    set(BUPP_PC_SHARED_CFLAGS " -DBUPP_SHARED_LIBRARY")
+  else()
+    set(BUPP_PC_SHARED_CFLAGS "")
+  endif()
+  configure_file(cmake/bupp.pc.in "${CMAKE_CURRENT_BINARY_DIR}/bupp.pc"
+                 @ONLY)
+  install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/bupp.pc"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+  install(FILES LICENSE README.md DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+endif()

@@ -253,5 +253,9 @@ High-level async runtime, stream owners, and buffer types.
 ## Build and Scripts
 
 - `CMakeLists.txt` — top-level CMake project.
-- `cmake/bexec.cmake` — resolves the `bexec` dependency.
+- `cmake/bexec.cmake` — resolves `bexec` from an installed CMake package, a
+  local source tree, or FetchContent.
+- `cmake/buppConfig.cmake.in` — installed CMake package configuration.
+- `cmake/bupp.pc.in` — relocatable pkg-config metadata template.
+- `tests/packaging/` — source, installed-CMake, and pkg-config consumers.
 - `scripts/` — project helper commands (format, check-doc, benchmark).

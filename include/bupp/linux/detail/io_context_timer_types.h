@@ -4,6 +4,7 @@
 
 #include <bupp/async_io/linux/io_uring_context.h>
 #include <bupp/async_io/time.h>
+#include <bupp/export.h>
 
 #include <atomic>
 #include <cstddef>
@@ -45,7 +46,7 @@ struct timer_heap_item {
 
 struct timer_slot;
 
-class timer_operation_base
+class BUPP_EXPORT timer_operation_base
     : public async_io::linux_native::io_uring_operation_base {
  public:
   explicit timer_operation_base(io_context& context) noexcept;

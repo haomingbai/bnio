@@ -2,11 +2,16 @@
 
 include(CMakeFindDependencyMacro)
 
-if(@BUPP_PLATFORM_LINUX@ OR @BUPP_PLATFORM_BSD@)
+if(NOT TARGET bexec::bexec)
+  find_dependency(bexec @BUPP_BEXEC_MIN_VERSION@ CONFIG)
+endif()
+
+if((@BUPP_PLATFORM_LINUX@ OR @BUPP_PLATFORM_BSD@) AND
+   (NOT TARGET OpenSSL::SSL OR NOT TARGET OpenSSL::Crypto))
   find_dependency(OpenSSL)
 endif()
 
-if(@BUPP_PLATFORM_LINUX@)
+if(@BUPP_PLATFORM_LINUX@ AND NOT TARGET PkgConfig::LIBURING)
   find_dependency(PkgConfig)
   pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.1)
 endif()

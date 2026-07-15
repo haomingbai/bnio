@@ -62,6 +62,7 @@ jobs:
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_SHARED_LIBS=ON
           -DBUPP_BUILD_EXAMPLES=OFF
           -DBUPP_ENABLE_COVERAGE=ON
 
@@ -95,3 +96,79 @@ jobs:
           name: coverage-${{ runner.os }}
           path: coverage/
           if-no-files-found: error
+
+  package:
+    name: Test package consumers (Linux)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            liburing-dev \
+            libssl-dev \
+            ninja-build \
+            pkg-config
+
+      - name: Build with fetched bexec
+        run: |
+          cmake -S . -B build/provider-fetch -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUPP_BUILD_TESTS=OFF \
+            -DBUPP_BUILD_EXAMPLES=OFF \
+            -DBUPP_INSTALL=OFF \
+            -DBUPP_BEXEC_PROVIDER=FETCH
+          cmake --build build/provider-fetch --target bupp --parallel 2
+
+      - name: Install fetched bexec
+        run: |
+          cmake -S build/provider-fetch/_deps/bexec-src \
+            -B build/bexec-package -G Ninja \
+            -DBEXEC_BUILD_TESTS=OFF \
+            -DBEXEC_BUILD_EXAMPLES=OFF
+          cmake --install build/bexec-package --prefix "${RUNNER_TEMP}/bupp"
+
+      - name: Build and install shared bupp with packaged bexec
+        run: |
+          cmake -S . -B build/package -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_LIBDIR=lib \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/bupp" \
+            -DBUILD_SHARED_LIBS=ON \
+            -DBUPP_BUILD_TESTS=OFF \
+            -DBUPP_BUILD_EXAMPLES=OFF \
+            -DBUPP_BEXEC_PROVIDER=FIND_PACKAGE
+          cmake --build build/package --parallel 2
+          cmake --install build/package --prefix "${RUNNER_TEMP}/bupp"
+
+      - name: Build source consumer with local bexec
+        run: |
+          cmake -S tests/packaging/source -B build/consumer-source -G Ninja \
+            -DBUPP_SOURCE_DIR="${GITHUB_WORKSPACE}" \
+            -DBUPP_BEXEC_PROVIDER=SOURCE \
+            -DBUPP_BEXEC_SOURCE_DIR="${GITHUB_WORKSPACE}/build/provider-fetch/_deps/bexec-src"
+          cmake --build build/consumer-source --parallel 2
+          ctest --test-dir build/consumer-source --output-on-failure
+
+      - name: Build installed CMake consumer
+        run: |
+          cmake -S tests/packaging/cmake -B build/consumer-cmake -G Ninja \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/bupp"
+          cmake --build build/consumer-cmake --parallel 2
+          ctest --test-dir build/consumer-cmake --output-on-failure
+
+      - name: Build installed pkg-config consumer
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/bupp/lib
+          PKG_CONFIG_PATH: ${{ runner.temp }}/bupp/lib/pkgconfig
+        run: |
+          cmake -S tests/packaging/pkgconfig \
+            -B build/consumer-pkgconfig -G Ninja
+          cmake --build build/consumer-pkgconfig --parallel 2
+          ctest --test-dir build/consumer-pkgconfig --output-on-failure
