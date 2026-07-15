@@ -39,6 +39,14 @@ void test_empty_address() {
   assert(native.size() == 0);
 }
 
+void test_unspecified_endpoint_address() {
+  socket_address native(endpoint{});
+  assert(!native.valid());
+  assert(native.family() == AF_UNSPEC);
+  assert(native.data() == nullptr);
+  assert(native.size() == 0);
+}
+
 void test_v4_address() {
   const auto value = endpoint::loopback_v4(8080);
   const socket_address native(value);
@@ -56,6 +64,14 @@ void test_v4_address() {
   const auto restored = make_endpoint(native.data(), native.size());
   assert(restored.has_value());
   check_v4_endpoint(*restored, 8080);
+}
+
+void test_mutable_v4_address_data() {
+  socket_address native(endpoint::loopback_v4(8084));
+
+  sockaddr* raw = native.data();
+  assert(raw != nullptr);
+  assert(raw->sa_family == AF_INET);
 }
 
 void test_v6_address() {
@@ -80,10 +96,20 @@ void test_v6_address() {
 void test_invalid_native_address() {
   assert(!make_endpoint(nullptr, 0).has_value());
 
+  sockaddr_storage too_short{};
+  auto* too_short_raw = reinterpret_cast<sockaddr*>(&too_short);
+  assert(!make_endpoint(too_short_raw, 0).has_value());
+
   const socket_address native(endpoint::loopback_v4(8082));
   assert(
       !make_endpoint(native.data(), static_cast<socklen_t>(sizeof(sa_family_t)))
            .has_value());
+
+  sockaddr_in6 short_v6{};
+  short_v6.sin6_family = static_cast<sa_family_t>(AF_INET6);
+  assert(!make_endpoint(reinterpret_cast<sockaddr*>(&short_v6),
+                        static_cast<socklen_t>(sizeof(sa_family_t)))
+              .has_value());
 
   sockaddr_storage unsupported{};
   auto* unsupported_raw = reinterpret_cast<sockaddr*>(&unsupported);
@@ -97,7 +123,9 @@ void test_invalid_native_address() {
 
 int main() {
   test_empty_address();
+  test_unspecified_endpoint_address();
   test_v4_address();
+  test_mutable_v4_address_data();
   test_v6_address();
   test_invalid_native_address();
 
