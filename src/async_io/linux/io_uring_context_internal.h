@@ -29,18 +29,6 @@ io_uring_context::operation_queue::pop_all() noexcept {
   return operations;
 }
 
-[[nodiscard]] inline io_uring_operation_base* reverse_tasks(
-    io_uring_operation_base* tasks) noexcept {
-  io_uring_operation_base* reversed = nullptr;
-  while (tasks != nullptr) {
-    io_uring_operation_base* next = tasks->next;
-    tasks->next = reversed;
-    reversed = tasks;
-    tasks = next;
-  }
-  return reversed;
-}
-
 inline void execute_tasks(io_uring_operation_base* tasks) noexcept {
   while (tasks != nullptr) {
     io_uring_operation_base* operation = tasks;

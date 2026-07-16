@@ -22,15 +22,18 @@ struct io_uring_context_options {
   /**
    * io_uring setup flags passed to the kernel.
    *
-   * Defaults to COOP_TASKRUN (supported since Linux 5.19) — lets the kernel
-   * defer task_work, reducing involuntary context switches.
+   * Defaults to COOP_TASKRUN | SINGLE_ISSUER — the former (Linux 5.19+)
+   * defers task_work to reduce involuntary context switches; the latter
+   * (Linux 5.19+) tells the kernel this ring is only submitted from a
+   * single task, eliminating kernel-side submission locking.
    *
-   * The library falls back automatically on EINVAL for kernels < 5.19.
+   * The library falls back automatically on EINVAL for older kernels.
    *
    * @see io_uring_queue_init
    * @see docs/design/io_uring-setup.md
    */
-  unsigned setup_flags = bupp::base::detail::io_uring_setup_coop_taskrun;
+  unsigned setup_flags = bupp::base::detail::io_uring_setup_coop_taskrun |
+                         bupp::base::detail::io_uring_setup_single_issuer;
 
   /**
    * Maximum number of ready CQEs collected in one batch.

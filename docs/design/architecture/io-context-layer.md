@@ -83,18 +83,18 @@ High-level `post` work is published to the shared CPU queue. Wakeup scans the
 worker slots and writes one waiting worker's eventfd. I/O is published to the
 lower-priority shared I/O queue. The worker that removes an I/O batch owns all
 SQ preparation and submission for that batch, so the high-level queue code does
-not need native ring synchronization. Timer bookkeeping remains on the primary
-native context (slot 0). Its timeout and timeout-update requests use the
-primary run loop's local passive I/O chain so both requests remain on the same
-ring; they do not expose or call an active submission API.
+not need native ring synchronization. Timer bookkeeping remains on the
+high-level context. Its timeout and timeout-update requests use the same shared
+passive I/O queue as other requests; they do not expose or call an active
+submission API.
 
 The shared state is owned by `io_context`, not by any native
 `io_uring_context`. Construction calls `set_global_state()` on the primary
 native context, and each later worker receives the same pointer before it can
 run. `run()` follows `global_state_` to obtain CPU work, I/O work, the
 awake-worker count, and the group closing flag. A standalone native context
-leaves the pointer null and uses only its local, non-atomic task queues; no
-hidden shared-state fallback is allocated.
+must also receive an externally owned state before `run()`; no hidden
+shared-state fallback is allocated.
 
 `io_context::stop()` sets the shared `closing` flag before scanning and waking
 native workers. Worker registration checks the same flag both before and after

@@ -1,3 +1,5 @@
+#include <cassert>
+
 #include "io_uring_context_internal.h"
 
 namespace bupp::async_io::linux_native {
@@ -16,12 +18,13 @@ void io_uring_context::run() noexcept {
     return;
   }
 
+  assert(global_state_ != nullptr &&
+         "set_global_state() must be called before run()");
+
   io_uring_context* previous_context = current_context_;
   current_context_ = this;
   waiting_.store(false, std::memory_order_release);
-  if (global_state_ != nullptr) {
-    global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
-  }
+  global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   (void)submit_eventfd_poll();
 
   run_phase phase = run_phase::run_ready_tasks;
@@ -46,9 +49,7 @@ void io_uring_context::run() noexcept {
   }
 
   current_context_ = previous_context;
-  if (global_state_ != nullptr) {
-    global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
-  }
+  global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
   run_active_.store(false, std::memory_order_release);
 }
 
@@ -73,8 +74,10 @@ io_uring_context::handle_run_ready_tasks() noexcept {
   // Reset the local-queue budget for this pass through the run loop.
   local_task_budget_ = options_.local_queue_threshold;
 
-  if (io_uring_operation_base* operations =
-          reverse_tasks(local_tasks_.pop_all())) {
+  // Always drain CQEs first to keep the ring backlog small under load.
+  (void)collect_ready_cqes();
+
+  if (io_uring_operation_base* operations = local_tasks_.pop_all()) {
     execute_tasks(operations);
     return run_phase::run_ready_tasks;
   }
@@ -144,8 +147,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
 
 bool io_uring_context::should_finish() const noexcept {
   return state_.load(std::memory_order_acquire) != context_state::running ||
-         (global_state_ != nullptr &&
-          global_state_->closing.load(std::memory_order_acquire));
+         global_state_->closing.load(std::memory_order_acquire);
 }
 
 void io_uring_context::finish() noexcept {
@@ -154,7 +156,7 @@ void io_uring_context::finish() noexcept {
     (void)collect_ready_cqes();
     (void)move_cpu_tasks();
 
-    io_uring_operation_base* operations = reverse_tasks(local_tasks_.pop_all());
+    io_uring_operation_base* operations = local_tasks_.pop_all();
     if (operations == nullptr) {
       break;
     }

@@ -36,7 +36,7 @@ void test_shared_task_queue_separates_cpu_and_io() {
 
   std::size_t io_count = 0;
   for (auto* operation = queue.pop_io_all(); operation != nullptr;
-       operation = operation->io_next) {
+       operation = static_cast<io_queue_test_operation*>(operation->next)) {
     ++io_count;
   }
   assert(io_count == io.size());

@@ -81,8 +81,6 @@ class timer_wakeup_operation
 
   void complete_submit_error(int result) noexcept override;
 
-  [[nodiscard]] bool ring_affine() const noexcept override { return true; }
-
   void execute() noexcept override;
 
  private:
@@ -100,8 +98,6 @@ class timer_update_operation
   void prepare(base::submission_queue_entry& sqe) noexcept override;
 
   void complete_submit_error(int result) noexcept override;
-
-  [[nodiscard]] bool ring_affine() const noexcept override { return true; }
 
   void execute() noexcept override;
 

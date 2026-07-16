@@ -231,7 +231,7 @@ detail::native_worker* io_context::register_run_worker() noexcept {
       worker->owned_context.reset();
       return nullptr;
     }
-    worker->owned_context->set_global_state(&global_state_);
+    worker->owned_context->set_global_state(global_state_);
     worker->context.store(worker->owned_context.get(),
                           std::memory_order_release);
   }

@@ -5,7 +5,6 @@
 #include <unistd.h>
 
 #include <atomic>
-#include <cassert>
 #include <cerrno>
 
 #include "io_uring_context_internal.h"
@@ -108,6 +107,7 @@ int io_uring_context::init_ring_params(
   if (flags != 0) {
     queue_params.reset();
     flags &= ~(bupp::base::detail::io_uring_setup_coop_taskrun |
+               bupp::base::detail::io_uring_setup_single_issuer |
                IORING_SETUP_SQPOLL);
     queue_params.set_flags(flags);
     result = ring_.queue_init_params(entries, queue_params);
@@ -121,7 +121,7 @@ void io_uring_context::queue_exit() noexcept {
   (void)signal_eventfd();
 
   (void)local_tasks_.pop_all();
-  local_io_tasks_ = nullptr;
+  (void)local_io_tasks_.pop_all();
   eventfd_poll_pending_ = false;
   ring_.queue_exit();
   if (owns_event_fd_ && event_fd_ >= 0) {
@@ -135,9 +135,8 @@ void io_uring_context::queue_exit() noexcept {
 bool io_uring_context::is_open() const noexcept { return ring_.is_open(); }
 
 void io_uring_context::set_global_state(
-    io_uring_task_queue_state* state) noexcept {
-  assert(!run_active_.load(std::memory_order_acquire));
-  global_state_ = state;
+    io_uring_task_queue_state& state) noexcept {
+  global_state_ = &state;
 }
 
 }  // namespace bupp::async_io::linux_native

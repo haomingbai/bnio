@@ -158,10 +158,11 @@ class BUPP_EXPORT io_uring_context {
   /**
    * Selects externally owned shared state for a worker group.
    *
-   * A null pointer selects this context's single-threaded local queues. The
-   * state must remain valid until this context stops running.
+   * This function is not thread-safe and must be called before publishing
+   * work or calling run(). The state must remain valid until this context
+   * stops running.
    */
-  void set_global_state(io_uring_task_queue_state* state) noexcept;
+  void set_global_state(io_uring_task_queue_state& state) noexcept;
 
   /**
    * Wakes the run loop through the context eventfd.
@@ -217,11 +218,6 @@ class BUPP_EXPORT io_uring_context {
     finish_drain,
     finished,
   };
-
-  /**
-   * Publishes a single operation to the shared CPU-task queue.
-   */
-  void push_cpu_task(io_uring_operation_base& operation) noexcept;
 
   /**
    * Publishes all operations from a local queue to the shared CPU-task queue.
@@ -354,7 +350,8 @@ class BUPP_EXPORT io_uring_context {
   static thread_local io_uring_context* current_context_;
   io_uring_task_queue_state* global_state_ = nullptr;
   operation_queue local_tasks_;
-  io_uring_io_operation_base* local_io_tasks_ = nullptr;
+  // Reserved for future ring-local I/O batching.
+  operation_queue local_io_tasks_;
   unsigned local_task_budget_ = 0;
 };
 

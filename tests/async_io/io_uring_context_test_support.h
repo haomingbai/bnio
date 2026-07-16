@@ -325,8 +325,17 @@ inline bool is_unsupported_ring_error(int result) {
   return result == -ENOSYS || result == -EPERM || result == -EACCES;
 }
 
-inline bool queue_init_or_skip(io_uring_context& context,
-                               io_uring_context_options options = {}) {
+// Not thread-safe: callers only use this before publishing the state.
+inline void reset_task_queue_state(
+    io_uring_task_queue_state& global_tasks) noexcept {
+  global_tasks.closing.store(false, std::memory_order_relaxed);
+  global_tasks.cpu_head.store(nullptr, std::memory_order_relaxed);
+  global_tasks.io_head.store(nullptr, std::memory_order_relaxed);
+  global_tasks.awake_workers.store(0, std::memory_order_relaxed);
+}
+
+inline bool queue_init_result_or_skip(io_uring_context& context,
+                                      io_uring_context_options options) {
   const int result = context.queue_init(options);
   if (result < 0) {
     assert(is_unsupported_ring_error(result));
@@ -335,11 +344,25 @@ inline bool queue_init_or_skip(io_uring_context& context,
   return true;
 }
 
+inline bool queue_init_with_state_or_skip(
+    io_uring_context& context, io_uring_task_queue_state& global_tasks,
+    io_uring_context_options options) {
+  reset_task_queue_state(global_tasks);
+  context.set_global_state(global_tasks);
+  return queue_init_result_or_skip(context, options);
+}
+
+inline bool queue_init_or_skip(io_uring_context& context,
+                               io_uring_context_options options = {}) {
+  // The state outlives each context run while keeping standalone tests terse.
+  static thread_local io_uring_task_queue_state global_tasks;
+  return queue_init_with_state_or_skip(context, global_tasks, options);
+}
+
 inline bool queue_init_shared_or_skip(io_uring_context& context,
                                       io_uring_task_queue_state& global_tasks,
                                       io_uring_context_options options = {}) {
-  context.set_global_state(&global_tasks);
-  return queue_init_or_skip(context, options);
+  return queue_init_with_state_or_skip(context, global_tasks, options);
 }
 
 }  // namespace bupp_async_io_io_uring_test

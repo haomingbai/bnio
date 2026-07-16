@@ -5,9 +5,9 @@ This page documents the io_uring setup flags applied by
 
 ## Default Setup Flags
 
-Since kernel 5.19 (2022), Linux supports `IORING_SETUP_COOP_TASKRUN`, which
-can reduce task-work wakeups while preserving bupp's multi-submitter locking
-model.
+Since kernel 5.19 (2022), Linux supports `IORING_SETUP_COOP_TASKRUN` and
+`IORING_SETUP_SINGLE_ISSUER`. The former reduces task-work wakeups; the latter
+lets each single-thread-submitted ring avoid kernel-side submission locking.
 
 ### `IORING_SETUP_COOP_TASKRUN`
 
@@ -18,12 +18,21 @@ model.
 | Why it helps | Reduces redundant `io_uring_enter` calls and keeps the CPU on the application's run loop longer. |
 | Compatibility fallback | Same retry-on-EINVAL strategy. |
 
+### `IORING_SETUP_SINGLE_ISSUER`
+
+| Property | Value |
+|---|---|
+| Kernel requirement | Linux ≥ 5.19 |
+| What it does | Declares that only one task submits requests to the ring. |
+| Why it helps | Removes submission-side kernel locking that is unnecessary for bupp's one-thread-one-ring model. |
+| Compatibility fallback | Same retry-on-EINVAL strategy. |
+
 ### Default Value
 
 `io_uring_context_options::setup_flags` defaults to:
 
 ```cpp
-IORING_SETUP_COOP_TASKRUN
+IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER
 ```
 
 Applications that need the old behaviour can explicitly set `setup_flags = 0`.
@@ -42,7 +51,8 @@ available for future use (e.g. detecting `IORING_FEAT_NODROP`,
 ```cpp
 struct io_uring_context_options {
   unsigned entries = 256;
-  unsigned setup_flags = IORING_SETUP_COOP_TASKRUN;
+  unsigned setup_flags =
+      IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER;
   unsigned cqe_batch_window = 64;
   unsigned wait_spin_count = 4;
   unsigned cqe_inline_completion_threshold = 64;
@@ -71,6 +81,6 @@ more than CPU efficiency.
 ## Backward Compatibility
 
 On kernels older than 5.19, `io_uring_queue_init_params` returns `-EINVAL`
-for the new flags.  The library detects this and retries with `setup_flags
-& ~IORING_SETUP_COOP_TASKRUN`, falling back to the pre-optimization behaviour
-transparently.
+for the new flags. The library detects this and retries after removing
+`IORING_SETUP_COOP_TASKRUN`, `IORING_SETUP_SINGLE_ISSUER`, and any enabled
+`IORING_SETUP_SQPOLL`, falling back transparently.

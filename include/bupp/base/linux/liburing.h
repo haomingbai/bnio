@@ -21,6 +21,13 @@ inline constexpr unsigned io_uring_setup_coop_taskrun =
 inline constexpr unsigned io_uring_setup_coop_taskrun = 0;
 #endif
 
+#ifdef IORING_SETUP_SINGLE_ISSUER
+inline constexpr unsigned io_uring_setup_single_issuer =
+    IORING_SETUP_SINGLE_ISSUER;
+#else
+inline constexpr unsigned io_uring_setup_single_issuer = 0;
+#endif
+
 inline void io_uring_sqe_set_data64(io_uring_sqe* sqe,
                                     std::uint64_t data) noexcept {
   sqe->user_data = data;

@@ -58,9 +58,9 @@ model, each run-loop thread owns its own `io_uring_context` (allocated from
 an `io_uring_task_queue_state`. That state contains separate MPSC CPU and I/O
 queues, the number of workers currently published as awake, and the closing
 state of the whole worker group. It deliberately has no I/O count, batch
-threshold, explicit-drain flag, timer, or lock. A
-standalone `io_uring_context` uses its non-atomic local CPU/I/O queues instead
-of creating a private object that pretends to be global state.
+threshold, explicit-drain flag, timer, or lock. A standalone
+`io_uring_context` must likewise be given an externally owned task queue state
+before `run()`.
 
 ```cpp
 class io_uring_context {
@@ -75,7 +75,7 @@ public:
     void queue_exit() noexcept;
     [[nodiscard]] bool is_open() const noexcept;
     [[nodiscard]] unsigned kernel_features() const noexcept;
-    void set_global_state(io_uring_task_queue_state* state) noexcept;
+    void set_global_state(io_uring_task_queue_state& state) noexcept;
 
     // Sender factories
     [[nodiscard]] auto async_poll(descriptor_view descriptor,
@@ -101,19 +101,20 @@ Each context stores one normalized `io_uring_context_options` value instead of
 copying its fields into separate members. Its single run thread is the only
 owner of SQ preparation, submission, and CQ collection, so the Linux async-io
 layer contains no ring mutex. Low-level senders publish an
-`io_uring_io_operation_base` to the context's selected I/O queue. There is no
+`io_uring_io_operation_base` to the shared I/O queue. There is no
 public raw prepare, submit, or batch-submit interface. Only the run loop takes
 I/O operations, fills SQEs, and calls the private ring-submission helper.
-Ring-affine internal control I/O created by the owning run thread uses a local
-I/O chain. Ordinary sender I/O enters the shared I/O queue when
-`global_state_` is set, and otherwise enters the context's local I/O chain.
+The unused ring-local I/O queue remains reserved for a future cache-locality
+path but receives no operations today. It uses the same queue type and
+intrusive `next` link as the local CPU queue.
 
-The run loop always checks CPU work first. It then consumes ring-local control
-I/O followed by every operation atomically taken from the shared I/O queue.
-Before eventfd wait it publishes the local waiting flag, decrements the shared
-awake count, and repeats the CQE/CPU/I/O checks. A producer publishing after
-that transition writes eventfd to wake one worker. This supplies low-load
-progress while busy workloads form batches naturally.
+Each ready-task pass first drains CQEs to keep the completion ring from
+overflowing, then checks local and shared CPU work before atomically taking
+every operation in the shared I/O queue. Before eventfd wait it publishes the
+local waiting flag, decrements the shared awake count, and repeats the
+CQE/CPU/I/O checks. A producer publishing after that transition writes eventfd
+to wake one worker. This supplies low-load progress while busy workloads form
+batches naturally.
 
 `io_uring_context_options::event_fd` may name a caller-owned eventfd. A
 negative value, the default, makes the context create and own a private eventfd.
@@ -123,7 +124,8 @@ negative value, the default, makes the context create and own a private eventfd.
 ```cpp
 struct io_uring_context_options {
     unsigned entries = 256;
-    unsigned setup_flags = IORING_SETUP_COOP_TASKRUN;
+    unsigned setup_flags =
+        IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER;
     unsigned cqe_batch_window = 64;
     unsigned wait_spin_count = 4;
     unsigned cqe_inline_completion_threshold = 64;
@@ -135,15 +137,14 @@ struct io_uring_context_options {
 };
 ```
 
-`set_global_state()` selects the execution model before work starts. Its
-default null pointer keeps all work in the native context's single-threaded
-local CPU/I/O queues. A non-null pointer selects externally owned shared state
-whose owner must keep it alive until the context stops. `io_context` owns one
-such state and calls the setter for every native worker. `io_uring_context`
-never owns or manufactures a fallback global state.
+`set_global_state()` is a non-thread-safe setter that must receive externally
+owned shared state before work is published or `run()` is called. Its owner
+must keep it alive until the context stops. `io_context` owns one such state
+and calls the setter for every native worker. `io_uring_context` never owns or
+manufactures a fallback global state.
 
 CPU operations derive from `io_uring_operation_base`. I/O operations add the
-prepare contract and a separate intrusive link:
+prepare contract and reuse the base class's intrusive link:
 
 ```cpp
 class io_uring_operation_base {
@@ -160,10 +161,8 @@ public:
 
 class io_uring_io_operation_base : public io_uring_operation_base {
 public:
-    io_uring_io_operation_base* io_next = nullptr;
     virtual void prepare(base::submission_queue_entry& sqe) noexcept = 0;
     virtual void complete_submit_error(int result) noexcept = 0;
-    virtual bool ring_affine() const noexcept; // false for ordinary I/O
 };
 
 struct io_uring_task_queue_state {
@@ -178,10 +177,9 @@ struct io_uring_task_queue_state {
 worker treats the run loop as finishing, including a worker racing with late
 registration.
 
-CPU work always has priority. The run loop drains its local CPU list and the
-shared CPU queue before atomically taking every operation currently published
-to the shared I/O queue. Ring-local control I/O is consumed before shared I/O,
-but only after CPU work is exhausted.
+Ready CQEs are collected at the beginning of every ready-task pass. The run
+loop then drains its local CPU list and the shared CPU queue before atomically
+taking every operation currently published to the shared I/O queue.
 
 Parking is a two-stage publication. The worker first marks its local state as
 waiting, then decrements `awake_workers`. It rechecks CQEs and CPU work and

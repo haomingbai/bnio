@@ -11,57 +11,32 @@ namespace bupp::async_io::linux_native {
 int io_uring_context::post(io_uring_operation_base& operation) noexcept {
   assert_running();
 
-  if (current_context_ == this || global_state_ == nullptr) {
-    assert(!run_active_.load(std::memory_order_acquire) ||
-           current_context_ == this);
+  if (current_context_ == this) {
     local_tasks_.push(operation);
     return 0;
   }
 
-  push_cpu_task(operation);
+  global_state_->push_cpu(operation);
+  notify_one_waiter();
   return 0;
 }
 
 void io_uring_context::publish_io(
     io_uring_io_operation_base& operation) noexcept {
   assert_running();
-  if (operation.ring_affine()) {
-    assert(current_context_ == this);
-    if (current_context_ != this) {
-      return;
-    }
-  } else if (global_state_ != nullptr) {
-    global_state_->push_io(operation);
-    notify_one_waiter();
-    return;
-  }
-
-  assert(!run_active_.load(std::memory_order_acquire) ||
-         current_context_ == this);
-  operation.io_next = local_io_tasks_;
-  local_io_tasks_ = &operation;
-}
-
-void io_uring_context::push_cpu_task(
-    io_uring_operation_base& operation) noexcept {
-  assert(global_state_ != nullptr);
-  global_state_->push_cpu(operation);
+  global_state_->push_io(operation);
   notify_one_waiter();
 }
 
 void io_uring_context::push_cpu_tasks(operation_queue& operations) noexcept {
-  if (global_state_ == nullptr) {
-    local_tasks_.push(reverse_tasks(operations.pop_all()));
-    return;
-  }
-  io_uring_operation_base* ordered_tasks = reverse_tasks(operations.pop_all());
-  if (ordered_tasks == nullptr) {
+  io_uring_operation_base* tasks = operations.pop_all();
+  if (tasks == nullptr) {
     return;
   }
 
-  while (ordered_tasks != nullptr) {
-    io_uring_operation_base* operation = ordered_tasks;
-    ordered_tasks = ordered_tasks->next;
+  while (tasks != nullptr) {
+    io_uring_operation_base* operation = tasks;
+    tasks = tasks->next;
     operation->next = nullptr;
     global_state_->push_cpu(*operation);
   }
@@ -69,15 +44,12 @@ void io_uring_context::push_cpu_tasks(operation_queue& operations) noexcept {
 }
 
 bool io_uring_context::move_cpu_tasks() noexcept {
-  if (global_state_ == nullptr) {
-    return false;
-  }
   io_uring_operation_base* incoming = global_state_->pop_cpu_all();
   if (incoming == nullptr) {
     return false;
   }
 
-  local_tasks_.push(reverse_tasks(incoming));
+  local_tasks_.push(incoming);
   return true;
 }
 
@@ -93,18 +65,13 @@ bool io_uring_context::is_waiting() const noexcept {
 
 void io_uring_context::begin_wait() noexcept {
   waiting_.store(true, std::memory_order_release);
-  if (global_state_ == nullptr) {
-    return;
-  }
-  const std::size_t previous =
+  [[maybe_unused]] const std::size_t previous =
       global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
   assert(previous != 0);
 }
 
 void io_uring_context::end_wait() noexcept {
-  if (global_state_ != nullptr) {
-    global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
-  }
+  global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   waiting_.store(false, std::memory_order_release);
 }
 

@@ -3,41 +3,13 @@
 
 #include <cassert>
 #include <cerrno>
-#include <utility>
 
 #include "io_uring_context_internal.h"
 
 namespace bupp::async_io::linux_native {
 
-namespace {
-
-// MPSC publication is LIFO; restore producer order before preparing SQEs.
-io_uring_io_operation_base* reverse_io_tasks(
-    io_uring_io_operation_base* tasks) noexcept {
-  io_uring_io_operation_base* reversed = nullptr;
-  while (tasks != nullptr) {
-    io_uring_io_operation_base* next = tasks->io_next;
-    tasks->io_next = reversed;
-    reversed = tasks;
-    tasks = next;
-  }
-  return reversed;
-}
-
-}  // namespace
-
 bool io_uring_context::consume_io_tasks() noexcept {
-  io_uring_io_operation_base* ring_local =
-      std::exchange(local_io_tasks_, nullptr);
-  io_uring_io_operation_base* global_io =
-      global_state_ == nullptr ? nullptr : global_state_->pop_io_all();
-
-  io_uring_io_operation_base* operations = reverse_io_tasks(ring_local);
-  io_uring_io_operation_base** tail = &operations;
-  while (*tail != nullptr) {
-    tail = &(*tail)->io_next;
-  }
-  *tail = reverse_io_tasks(global_io);
+  io_uring_io_operation_base* operations = global_state_->pop_io_all();
   if (operations == nullptr) {
     return false;
   }
@@ -52,16 +24,16 @@ bool io_uring_context::consume_io_tasks() noexcept {
       }
       while (operations != nullptr) {
         operation = operations;
-        operations = operation->io_next;
-        operation->io_next = nullptr;
+        operations = static_cast<io_uring_io_operation_base*>(operation->next);
+        operation->next = nullptr;
         operation->complete_submit_error(submit_result);
         local_tasks_.push(*operation);
       }
       return true;
     }
 
-    operations = operation->io_next;
-    operation->io_next = nullptr;
+    operations = static_cast<io_uring_io_operation_base*>(operation->next);
+    operation->next = nullptr;
     if (prepare_result < 0) {
       operation->complete_submit_error(prepare_result);
       local_tasks_.push(*operation);
