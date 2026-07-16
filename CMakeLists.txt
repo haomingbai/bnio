@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(BUPP_VERSION "0.0.1" CACHE STRING "bupp package version")
+set(BUPP_VERSION "0.0.2" CACHE STRING "bupp package version")
 
 project(
   bupp
