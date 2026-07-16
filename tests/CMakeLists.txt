@@ -12,16 +12,6 @@ function(bupp_add_gtest target test_prefix)
     ${ARGN})
 endfunction()
 
-add_subdirectory(async_io)
-
-if(BUPP_PLATFORM_LINUX)
-  add_subdirectory(base/linux)
-endif()
-
-if(BUPP_PLATFORM_LINUX OR BUPP_PLATFORM_BSD)
-  add_subdirectory(io_context)
-endif()
-
-if(BUPP_PLATFORM_BSD)
-  add_subdirectory(base/bsd)
-endif()
+add_subdirectory(basic)
+add_subdirectory(integration)
+add_subdirectory(stress)
