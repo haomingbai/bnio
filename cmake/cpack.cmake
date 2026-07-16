@@ -2,15 +2,13 @@
 # Included by the top-level CMakeLists.txt only when BUPP_PACKAGE=ON.
 
 # ---- Component definitions ----
-cpack_add_component(runtime
-  DISPLAY_NAME "Runtime library"
-  DESCRIPTION "Shared library files for bupp"
-  REQUIRED)
+set(CPACK_COMPONENT_RUNTIME_DISPLAY_NAME "Runtime library")
+set(CPACK_COMPONENT_RUNTIME_DESCRIPTION "Shared library files for bupp")
 
-cpack_add_component(development
-  DISPLAY_NAME "Development files"
-  DESCRIPTION "Headers, CMake config, and pkg-config for bupp"
-  DEPENDS runtime)
+set(CPACK_COMPONENT_DEVELOPMENT_DISPLAY_NAME "Development files")
+set(CPACK_COMPONENT_DEVELOPMENT_DESCRIPTION
+  "Headers, CMake config, and pkg-config for bupp")
+set(CPACK_COMPONENT_DEVELOPMENT_DEPENDS runtime)
 
 # ---- Common metadata ----
 set(CPACK_PACKAGE_NAME "bupp")
