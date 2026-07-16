@@ -53,6 +53,7 @@ option(BUPP_ENABLE_WARNINGS "Enable compiler warnings for bupp targets" ON)
 option(BUPP_ENABLE_TSAN "Build bupp targets with ThreadSanitizer" OFF)
 option(BUPP_ENABLE_COVERAGE "Instrument bupp targets for coverage reporting" OFF)
 option(BUPP_INSTALL "Generate bupp installation rules" ${BUPP_IS_TOP_LEVEL})
+option(BUPP_PACKAGE "Generate CPack packaging rules" OFF)
 
 if(BUPP_INSTALL)
   set(
@@ -169,7 +170,8 @@ if(BUPP_INSTALL)
   install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/buppConfig.cmake"
           "${CMAKE_CURRENT_BINARY_DIR}/buppConfigVersion.cmake"
-    DESTINATION "${BUPP_INSTALL_CMAKEDIR}")
+    DESTINATION "${BUPP_INSTALL_CMAKEDIR}"
+    COMPONENT development)
 
   if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
     file(
@@ -194,6 +196,14 @@ if(BUPP_INSTALL)
                  @ONLY)
   install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/bupp.pc"
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
-  install(FILES LICENSE README.md DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
+    COMPONENT development)
+  install(FILES LICENSE README.md
+          DESTINATION "${CMAKE_INSTALL_DOCDIR}"
+          COMPONENT development)
+endif()
+
+# ---- CPack packaging ----
+if(BUPP_PACKAGE)
+  include("${CMAKE_CURRENT_LIST_DIR}/cmake/cpack.cmake")
 endif()
