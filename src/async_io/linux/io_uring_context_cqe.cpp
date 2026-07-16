@@ -51,7 +51,9 @@ unsigned io_uring_context::collect_cqe_tasks(
         if (data.user_data == eventfd_user_data()) {
           eventfd_poll_pending_ = false;
           drain_eventfd();
-          (void)submit_eventfd_poll();
+          if (submit_eventfd_poll() < 0) {
+            state_.store(context_state::finishing, std::memory_order_release);
+          }
           return;
         }
 

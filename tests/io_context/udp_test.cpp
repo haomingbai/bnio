@@ -10,12 +10,12 @@
 #include <bupp/ip.h>
 #include <bupp/udp.h>
 #include <fcntl.h>
+#include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <array>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
-#include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -36,14 +36,14 @@ void self_move_assign(Owner& owner) {
 
 void assert_descriptor_closed(int fd) {
   errno = 0;
-  assert(::fcntl(fd, F_GETFD) == -1);
-  assert(errno == EBADF);
+  EXPECT_TRUE(::fcntl(fd, F_GETFD) == -1);
+  EXPECT_TRUE(errno == EBADF);
 }
 
 void assert_close_on_exec(int fd) {
   const int flags = ::fcntl(fd, F_GETFD);
-  assert(flags >= 0);
-  assert((flags & FD_CLOEXEC) != 0);
+  EXPECT_TRUE(flags >= 0);
+  EXPECT_TRUE((flags & FD_CLOEXEC) != 0);
 }
 
 template <class Scheduler, class Socket, class Buffer>
@@ -119,7 +119,7 @@ struct receive_receiver {
   }
 };
 
-void test_sender_concepts() {
+TEST(UdpTest, sender_concepts) {
   bupp::io_context context;
   auto scheduler = context.get_post_scheduler();
   bupp::udp::socket socket;
@@ -166,129 +166,129 @@ void test_sender_concepts() {
                                            bupp::mutable_buffer>);
 }
 
-void test_protocol_and_lifecycle() {
+TEST(UdpTest, protocol_and_lifecycle) {
   static_assert(std::is_same_v<bupp::ip::udp::socket, bupp::udp::socket>);
   static_assert(std::is_same_v<bupp::udp_socket, bupp::udp::socket>);
   static_assert(!std::is_copy_constructible_v<bupp::udp::socket>);
   static_assert(std::is_nothrow_move_constructible_v<bupp::udp::socket>);
   static_assert(!has_sync_datagram_io<bupp::udp::socket>);
 
-  assert(bupp::ip::udp::v4().version() == bupp::ip::address::version::v4);
-  assert(bupp::ip::udp::v6().version() == bupp::ip::address::version::v6);
+  EXPECT_TRUE(bupp::ip::udp::v4().version() == bupp::ip::address::version::v4);
+  EXPECT_TRUE(bupp::ip::udp::v6().version() == bupp::ip::address::version::v6);
 
   auto query =
       bupp::udp::make_resolve_query("127.0.0.1", 443, bupp::ip::udp::v4());
-  assert(query.transport() == bupp::dns_transport::udp);
-  assert(query.address_version() == bupp::ip::address::version::v4);
-  assert(query.service() == "443");
+  EXPECT_TRUE(query.transport() == bupp::dns_transport::udp);
+  EXPECT_TRUE(query.address_version() == bupp::ip::address::version::v4);
+  EXPECT_TRUE(query.service() == "443");
   std::array<bupp::ip::endpoint, 4> resolved{};
   std::size_t resolved_count = 0;
-  assert(!bupp::async_io::resolve_dns(query, bupp::dns_result_view(resolved),
-                                      resolved_count));
-  assert(resolved_count > 0);
-  assert(resolved[0].address().is_v4());
-  assert(resolved[0].port() == 443);
+  EXPECT_TRUE(!bupp::async_io::resolve_dns(
+      query, bupp::dns_result_view(resolved), resolved_count));
+  EXPECT_TRUE(resolved_count > 0);
+  EXPECT_TRUE(resolved[0].address().is_v4());
+  EXPECT_TRUE(resolved[0].port() == 443);
 
   bupp::udp::socket unspecified;
   const std::error_code error = unspecified.open(bupp::ip::udp());
-  assert(error == std::error_code(EAFNOSUPPORT, std::generic_category()));
+  EXPECT_TRUE(error == std::error_code(EAFNOSUPPORT, std::generic_category()));
 
   bupp::udp::socket first;
-  assert(!first.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!first.open(bupp::ip::udp::v4()));
   const int fd = first.native_handle();
-  assert(fd >= 0);
+  EXPECT_TRUE(fd >= 0);
   bupp::udp::socket second(std::move(first));
-  assert(!first.is_open());
-  assert(second.native_handle() == fd);
-  assert(second.release() == fd);
-  assert(::close(fd) == 0);
+  EXPECT_TRUE(!first.is_open());
+  EXPECT_TRUE(second.native_handle() == fd);
+  EXPECT_TRUE(second.release() == fd);
+  EXPECT_TRUE(::close(fd) == 0);
 }
 
-void test_socket_ownership_and_error_paths() {
+TEST(UdpTest, socket_ownership_and_error_paths) {
   bupp::udp::socket socket;
-  assert(!socket.close());
-  assert(!socket.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!socket.close());
+  EXPECT_TRUE(!socket.open(bupp::ip::udp::v4()));
   const int transferred_fd = socket.native_handle();
   assert_close_on_exec(transferred_fd);
-  assert(!socket.open(bupp::ip::udp::v4()));
-  assert(socket.native_handle() == transferred_fd);
+  EXPECT_TRUE(!socket.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(socket.native_handle() == transferred_fd);
   self_move_assign(socket);
-  assert(socket.native_handle() == transferred_fd);
+  EXPECT_TRUE(socket.native_handle() == transferred_fd);
 
   bupp::udp::socket destination;
-  assert(!destination.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!destination.open(bupp::ip::udp::v4()));
   const int replaced_fd = destination.native_handle();
   destination = std::move(socket);
-  assert(!socket.is_open());
-  assert(destination.native_handle() == transferred_fd);
+  EXPECT_TRUE(!socket.is_open());
+  EXPECT_TRUE(destination.native_handle() == transferred_fd);
   assert_descriptor_closed(replaced_fd);
 
   bupp::udp::socket replacement;
-  assert(!replacement.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!replacement.open(bupp::ip::udp::v4()));
   const int replacement_fd = replacement.release();
   destination.assign(replacement_fd);
-  assert(destination.native_handle() == replacement_fd);
+  EXPECT_TRUE(destination.native_handle() == replacement_fd);
   assert_descriptor_closed(transferred_fd);
   destination.assign(replacement_fd);
-  assert(::fcntl(replacement_fd, F_GETFD) >= 0);
-  assert(!destination.set_reuse_address(true));
-  assert(!destination.set_reuse_address(false));
-  assert(!destination.close());
+  EXPECT_TRUE(::fcntl(replacement_fd, F_GETFD) >= 0);
+  EXPECT_TRUE(!destination.set_reuse_address(true));
+  EXPECT_TRUE(!destination.set_reuse_address(false));
+  EXPECT_TRUE(!destination.close());
   assert_descriptor_closed(replacement_fd);
-  assert(!destination.close());
+  EXPECT_TRUE(!destination.close());
 
   bupp::udp::socket invalid_family;
-  assert(invalid_family.open(AF_UNSPEC));
-  assert(!invalid_family.is_open());
+  EXPECT_TRUE(invalid_family.open(AF_UNSPEC));
+  EXPECT_TRUE(!invalid_family.is_open());
 }
 
-void test_socket_destructor_and_invalid_descriptor_errors() {
+TEST(UdpTest, socket_destructor_and_invalid_descriptor_errors) {
   int owned_fd = -1;
   {
     bupp::udp::socket owned;
-    assert(!owned.open(bupp::ip::udp::v4()));
+    EXPECT_TRUE(!owned.open(bupp::ip::udp::v4()));
     owned_fd = owned.native_handle();
   }
   assert_descriptor_closed(owned_fd);
 
   bupp::udp::socket externally_closed;
-  assert(!externally_closed.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!externally_closed.open(bupp::ip::udp::v4()));
   const int fd = externally_closed.native_handle();
-  assert(::close(fd) == 0);
+  EXPECT_TRUE(::close(fd) == 0);
   const std::error_code close_error = externally_closed.close();
-  assert(close_error == std::error_code(EBADF, std::generic_category()));
-  assert(!externally_closed.is_open());
+  EXPECT_TRUE(close_error == std::error_code(EBADF, std::generic_category()));
+  EXPECT_TRUE(!externally_closed.is_open());
 
   bupp::udp::socket closed;
-  assert(closed.shutdown(SHUT_RDWR) ==
-         std::error_code(EBADF, std::generic_category()));
-  assert(closed.set_reuse_address(true) ==
-         std::error_code(EBADF, std::generic_category()));
+  EXPECT_TRUE(closed.shutdown(SHUT_RDWR) ==
+              std::error_code(EBADF, std::generic_category()));
+  EXPECT_TRUE(closed.set_reuse_address(true) ==
+              std::error_code(EBADF, std::generic_category()));
 
   bupp::ip::endpoint endpoint = bupp::ip::endpoint::loopback_v4(1234);
-  assert(closed.local_endpoint(endpoint) ==
-         std::error_code(EBADF, std::generic_category()));
-  assert(endpoint.version() == bupp::ip::address::version::unspecified);
+  EXPECT_TRUE(closed.local_endpoint(endpoint) ==
+              std::error_code(EBADF, std::generic_category()));
+  EXPECT_TRUE(endpoint.version() == bupp::ip::address::version::unspecified);
   endpoint = bupp::ip::endpoint::loopback_v4(1234);
-  assert(closed.remote_endpoint(endpoint) ==
-         std::error_code(EBADF, std::generic_category()));
-  assert(endpoint.version() == bupp::ip::address::version::unspecified);
+  EXPECT_TRUE(closed.remote_endpoint(endpoint) ==
+              std::error_code(EBADF, std::generic_category()));
+  EXPECT_TRUE(endpoint.version() == bupp::ip::address::version::unspecified);
 }
 
-void test_async_send_to_receive_from() {
+TEST(UdpTest, async_send_to_receive_from) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
   auto scheduler = context.get_post_scheduler();
 
   bupp::udp::socket server;
   bupp::udp::socket client;
-  assert(!server.open(bupp::ip::udp::v4()));
-  assert(!client.open(bupp::ip::udp::v4()));
-  assert(!server.bind(bupp::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(!server.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!client.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!server.bind(bupp::ip::endpoint::loopback_v4(0)));
   bupp::ip::endpoint server_endpoint;
-  assert(!server.local_endpoint(server_endpoint));
+  EXPECT_TRUE(!server.local_endpoint(server_endpoint));
 
   constexpr std::string_view payload = "asynchronous datagram";
   std::string received;
@@ -308,36 +308,37 @@ void test_async_send_to_receive_from() {
 
   context.run();
 
-  assert(!state.error);
-  assert(state.completions == 2);
-  assert(state.sent == payload.size());
-  assert(state.received == payload.size());
-  assert(received == payload);
-  assert(source.address().is_v4());
-  assert(source.address().to_v4() == bupp::ip::address::loopback_v4().to_v4());
-  assert(source.port() != 0);
+  EXPECT_TRUE(!state.error);
+  EXPECT_TRUE(state.completions == 2);
+  EXPECT_TRUE(state.sent == payload.size());
+  EXPECT_TRUE(state.received == payload.size());
+  EXPECT_TRUE(received == payload);
+  EXPECT_TRUE(source.address().is_v4());
+  EXPECT_TRUE(source.address().to_v4() ==
+              bupp::ip::address::loopback_v4().to_v4());
+  EXPECT_TRUE(source.port() != 0);
 }
 
-void test_async_default_peer() {
+TEST(UdpTest, async_default_peer) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
   auto scheduler = context.get_post_scheduler();
 
   bupp::udp::socket server;
   bupp::udp::socket client;
-  assert(!server.open(bupp::ip::udp::v4()));
-  assert(!client.open(bupp::ip::udp::v4()));
-  assert(!server.bind(bupp::ip::endpoint::loopback_v4(0)));
-  assert(!client.bind(bupp::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(!server.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!client.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!server.bind(bupp::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(!client.bind(bupp::ip::endpoint::loopback_v4(0)));
 
   bupp::ip::endpoint server_endpoint;
   bupp::ip::endpoint client_endpoint;
-  assert(!server.local_endpoint(server_endpoint));
-  assert(!client.local_endpoint(client_endpoint));
-  assert(!server.connect(client_endpoint));
-  assert(!client.connect(server_endpoint));
+  EXPECT_TRUE(!server.local_endpoint(server_endpoint));
+  EXPECT_TRUE(!client.local_endpoint(client_endpoint));
+  EXPECT_TRUE(!server.connect(client_endpoint));
+  EXPECT_TRUE(!client.connect(server_endpoint));
 
   constexpr std::string_view payload = "default-peer";
   std::string received;
@@ -354,17 +355,17 @@ void test_async_default_peer() {
 
   context.run();
 
-  assert(!state.error);
-  assert(state.completions == 2);
-  assert(state.sent == payload.size());
-  assert(state.received == payload.size());
-  assert(received == payload);
+  EXPECT_TRUE(!state.error);
+  EXPECT_TRUE(state.completions == 2);
+  EXPECT_TRUE(state.sent == payload.size());
+  EXPECT_TRUE(state.received == payload.size());
+  EXPECT_TRUE(received == payload);
 }
 
-void test_async_ipv6_send_to() {
+TEST(UdpTest, async_ipv6_send_to) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
   auto scheduler = context.get_post_scheduler();
 
@@ -376,17 +377,17 @@ void test_async_ipv6_send_to() {
       client_open == std::errc::address_family_not_supported) {
     return;
   }
-  assert(!server_open);
-  assert(!client_open);
+  EXPECT_TRUE(!server_open);
+  EXPECT_TRUE(!client_open);
   const std::error_code bind_error =
       server.bind(bupp::ip::endpoint::loopback_v6(0));
   if (bind_error == std::errc::address_not_available) {
     return;
   }
-  assert(!bind_error);
+  EXPECT_TRUE(!bind_error);
 
   bupp::ip::endpoint destination;
-  assert(!server.local_endpoint(destination));
+  EXPECT_TRUE(!server.local_endpoint(destination));
   constexpr std::string_view payload = "ipv6";
   std::string received;
   bupp::ip::endpoint source;
@@ -402,22 +403,11 @@ void test_async_ipv6_send_to() {
   bexec::start(send_operation);
   context.run();
 
-  assert(!state.error);
-  assert(state.sent == payload.size());
-  assert(state.received == payload.size());
-  assert(received == payload);
-  assert(source.address().is_v6());
+  EXPECT_TRUE(!state.error);
+  EXPECT_TRUE(state.sent == payload.size());
+  EXPECT_TRUE(state.received == payload.size());
+  EXPECT_TRUE(received == payload);
+  EXPECT_TRUE(source.address().is_v6());
 }
 
 }  // namespace
-
-int main() {
-  test_sender_concepts();
-  test_protocol_and_lifecycle();
-  test_socket_ownership_and_error_paths();
-  test_socket_destructor_and_invalid_descriptor_errors();
-  test_async_send_to_receive_from();
-  test_async_default_peer();
-  test_async_ipv6_send_to();
-  return 0;
-}

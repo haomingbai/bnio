@@ -1,11 +1,11 @@
 #include <bupp/base/linux/submission_queue_entry.h>
+#include <gtest/gtest.h>
 #include <liburing.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 
 #include <array>
-#include <cassert>
 #include <cstdint>
 
 namespace {
@@ -22,10 +22,10 @@ void test_metadata_helpers(io_uring_sqe& raw_sqe) {
   bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
 
   sqe.set_data(&marker);
-  assert(raw_sqe.user_data == reinterpret_cast<std::uintptr_t>(&marker));
+  EXPECT_TRUE(raw_sqe.user_data == reinterpret_cast<std::uintptr_t>(&marker));
 
   sqe.set_data64(k_user_data);
-  assert(raw_sqe.user_data == k_user_data);
+  EXPECT_TRUE(raw_sqe.user_data == k_user_data);
 }
 
 void test_network_preps(io_uring_sqe& raw_sqe) {
@@ -38,27 +38,27 @@ void test_network_preps(io_uring_sqe& raw_sqe) {
 
   bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
   sqe.prep_accept(-1, addr, &addrlen, 0);
-  assert(raw_sqe.opcode == IORING_OP_ACCEPT);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_ACCEPT);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_connect(-1, const_addr, addrlen);
-  assert(raw_sqe.opcode == IORING_OP_CONNECT);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_CONNECT);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_send(-1, buffer.data(), buffer.size(), 0);
-  assert(raw_sqe.opcode == IORING_OP_SEND);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_SEND);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_sendmsg(-1, &message, 0);
-  assert(raw_sqe.opcode == IORING_OP_SENDMSG);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_SENDMSG);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_recv(-1, buffer.data(), buffer.size(), 0);
-  assert(raw_sqe.opcode == IORING_OP_RECV);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_RECV);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_recvmsg(-1, &message, 0);
-  assert(raw_sqe.opcode == IORING_OP_RECVMSG);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_RECVMSG);
 }
 
 void test_poll_and_timeout_preps(io_uring_sqe& raw_sqe) {
@@ -66,15 +66,15 @@ void test_poll_and_timeout_preps(io_uring_sqe& raw_sqe) {
 
   bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
   sqe.prep_poll_add(-1, static_cast<unsigned>(POLLIN));
-  assert(raw_sqe.opcode == IORING_OP_POLL_ADD);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_POLL_ADD);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_timeout(&timeout, 1, 0);
-  assert(raw_sqe.opcode == IORING_OP_TIMEOUT);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_TIMEOUT);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_timeout_update(&timeout, k_user_data, 0);
-  assert(raw_sqe.opcode == IORING_OP_TIMEOUT_REMOVE);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_TIMEOUT_REMOVE);
 }
 
 void test_filesystem_preps(io_uring_sqe& raw_sqe) {
@@ -84,34 +84,32 @@ void test_filesystem_preps(io_uring_sqe& raw_sqe) {
 
   bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
   sqe.prep_read(-1, buffer.data(), buffer_size, 0);
-  assert(raw_sqe.opcode == IORING_OP_READ);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_READ);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_write(-1, buffer.data(), buffer_size, 0);
-  assert(raw_sqe.opcode == IORING_OP_WRITE);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_WRITE);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_readv(-1, &iov, 1, 0);
-  assert(raw_sqe.opcode == IORING_OP_READV);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_READV);
 
   sqe = reset_sqe(raw_sqe);
   sqe.prep_writev(-1, &iov, 1, 0);
-  assert(raw_sqe.opcode == IORING_OP_WRITEV);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_WRITEV);
 }
 
 }  // namespace
 
-int main() {
+TEST(SubmissionQueueEntryTest, behavior) {
   io_uring_sqe raw_sqe{};
 
   bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
   sqe.prep_nop();
-  assert(raw_sqe.opcode == IORING_OP_NOP);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_NOP);
 
   test_metadata_helpers(raw_sqe);
   test_network_preps(raw_sqe);
   test_poll_and_timeout_preps(raw_sqe);
   test_filesystem_preps(raw_sqe);
-
-  return 0;
 }

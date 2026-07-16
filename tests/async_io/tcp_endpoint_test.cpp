@@ -1,7 +1,7 @@
 #include <bupp/async_io/ip/tcp.h>
 #include <bupp/async_io/ip/udp.h>
+#include <gtest/gtest.h>
 
-#include <cassert>
 #include <type_traits>
 
 namespace {
@@ -10,25 +10,25 @@ using bupp::async_io::ip::address;
 
 void check_v4_endpoint(const bupp::async_io::ip::tcp::endpoint& endpoint,
                        std::uint16_t port, address::v4_bytes expected_address) {
-  assert(endpoint.version() == address::version::v4);
-  assert(endpoint.port() == port);
-  assert(endpoint.address().is_v4());
-  assert(endpoint.address().v4() != nullptr);
-  assert(*endpoint.address().v4() == expected_address);
+  EXPECT_TRUE(endpoint.version() == address::version::v4);
+  EXPECT_TRUE(endpoint.port() == port);
+  EXPECT_TRUE(endpoint.address().is_v4());
+  EXPECT_TRUE(endpoint.address().v4() != nullptr);
+  EXPECT_TRUE(*endpoint.address().v4() == expected_address);
 }
 
 void check_v6_endpoint(const bupp::async_io::ip::tcp::endpoint& endpoint,
                        std::uint16_t port, address::v6_bytes expected_address) {
-  assert(endpoint.version() == address::version::v6);
-  assert(endpoint.port() == port);
-  assert(endpoint.address().is_v6());
-  assert(endpoint.address().v6() != nullptr);
-  assert(*endpoint.address().v6() == expected_address);
+  EXPECT_TRUE(endpoint.version() == address::version::v6);
+  EXPECT_TRUE(endpoint.port() == port);
+  EXPECT_TRUE(endpoint.address().is_v6());
+  EXPECT_TRUE(endpoint.address().v6() != nullptr);
+  EXPECT_TRUE(*endpoint.address().v6() == expected_address);
 }
 
 }  // namespace
 
-int main() {
+TEST(TcpEndpointTest, behavior) {
   constexpr address::v4_bytes k_any_v4{0, 0, 0, 0};
   constexpr address::v4_bytes k_loopback_v4{127, 0, 0, 1};
   constexpr address::v6_bytes k_any_v6{};
@@ -40,10 +40,10 @@ int main() {
   static_assert(
       std::is_nothrow_move_assignable_v<bupp::async_io::ip::tcp::endpoint>);
 
-  assert(bupp::async_io::ip::tcp::v4().version() == address::version::v4);
-  assert(bupp::async_io::ip::tcp::v6().version() == address::version::v6);
-  assert(bupp::async_io::ip::udp::v4().version() == address::version::v4);
-  assert(bupp::async_io::ip::udp::v6().version() == address::version::v6);
+  EXPECT_TRUE(bupp::async_io::ip::tcp::v4().version() == address::version::v4);
+  EXPECT_TRUE(bupp::async_io::ip::tcp::v6().version() == address::version::v6);
+  EXPECT_TRUE(bupp::async_io::ip::udp::v4().version() == address::version::v4);
+  EXPECT_TRUE(bupp::async_io::ip::udp::v6().version() == address::version::v6);
 
   check_v4_endpoint(bupp::async_io::ip::tcp::endpoint::loopback_v4(8080), 8080,
                     k_loopback_v4);
@@ -70,13 +70,13 @@ int main() {
   check_v6_endpoint(endpoint, 9002, k_any_v6);
 
   endpoint.set_address(bupp::async_io::ip::address{});
-  assert(endpoint.version() == address::version::unspecified);
-  assert(endpoint.port() == 0);
+  EXPECT_TRUE(endpoint.version() == address::version::unspecified);
+  EXPECT_TRUE(endpoint.port() == 0);
   endpoint.set_port(9003);
   endpoint.set_v4_address(k_loopback_v4);
   endpoint.set_v6_address(k_loopback_v6);
-  assert(endpoint.version() == address::version::unspecified);
-  assert(endpoint.port() == 0);
+  EXPECT_TRUE(endpoint.version() == address::version::unspecified);
+  EXPECT_TRUE(endpoint.port() == 0);
 
   endpoint.set_address(bupp::async_io::ip::address::loopback_v4());
   endpoint.set_port(9004);
@@ -84,8 +84,6 @@ int main() {
   check_v4_endpoint(endpoint, 9004, k_loopback_v4);
 
   endpoint.reset();
-  assert(endpoint.version() == address::version::unspecified);
-  assert(endpoint.port() == 0);
-
-  return 0;
+  EXPECT_TRUE(endpoint.version() == address::version::unspecified);
+  EXPECT_TRUE(endpoint.port() == 0);
 }

@@ -1,6 +1,7 @@
 #include <bupp/io_context.h>
 #include <bupp/tcp.h>
 #include <fcntl.h>
+#include <gtest/gtest.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -10,7 +11,6 @@
 #include <bexec/scheduler.hpp>
 #include <bexec/sender.hpp>
 #include <bexec/stop_token.hpp>
-#include <cassert>
 #include <chrono>
 #include <cstring>
 #include <memory>

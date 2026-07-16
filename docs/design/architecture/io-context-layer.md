@@ -79,6 +79,12 @@ call `run()`, each thread claims a distinct slot with its own ring — hence
 **one thread, one uring**. Slot 0 always hosts the construction-time primary
 context, so existing code can start work before `run()`.
 
+The primary ring is initially disabled when single-issuer mode is available.
+The thread that claims slot 0 enables it immediately before entering the native
+run loop and therefore becomes its designated issuer. This preserves
+single-issuer optimization when construction and execution use different
+threads.
+
 High-level `post` work is published to the shared CPU queue. Wakeup scans the
 worker slots and writes one waiting worker's eventfd. I/O is published to the
 lower-priority shared I/O queue. The worker that removes an I/O batch owns all

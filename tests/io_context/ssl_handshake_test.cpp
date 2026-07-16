@@ -1,10 +1,11 @@
+#include <gtest/gtest.h>
 #include <openssl/err.h>
 
 #include "ssl_test_support.h"
 
 namespace {
 
-void test_socketpair_handshake_is_io_context_driven() {
+TEST(SslHandshakeTest, socketpair_handshake_is_io_context_driven) {
   bupp::io_context context;
   if (!context.is_open()) {
     return;
@@ -50,12 +51,12 @@ void test_socketpair_handshake_is_io_context_driven() {
   bexec::start(server_operation);
   context.run();
 
-  assert(state->values == 2);
-  assert(state->errors == 0);
-  assert(state->stopped == 0);
+  EXPECT_TRUE(state->values == 2);
+  EXPECT_TRUE(state->errors == 0);
+  EXPECT_TRUE(state->stopped == 0);
 }
 
-void test_invalid_stream_reports_protocol_error() {
+TEST(SslHandshakeTest, invalid_stream_reports_protocol_error) {
   bupp::io_context context;
   if (!context.is_open()) {
     return;
@@ -66,8 +67,8 @@ void test_invalid_stream_reports_protocol_error() {
   test_require(ssl_context.valid());
   bupp::ssl_stream source{bupp::tcp_socket(-1), ssl_context};
   bupp::ssl_stream owner{std::move(source)};
-  assert(!source.valid());
-  assert(owner.valid());
+  EXPECT_TRUE(!source.valid());
+  EXPECT_TRUE(owner.valid());
 
   ERR_clear_error();
   auto state = std::make_shared<handshake_state>();
@@ -78,13 +79,13 @@ void test_invalid_stream_reports_protocol_error() {
   bexec::start(operation);
   context.run();
 
-  assert(state->values == 0);
-  assert(state->errors == 1);
-  assert(state->stopped == 0);
-  assert(state->error == std::errc::protocol_error);
+  EXPECT_TRUE(state->values == 0);
+  EXPECT_TRUE(state->errors == 1);
+  EXPECT_TRUE(state->stopped == 0);
+  EXPECT_TRUE(state->error == std::errc::protocol_error);
 }
 
-void test_closed_transport_reports_handshake_error() {
+TEST(SslHandshakeTest, closed_transport_reports_handshake_error) {
   bupp::io_context context;
   if (!context.is_open()) {
     return;
@@ -109,13 +110,13 @@ void test_closed_transport_reports_handshake_error() {
   bexec::start(operation);
   context.run();
 
-  assert(state->values == 0);
-  assert(state->errors == 1);
-  assert(state->stopped == 0);
-  assert(state->error);
+  EXPECT_TRUE(state->values == 0);
+  EXPECT_TRUE(state->errors == 1);
+  EXPECT_TRUE(state->stopped == 0);
+  EXPECT_TRUE(state->error);
 }
 
-void test_socketpair_shutdown_exchanges_close_notify() {
+TEST(SslHandshakeTest, socketpair_shutdown_exchanges_close_notify) {
   test_certificate_files files;
 
   bupp::ssl_context server_context(bupp::ssl_context_method::tls_server);
@@ -152,9 +153,9 @@ void test_socketpair_shutdown_exchanges_close_notify() {
     bexec::start(client_operation);
     bexec::start(server_operation);
     context.run();
-    assert(state->values == 2);
-    assert(state->errors == 0);
-    assert(state->stopped == 0);
+    EXPECT_TRUE(state->values == 2);
+    EXPECT_TRUE(state->errors == 0);
+    EXPECT_TRUE(state->stopped == 0);
   }
 
   bupp::io_context context;
@@ -171,17 +172,9 @@ void test_socketpair_shutdown_exchanges_close_notify() {
   bexec::start(server_operation);
   context.run();
 
-  assert(state->values == 2);
-  assert(state->errors == 0);
-  assert(state->stopped == 0);
+  EXPECT_TRUE(state->values == 2);
+  EXPECT_TRUE(state->errors == 0);
+  EXPECT_TRUE(state->stopped == 0);
 }
 
 }  // namespace
-
-int main() {
-  test_socketpair_handshake_is_io_context_driven();
-  test_invalid_stream_reports_protocol_error();
-  test_closed_transport_reports_handshake_error();
-  test_socketpair_shutdown_exchanges_close_notify();
-  return 0;
-}

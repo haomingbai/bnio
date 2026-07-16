@@ -1,5 +1,6 @@
+#include <gtest/gtest.h>
+
 #include <array>
-#include <cassert>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -11,7 +12,7 @@ namespace {
 
 using namespace bupp_async_io_io_uring_test;
 
-void test_cqe_batch_window_drains_multiple_rounds() {
+TEST(IoUringCqeDispatchTest, cqe_batch_window_drains_multiple_rounds) {
   io_uring_context context;
   io_uring_context_options options;
   options.entries = 16;
@@ -19,7 +20,7 @@ void test_cqe_batch_window_drains_multiple_rounds() {
   options.wait_spin_count = 1;
   options.cqe_inline_completion_threshold = 0;
   if (!queue_init_or_skip(context, options)) {
-    return;
+    GTEST_SKIP() << "io_uring is unavailable";
   }
 
   constexpr unsigned k_count = 5;
@@ -39,13 +40,13 @@ void test_cqe_batch_window_drains_multiple_rounds() {
 
   context.run();
 
-  assert(state->completed == k_count);
-  assert(state->errors == 0);
-  assert(state->stopped == 0);
-  assert(state->all_in_context);
+  EXPECT_TRUE(state->completed == k_count);
+  EXPECT_TRUE(state->errors == 0);
+  EXPECT_TRUE(state->stopped == 0);
+  EXPECT_TRUE(state->all_in_context);
 }
 
-void test_concurrent_start_uses_the_single_run_thread() {
+TEST(IoUringCqeDispatchTest, concurrent_start_uses_the_single_run_thread) {
   io_uring_task_queue_state global_tasks;
   io_uring_context context;
   io_uring_context_options options;
@@ -55,7 +56,7 @@ void test_concurrent_start_uses_the_single_run_thread() {
   options.cqe_inline_completion_threshold = 0;
   options.local_queue_threshold = 8;
   if (!queue_init_shared_or_skip(context, global_tasks, options)) {
-    return;
+    GTEST_SKIP() << "io_uring is unavailable";
   }
 
   constexpr unsigned k_count = 512;
@@ -94,15 +95,9 @@ void test_concurrent_start_uses_the_single_run_thread() {
     worker.join();
   }
 
-  assert(state->completed.load(std::memory_order_acquire) == k_count);
-  assert(state->errors.load(std::memory_order_acquire) == 0);
-  assert(state->stopped.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(state->completed.load(std::memory_order_acquire) == k_count);
+  EXPECT_TRUE(state->errors.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(state->stopped.load(std::memory_order_acquire) == 0);
 }
 
 }  // namespace
-
-int main() {
-  test_cqe_batch_window_drains_multiple_rounds();
-  test_concurrent_start_uses_the_single_run_thread();
-  return 0;
-}

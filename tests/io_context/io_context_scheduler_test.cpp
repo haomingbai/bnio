@@ -1,11 +1,15 @@
+#include <gtest/gtest.h>
+
+#include <thread>
+
 #include "io_context_runtime_test_support.h"
 
 namespace {
 
-void test_post_scheduler_schedule_posts_fifo() {
+TEST(IoContextSchedulerTest, post_scheduler_schedule_posts_fifo) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   auto scheduler = context.get_post_scheduler();
@@ -41,20 +45,21 @@ void test_post_scheduler_schedule_posts_fifo() {
   bexec::start(second_operation);
   bexec::start(third_operation);
 
-  assert(state->order.empty());
+  EXPECT_TRUE(state->order.empty());
   context.run();
 
-  assert(state->signal == signal_kind::value);
-  assert(state->order.size() == 3);
-  assert(state->order[0] == 1);
-  assert(state->order[1] == 2);
-  assert(state->order[2] == 3);
+  EXPECT_TRUE(state->signal == signal_kind::value);
+  EXPECT_TRUE(state->order.size() == 3);
+  EXPECT_TRUE(state->order[0] == 1);
+  EXPECT_TRUE(state->order[1] == 2);
+  EXPECT_TRUE(state->order[2] == 3);
 }
 
-void test_dispatch_scheduler_schedule_posts_outside_context() {
+TEST(IoContextSchedulerTest,
+     dispatch_scheduler_schedule_posts_outside_context) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   auto scheduler = context.get_dispatch_scheduler();
@@ -70,18 +75,19 @@ void test_dispatch_scheduler_schedule_posts_outside_context() {
       bexec::connect(bexec::schedule(scheduler), std::move(receiver));
   bexec::start(operation);
 
-  assert(state->signal == signal_kind::none);
+  EXPECT_TRUE(state->signal == signal_kind::none);
   context.run();
 
-  assert(state->signal == signal_kind::value);
-  assert(state->order.size() == 1);
-  assert(state->order[0] == 7);
+  EXPECT_TRUE(state->signal == signal_kind::value);
+  EXPECT_TRUE(state->order.size() == 1);
+  EXPECT_TRUE(state->order[0] == 7);
 }
 
-void test_dispatch_scheduler_schedule_runs_inline_in_context() {
+TEST(IoContextSchedulerTest,
+     dispatch_scheduler_schedule_runs_inline_in_context) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   auto state = std::make_shared<schedule_state>();
@@ -93,20 +99,20 @@ void test_dispatch_scheduler_schedule_runs_inline_in_context() {
   bexec::start(operation);
   context.run();
 
-  assert(state->signal == signal_kind::value);
-  assert(state->completed_during_start);
-  assert(state->order.size() == 1);
-  assert(state->order[0] == 42);
+  EXPECT_TRUE(state->signal == signal_kind::value);
+  EXPECT_TRUE(state->completed_during_start);
+  EXPECT_TRUE(state->order.size() == 1);
+  EXPECT_TRUE(state->order[0] == 42);
 }
 
-void test_scheduler_schedule_pre_stopped_token_stops() {
+TEST(IoContextSchedulerTest, scheduler_schedule_pre_stopped_token_stops) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   bexec::inplace_stop_source source;
-  assert(source.request_stop());
+  EXPECT_TRUE(source.request_stop());
 
   auto state = std::make_shared<schedule_state>();
   stopped_schedule_receiver receiver;
@@ -119,15 +125,31 @@ void test_scheduler_schedule_pre_stopped_token_stops() {
   bexec::start(operation);
   context.run();
 
-  assert(state->signal == signal_kind::stopped);
+  EXPECT_TRUE(state->signal == signal_kind::stopped);
+}
+
+TEST(IoContextSchedulerTest, default_context_runs_on_a_different_thread) {
+  bupp::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  auto state = std::make_shared<schedule_state>();
+  schedule_receiver receiver;
+  receiver.state = state;
+  receiver.context = &context;
+  receiver.value = 99;
+
+  auto operation = bexec::connect(bexec::schedule(context.get_post_scheduler()),
+                                  std::move(receiver));
+  bexec::start(operation);
+
+  std::thread runner([&context] { context.run(); });
+  runner.join();
+
+  EXPECT_TRUE(state->signal == signal_kind::value);
+  EXPECT_TRUE(state->order.size() == 1);
+  EXPECT_TRUE(state->order[0] == 99);
 }
 
 }  // namespace
-
-int main() {
-  test_post_scheduler_schedule_posts_fifo();
-  test_dispatch_scheduler_schedule_posts_outside_context();
-  test_dispatch_scheduler_schedule_runs_inline_in_context();
-  test_scheduler_schedule_pre_stopped_token_stops();
-  return 0;
-}

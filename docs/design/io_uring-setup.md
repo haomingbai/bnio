@@ -5,9 +5,11 @@ This page documents the io_uring setup flags applied by
 
 ## Default Setup Flags
 
-Since kernel 5.19 (2022), Linux supports `IORING_SETUP_COOP_TASKRUN` and
+Modern Linux kernels support `IORING_SETUP_COOP_TASKRUN` and
 `IORING_SETUP_SINGLE_ISSUER`. The former reduces task-work wakeups; the latter
 lets each single-thread-submitted ring avoid kernel-side submission locking.
+`bupp` combines `SINGLE_ISSUER` with `IORING_SETUP_R_DISABLED` so that ring
+construction and issuer selection do not have to happen on the same thread.
 
 ### `IORING_SETUP_COOP_TASKRUN`
 
@@ -22,20 +24,37 @@ lets each single-thread-submitted ring avoid kernel-side submission locking.
 
 | Property | Value |
 |---|---|
-| Kernel requirement | Linux ≥ 5.19 |
+| Kernel requirement | Linux ≥ 6.0 |
 | What it does | Declares that only one task submits requests to the ring. |
 | Why it helps | Removes submission-side kernel locking that is unnecessary for bupp's one-thread-one-ring model. |
 | Compatibility fallback | Same retry-on-EINVAL strategy. |
+
+### `IORING_SETUP_R_DISABLED`
+
+When `SINGLE_ISSUER` is requested, `queue_init()` also requests
+`R_DISABLED`. A disabled ring accepts no submissions. At the start of
+`io_uring_context::run()`, the run-loop thread calls
+`io_uring_enable_rings()` before preparing or submitting any SQE. Under the
+kernel issuer rules, that enabling thread becomes the designated issuer.
+
+This handoff matters for the primary high-level context: `io_context` can be
+constructed on one thread and run on another. Additional worker rings follow
+the same lifecycle, keeping the rule uniform.
 
 ### Default Value
 
 `io_uring_context_options::setup_flags` defaults to:
 
 ```cpp
-IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER
+IORING_SETUP_COOP_TASKRUN |
+    IORING_SETUP_SINGLE_ISSUER |
+    IORING_SETUP_R_DISABLED
 ```
 
-Applications that need the old behaviour can explicitly set `setup_flags = 0`.
+`io_uring_context` automatically adds `R_DISABLED` whenever callers request
+`SINGLE_ISSUER`, even if it was omitted from `setup_flags`. Applications that
+need the old unrestricted-submitter behaviour can explicitly set
+`setup_flags = 0`.
 
 ## Kernel Feature Probing
 
@@ -52,7 +71,9 @@ available for future use (e.g. detecting `IORING_FEAT_NODROP`,
 struct io_uring_context_options {
   unsigned entries = 256;
   unsigned setup_flags =
-      IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER;
+      IORING_SETUP_COOP_TASKRUN |
+      IORING_SETUP_SINGLE_ISSUER |
+      IORING_SETUP_R_DISABLED;
   unsigned cqe_batch_window = 64;
   unsigned wait_spin_count = 4;
   unsigned cqe_inline_completion_threshold = 64;
@@ -80,7 +101,9 @@ more than CPU efficiency.
 
 ## Backward Compatibility
 
-On kernels older than 5.19, `io_uring_queue_init_params` returns `-EINVAL`
-for the new flags. The library detects this and retries after removing
-`IORING_SETUP_COOP_TASKRUN`, `IORING_SETUP_SINGLE_ISSUER`, and any enabled
-`IORING_SETUP_SQPOLL`, falling back transparently.
+When a kernel rejects the optional task-run/issuer flags with `-EINVAL`, the
+library retries after removing `IORING_SETUP_COOP_TASKRUN`,
+`IORING_SETUP_SINGLE_ISSUER`, and `IORING_SETUP_R_DISABLED`. An explicitly
+requested `IORING_SETUP_SQPOLL` is retained. Other errors, including SQPOLL
+permission failures, are propagated instead of silently changing the requested
+execution mode.

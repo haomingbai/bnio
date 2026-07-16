@@ -1,23 +1,25 @@
+#include <gtest/gtest.h>
+
 #include "io_context_loopback_test_support.h"
 
 namespace {
 
-void test_accept_connect_loopback() {
+TEST(IoContextAcceptConnectTest, accept_connect_loopback) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
   auto scheduler = context.get_post_scheduler();
 
   bupp::tcp_acceptor acceptor;
-  assert(!acceptor.open(bupp::ip::tcp::v4()));
-  assert(!acceptor.set_reuse_address(true));
-  assert(!acceptor.bind(bupp::ip::endpoint::loopback_v4(0)));
-  assert(!acceptor.listen(4));
+  EXPECT_TRUE(!acceptor.open(bupp::ip::tcp::v4()));
+  EXPECT_TRUE(!acceptor.set_reuse_address(true));
+  EXPECT_TRUE(!acceptor.bind(bupp::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(!acceptor.listen(4));
   const bupp::ip::endpoint endpoint = bound_loopback_endpoint(acceptor);
 
   bupp::tcp_socket client;
-  assert(!client.open(bupp::ip::tcp::v4()));
+  EXPECT_TRUE(!client.open(bupp::ip::tcp::v4()));
 
   unsigned completions = 0;
 
@@ -45,22 +47,17 @@ void test_accept_connect_loopback() {
   bexec::start(connect_operation);
   context.run();
 
-  assert(completions == 2);
-  assert(accept_state->signal == signal_kind::value);
-  assert(accept_state->fd >= 0);
+  EXPECT_TRUE(completions == 2);
+  EXPECT_TRUE(accept_state->signal == signal_kind::value);
+  EXPECT_TRUE(accept_state->fd >= 0);
 #if defined(BUPP_HAS_IO_CONTEXT_BSD)
-  assert((::fcntl(accept_state->fd, F_GETFL, 0) & O_NONBLOCK) != 0);
+  EXPECT_TRUE((::fcntl(accept_state->fd, F_GETFL, 0) & O_NONBLOCK) != 0);
 #endif
-  assert(connect_state->signal == signal_kind::value);
-  assert(client.is_open());
+  EXPECT_TRUE(connect_state->signal == signal_kind::value);
+  EXPECT_TRUE(client.is_open());
 
-  assert(::close(accept_state->fd) == 0);
+  EXPECT_TRUE(::close(accept_state->fd) == 0);
   accept_state->fd = -1;
 }
 
 }  // namespace
-
-int main() {
-  test_accept_connect_loopback();
-  return 0;
-}

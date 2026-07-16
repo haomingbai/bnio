@@ -16,6 +16,9 @@ namespace {
 unsigned prepare_queue_params(const io_uring_context_options& options,
                               bupp::base::params& queue_params) noexcept {
   unsigned flags = options.setup_flags;
+  if ((flags & bupp::base::detail::io_uring_setup_single_issuer) != 0) {
+    flags |= bupp::base::detail::io_uring_setup_r_disabled;
+  }
   if (options.enable_sqpoll) {
     flags |= IORING_SETUP_SQPOLL;
     queue_params.set_sq_thread_cpu(options.sqpoll_thread_cpu);
@@ -75,8 +78,11 @@ int io_uring_context::queue_init(
 
   if (result >= 0) {
     kernel_features_ = queue_params.features();
+    ring_disabled_ = (queue_params.flags() &
+                      bupp::base::detail::io_uring_setup_r_disabled) != 0;
   } else {
     kernel_features_ = 0;
+    ring_disabled_ = false;
   }
 
   if (result < 0) {
@@ -103,13 +109,19 @@ int io_uring_context::init_ring_params(
     return result;
   }
 
-  // Fallback: retry without bupp-managed setup flags for older kernels.
-  if (flags != 0) {
+  // Fallback: retry without optional task-run/issuer flags on older kernels.
+  // Explicit SQPOLL requests are retained and permission/resource failures are
+  // propagated instead of being silently converted to a different mode.
+  if (result == -EINVAL && flags != 0) {
     queue_params.reset();
     flags &= ~(bupp::base::detail::io_uring_setup_coop_taskrun |
                bupp::base::detail::io_uring_setup_single_issuer |
-               IORING_SETUP_SQPOLL);
+               bupp::base::detail::io_uring_setup_r_disabled);
     queue_params.set_flags(flags);
+    if ((flags & IORING_SETUP_SQPOLL) != 0) {
+      queue_params.set_sq_thread_cpu(options_.sqpoll_thread_cpu);
+      queue_params.set_sq_thread_idle(options_.sqpoll_idle_ms);
+    }
     result = ring_.queue_init_params(entries, queue_params);
   }
 
@@ -123,6 +135,7 @@ void io_uring_context::queue_exit() noexcept {
   (void)local_tasks_.pop_all();
   (void)local_io_tasks_.pop_all();
   eventfd_poll_pending_ = false;
+  ring_disabled_ = false;
   ring_.queue_exit();
   if (owns_event_fd_ && event_fd_ >= 0) {
     (void)::close(event_fd_);

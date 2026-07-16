@@ -195,6 +195,9 @@ class BUPP_EXPORT io_uring_context {
 
   int submit_ring() noexcept;
 
+  /** Enables a disabled ring on its run-loop thread. */
+  int enable_ring() noexcept;
+
   /**
    * Small copy of CQE data used after the CQ head advances.
    */
@@ -340,6 +343,7 @@ class BUPP_EXPORT io_uring_context {
   unsigned kernel_features_ = 0;
   std::atomic<context_state> state_{context_state::finished};
   bool queue_initialized_ = false;
+  bool ring_disabled_ = false;
 
   std::atomic_bool run_active_{false};
   std::atomic_bool waiting_{false};

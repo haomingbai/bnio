@@ -1,11 +1,12 @@
 #include <bupp/async_io/time.h>
+#include <gtest/gtest.h>
 
 #include <chrono>
 #include <type_traits>
 
 namespace {
 
-void test_chrono_aliases() {
+TEST(TimeTest, chrono_aliases) {
   static_assert(
       std::is_same_v<bupp::async_io::steady_clock, std::chrono::steady_clock>);
   static_assert(
@@ -21,8 +22,3 @@ void test_chrono_aliases() {
 }
 
 }  // namespace
-
-int main() {
-  test_chrono_aliases();
-  return 0;
-}

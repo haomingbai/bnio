@@ -52,6 +52,13 @@
 
 ## Tests
 
+- Write runtime tests as focused GoogleTest `TEST` cases and register them with
+  the shared `bupp_add_gtest` CMake helper.
+- Use `GTEST_SKIP()` when a supported backend is unavailable on the host; do
+  not silently return from a runtime test.
+- Exercise production defaults in behavioral regression tests. Do not clear
+  setup flags or weaken concurrency merely to make a test pass; a test that
+  intentionally targets a non-default mode must name and assert that mode.
 - Keep base-layer Linux tests under `tests/base/linux/`.
 - Keep base-layer BSD tests under `tests/base/bsd/`.
 - Ensure each public base header can be included independently.

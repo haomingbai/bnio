@@ -352,8 +352,6 @@ int main(int argc, char** argv) {
   opts.concurrency_hint = worker_count;
 #if defined(BUPP_HAS_IO_CONTEXT_LINUX)
   opts.platform.uring.entries = 1024;
-  opts.platform.uring.setup_flags =
-      bupp::base::detail::io_uring_setup_coop_taskrun;
 #elif defined(BUPP_HAS_IO_CONTEXT_BSD)
   opts.platform.kqueue.entries = 1024;
 #endif

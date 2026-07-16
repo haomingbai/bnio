@@ -12,4 +12,6 @@
 #error "missing header self-contained test definition"
 #endif
 
-int main() { return 0; }
+#include <gtest/gtest.h>
+
+TEST(HeaderSelfContainedTest, compiles) { SUCCEED(); }

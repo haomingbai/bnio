@@ -1,8 +1,7 @@
 function(bupp_add_bsd_base_test name source)
   add_executable(bupp_base_bsd_${name}_test ${source})
   target_link_libraries(bupp_base_bsd_${name}_test PRIVATE bupp::bupp)
-  bupp_set_project_warnings(bupp_base_bsd_${name}_test)
-  add_test(NAME bupp.base.bsd.${name} COMMAND bupp_base_bsd_${name}_test)
+  bupp_add_gtest(bupp_base_bsd_${name}_test bupp.base.bsd.${name})
 endfunction()
 
 bupp_add_bsd_base_test(kqueue kqueue_test.cpp)
@@ -13,9 +12,8 @@ function(bupp_add_bsd_base_header_self_contained_test name definition)
   target_compile_definitions(bupp_base_bsd_header_${name}_test
                              PRIVATE ${definition})
   target_link_libraries(bupp_base_bsd_header_${name}_test PRIVATE bupp::bupp)
-  bupp_set_project_warnings(bupp_base_bsd_header_${name}_test)
-  add_test(NAME bupp.base.bsd.header.${name}
-           COMMAND bupp_base_bsd_header_${name}_test)
+  bupp_add_gtest(bupp_base_bsd_header_${name}_test
+                 bupp.base.bsd.header.${name})
 endfunction()
 
 bupp_add_bsd_base_header_self_contained_test(base BUPP_HEADER_TEST_BASE)

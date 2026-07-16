@@ -62,6 +62,11 @@ threshold, explicit-drain flag, timer, or lock. A standalone
 `io_uring_context` must likewise be given an externally owned task queue state
 before `run()`.
 
+Rings using `IORING_SETUP_SINGLE_ISSUER` are created with
+`IORING_SETUP_R_DISABLED`. The owning run-loop thread enables its ring before
+the first submission, making that thread the kernel-designated issuer even
+when the context object was constructed elsewhere.
+
 ```cpp
 class io_uring_context {
 public:
@@ -125,7 +130,9 @@ negative value, the default, makes the context create and own a private eventfd.
 struct io_uring_context_options {
     unsigned entries = 256;
     unsigned setup_flags =
-        IORING_SETUP_COOP_TASKRUN | IORING_SETUP_SINGLE_ISSUER;
+        IORING_SETUP_COOP_TASKRUN |
+        IORING_SETUP_SINGLE_ISSUER |
+        IORING_SETUP_R_DISABLED;
     unsigned cqe_batch_window = 64;
     unsigned wait_spin_count = 4;
     unsigned cqe_inline_completion_threshold = 64;

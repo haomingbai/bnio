@@ -1,9 +1,9 @@
 #include <bupp/io_context.h>
+#include <gtest/gtest.h>
 
 #include <array>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
-#include <cassert>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -61,7 +61,7 @@ struct resolve_receiver {
   return context.is_open();
 }
 
-void test_sender_concepts() {
+TEST(DnsTest, sender_concepts) {
   bupp::io_context context;
   auto scheduler = context.get_post_scheduler();
   std::array<bupp::ip::endpoint, 4> results{};
@@ -82,10 +82,10 @@ void test_sender_concepts() {
   static_assert(bexec::operation_state<decltype(operation)>);
 }
 
-void test_scheduler_resolves_numeric_address() {
+TEST(DnsTest, scheduler_resolves_numeric_address) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   auto scheduler = context.get_post_scheduler();
@@ -104,16 +104,16 @@ void test_scheduler_resolves_numeric_address() {
   bexec::start(operation);
   context.run();
 
-  assert(state.signal == signal_kind::value);
-  assert(state.endpoint_count > 0);
-  assert(results[0].port() == 8080);
-  assert(results[0].address().type() == bupp::ip::address::version::v4);
+  EXPECT_TRUE(state.signal == signal_kind::value);
+  EXPECT_TRUE(state.endpoint_count > 0);
+  EXPECT_TRUE(results[0].port() == 8080);
+  EXPECT_TRUE(results[0].address().type() == bupp::ip::address::version::v4);
 }
 
-void test_scheduler_resolves_host_service_strings() {
+TEST(DnsTest, scheduler_resolves_host_service_strings) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   auto scheduler = context.get_post_scheduler();
@@ -130,16 +130,9 @@ void test_scheduler_resolves_host_service_strings() {
   bexec::start(operation);
   context.run();
 
-  assert(state.signal == signal_kind::value);
-  assert(state.endpoint_count > 0);
-  assert(results[0].port() == 8081);
+  EXPECT_TRUE(state.signal == signal_kind::value);
+  EXPECT_TRUE(state.endpoint_count > 0);
+  EXPECT_TRUE(results[0].port() == 8081);
 }
 
 }  // namespace
-
-int main() {
-  test_sender_concepts();
-  test_scheduler_resolves_numeric_address();
-  test_scheduler_resolves_host_service_strings();
-  return 0;
-}

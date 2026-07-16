@@ -1,14 +1,13 @@
 function(bupp_add_base_test name source)
   add_executable(bupp_base_${name}_test ${source})
   target_link_libraries(bupp_base_${name}_test PRIVATE bupp::bupp)
-  bupp_set_project_warnings(bupp_base_${name}_test)
-  add_test(NAME bupp.base.${name} COMMAND bupp_base_${name}_test)
+  bupp_add_gtest(bupp_base_${name}_test bupp.base.${name} ${ARGN})
 endfunction()
 
 bupp_add_base_test(params params_test.cpp)
 bupp_add_base_test(completion_queue_entry completion_queue_entry_test.cpp)
 bupp_add_base_test(submission_queue_entry submission_queue_entry_test.cpp)
-bupp_add_base_test(ring ring_test.cpp)
+bupp_add_base_test(ring ring_test.cpp PROPERTIES TIMEOUT 10)
 bupp_add_base_test(probe probe_test.cpp)
 
 function(bupp_add_base_header_self_contained_test name definition)
@@ -16,9 +15,7 @@ function(bupp_add_base_header_self_contained_test name definition)
   target_compile_definitions(bupp_base_header_${name}_test
                              PRIVATE ${definition})
   target_link_libraries(bupp_base_header_${name}_test PRIVATE bupp::bupp)
-  bupp_set_project_warnings(bupp_base_header_${name}_test)
-  add_test(NAME bupp.base.header.${name}
-           COMMAND bupp_base_header_${name}_test)
+  bupp_add_gtest(bupp_base_header_${name}_test bupp.base.header.${name})
 endfunction()
 
 bupp_add_base_header_self_contained_test(base BUPP_HEADER_TEST_BASE)

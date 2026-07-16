@@ -1,8 +1,10 @@
+#include <gtest/gtest.h>
+
 #include "io_context_test_support.h"
 
 namespace {
 
-void test_sender_concepts() {
+TEST(IoContextSenderConceptTest, sender_concepts) {
   bupp::io_context context;
   auto scheduler = context.get_post_scheduler();
   bupp::tcp_socket socket(3);
@@ -98,8 +100,3 @@ void test_sender_concepts() {
 }
 
 }  // namespace
-
-int main() {
-  test_sender_concepts();
-  return 0;
-}

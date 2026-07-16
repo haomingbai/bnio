@@ -14,14 +14,34 @@ bool io_uring_context::consume_io_tasks() noexcept {
     return false;
   }
 
+  io_uring_io_operation_base* prepared = nullptr;
+  const auto release_prepared = [&prepared]() noexcept {
+    while (prepared != nullptr) {
+      io_uring_io_operation_base* operation = prepared;
+      prepared = static_cast<io_uring_io_operation_base*>(operation->next);
+      operation->next = nullptr;
+    }
+  };
+  const auto fail_prepared = [this, &prepared](int result) noexcept {
+    while (prepared != nullptr) {
+      io_uring_io_operation_base* operation = prepared;
+      prepared = static_cast<io_uring_io_operation_base*>(operation->next);
+      operation->next = nullptr;
+      operation->complete_submit_error(result);
+      local_tasks_.push(*operation);
+    }
+  };
+
   while (operations != nullptr) {
     io_uring_io_operation_base* operation = operations;
     const int prepare_result = prepare_io(*operation);
     if (prepare_result == -EAGAIN) {
       const int submit_result = submit_ring();
       if (submit_result >= 0) {
+        release_prepared();
         continue;
       }
+      fail_prepared(submit_result);
       while (operations != nullptr) {
         operation = operations;
         operations = static_cast<io_uring_io_operation_base*>(operation->next);
@@ -37,10 +57,20 @@ bool io_uring_context::consume_io_tasks() noexcept {
     if (prepare_result < 0) {
       operation->complete_submit_error(prepare_result);
       local_tasks_.push(*operation);
+    } else {
+      operation->next = prepared;
+      prepared = operation;
     }
   }
 
-  (void)submit_ring();
+  if (prepared != nullptr) {
+    const int submit_result = submit_ring();
+    if (submit_result >= 0) {
+      release_prepared();
+    } else {
+      fail_prepared(submit_result);
+    }
+  }
   return true;
 }
 
@@ -65,6 +95,21 @@ int io_uring_context::submit_ring() noexcept {
     return -EINVAL;
   }
   return ring_.submit();
+}
+
+int io_uring_context::enable_ring() noexcept {
+  if (!ring_.is_open()) {
+    return -EINVAL;
+  }
+  if (!ring_disabled_) {
+    return 0;
+  }
+
+  const int result = ring_.enable();
+  if (result >= 0) {
+    ring_disabled_ = false;
+  }
+  return result;
 }
 
 void io_uring_context::assert_running() const noexcept {

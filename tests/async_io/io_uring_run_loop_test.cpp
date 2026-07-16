@@ -1,7 +1,8 @@
+#include <gtest/gtest.h>
+
 #include <array>
 #include <atomic>
 #include <barrier>
-#include <cassert>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -44,10 +45,10 @@ struct concurrent_post_receiver {
   }
 };
 
-void test_posted_tasks_drain_in_post_order() {
+TEST(IoUringRunLoopTest, posted_tasks_drain_in_post_order) {
   io_uring_context context;
   if (!queue_init_or_skip(context)) {
-    return;
+    GTEST_SKIP() << "io_uring is unavailable";
   }
 
   constexpr unsigned k_count = 8;
@@ -70,18 +71,19 @@ void test_posted_tasks_drain_in_post_order() {
 
   context.run();
 
-  assert(state->completed == k_count);
-  assert(state->errors == 0);
-  assert(state->stopped == 0);
-  assert(state->all_in_context);
-  assert(state->in_order);
+  EXPECT_TRUE(state->completed == k_count);
+  EXPECT_TRUE(state->errors == 0);
+  EXPECT_TRUE(state->stopped == 0);
+  EXPECT_TRUE(state->all_in_context);
+  EXPECT_TRUE(state->in_order);
 }
 
-void test_posted_tasks_accept_concurrent_external_posts() {
+TEST(IoUringRunLoopTest, posted_tasks_accept_concurrent_external_posts) {
   io_uring_task_queue_state global_tasks;
   io_uring_context context;
-  if (!queue_init_shared_or_skip(context, global_tasks)) {
-    return;
+  io_uring_context_options options;
+  if (!queue_init_shared_or_skip(context, global_tasks, options)) {
+    GTEST_SKIP() << "io_uring is unavailable";
   }
 
   constexpr unsigned k_threads = 8;
@@ -138,29 +140,22 @@ void test_posted_tasks_accept_concurrent_external_posts() {
   }
   runner.join();
 
-  assert(state->completed.load(std::memory_order_acquire) == k_count);
-  assert(state->stopped.load(std::memory_order_acquire) == 0);
-  assert(state->all_in_context.load(std::memory_order_acquire));
+  EXPECT_TRUE(state->completed.load(std::memory_order_acquire) == k_count);
+  EXPECT_TRUE(state->stopped.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(state->all_in_context.load(std::memory_order_acquire));
 }
 
-void test_shared_closing_state_finishes_the_worker() {
+TEST(IoUringRunLoopTest, shared_closing_state_finishes_the_worker) {
   io_uring_task_queue_state global_state;
   io_uring_context context;
   if (!queue_init_shared_or_skip(context, global_state)) {
-    return;
+    GTEST_SKIP() << "io_uring is unavailable";
   }
 
   global_state.closing.store(true, std::memory_order_release);
   context.run();
 
-  assert(global_state.awake_workers.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(global_state.awake_workers.load(std::memory_order_acquire) == 0);
 }
 
 }  // namespace
-
-int main() {
-  test_posted_tasks_drain_in_post_order();
-  test_posted_tasks_accept_concurrent_external_posts();
-  test_shared_closing_state_finishes_the_worker();
-  return 0;
-}

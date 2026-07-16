@@ -3,11 +3,11 @@
 #include <bupp/async_io/ip/tcp.h>
 #include <bupp/async_io/socket_view.h>
 #include <bupp/config/system.h>
+#include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <cassert>
 #include <cerrno>
 #include <system_error>
 #include <type_traits>
@@ -71,21 +71,21 @@ unique_fd make_tcp_socket() {
 }
 
 void check_error(const std::error_code& error, int value) {
-  assert(error);
-  assert(error.value() == value);
-  assert(error.category() == std::generic_category());
+  EXPECT_TRUE(error);
+  EXPECT_TRUE(error.value() == value);
+  EXPECT_TRUE(error.category() == std::generic_category());
 }
 
-void test_invalid_socket() {
+TEST(SocketViewTest, invalid_socket) {
   bupp::async_io::socket_view generic_socket;
-  assert(!generic_socket.valid());
-  assert(generic_socket.native_handle() == -1);
+  EXPECT_TRUE(!generic_socket.valid());
+  EXPECT_TRUE(generic_socket.native_handle() == -1);
 
   const auto endpoint = bupp::async_io::ip::tcp::endpoint::loopback_v4(0);
 
   bupp::async_io::stream_socket_view stream;
-  assert(!stream.valid());
-  assert(stream.native_handle() == -1);
+  EXPECT_TRUE(!stream.valid());
+  EXPECT_TRUE(stream.native_handle() == -1);
   check_error(stream.bind(endpoint), EBADF);
   check_error(stream.listen(1), EBADF);
   check_error(stream.connect(endpoint), EBADF);
@@ -93,8 +93,8 @@ void test_invalid_socket() {
   check_error(stream.set_reuse_address(true), EBADF);
 
   bupp::async_io::datagram_socket_view datagram;
-  assert(!datagram.valid());
-  assert(datagram.native_handle() == -1);
+  EXPECT_TRUE(!datagram.valid());
+  EXPECT_TRUE(datagram.native_handle() == -1);
   check_error(datagram.bind(endpoint), EBADF);
   check_error(datagram.connect(endpoint), EBADF);
   check_error(datagram.shutdown(SHUT_RDWR), EBADF);
@@ -103,61 +103,64 @@ void test_invalid_socket() {
   bupp::async_io::ip::endpoint stale =
       bupp::async_io::ip::endpoint::loopback_v4(1234);
   check_error(datagram.local_endpoint(stale), EBADF);
-  assert(stale.version() == bupp::async_io::ip::address::version::unspecified);
+  EXPECT_TRUE(stale.version() ==
+              bupp::async_io::ip::address::version::unspecified);
   stale = bupp::async_io::ip::endpoint::loopback_v4(1234);
   check_error(datagram.remote_endpoint(stale), EBADF);
-  assert(stale.version() == bupp::async_io::ip::address::version::unspecified);
+  EXPECT_TRUE(stale.version() ==
+              bupp::async_io::ip::address::version::unspecified);
 }
 
-void test_datagram_lifecycle() {
+TEST(SocketViewTest, datagram_lifecycle) {
   unique_fd receiver_fd(
       ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP));
   unique_fd sender_fd(
       ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP));
-  assert(receiver_fd.get() >= 0);
-  assert(sender_fd.get() >= 0);
+  EXPECT_TRUE(receiver_fd.get() >= 0);
+  EXPECT_TRUE(sender_fd.get() >= 0);
 
   bupp::async_io::datagram_socket_view receiver(receiver_fd.get());
   bupp::async_io::datagram_socket_view sender(sender_fd.get());
-  assert(!receiver.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(!receiver.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
   bupp::async_io::ip::endpoint destination;
-  assert(!receiver.local_endpoint(destination));
-  assert(!sender.connect(destination));
+  EXPECT_TRUE(!receiver.local_endpoint(destination));
+  EXPECT_TRUE(!sender.connect(destination));
   bupp::async_io::ip::endpoint peer;
-  assert(!sender.remote_endpoint(peer));
-  assert(peer.address().is_v4());
-  assert(peer.port() == destination.port());
+  EXPECT_TRUE(!sender.remote_endpoint(peer));
+  EXPECT_TRUE(peer.address().is_v4());
+  EXPECT_TRUE(peer.port() == destination.port());
 }
 
-void test_loopback_setup() {
+TEST(SocketViewTest, loopback_setup) {
   unique_fd listener_fd = make_tcp_socket();
-  assert(listener_fd.get() >= 0);
+  EXPECT_TRUE(listener_fd.get() >= 0);
 
   bupp::async_io::stream_socket_view listener(listener_fd.get());
-  assert(listener.valid());
-  assert(listener.native_handle() == listener_fd.get());
+  EXPECT_TRUE(listener.valid());
+  EXPECT_TRUE(listener.native_handle() == listener_fd.get());
 
-  assert(!listener.set_reuse_address(true));
-  assert(!listener.bind(bupp::async_io::ip::tcp::endpoint::loopback_v4(0)));
-  assert(!listener.listen(1));
+  EXPECT_TRUE(!listener.set_reuse_address(true));
+  EXPECT_TRUE(
+      !listener.bind(bupp::async_io::ip::tcp::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(!listener.listen(1));
 
   sockaddr_in bound_address{};
   socklen_t bound_address_size = sizeof(bound_address);
-  assert(::getsockname(listener.native_handle(),
-                       reinterpret_cast<sockaddr*>(&bound_address),
-                       &bound_address_size) == 0);
-  assert(bound_address.sin_family == AF_INET);
-  assert(bound_address_size == sizeof(bound_address));
+  EXPECT_TRUE(::getsockname(listener.native_handle(),
+                            reinterpret_cast<sockaddr*>(&bound_address),
+                            &bound_address_size) == 0);
+  EXPECT_TRUE(bound_address.sin_family == AF_INET);
+  EXPECT_TRUE(bound_address_size == sizeof(bound_address));
 
   bupp::async_io::ip::tcp::endpoint remote(
       bupp::async_io::ip::address::loopback_v4(),
       ntohs(bound_address.sin_port));
 
   unique_fd client_fd = make_tcp_socket();
-  assert(client_fd.get() >= 0);
+  EXPECT_TRUE(client_fd.get() >= 0);
 
   bupp::async_io::stream_socket_view client(client_fd.get());
-  assert(!client.connect(remote));
+  EXPECT_TRUE(!client.connect(remote));
 
 #if defined(BUPP_SYSTEM_LINUX) || defined(BUPP_SYSTEM_FREEBSD)
   unique_fd accepted_fd(
@@ -165,15 +168,15 @@ void test_loopback_setup() {
 #else
   unique_fd accepted_fd(::accept(listener.native_handle(), nullptr, nullptr));
 #endif
-  assert(accepted_fd.get() >= 0);
+  EXPECT_TRUE(accepted_fd.get() >= 0);
 
   bupp::async_io::stream_socket_view accepted(accepted_fd.get());
-  assert(!accepted.shutdown(SHUT_RDWR));
+  EXPECT_TRUE(!accepted.shutdown(SHUT_RDWR));
 }
 
 }  // namespace
 
-int main() {
+TEST(SocketViewTest, behavior) {
   static_assert(sizeof(bupp::async_io::socket_view) == sizeof(int));
   static_assert(std::is_trivially_copyable_v<bupp::async_io::socket_view>);
   static_assert(std::is_standard_layout_v<bupp::async_io::socket_view>);
@@ -201,10 +204,4 @@ int main() {
                              const sockaddr*, socklen_t>);
   static_assert(!can_listen<bupp::async_io::datagram_socket_view, int>);
   static_assert(!has_sync_datagram_io<bupp::async_io::datagram_socket_view>);
-
-  test_invalid_socket();
-  test_loopback_setup();
-  test_datagram_lifecycle();
-
-  return 0;
 }

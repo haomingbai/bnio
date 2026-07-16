@@ -1,3 +1,5 @@
+#include <gtest/gtest.h>
+
 #include <thread>
 #include <vector>
 
@@ -39,14 +41,14 @@ struct ordered_timer_receiver {
   }
 };
 
-void test_steady_timer_completes() {
+TEST(SteadyTimerTest, steady_timer_completes) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   bupp::steady_timer timer(context);
-  assert(timer.expires_after(std::chrono::milliseconds(1)) == 0);
+  EXPECT_TRUE(timer.expires_after(std::chrono::milliseconds(1)) == 0);
 
   void_receiver receiver;
   receiver.context = &context;
@@ -57,17 +59,17 @@ void test_steady_timer_completes() {
   bexec::start(operation);
   context.run();
 
-  assert(state->signal == signal_kind::value);
+  EXPECT_TRUE(state->signal == signal_kind::value);
 }
 
-void test_steady_timer_cancel_stops_wait() {
+TEST(SteadyTimerTest, steady_timer_cancel_stops_wait) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   bupp::steady_timer timer(context);
-  assert(timer.expires_after(std::chrono::seconds(30)) == 0);
+  EXPECT_TRUE(timer.expires_after(std::chrono::seconds(30)) == 0);
 
   void_receiver receiver;
   receiver.context = &context;
@@ -77,20 +79,20 @@ void test_steady_timer_cancel_stops_wait() {
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
-  assert(timer.cancel() == 1);
+  EXPECT_TRUE(timer.cancel() == 1);
   context.run();
 
-  assert(state->signal == signal_kind::stopped);
+  EXPECT_TRUE(state->signal == signal_kind::stopped);
 }
 
-void test_steady_timer_expires_after_stops_old_wait() {
+TEST(SteadyTimerTest, steady_timer_expires_after_stops_old_wait) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   bupp::steady_timer timer(context);
-  assert(timer.expires_after(std::chrono::seconds(30)) == 0);
+  EXPECT_TRUE(timer.expires_after(std::chrono::seconds(30)) == 0);
 
   void_receiver receiver;
   receiver.context = &context;
@@ -100,20 +102,20 @@ void test_steady_timer_expires_after_stops_old_wait() {
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
-  assert(timer.expires_after(std::chrono::milliseconds(1)) == 1);
+  EXPECT_TRUE(timer.expires_after(std::chrono::milliseconds(1)) == 1);
   context.run();
 
-  assert(state->signal == signal_kind::stopped);
+  EXPECT_TRUE(state->signal == signal_kind::stopped);
 }
 
-void test_steady_timer_multiple_waits_complete() {
+TEST(SteadyTimerTest, steady_timer_multiple_waits_complete) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   bupp::steady_timer timer(context);
-  assert(timer.expires_after(std::chrono::milliseconds(1)) == 0);
+  EXPECT_TRUE(timer.expires_after(std::chrono::milliseconds(1)) == 0);
 
   unsigned completions = 0;
   void_receiver first;
@@ -138,19 +140,19 @@ void test_steady_timer_multiple_waits_complete() {
   bexec::start(second_operation);
   context.run();
 
-  assert(completions == 2);
-  assert(first_state->signal == signal_kind::value);
-  assert(second_state->signal == signal_kind::value);
+  EXPECT_TRUE(completions == 2);
+  EXPECT_TRUE(first_state->signal == signal_kind::value);
+  EXPECT_TRUE(second_state->signal == signal_kind::value);
 }
 
-void test_steady_timer_move_stops_old_wait() {
+TEST(SteadyTimerTest, steady_timer_move_stops_old_wait) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   bupp::steady_timer timer(context);
-  assert(timer.expires_after(std::chrono::seconds(30)) == 0);
+  EXPECT_TRUE(timer.expires_after(std::chrono::seconds(30)) == 0);
 
   unsigned completions = 0;
   void_receiver receiver;
@@ -164,7 +166,7 @@ void test_steady_timer_move_stops_old_wait() {
   bexec::start(operation);
 
   bupp::steady_timer moved_timer(std::move(timer));
-  assert(moved_timer.expires_after(std::chrono::milliseconds(1)) == 0);
+  EXPECT_TRUE(moved_timer.expires_after(std::chrono::milliseconds(1)) == 0);
 
   void_receiver moved_receiver;
   moved_receiver.context = &context;
@@ -177,21 +179,21 @@ void test_steady_timer_move_stops_old_wait() {
   bexec::start(moved_operation);
   context.run();
 
-  assert(completions == 2);
-  assert(state->signal == signal_kind::stopped);
-  assert(moved_state->signal == signal_kind::value);
+  EXPECT_TRUE(completions == 2);
+  EXPECT_TRUE(state->signal == signal_kind::stopped);
+  EXPECT_TRUE(moved_state->signal == signal_kind::value);
 }
 
-void test_steady_timer_pre_stopped_token_stops_wait() {
+TEST(SteadyTimerTest, steady_timer_pre_stopped_token_stops_wait) {
   bupp::io_context context;
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   bexec::inplace_stop_source source;
-  assert(source.request_stop());
+  EXPECT_TRUE(source.request_stop());
   bupp::steady_timer timer(context);
-  assert(timer.expires_after(std::chrono::seconds(30)) == 0);
+  EXPECT_TRUE(timer.expires_after(std::chrono::seconds(30)) == 0);
 
   stopped_void_receiver receiver;
   receiver.context = &context;
@@ -203,16 +205,17 @@ void test_steady_timer_pre_stopped_token_stops_wait() {
   bexec::start(operation);
   context.run();
 
-  assert(state->signal == signal_kind::stopped);
+  EXPECT_TRUE(state->signal == signal_kind::stopped);
 }
 
-void test_timer_update_stays_on_primary_context_with_multiple_workers() {
+TEST(SteadyTimerTest,
+     timer_update_stays_on_primary_context_with_multiple_workers) {
   constexpr unsigned worker_count = 4;
   bupp::io_context_options options;
   options.concurrency_hint = worker_count;
   bupp::io_context context(options);
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   std::atomic<unsigned> completions{0};
@@ -220,7 +223,7 @@ void test_timer_update_stays_on_primary_context_with_multiple_workers() {
   std::atomic<unsigned> first_order{0};
   std::atomic<unsigned> second_order{0};
   bupp::steady_timer first_timer(context);
-  assert(first_timer.expires_after(std::chrono::milliseconds(60)) == 0);
+  EXPECT_TRUE(first_timer.expires_after(std::chrono::milliseconds(60)) == 0);
 
   ordered_timer_receiver first_receiver;
   first_receiver.context = &context;
@@ -240,7 +243,7 @@ void test_timer_update_stays_on_primary_context_with_multiple_workers() {
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   bupp::steady_timer second_timer(context);
-  assert(second_timer.expires_after(std::chrono::milliseconds(5)) == 0);
+  EXPECT_TRUE(second_timer.expires_after(std::chrono::milliseconds(5)) == 0);
 
   ordered_timer_receiver second_receiver;
   second_receiver.context = &context;
@@ -256,22 +259,11 @@ void test_timer_update_stays_on_primary_context_with_multiple_workers() {
     worker.join();
   }
 
-  assert(completions.load(std::memory_order_acquire) == 2);
-  assert(first_state->signal == signal_kind::value);
-  assert(second_state->signal == signal_kind::value);
-  assert(second_order.load(std::memory_order_acquire) == 1);
-  assert(first_order.load(std::memory_order_acquire) == 2);
+  EXPECT_TRUE(completions.load(std::memory_order_acquire) == 2);
+  EXPECT_TRUE(first_state->signal == signal_kind::value);
+  EXPECT_TRUE(second_state->signal == signal_kind::value);
+  EXPECT_TRUE(second_order.load(std::memory_order_acquire) == 1);
+  EXPECT_TRUE(first_order.load(std::memory_order_acquire) == 2);
 }
 
 }  // namespace
-
-int main() {
-  test_steady_timer_completes();
-  test_steady_timer_cancel_stops_wait();
-  test_steady_timer_expires_after_stops_old_wait();
-  test_steady_timer_multiple_waits_complete();
-  test_steady_timer_move_stops_old_wait();
-  test_steady_timer_pre_stopped_token_stops_wait();
-  test_timer_update_stays_on_primary_context_with_multiple_workers();
-  return 0;
-}

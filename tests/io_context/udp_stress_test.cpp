@@ -3,12 +3,12 @@
 #include <bupp/io_context.h>
 #include <bupp/ip.h>
 #include <bupp/udp.h>
+#include <gtest/gtest.h>
 
 #include <array>
 #include <atomic>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
-#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -79,21 +79,21 @@ void run_stress_test() {
 #endif
   bupp::io_context context(options);
   if (!context_available(context)) {
-    return;
+    GTEST_SKIP() << "native I/O context is unavailable";
   }
   auto scheduler = context.get_post_scheduler();
 
   bupp::udp::socket receiver_socket;
   bupp::udp::socket sender_socket;
-  assert(!receiver_socket.open(bupp::ip::udp::v4()));
-  assert(!sender_socket.open(bupp::ip::udp::v4()));
-  assert(!receiver_socket.bind(bupp::ip::endpoint::loopback_v4(0)));
-  assert(!sender_socket.bind(bupp::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(!receiver_socket.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!sender_socket.open(bupp::ip::udp::v4()));
+  EXPECT_TRUE(!receiver_socket.bind(bupp::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(!sender_socket.bind(bupp::ip::endpoint::loopback_v4(0)));
 
   bupp::ip::endpoint receiver_endpoint;
   bupp::ip::endpoint sender_endpoint;
-  assert(!receiver_socket.local_endpoint(receiver_endpoint));
-  assert(!sender_socket.local_endpoint(sender_endpoint));
+  EXPECT_TRUE(!receiver_socket.local_endpoint(receiver_endpoint));
+  EXPECT_TRUE(!sender_socket.local_endpoint(sender_endpoint));
 
   using bytes = std::array<char, datagram_size>;
   std::array<bytes, datagram_count> sent{};
@@ -148,34 +148,31 @@ void run_stress_test() {
     worker.join();
   }
 
-  assert(state.completions.load(std::memory_order_acquire) ==
-         datagram_count * 2);
-  assert(state.errors.load(std::memory_order_acquire) == 0);
-  assert(state.stopped.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(state.completions.load(std::memory_order_acquire) ==
+              datagram_count * 2);
+  EXPECT_TRUE(state.errors.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(state.stopped.load(std::memory_order_acquire) == 0);
 
   std::array<bool, datagram_count> observed{};
   for (std::size_t index = 0; index < datagram_count; ++index) {
-    assert(state.receive_sizes[index] == datagram_size);
-    assert(state.send_sizes[index] == datagram_size);
-    assert(sources[index].address().is_v4());
-    assert(sources[index].address().to_v4() ==
-           sender_endpoint.address().to_v4());
-    assert(sources[index].port() == sender_endpoint.port());
+    EXPECT_TRUE(state.receive_sizes[index] == datagram_size);
+    EXPECT_TRUE(state.send_sizes[index] == datagram_size);
+    EXPECT_TRUE(sources[index].address().is_v4());
+    EXPECT_TRUE(sources[index].address().to_v4() ==
+                sender_endpoint.address().to_v4());
+    EXPECT_TRUE(sources[index].port() == sender_endpoint.port());
 
     std::uint32_t value = 0;
     std::memcpy(&value, received[index].data(), sizeof(value));
-    assert(value < datagram_count);
-    assert(!observed[value]);
+    EXPECT_TRUE(value < datagram_count);
+    EXPECT_TRUE(!observed[value]);
     observed[value] = true;
   }
   for (bool value : observed) {
-    assert(value);
+    EXPECT_TRUE(value);
   }
 }
 
 }  // namespace
 
-int main() {
-  run_stress_test();
-  return 0;
-}
+TEST(UdpStressTest, behavior) { run_stress_test(); }

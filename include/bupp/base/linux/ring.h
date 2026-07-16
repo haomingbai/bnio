@@ -73,6 +73,13 @@ class BUPP_EXPORT ring {
   int queue_init_params(unsigned entries, params& queue_params) noexcept;
 
   /**
+   * Enables a ring created with IORING_SETUP_R_DISABLED.
+   *
+   * @see io_uring_enable_rings
+   */
+  int enable() noexcept;
+
+  /**
    * Releases the ring if it is open.
    *
    * @see io_uring_queue_exit

@@ -5,6 +5,7 @@
 #include <bupp/async_io/linux/io_uring_context.h>
 #include <bupp/base/linux/liburing.h>
 #include <fcntl.h>
+#include <gtest/gtest.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -16,7 +17,6 @@
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
 #include <bexec/stop_token.hpp>
-#include <cassert>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -221,7 +221,7 @@ struct batch_receiver {
   unsigned target = 0;
 
   void set_value(int result, unsigned /*flags*/) noexcept {
-    assert(result == 0);
+    EXPECT_TRUE(result == 0);
     ++state->completed;
     state->all_in_context = state->all_in_context &&
                             (context != nullptr && context->is_in_context());
@@ -298,7 +298,7 @@ struct concurrent_batch_receiver {
   unsigned target = 0;
 
   void set_value(int result, unsigned /*flags*/) noexcept {
-    assert(result == 0);
+    EXPECT_TRUE(result == 0);
     const unsigned completed =
         state->completed.fetch_add(1, std::memory_order_acq_rel) + 1;
     if (completed == target && context != nullptr) {
@@ -338,7 +338,7 @@ inline bool queue_init_result_or_skip(io_uring_context& context,
                                       io_uring_context_options options) {
   const int result = context.queue_init(options);
   if (result < 0) {
-    assert(is_unsupported_ring_error(result));
+    EXPECT_TRUE(is_unsupported_ring_error(result));
     return false;
   }
   return true;

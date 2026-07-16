@@ -46,6 +46,13 @@ int ring::queue_init_params(unsigned entries, params& queue_params) noexcept {
   return result;
 }
 
+int ring::enable() noexcept {
+  if (!open_) {
+    return -EINVAL;
+  }
+  return io_uring_enable_rings(&ring_);
+}
+
 void ring::queue_exit() noexcept {
   if (open_) {
     io_uring_queue_exit(&ring_);

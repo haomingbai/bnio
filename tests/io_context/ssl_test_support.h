@@ -1,11 +1,11 @@
 #include <bupp/ssl.h>
+#include <gtest/gtest.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <array>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
-#include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -26,7 +26,7 @@
 namespace {
 
 [[maybe_unused]] void test_require(bool condition) noexcept {
-  assert(condition);
+  EXPECT_TRUE(condition);
   if (!condition) {
     std::abort();
   }

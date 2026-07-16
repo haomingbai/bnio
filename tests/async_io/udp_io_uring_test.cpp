@@ -4,13 +4,13 @@
 #include <bupp/async_io/linux/io_uring_context_base/context.h>
 #include <bupp/async_io/linux/io_uring_operations/socket.h>
 #include <bupp/async_io/socket_view.h>
+#include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <array>
 #include <bexec/operation_state.hpp>
-#include <cassert>
 #include <cstring>
 #include <string_view>
 #include <system_error>
@@ -55,24 +55,25 @@ struct transfer_receiver {
   }
 };
 
-void test_send_to_receive_from_operations() {
+TEST(UdpIoUringTest, send_to_receive_from_operations) {
   io_uring_context context;
   if (!queue_init_or_skip(context)) {
-    return;
+    GTEST_SKIP() << "io_uring is unavailable";
   }
 
   const int receiver_fd =
       ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
   const int sender_fd =
       ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
-  assert(receiver_fd >= 0);
-  assert(sender_fd >= 0);
+  EXPECT_TRUE(receiver_fd >= 0);
+  EXPECT_TRUE(sender_fd >= 0);
 
   datagram_socket_view receiver_socket(receiver_fd);
   datagram_socket_view sender_socket(sender_fd);
-  assert(!receiver_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(
+      !receiver_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
   bupp::async_io::ip::endpoint receiver_endpoint;
-  assert(!receiver_socket.local_endpoint(receiver_endpoint));
+  EXPECT_TRUE(!receiver_socket.local_endpoint(receiver_endpoint));
 
   constexpr std::string_view payload = "low-level UDP";
   std::array<char, 32> bytes{};
@@ -91,42 +92,44 @@ void test_send_to_receive_from_operations() {
   bexec::start(send_operation);
   context.run();
 
-  assert(!state.error);
-  assert(state.completions == 2);
-  assert(state.sent == static_cast<int>(payload.size()));
-  assert(state.received == static_cast<int>(payload.size()));
-  assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
-  assert(source.address().is_v4());
-  assert(source.port() != 0);
+  EXPECT_TRUE(!state.error);
+  EXPECT_TRUE(state.completions == 2);
+  EXPECT_TRUE(state.sent == static_cast<int>(payload.size()));
+  EXPECT_TRUE(state.received == static_cast<int>(payload.size()));
+  EXPECT_TRUE(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+  EXPECT_TRUE(source.address().is_v4());
+  EXPECT_TRUE(source.port() != 0);
 
-  assert(::close(receiver_fd) == 0);
-  assert(::close(sender_fd) == 0);
+  EXPECT_TRUE(::close(receiver_fd) == 0);
+  EXPECT_TRUE(::close(sender_fd) == 0);
 }
 
-void test_connected_datagram_operations() {
+TEST(UdpIoUringTest, connected_datagram_operations) {
   io_uring_context context;
   if (!queue_init_or_skip(context)) {
-    return;
+    GTEST_SKIP() << "io_uring is unavailable";
   }
 
   const int receiver_fd =
       ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
   const int sender_fd =
       ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
-  assert(receiver_fd >= 0);
-  assert(sender_fd >= 0);
+  EXPECT_TRUE(receiver_fd >= 0);
+  EXPECT_TRUE(sender_fd >= 0);
 
   datagram_socket_view receiver_socket(receiver_fd);
   datagram_socket_view sender_socket(sender_fd);
-  assert(!receiver_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
-  assert(!sender_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(
+      !receiver_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
+  EXPECT_TRUE(
+      !sender_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
 
   bupp::async_io::ip::endpoint receiver_endpoint;
   bupp::async_io::ip::endpoint sender_endpoint;
-  assert(!receiver_socket.local_endpoint(receiver_endpoint));
-  assert(!sender_socket.local_endpoint(sender_endpoint));
-  assert(!receiver_socket.connect(sender_endpoint));
-  assert(!sender_socket.connect(receiver_endpoint));
+  EXPECT_TRUE(!receiver_socket.local_endpoint(receiver_endpoint));
+  EXPECT_TRUE(!sender_socket.local_endpoint(sender_endpoint));
+  EXPECT_TRUE(!receiver_socket.connect(sender_endpoint));
+  EXPECT_TRUE(!sender_socket.connect(receiver_endpoint));
 
   constexpr std::string_view payload = "connected low-level UDP";
   std::array<char, 32> bytes{};
@@ -144,20 +147,14 @@ void test_connected_datagram_operations() {
   bexec::start(send_operation);
   context.run();
 
-  assert(!state.error);
-  assert(state.completions == 2);
-  assert(state.sent == static_cast<int>(payload.size()));
-  assert(state.received == static_cast<int>(payload.size()));
-  assert(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+  EXPECT_TRUE(!state.error);
+  EXPECT_TRUE(state.completions == 2);
+  EXPECT_TRUE(state.sent == static_cast<int>(payload.size()));
+  EXPECT_TRUE(state.received == static_cast<int>(payload.size()));
+  EXPECT_TRUE(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
 
-  assert(::close(receiver_fd) == 0);
-  assert(::close(sender_fd) == 0);
+  EXPECT_TRUE(::close(receiver_fd) == 0);
+  EXPECT_TRUE(::close(sender_fd) == 0);
 }
 
 }  // namespace
-
-int main() {
-  test_send_to_receive_from_operations();
-  test_connected_datagram_operations();
-  return 0;
-}

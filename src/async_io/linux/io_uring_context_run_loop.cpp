@@ -21,11 +21,26 @@ void io_uring_context::run() noexcept {
   assert(global_state_ != nullptr &&
          "set_global_state() must be called before run()");
 
+  // With SINGLE_ISSUER | R_DISABLED, this call makes the run-loop thread the
+  // designated issuer before any SQE can be submitted.
+  if (enable_ring() < 0) {
+    state_.store(context_state::finished, std::memory_order_release);
+    run_active_.store(false, std::memory_order_release);
+    return;
+  }
+
   io_uring_context* previous_context = current_context_;
   current_context_ = this;
   waiting_.store(false, std::memory_order_release);
   global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
-  (void)submit_eventfd_poll();
+  const int poll_result = submit_eventfd_poll();
+  if (poll_result < 0) {
+    state_.store(context_state::finished, std::memory_order_release);
+    current_context_ = previous_context;
+    global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
+    run_active_.store(false, std::memory_order_release);
+    return;
+  }
 
   run_phase phase = run_phase::run_ready_tasks;
 
@@ -130,7 +145,12 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
                            : run_phase::run_ready_tasks;
   }
 
-  (void)submit_eventfd_poll();
+  const int poll_result = submit_eventfd_poll();
+  if (poll_result < 0) {
+    end_wait();
+    state_.store(context_state::finished, std::memory_order_release);
+    return run_phase::finished;
+  }
   const int wait_result = wait_for_cqe_event();
   end_wait();
 

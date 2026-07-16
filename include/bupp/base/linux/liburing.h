@@ -28,6 +28,12 @@ inline constexpr unsigned io_uring_setup_single_issuer =
 inline constexpr unsigned io_uring_setup_single_issuer = 0;
 #endif
 
+#ifdef IORING_SETUP_R_DISABLED
+inline constexpr unsigned io_uring_setup_r_disabled = IORING_SETUP_R_DISABLED;
+#else
+inline constexpr unsigned io_uring_setup_r_disabled = 0;
+#endif
+
 inline void io_uring_sqe_set_data64(io_uring_sqe* sqe,
                                     std::uint64_t data) noexcept {
   sqe->user_data = data;

@@ -1,8 +1,10 @@
+#include <gtest/gtest.h>
+
 #include "ssl_test_support.h"
 
 namespace {
 
-void test_socketpair_read_write_transfers_plaintext() {
+TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
   test_certificate_files files;
 
   bupp::ssl_context server_context(bupp::ssl_context_method::tls_server);
@@ -49,9 +51,9 @@ void test_socketpair_read_write_transfers_plaintext() {
     bexec::start(server_operation);
     context.run();
 
-    assert(state->values == 2);
-    assert(state->errors == 0);
-    assert(state->stopped == 0);
+    EXPECT_TRUE(state->values == 2);
+    EXPECT_TRUE(state->errors == 0);
+    EXPECT_TRUE(state->stopped == 0);
   }
 
 #if defined(BUPP_HAS_IO_CONTEXT_BSD)
@@ -105,10 +107,10 @@ void test_socketpair_read_write_transfers_plaintext() {
         context.run();
       }
 
-      assert(write_state->values == 1);
-      assert(write_state->errors == 0);
-      assert(write_state->stopped == 0);
-      assert(write_state->bytes == payload.size() - sent);
+      EXPECT_TRUE(write_state->values == 1);
+      EXPECT_TRUE(write_state->errors == 0);
+      EXPECT_TRUE(write_state->stopped == 0);
+      EXPECT_TRUE(write_state->bytes == payload.size() - sent);
       sent += write_state->bytes;
     } else {
       auto read_operation =
@@ -120,18 +122,19 @@ void test_socketpair_read_write_transfers_plaintext() {
       }
     }
 
-    assert(completions == target);
-    assert(read_state->values == 1);
-    assert(read_state->errors == 0);
-    assert(read_state->stopped == 0);
-    assert(read_state->bytes != 0);
+    EXPECT_TRUE(completions == target);
+    EXPECT_TRUE(read_state->values == 1);
+    EXPECT_TRUE(read_state->errors == 0);
+    EXPECT_TRUE(read_state->stopped == 0);
+    EXPECT_TRUE(read_state->bytes != 0);
 
     received_size += read_state->bytes;
   }
 
-  assert(sent == payload.size());
-  assert(received_size == payload.size());
-  assert(std::memcmp(received.data(), payload.data(), payload.size()) == 0);
+  EXPECT_TRUE(sent == payload.size());
+  EXPECT_TRUE(received_size == payload.size());
+  EXPECT_TRUE(std::memcmp(received.data(), payload.data(), payload.size()) ==
+              0);
 
   test_require(!client.lowest_layer().close());
   bupp::io_context error_context;
@@ -148,16 +151,11 @@ void test_socketpair_read_write_transfers_plaintext() {
   bexec::start(read_operation);
   error_context.run();
 
-  assert(completions == 1);
-  assert(error_state->values == 0);
-  assert(error_state->errors == 1);
-  assert(error_state->stopped == 0);
-  assert(error_state->error == std::errc::connection_reset);
+  EXPECT_TRUE(completions == 1);
+  EXPECT_TRUE(error_state->values == 0);
+  EXPECT_TRUE(error_state->errors == 1);
+  EXPECT_TRUE(error_state->stopped == 0);
+  EXPECT_TRUE(error_state->error == std::errc::connection_reset);
 }
 
 }  // namespace
-
-int main() {
-  test_socketpair_read_write_transfers_plaintext();
-  return 0;
-}

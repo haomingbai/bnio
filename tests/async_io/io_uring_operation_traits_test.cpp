@@ -1,4 +1,5 @@
-#include <cassert>
+#include <gtest/gtest.h>
+
 #include <chrono>
 #include <cstdint>
 #include <type_traits>
@@ -21,7 +22,7 @@ struct io_queue_test_operation
   void execute() noexcept override {}
 };
 
-void test_shared_task_queue_separates_cpu_and_io() {
+TEST(IoUringOperationTraitsTest, shared_task_queue_separates_cpu_and_io) {
   bupp::async_io::linux_native::io_uring_task_queue_state queue;
   queue_test_operation cpu;
   std::array<io_queue_test_operation, 3> io;
@@ -31,20 +32,20 @@ void test_shared_task_queue_separates_cpu_and_io() {
   }
   queue.push_cpu(cpu);
 
-  assert(queue.pop_cpu_all() == &cpu);
-  assert(queue.pop_cpu_all() == nullptr);
+  EXPECT_TRUE(queue.pop_cpu_all() == &cpu);
+  EXPECT_TRUE(queue.pop_cpu_all() == nullptr);
 
   std::size_t io_count = 0;
   for (auto* operation = queue.pop_io_all(); operation != nullptr;
        operation = static_cast<io_queue_test_operation*>(operation->next)) {
     ++io_count;
   }
-  assert(io_count == io.size());
-  assert(queue.pop_io_all() == nullptr);
-  assert(!queue.closing.load(std::memory_order_acquire));
+  EXPECT_TRUE(io_count == io.size());
+  EXPECT_TRUE(queue.pop_io_all() == nullptr);
+  EXPECT_TRUE(!queue.closing.load(std::memory_order_acquire));
 }
 
-void test_operation_state_concepts() {
+TEST(IoUringOperationTraitsTest, operation_state_concepts) {
   static_assert(bexec::operation_state<io_uring_post_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_nop_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_timeout_operation<receiver>>);
@@ -103,7 +104,7 @@ void test_operation_state_concepts() {
                                const buffer_view&, int, receiver>);
 }
 
-void test_io_operations_accept_async_io_views() {
+TEST(IoUringOperationTraitsTest, io_operations_accept_async_io_views) {
   io_uring_context context;
   stream_socket_view listener(3);
   stream_socket_view stream(4);
@@ -163,7 +164,7 @@ void test_io_operations_accept_async_io_views() {
       bupp::async_io::dns_result_view(resolved_endpoints), resolve_receiver{});
 }
 
-void test_timeout_operation_prepares_async_io_time() {
+TEST(IoUringOperationTraitsTest, timeout_operation_prepares_async_io_time) {
   io_uring_context context;
   io_uring_sqe raw_sqe{};
   bupp::base::submission_queue_entry sqe(&raw_sqe);
@@ -175,19 +176,11 @@ void test_timeout_operation_prepares_async_io_time() {
 
   const auto* timeout = reinterpret_cast<const __kernel_timespec*>(
       static_cast<std::uintptr_t>(raw_sqe.addr));
-  assert(raw_sqe.opcode == IORING_OP_TIMEOUT);
-  assert(raw_sqe.timeout_flags == IORING_TIMEOUT_ABS);
-  assert(timeout != nullptr);
-  assert(timeout->tv_sec == 2);
-  assert(timeout->tv_nsec == 5);
+  EXPECT_TRUE(raw_sqe.opcode == IORING_OP_TIMEOUT);
+  EXPECT_TRUE(raw_sqe.timeout_flags == IORING_TIMEOUT_ABS);
+  EXPECT_TRUE(timeout != nullptr);
+  EXPECT_TRUE(timeout->tv_sec == 2);
+  EXPECT_TRUE(timeout->tv_nsec == 5);
 }
 
 }  // namespace
-
-int main() {
-  test_shared_task_queue_separates_cpu_and_io();
-  test_operation_state_concepts();
-  test_io_operations_accept_async_io_views();
-  test_timeout_operation_prepares_async_io_time();
-  return 0;
-}

@@ -1,7 +1,8 @@
+#include <gtest/gtest.h>
+
 #include <atomic>
 #include <barrier>
 #include <bexec/operation_state.hpp>
-#include <cassert>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -49,7 +50,7 @@ struct batch_receiver {
   unsigned target = 0;
 
   void set_value(int result, unsigned /*flags*/) noexcept {
-    assert(result == 0);
+    EXPECT_TRUE(result == 0);
     if (context == nullptr || !context->is_in_context()) {
       state->all_in_context.store(false, std::memory_order_release);
     }
@@ -75,13 +76,13 @@ struct batch_receiver {
   }
 };
 
-void test_passive_io_queue_registers_all_published_operations() {
+TEST(KqueueRunLoopTest, passive_io_queue_registers_all_published_operations) {
   kqueue_context context;
   kqueue_context_options options;
   options.entries = 8;
   options.event_inline_completion_threshold = 0;
   options.local_queue_threshold = 2;
-  assert(context.queue_init(options) == 0);
+  EXPECT_TRUE(context.queue_init(options) == 0);
 
   constexpr unsigned operation_count = 8;
   auto state = std::make_shared<concurrent_state>();
@@ -98,18 +99,19 @@ void test_passive_io_queue_registers_all_published_operations() {
   }
   context.run();
 
-  assert(state->completed.load(std::memory_order_acquire) == operation_count);
-  assert(state->stopped.load(std::memory_order_acquire) == 0);
-  assert(state->all_in_context.load(std::memory_order_acquire));
+  EXPECT_TRUE(state->completed.load(std::memory_order_acquire) ==
+              operation_count);
+  EXPECT_TRUE(state->stopped.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(state->all_in_context.load(std::memory_order_acquire));
 }
 
-void test_concurrent_external_io_publication_is_drained() {
+TEST(KqueueRunLoopTest, concurrent_external_io_publication_is_drained) {
   kqueue_task_queue_state global_tasks;
   kqueue_context context;
   kqueue_context_options options;
   options.wait_spin_count = 1;
   context.set_global_state(&global_tasks);
-  assert(context.queue_init(options) == 0);
+  EXPECT_TRUE(context.queue_init(options) == 0);
 
   constexpr unsigned thread_count = 4;
   constexpr unsigned operations_per_thread = 128;
@@ -155,18 +157,19 @@ void test_concurrent_external_io_publication_is_drained() {
   }
   runner.join();
 
-  assert(state->completed.load(std::memory_order_acquire) == operation_count);
-  assert(state->stopped.load(std::memory_order_acquire) == 0);
-  assert(state->all_in_context.load(std::memory_order_acquire));
+  EXPECT_TRUE(state->completed.load(std::memory_order_acquire) ==
+              operation_count);
+  EXPECT_TRUE(state->stopped.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(state->all_in_context.load(std::memory_order_acquire));
 }
 
-void test_concurrent_external_posts_are_drained() {
+TEST(KqueueRunLoopTest, concurrent_external_posts_are_drained) {
   kqueue_task_queue_state global_tasks;
   kqueue_context context;
   kqueue_context_options options;
   options.wait_spin_count = 1;
   context.set_global_state(&global_tasks);
-  assert(context.queue_init(options) == 0);
+  EXPECT_TRUE(context.queue_init(options) == 0);
 
   constexpr unsigned thread_count = 4;
   constexpr unsigned posts_per_thread = 128;
@@ -214,29 +217,22 @@ void test_concurrent_external_posts_are_drained() {
   }
   runner.join();
 
-  assert(state->completed.load(std::memory_order_acquire) == operation_count);
-  assert(state->stopped.load(std::memory_order_acquire) == 0);
-  assert(state->all_in_context.load(std::memory_order_acquire));
+  EXPECT_TRUE(state->completed.load(std::memory_order_acquire) ==
+              operation_count);
+  EXPECT_TRUE(state->stopped.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(state->all_in_context.load(std::memory_order_acquire));
 }
 
-void test_shared_closing_state_finishes_the_worker() {
+TEST(KqueueRunLoopTest, shared_closing_state_finishes_the_worker) {
   kqueue_task_queue_state global_state;
   kqueue_context context;
   context.set_global_state(&global_state);
-  assert(context.queue_init() == 0);
+  EXPECT_TRUE(context.queue_init() == 0);
 
   global_state.closing.store(true, std::memory_order_release);
   context.run();
 
-  assert(global_state.awake_workers.load(std::memory_order_acquire) == 0);
+  EXPECT_TRUE(global_state.awake_workers.load(std::memory_order_acquire) == 0);
 }
 
 }  // namespace
-
-int main() {
-  test_passive_io_queue_registers_all_published_operations();
-  test_concurrent_external_io_publication_is_drained();
-  test_concurrent_external_posts_are_drained();
-  test_shared_closing_state_finishes_the_worker();
-  return 0;
-}

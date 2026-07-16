@@ -1,8 +1,7 @@
 function(bupp_add_async_io_test name source)
   add_executable(bupp_async_io_${name}_test ${source})
   target_link_libraries(bupp_async_io_${name}_test PRIVATE bupp::bupp)
-  bupp_set_project_warnings(bupp_async_io_${name}_test)
-  add_test(NAME bupp.async_io.${name} COMMAND bupp_async_io_${name}_test)
+  bupp_add_gtest(bupp_async_io_${name}_test bupp.async_io.${name} ${ARGN})
 endfunction()
 
 bupp_add_async_io_test(address address_test.cpp)
@@ -12,13 +11,16 @@ bupp_add_async_io_test(dns dns_test.cpp)
 bupp_add_async_io_test(socket_view socket_view_test.cpp)
 if(BUPP_PLATFORM_LINUX)
   bupp_add_async_io_test(io_uring_cqe_dispatch
-                         io_uring_cqe_dispatch_test.cpp)
+                         io_uring_cqe_dispatch_test.cpp PROPERTIES TIMEOUT 10)
   bupp_add_async_io_test(io_uring_operation_traits
                          io_uring_operation_traits_test.cpp)
-  bupp_add_async_io_test(io_uring_run_loop io_uring_run_loop_test.cpp)
-  bupp_add_async_io_test(io_uring_sender io_uring_sender_test.cpp)
+  bupp_add_async_io_test(io_uring_run_loop io_uring_run_loop_test.cpp
+                         PROPERTIES TIMEOUT 10)
+  bupp_add_async_io_test(io_uring_sender io_uring_sender_test.cpp PROPERTIES
+                         TIMEOUT 10)
   bupp_add_async_io_test(linux_socket_address linux_socket_address_test.cpp)
-  bupp_add_async_io_test(udp_io_uring udp_io_uring_test.cpp)
+  bupp_add_async_io_test(udp_io_uring udp_io_uring_test.cpp PROPERTIES TIMEOUT
+                         10)
 endif()
 if(BUPP_PLATFORM_BSD)
   bupp_add_async_io_test(bsd_socket_address bsd_socket_address_test.cpp)
@@ -37,9 +39,8 @@ function(bupp_add_async_io_header_self_contained_test name definition)
   target_compile_definitions(bupp_async_io_header_${name}_test
                              PRIVATE ${definition})
   target_link_libraries(bupp_async_io_header_${name}_test PRIVATE bupp::bupp)
-  bupp_set_project_warnings(bupp_async_io_header_${name}_test)
-  add_test(NAME bupp.async_io.header.${name}
-           COMMAND bupp_async_io_header_${name}_test)
+  bupp_add_gtest(bupp_async_io_header_${name}_test
+                 bupp.async_io.header.${name})
 endfunction()
 
 bupp_add_async_io_header_self_contained_test(async_io

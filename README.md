@@ -29,6 +29,7 @@ and composed writes all ship out of the box.
   - [Architecture](#architecture)
     - [Read and write semantics](#read-and-write-semantics)
   - [Build Options](#build-options)
+    - [GoogleTest dependency](#googletest-dependency)
     - [bexec dependency providers](#bexec-dependency-providers)
     - [Using a local bexec checkout](#using-a-local-bexec-checkout)
     - [Shared library build](#shared-library-build)
@@ -317,21 +318,45 @@ bounded write attempt and returns that attempt's byte count.
 
 ## Build Options
 
-| Option                     | Default   | Description                              |
-| -------------------------- | --------- | ---------------------------------------- |
-| `BUILD_SHARED_LIBS`        | `OFF`     | Build `bupp` as a shared library         |
-| `BUPP_BUILD_TESTS`         | top-level | Build and enable CTest                   |
-| `BUPP_BUILD_EXAMPLES`      | top-level | Build example executables                |
-| `BUPP_BUILD_ASIO_EXAMPLES` | `OFF`     | Build Asio examples and fetch Asio       |
-| `BUPP_INSTALL`             | top-level | Generate installation and package files  |
-| `BUPP_ENABLE_COVERAGE`     | `OFF`     | Instrument GCC/Clang builds for coverage |
-| `BUPP_BEXEC_PROVIDER`      | `AUTO`    | `AUTO`, `FIND_PACKAGE`, `SOURCE`, `FETCH` |
-| `BUPP_BEXEC_SOURCE_DIR`    | empty     | Path used by the `SOURCE` provider       |
-| `BUPP_BEXEC_GIT_TAG`       | `main`    | Git ref used by the `FETCH` provider     |
+| Option                         | Default      | Description                                  |
+| ------------------------------ | ------------ | -------------------------------------------- |
+| `BUILD_SHARED_LIBS`            | `OFF`        | Build `bupp` as a shared library             |
+| `BUPP_BUILD_TESTS`             | top-level    | Build GoogleTest tests and enable CTest      |
+| `BUPP_BUILD_EXAMPLES`          | top-level    | Build example executables                    |
+| `BUPP_BUILD_ASIO_EXAMPLES`     | `OFF`        | Build Asio examples and fetch Asio           |
+| `BUPP_INSTALL`                 | top-level    | Generate installation and package files      |
+| `BUPP_ENABLE_COVERAGE`         | `OFF`        | Instrument GCC/Clang builds for coverage     |
+| `BUPP_GOOGLETEST_PROVIDER`     | `AUTO`       | `AUTO`, `FIND_PACKAGE`, `FETCH` (tests only)  |
+| `BUPP_GOOGLETEST_GIT_TAG`      | `v1.17.0`    | Git ref used by the test-only `FETCH` provider |
+| `BUPP_BEXEC_PROVIDER`          | `AUTO`       | `AUTO`, `FIND_PACKAGE`, `SOURCE`, `FETCH`     |
+| `BUPP_BEXEC_SOURCE_DIR`        | empty        | Path used by the `SOURCE` provider            |
+| `BUPP_BEXEC_GIT_TAG`           | `main`       | Git ref used by the `FETCH` provider          |
 
 When `bupp` is included with `add_subdirectory()` or `FetchContent`, tests,
 examples, and installation rules default to off so they do not modify the
 parent project's build.
+
+### GoogleTest dependency
+
+GoogleTest is resolved only after `BUPP_BUILD_TESTS` enables the `tests/`
+subdirectory. With tests disabled, bupp does not call `find_package(GTest)`,
+download GoogleTest, create GoogleTest targets, or expose it through the bupp
+package.
+
+The default `AUTO` provider accepts an existing `GTest::gtest_main` target,
+tries `find_package(GTest)` (config and module modes), and then fetches the
+pinned `BUPP_GOOGLETEST_GIT_TAG` as a fallback. The fetched copy does not build
+GoogleMock and does not add GoogleTest installation rules.
+
+```sh
+# Require a preinstalled GoogleTest package; never download it.
+cmake -S . -B build \
+  -DBUPP_BUILD_TESTS=ON \
+  -DBUPP_GOOGLETEST_PROVIDER=FIND_PACKAGE
+
+# Skip all GoogleTest discovery and download work.
+cmake -S . -B build-library -DBUPP_BUILD_TESTS=OFF
+```
 
 ### bexec dependency providers
 
