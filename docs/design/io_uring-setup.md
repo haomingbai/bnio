@@ -1,14 +1,14 @@
 # io_uring Setup Optimizations
 
 This page documents the io_uring setup flags applied by
-`bupp::async_io::linux_native::io_uring_context`.
+`bnio::async_io::linux_native::io_uring_context`.
 
 ## Default Setup Flags
 
 Modern Linux kernels support `IORING_SETUP_COOP_TASKRUN` and
 `IORING_SETUP_SINGLE_ISSUER`. The former reduces task-work wakeups; the latter
 lets each single-thread-submitted ring avoid kernel-side submission locking.
-`bupp` combines `SINGLE_ISSUER` with `IORING_SETUP_R_DISABLED` so that ring
+`bnio` combines `SINGLE_ISSUER` with `IORING_SETUP_R_DISABLED` so that ring
 construction and issuer selection do not have to happen on the same thread.
 
 ### `IORING_SETUP_COOP_TASKRUN`
@@ -26,7 +26,7 @@ construction and issuer selection do not have to happen on the same thread.
 |---|---|
 | Kernel requirement | Linux ≥ 6.0 |
 | What it does | Declares that only one task submits requests to the ring. |
-| Why it helps | Removes submission-side kernel locking that is unnecessary for bupp's one-thread-one-ring model. |
+| Why it helps | Removes submission-side kernel locking that is unnecessary for bnio's one-thread-one-ring model. |
 | Compatibility fallback | Same retry-on-EINVAL strategy. |
 
 ### `IORING_SETUP_R_DISABLED`

@@ -1,12 +1,12 @@
-#include <bupp/async_io/bsd/socket_address.h>
-#include <bupp/async_io/ip/endpoint.h>
-#include <bupp/async_io/socket_view.h>
+#include <bnio/async_io/bsd/socket_address.h>
+#include <bnio/async_io/ip/endpoint.h>
+#include <bnio/async_io/socket_view.h>
 #include <sys/socket.h>
 
 #include <cerrno>
 #include <system_error>
 
-namespace bupp::async_io {
+namespace bnio::async_io {
 namespace {
 
 std::error_code last_error() noexcept {
@@ -110,4 +110,4 @@ std::error_code datagram_socket_view::remote_endpoint(
   return get_socket_endpoint(native_handle(), true, endpoint);
 }
 
-}  // namespace bupp::async_io
+}  // namespace bnio::async_io

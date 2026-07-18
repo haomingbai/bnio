@@ -1,8 +1,8 @@
 #include <arpa/inet.h>
-#include <bupp/async_io/buffer_view.h>
-#include <bupp/async_io/ip/tcp.h>
-#include <bupp/async_io/socket_view.h>
-#include <bupp/config/system.h>
+#include <bnio/async_io/buffer_view.h>
+#include <bnio/async_io/ip/tcp.h>
+#include <bnio/async_io/socket_view.h>
+#include <bnio/config/system.h>
 #include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -36,8 +36,8 @@ concept can_listen = requires(Socket socket, Args&&... args) {
 
 template <class Socket>
 concept has_sync_datagram_io =
-    requires(Socket socket, bupp::async_io::buffer_view buffer,
-             bupp::async_io::ip::endpoint endpoint, std::error_code error) {
+    requires(Socket socket, bnio::async_io::buffer_view buffer,
+             bnio::async_io::ip::endpoint endpoint, std::error_code error) {
       socket.send(buffer, 0, error);
       socket.receive(buffer, 0, error);
       socket.send_to(buffer, endpoint, 0, error);
@@ -77,13 +77,13 @@ void check_error(const std::error_code& error, int value) {
 }
 
 TEST(SocketViewTest, invalid_socket) {
-  bupp::async_io::socket_view generic_socket;
+  bnio::async_io::socket_view generic_socket;
   EXPECT_FALSE(generic_socket.valid());
   EXPECT_EQ(generic_socket.native_handle(), -1);
 
-  const auto endpoint = bupp::async_io::ip::tcp::endpoint::loopback_v4(0);
+  const auto endpoint = bnio::async_io::ip::tcp::endpoint::loopback_v4(0);
 
-  bupp::async_io::stream_socket_view stream;
+  bnio::async_io::stream_socket_view stream;
   EXPECT_FALSE(stream.valid());
   EXPECT_EQ(stream.native_handle(), -1);
   check_error(stream.bind(endpoint), EBADF);
@@ -92,7 +92,7 @@ TEST(SocketViewTest, invalid_socket) {
   check_error(stream.shutdown(SHUT_RDWR), EBADF);
   check_error(stream.set_reuse_address(true), EBADF);
 
-  bupp::async_io::datagram_socket_view datagram;
+  bnio::async_io::datagram_socket_view datagram;
   EXPECT_FALSE(datagram.valid());
   EXPECT_EQ(datagram.native_handle(), -1);
   check_error(datagram.bind(endpoint), EBADF);
@@ -100,15 +100,15 @@ TEST(SocketViewTest, invalid_socket) {
   check_error(datagram.shutdown(SHUT_RDWR), EBADF);
   check_error(datagram.set_reuse_address(true), EBADF);
 
-  bupp::async_io::ip::endpoint stale =
-      bupp::async_io::ip::endpoint::loopback_v4(1234);
+  bnio::async_io::ip::endpoint stale =
+      bnio::async_io::ip::endpoint::loopback_v4(1234);
   check_error(datagram.local_endpoint(stale), EBADF);
   EXPECT_EQ(stale.version(),
-            bupp::async_io::ip::address::version::unspecified);
-  stale = bupp::async_io::ip::endpoint::loopback_v4(1234);
+            bnio::async_io::ip::address::version::unspecified);
+  stale = bnio::async_io::ip::endpoint::loopback_v4(1234);
   check_error(datagram.remote_endpoint(stale), EBADF);
   EXPECT_EQ(stale.version(),
-            bupp::async_io::ip::address::version::unspecified);
+            bnio::async_io::ip::address::version::unspecified);
 }
 
 TEST(SocketViewTest, datagram_lifecycle) {
@@ -119,13 +119,13 @@ TEST(SocketViewTest, datagram_lifecycle) {
   EXPECT_TRUE(receiver_fd.get() >= 0);
   EXPECT_TRUE(sender_fd.get() >= 0);
 
-  bupp::async_io::datagram_socket_view receiver(receiver_fd.get());
-  bupp::async_io::datagram_socket_view sender(sender_fd.get());
-  EXPECT_FALSE(receiver.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
-  bupp::async_io::ip::endpoint destination;
+  bnio::async_io::datagram_socket_view receiver(receiver_fd.get());
+  bnio::async_io::datagram_socket_view sender(sender_fd.get());
+  EXPECT_FALSE(receiver.bind(bnio::async_io::ip::endpoint::loopback_v4(0)));
+  bnio::async_io::ip::endpoint destination;
   EXPECT_FALSE(receiver.local_endpoint(destination));
   EXPECT_FALSE(sender.connect(destination));
-  bupp::async_io::ip::endpoint peer;
+  bnio::async_io::ip::endpoint peer;
   EXPECT_FALSE(sender.remote_endpoint(peer));
   EXPECT_TRUE(peer.address().is_v4());
   EXPECT_EQ(peer.port(), destination.port());
@@ -135,13 +135,13 @@ TEST(SocketViewTest, loopback_setup) {
   unique_fd listener_fd = make_tcp_socket();
   EXPECT_TRUE(listener_fd.get() >= 0);
 
-  bupp::async_io::stream_socket_view listener(listener_fd.get());
+  bnio::async_io::stream_socket_view listener(listener_fd.get());
   EXPECT_TRUE(listener.valid());
   EXPECT_EQ(listener.native_handle(), listener_fd.get());
 
   EXPECT_FALSE(listener.set_reuse_address(true));
   EXPECT_FALSE(
-      listener.bind(bupp::async_io::ip::tcp::endpoint::loopback_v4(0)));
+      listener.bind(bnio::async_io::ip::tcp::endpoint::loopback_v4(0)));
   EXPECT_FALSE(listener.listen(1));
 
   sockaddr_in bound_address{};
@@ -152,17 +152,17 @@ TEST(SocketViewTest, loopback_setup) {
   EXPECT_EQ(bound_address.sin_family, AF_INET);
   EXPECT_EQ(bound_address_size, sizeof(bound_address));
 
-  bupp::async_io::ip::tcp::endpoint remote(
-      bupp::async_io::ip::address::loopback_v4(),
+  bnio::async_io::ip::tcp::endpoint remote(
+      bnio::async_io::ip::address::loopback_v4(),
       ntohs(bound_address.sin_port));
 
   unique_fd client_fd = make_tcp_socket();
   EXPECT_TRUE(client_fd.get() >= 0);
 
-  bupp::async_io::stream_socket_view client(client_fd.get());
+  bnio::async_io::stream_socket_view client(client_fd.get());
   EXPECT_FALSE(client.connect(remote));
 
-#if defined(BUPP_SYSTEM_LINUX) || defined(BUPP_SYSTEM_FREEBSD)
+#if defined(BNIO_SYSTEM_LINUX) || defined(BNIO_SYSTEM_FREEBSD)
   unique_fd accepted_fd(
       ::accept4(listener.native_handle(), nullptr, nullptr, SOCK_CLOEXEC));
 #else
@@ -170,38 +170,38 @@ TEST(SocketViewTest, loopback_setup) {
 #endif
   EXPECT_TRUE(accepted_fd.get() >= 0);
 
-  bupp::async_io::stream_socket_view accepted(accepted_fd.get());
+  bnio::async_io::stream_socket_view accepted(accepted_fd.get());
   EXPECT_FALSE(accepted.shutdown(SHUT_RDWR));
 }
 
 }  // namespace
 
 TEST(SocketViewTest, behavior) {
-  static_assert(sizeof(bupp::async_io::socket_view) == sizeof(int));
-  static_assert(std::is_trivially_copyable_v<bupp::async_io::socket_view>);
-  static_assert(std::is_standard_layout_v<bupp::async_io::socket_view>);
-  static_assert(sizeof(bupp::async_io::stream_socket_view) == sizeof(int));
+  static_assert(sizeof(bnio::async_io::socket_view) == sizeof(int));
+  static_assert(std::is_trivially_copyable_v<bnio::async_io::socket_view>);
+  static_assert(std::is_standard_layout_v<bnio::async_io::socket_view>);
+  static_assert(sizeof(bnio::async_io::stream_socket_view) == sizeof(int));
   static_assert(
-      std::is_trivially_copyable_v<bupp::async_io::stream_socket_view>);
-  static_assert(std::is_standard_layout_v<bupp::async_io::stream_socket_view>);
-  static_assert(sizeof(bupp::async_io::datagram_socket_view) == sizeof(int));
+      std::is_trivially_copyable_v<bnio::async_io::stream_socket_view>);
+  static_assert(std::is_standard_layout_v<bnio::async_io::stream_socket_view>);
+  static_assert(sizeof(bnio::async_io::datagram_socket_view) == sizeof(int));
   static_assert(
-      std::is_trivially_copyable_v<bupp::async_io::datagram_socket_view>);
+      std::is_trivially_copyable_v<bnio::async_io::datagram_socket_view>);
   static_assert(
-      std::is_standard_layout_v<bupp::async_io::datagram_socket_view>);
-  static_assert(can_bind<bupp::async_io::stream_socket_view,
-                         const bupp::async_io::ip::endpoint&>);
-  static_assert(can_connect<bupp::async_io::stream_socket_view,
-                            const bupp::async_io::ip::endpoint&>);
-  static_assert(can_listen<bupp::async_io::stream_socket_view, int>);
-  static_assert(can_bind<bupp::async_io::datagram_socket_view,
-                         const bupp::async_io::ip::endpoint&>);
-  static_assert(can_connect<bupp::async_io::datagram_socket_view,
-                            const bupp::async_io::ip::endpoint&>);
-  static_assert(!can_bind<bupp::async_io::stream_socket_view, const sockaddr*,
+      std::is_standard_layout_v<bnio::async_io::datagram_socket_view>);
+  static_assert(can_bind<bnio::async_io::stream_socket_view,
+                         const bnio::async_io::ip::endpoint&>);
+  static_assert(can_connect<bnio::async_io::stream_socket_view,
+                            const bnio::async_io::ip::endpoint&>);
+  static_assert(can_listen<bnio::async_io::stream_socket_view, int>);
+  static_assert(can_bind<bnio::async_io::datagram_socket_view,
+                         const bnio::async_io::ip::endpoint&>);
+  static_assert(can_connect<bnio::async_io::datagram_socket_view,
+                            const bnio::async_io::ip::endpoint&>);
+  static_assert(!can_bind<bnio::async_io::stream_socket_view, const sockaddr*,
                           socklen_t>);
-  static_assert(!can_connect<bupp::async_io::stream_socket_view,
+  static_assert(!can_connect<bnio::async_io::stream_socket_view,
                              const sockaddr*, socklen_t>);
-  static_assert(!can_listen<bupp::async_io::datagram_socket_view, int>);
-  static_assert(!has_sync_datagram_io<bupp::async_io::datagram_socket_view>);
+  static_assert(!can_listen<bnio::async_io::datagram_socket_view, int>);
+  static_assert(!has_sync_datagram_io<bnio::async_io::datagram_socket_view>);
 }

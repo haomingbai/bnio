@@ -1,4 +1,4 @@
-#include <bupp/async_io/bsd/kqueue_context.h>
+#include <bnio/async_io/bsd/kqueue_context.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -8,14 +8,14 @@
 
 namespace {
 
-using namespace bupp_async_io_kqueue_test;
+using namespace bnio_async_io_kqueue_test;
 
 struct queue_test_operation : kqueue_operation_base {
   void execute() noexcept override {}
 };
 
 struct io_queue_test_operation : kqueue_io_operation_base {
-  void prepare(bupp::async_io::bsd_native::kqueue_helper&) noexcept override {}
+  void prepare(bnio::async_io::bsd_native::kqueue_helper&) noexcept override {}
   void complete_submit_error(int) noexcept override {}
   void execute() noexcept override {}
 };

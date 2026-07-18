@@ -1,13 +1,13 @@
-#include <bupp/linux/io_context.h>
+#include <bnio/linux/io_context.h>
 
 #include <atomic>
 #include <cstddef>
 
-#include "bupp/async_io/linux/io_uring_context_base/context.h"
-#include "bupp/async_io/linux/io_uring_context_base/operation_base.h"
-#include "bupp/linux/detail/io_context_state.h"
+#include "bnio/async_io/linux/io_uring_context_base/context.h"
+#include "bnio/async_io/linux/io_uring_context_base/operation_base.h"
+#include "bnio/linux/detail/io_context_state.h"
 
-namespace bupp {
+namespace bnio {
 
 using detail::native_worker;
 
@@ -47,4 +47,4 @@ void io_context::wake_one_worker() noexcept {
   }
 }
 
-}  // namespace bupp
+}  // namespace bnio

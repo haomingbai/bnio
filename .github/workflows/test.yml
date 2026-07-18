@@ -63,8 +63,8 @@ jobs:
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
           -DBUILD_SHARED_LIBS=ON
-          -DBUPP_BUILD_EXAMPLES=OFF
-          -DBUPP_ENABLE_COVERAGE=ON
+          -DBNIO_BUILD_EXAMPLES=OFF
+          -DBNIO_ENABLE_COVERAGE=ON
 
       - name: Build
         run: cmake --build build
@@ -123,11 +123,11 @@ jobs:
         run: |
           cmake -S . -B build/provider-fetch -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUPP_BUILD_TESTS=OFF \
-            -DBUPP_BUILD_EXAMPLES=OFF \
-            -DBUPP_INSTALL=OFF \
-            -DBUPP_BEXEC_PROVIDER=FETCH
-          cmake --build build/provider-fetch --target bupp --parallel 2
+            -DBNIO_BUILD_TESTS=OFF \
+            -DBNIO_BUILD_EXAMPLES=OFF \
+            -DBNIO_INSTALL=OFF \
+            -DBNIO_BEXEC_PROVIDER=FETCH
+          cmake --build build/provider-fetch --target bnio --parallel 2
 
       - name: Install fetched bexec
         run: |
@@ -135,41 +135,41 @@ jobs:
             -B build/bexec-package -G Ninja \
             -DBEXEC_BUILD_TESTS=OFF \
             -DBEXEC_BUILD_EXAMPLES=OFF
-          cmake --install build/bexec-package --prefix "${RUNNER_TEMP}/bupp"
+          cmake --install build/bexec-package --prefix "${RUNNER_TEMP}/bnio"
 
-      - name: Build and install shared bupp with packaged bexec
+      - name: Build and install shared bnio with packaged bexec
         run: |
           cmake -S . -B build/package -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_LIBDIR=lib \
-            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/bupp" \
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/bnio" \
             -DBUILD_SHARED_LIBS=ON \
-            -DBUPP_BUILD_TESTS=OFF \
-            -DBUPP_BUILD_EXAMPLES=OFF \
-            -DBUPP_BEXEC_PROVIDER=FIND_PACKAGE
+            -DBNIO_BUILD_TESTS=OFF \
+            -DBNIO_BUILD_EXAMPLES=OFF \
+            -DBNIO_BEXEC_PROVIDER=FIND_PACKAGE
           cmake --build build/package --parallel 2
-          cmake --install build/package --prefix "${RUNNER_TEMP}/bupp"
+          cmake --install build/package --prefix "${RUNNER_TEMP}/bnio"
 
       - name: Build source consumer with local bexec
         run: |
           cmake -S tests/packaging/source -B build/consumer-source -G Ninja \
-            -DBUPP_SOURCE_DIR="${GITHUB_WORKSPACE}" \
-            -DBUPP_BEXEC_PROVIDER=SOURCE \
-            -DBUPP_BEXEC_SOURCE_DIR="${GITHUB_WORKSPACE}/build/provider-fetch/_deps/bexec-src"
+            -DBNIO_SOURCE_DIR="${GITHUB_WORKSPACE}" \
+            -DBNIO_BEXEC_PROVIDER=SOURCE \
+            -DBNIO_BEXEC_SOURCE_DIR="${GITHUB_WORKSPACE}/build/provider-fetch/_deps/bexec-src"
           cmake --build build/consumer-source --parallel 2
           ctest --test-dir build/consumer-source --output-on-failure
 
       - name: Build installed CMake consumer
         run: |
           cmake -S tests/packaging/cmake -B build/consumer-cmake -G Ninja \
-            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/bupp"
+            -DCMAKE_PREFIX_PATH="${RUNNER_TEMP}/bnio"
           cmake --build build/consumer-cmake --parallel 2
           ctest --test-dir build/consumer-cmake --output-on-failure
 
       - name: Build installed pkg-config consumer
         env:
-          LD_LIBRARY_PATH: ${{ runner.temp }}/bupp/lib
-          PKG_CONFIG_PATH: ${{ runner.temp }}/bupp/lib/pkgconfig
+          LD_LIBRARY_PATH: ${{ runner.temp }}/bnio/lib
+          PKG_CONFIG_PATH: ${{ runner.temp }}/bnio/lib/pkgconfig
         run: |
           cmake -S tests/packaging/pkgconfig \
             -B build/consumer-pkgconfig -G Ninja

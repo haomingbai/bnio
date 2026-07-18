@@ -1,6 +1,6 @@
-#include <bupp/base/linux/completion_queue_entry.h>
-#include <bupp/base/linux/ring.h>
-#include <bupp/base/linux/submission_queue_entry.h>
+#include <bnio/base/linux/completion_queue_entry.h>
+#include <bnio/base/linux/ring.h>
+#include <bnio/base/linux/submission_queue_entry.h>
 
 #include <cstdint>
 #include <iostream>
@@ -8,18 +8,18 @@
 #include "example_support.h"
 
 int main() {
-  bupp::base::ring ring;
-  switch (bupp::examples::base::init_ring(ring, 8, "nop")) {
-    case bupp::examples::base::ring_init_result::ready:
+  bnio::base::ring ring;
+  switch (bnio::examples::base::init_ring(ring, 8, "nop")) {
+    case bnio::examples::base::ring_init_result::ready:
       break;
-    case bupp::examples::base::ring_init_result::unavailable:
+    case bnio::examples::base::ring_init_result::unavailable:
       return 0;
-    case bupp::examples::base::ring_init_result::failed:
+    case bnio::examples::base::ring_init_result::failed:
       return 1;
   }
 
-  bupp::base::submission_queue_entry sqe =
-      bupp::examples::base::get_sqe_or_log(ring, "nop");
+  bnio::base::submission_queue_entry sqe =
+      bnio::examples::base::get_sqe_or_log(ring, "nop");
   if (sqe.raw() == nullptr) {
     return 1;
   }
@@ -34,7 +34,7 @@ int main() {
     return 1;
   }
 
-  bupp::base::completion_queue_entry cqe;
+  bnio::base::completion_queue_entry cqe;
   const int wait_result = ring.wait_cqe(cqe);
   if (wait_result < 0) {
     std::cerr << "io_uring_wait_cqe failed: " << wait_result << '\n';

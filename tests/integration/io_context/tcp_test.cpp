@@ -1,4 +1,4 @@
-#include <bupp/tcp.h>
+#include <bnio/tcp.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -28,82 +28,82 @@ void assert_close_on_exec(int fd) {
 }
 
 TEST(TcpTest, ip_aliases) {
-  static_assert(std::is_same_v<bupp::ip::address, bupp::async_io::ip::address>);
+  static_assert(std::is_same_v<bnio::ip::address, bnio::async_io::ip::address>);
   static_assert(
-      std::is_same_v<bupp::ip::endpoint, bupp::async_io::ip::endpoint>);
+      std::is_same_v<bnio::ip::endpoint, bnio::async_io::ip::endpoint>);
   static_assert(
-      std::is_same_v<bupp::ip::tcp::endpoint, bupp::async_io::ip::endpoint>);
+      std::is_same_v<bnio::ip::tcp::endpoint, bnio::async_io::ip::endpoint>);
   static_assert(
-      std::is_same_v<bupp::ip::udp::endpoint, bupp::async_io::ip::endpoint>);
+      std::is_same_v<bnio::ip::udp::endpoint, bnio::async_io::ip::endpoint>);
 
-  const auto address = bupp::ip::make_address("127.0.0.1");
+  const auto address = bnio::ip::make_address("127.0.0.1");
   EXPECT_TRUE(address.has_value());
   EXPECT_TRUE(address->is_v4());
 }
 
 TEST(TcpTest, tcp_type_namespace) {
-  static_assert(std::is_same_v<bupp::tcp::socket, bupp::tcp_socket>);
-  static_assert(std::is_same_v<bupp::tcp::acceptor, bupp::tcp_acceptor>);
-  static_assert(std::is_same_v<bupp::ip::tcp::socket, bupp::tcp_socket>);
-  static_assert(std::is_same_v<bupp::ip::tcp::stream, bupp::tcp_socket>);
-  static_assert(std::is_same_v<bupp::ip::tcp::acceptor, bupp::tcp_acceptor>);
+  static_assert(std::is_same_v<bnio::tcp::socket, bnio::tcp_socket>);
+  static_assert(std::is_same_v<bnio::tcp::acceptor, bnio::tcp_acceptor>);
+  static_assert(std::is_same_v<bnio::ip::tcp::socket, bnio::tcp_socket>);
+  static_assert(std::is_same_v<bnio::ip::tcp::stream, bnio::tcp_socket>);
+  static_assert(std::is_same_v<bnio::ip::tcp::acceptor, bnio::tcp_acceptor>);
 
-  EXPECT_EQ(bupp::ip::tcp::v4().version(), bupp::ip::address::version::v4);
-  EXPECT_EQ(bupp::ip::tcp::v6().version(), bupp::ip::address::version::v6);
-  EXPECT_EQ(bupp::ip::tcp::v4().async_io_protocol().version(),
-            bupp::async_io::ip::address::version::v4);
+  EXPECT_EQ(bnio::ip::tcp::v4().version(), bnio::ip::address::version::v4);
+  EXPECT_EQ(bnio::ip::tcp::v6().version(), bnio::ip::address::version::v6);
+  EXPECT_EQ(bnio::ip::tcp::v4().async_io_protocol().version(),
+            bnio::async_io::ip::address::version::v4);
 }
 
 TEST(TcpTest, tcp_owner_aliases) {
-  bupp::ip::tcp::socket socket(3);
+  bnio::ip::tcp::socket socket(3);
   EXPECT_EQ(socket.native_handle(), 3);
   EXPECT_EQ(socket.release(), 3);
 
-  bupp::ip::tcp::acceptor acceptor(4);
+  bnio::ip::tcp::acceptor acceptor(4);
   EXPECT_EQ(acceptor.native_handle(), 4);
   EXPECT_EQ(acceptor.release(), 4);
 }
 
 TEST(TcpTest, open_protocol_rejects_unspecified_tcp) {
-  bupp::ip::tcp::socket socket;
-  const std::error_code socket_error = socket.open(bupp::ip::tcp());
+  bnio::ip::tcp::socket socket;
+  const std::error_code socket_error = socket.open(bnio::ip::tcp());
   EXPECT_TRUE(socket_error ==
               std::error_code(EAFNOSUPPORT, std::generic_category()));
   EXPECT_FALSE(socket.is_open());
 
-  bupp::ip::tcp::acceptor acceptor;
-  const std::error_code acceptor_error = acceptor.open(bupp::ip::tcp());
+  bnio::ip::tcp::acceptor acceptor;
+  const std::error_code acceptor_error = acceptor.open(bnio::ip::tcp());
   EXPECT_TRUE(acceptor_error ==
               std::error_code(EAFNOSUPPORT, std::generic_category()));
   EXPECT_FALSE(acceptor.is_open());
 }
 
 TEST(TcpTest, socket_owns_and_replaces_descriptors) {
-  bupp::tcp::socket socket;
+  bnio::tcp::socket socket;
   EXPECT_FALSE(socket.close());
-  EXPECT_FALSE(socket.open(bupp::ip::tcp::v4()));
+  EXPECT_FALSE(socket.open(bnio::ip::tcp::v4()));
   const int transferred_fd = socket.native_handle();
   assert_close_on_exec(transferred_fd);
 
-  EXPECT_FALSE(socket.open(bupp::ip::tcp::v4()));
+  EXPECT_FALSE(socket.open(bnio::ip::tcp::v4()));
   EXPECT_EQ(socket.native_handle(), transferred_fd);
   self_move_assign(socket);
   EXPECT_EQ(socket.native_handle(), transferred_fd);
 
-  bupp::tcp::socket moved(std::move(socket));
+  bnio::tcp::socket moved(std::move(socket));
   EXPECT_FALSE(socket.is_open());
   EXPECT_EQ(moved.native_handle(), transferred_fd);
 
-  bupp::tcp::socket destination;
-  EXPECT_FALSE(destination.open(bupp::ip::tcp::v4()));
+  bnio::tcp::socket destination;
+  EXPECT_FALSE(destination.open(bnio::ip::tcp::v4()));
   const int replaced_fd = destination.native_handle();
   destination = std::move(moved);
   EXPECT_FALSE(moved.is_open());
   EXPECT_EQ(destination.native_handle(), transferred_fd);
   assert_descriptor_closed(replaced_fd);
 
-  bupp::tcp::socket replacement;
-  EXPECT_FALSE(replacement.open(bupp::ip::tcp::v4()));
+  bnio::tcp::socket replacement;
+  EXPECT_FALSE(replacement.open(bnio::ip::tcp::v4()));
   const int replacement_fd = replacement.release();
   destination.assign(replacement_fd);
   EXPECT_EQ(destination.native_handle(), replacement_fd);
@@ -120,21 +120,21 @@ TEST(TcpTest, socket_owns_and_replaces_descriptors) {
 TEST(TcpTest, socket_destructor_and_close_error) {
   int owned_fd = -1;
   {
-    bupp::tcp::socket owned;
-    EXPECT_FALSE(owned.open(bupp::ip::tcp::v4()));
+    bnio::tcp::socket owned;
+    EXPECT_FALSE(owned.open(bnio::ip::tcp::v4()));
     owned_fd = owned.native_handle();
   }
   assert_descriptor_closed(owned_fd);
 
-  bupp::tcp::socket externally_closed;
-  EXPECT_FALSE(externally_closed.open(bupp::ip::tcp::v4()));
+  bnio::tcp::socket externally_closed;
+  EXPECT_FALSE(externally_closed.open(bnio::ip::tcp::v4()));
   const int fd = externally_closed.native_handle();
   EXPECT_EQ(::close(fd), 0);
   const std::error_code error = externally_closed.close();
   EXPECT_TRUE(error == std::error_code(EBADF, std::generic_category()));
   EXPECT_FALSE(externally_closed.is_open());
 
-  bupp::tcp::socket invalid_family;
+  bnio::tcp::socket invalid_family;
   EXPECT_TRUE(invalid_family.open(AF_UNSPEC));
   EXPECT_FALSE(invalid_family.is_open());
   EXPECT_TRUE(invalid_family.shutdown(SHUT_RDWR) ==
@@ -142,30 +142,30 @@ TEST(TcpTest, socket_destructor_and_close_error) {
 }
 
 TEST(TcpTest, acceptor_owns_and_replaces_descriptors) {
-  bupp::tcp::acceptor acceptor;
+  bnio::tcp::acceptor acceptor;
   EXPECT_FALSE(acceptor.close());
-  EXPECT_FALSE(acceptor.open(bupp::ip::tcp::v4()));
+  EXPECT_FALSE(acceptor.open(bnio::ip::tcp::v4()));
   const int transferred_fd = acceptor.native_handle();
   assert_close_on_exec(transferred_fd);
-  EXPECT_FALSE(acceptor.open(bupp::ip::tcp::v4()));
+  EXPECT_FALSE(acceptor.open(bnio::ip::tcp::v4()));
   EXPECT_EQ(acceptor.native_handle(), transferred_fd);
   self_move_assign(acceptor);
   EXPECT_EQ(acceptor.native_handle(), transferred_fd);
 
-  bupp::tcp::acceptor moved(std::move(acceptor));
+  bnio::tcp::acceptor moved(std::move(acceptor));
   EXPECT_FALSE(acceptor.is_open());
   EXPECT_EQ(moved.native_handle(), transferred_fd);
 
-  bupp::tcp::acceptor destination;
-  EXPECT_FALSE(destination.open(bupp::ip::tcp::v4()));
+  bnio::tcp::acceptor destination;
+  EXPECT_FALSE(destination.open(bnio::ip::tcp::v4()));
   const int replaced_fd = destination.native_handle();
   destination = std::move(moved);
   EXPECT_FALSE(moved.is_open());
   EXPECT_EQ(destination.native_handle(), transferred_fd);
   assert_descriptor_closed(replaced_fd);
 
-  bupp::tcp::acceptor replacement;
-  EXPECT_FALSE(replacement.open(bupp::ip::tcp::v4()));
+  bnio::tcp::acceptor replacement;
+  EXPECT_FALSE(replacement.open(bnio::ip::tcp::v4()));
   const int replacement_fd = replacement.release();
   destination.assign(replacement_fd);
   EXPECT_EQ(destination.native_handle(), replacement_fd);
@@ -176,7 +176,7 @@ TEST(TcpTest, acceptor_owns_and_replaces_descriptors) {
   EXPECT_FALSE(destination.close());
   assert_descriptor_closed(replacement_fd);
 
-  bupp::tcp::acceptor invalid_family;
+  bnio::tcp::acceptor invalid_family;
   EXPECT_TRUE(invalid_family.open(AF_UNSPEC));
   EXPECT_FALSE(invalid_family.is_open());
   EXPECT_TRUE(invalid_family.shutdown(SHUT_RDWR) ==
@@ -186,14 +186,14 @@ TEST(TcpTest, acceptor_owns_and_replaces_descriptors) {
 TEST(TcpTest, acceptor_destructor_and_close_error) {
   int owned_fd = -1;
   {
-    bupp::tcp::acceptor owned;
-    EXPECT_FALSE(owned.open(bupp::ip::tcp::v4()));
+    bnio::tcp::acceptor owned;
+    EXPECT_FALSE(owned.open(bnio::ip::tcp::v4()));
     owned_fd = owned.native_handle();
   }
   assert_descriptor_closed(owned_fd);
 
-  bupp::tcp::acceptor externally_closed;
-  EXPECT_FALSE(externally_closed.open(bupp::ip::tcp::v4()));
+  bnio::tcp::acceptor externally_closed;
+  EXPECT_FALSE(externally_closed.open(bnio::ip::tcp::v4()));
   const int fd = externally_closed.native_handle();
   EXPECT_EQ(::close(fd), 0);
   const std::error_code error = externally_closed.close();

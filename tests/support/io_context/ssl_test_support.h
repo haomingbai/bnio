@@ -1,4 +1,4 @@
-#include <bupp/ssl.h>
+#include <bnio/ssl.h>
 #include <gtest/gtest.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -104,7 +104,7 @@ struct handshake_state {
 
 struct handshake_receiver {
   std::shared_ptr<handshake_state> state;
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
 
   void set_value() noexcept {
     ++state->values;
@@ -139,7 +139,7 @@ struct transfer_state {
 
 struct transfer_receiver {
   std::shared_ptr<transfer_state> state;
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
   unsigned* completions = nullptr;
   unsigned target = 0;
 
@@ -178,7 +178,7 @@ struct test_certificate_files {
 
   test_certificate_files() {
     directory = std::filesystem::temp_directory_path() /
-                ("bupp_ssl_test_" + std::to_string(::getpid()));
+                ("bnio_ssl_test_" + std::to_string(::getpid()));
     std::filesystem::create_directories(directory);
     certificate = directory / "cert.pem";
     private_key = directory / "key.pem";

@@ -1,7 +1,7 @@
-#include <bupp/async_io/ip/tcp.h>
-#include <bupp/async_io/ip/udp.h>
+#include <bnio/async_io/ip/tcp.h>
+#include <bnio/async_io/ip/udp.h>
 
-namespace bupp::async_io::ip {
+namespace bnio::async_io::ip {
 
 endpoint::endpoint() noexcept = default;
 
@@ -95,4 +95,4 @@ ip::address::version udp::version() const noexcept { return version_; }
 
 udp::udp(ip::address::version version) noexcept : version_(version) {}
 
-}  // namespace bupp::async_io::ip
+}  // namespace bnio::async_io::ip

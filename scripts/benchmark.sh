@@ -4,13 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT_NAME="${0##*/}"
 
-BUILD_DIR="${BUILD_DIR:-/tmp/bupp-bench}"
+BUILD_DIR="${BUILD_DIR:-/tmp/bnio-bench}"
 CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
 PERF="${PERF:-0}"
 CONNECTIONS="${CONNECTIONS:-128}"
 DURATION="${DURATION:-10s}"
 MSG_SIZE="${MSG_SIZE:-1024}"
-BUPP_PORT_RAW="${BUPP_PORT_RAW:-8090}"
+BNIO_PORT_RAW="${BNIO_PORT_RAW:-8090}"
 ASIO_PORT_RAW="${ASIO_PORT_RAW:-8091}"
 CLIENT_WORKERS="${CLIENT_WORKERS:-match}"
 
@@ -23,9 +23,9 @@ usage() {
 usage: ${SCRIPT_NAME} [FLAGS...]
 
 Flags:
-  --build-dir DIR     CMake build directory (default: /tmp/bupp-bench)
+  --build-dir DIR     CMake build directory (default: /tmp/bnio-bench)
   --perf              Record perf.data to .artifacts/
-  --fetch-asio        Pass -DBUPP_BUILD_ASIO_EXAMPLES=ON (auto-fetch Asio)
+  --fetch-asio        Pass -DBNIO_BUILD_ASIO_EXAMPLES=ON (auto-fetch Asio)
   --cmake-args "..."  Extra arguments forwarded to cmake
   --help, -h          Show this message
 
@@ -36,7 +36,7 @@ Environment variables:
   CLIENT_WORKERS      Client worker count, or "match" to use the server count
                       (default: match)
   SERVER_WORKERS      Backward-compatible alias for WORKER_COUNTS
-  BUPP_PORT_RAW, ASIO_PORT_RAW
+  BNIO_PORT_RAW, ASIO_PORT_RAW
 EOF
   exit 0
 }
@@ -121,12 +121,12 @@ fi
 
 CMAKE_ARGS=(
   -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
-  -DBUPP_BUILD_EXAMPLES=ON
-  -DBUPP_BUILD_ASIO_EXAMPLES=ON
+  -DBNIO_BUILD_EXAMPLES=ON
+  -DBNIO_BUILD_ASIO_EXAMPLES=ON
 )
 
 if ${FETCH_ASIO}; then
-  CMAKE_ARGS+=(-DBUPP_BUILD_ASIO_EXAMPLES=ON)
+  CMAKE_ARGS+=(-DBNIO_BUILD_ASIO_EXAMPLES=ON)
 fi
 
 CMAKE_ARGS+=("${EXTRA_CMAKE_ARGS[@]}")
@@ -135,7 +135,7 @@ echo "=== cmake configure ==="
 cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" "${CMAKE_ARGS[@]}"
 
 echo "=== build raw echo targets ==="
-cmake --build "${BUILD_DIR}" --target bupp_raw_echo asio_raw_echo raw_echo_client
+cmake --build "${BUILD_DIR}" --target bnio_raw_echo asio_raw_echo raw_echo_client
 
 if [[ "${PERF}" == "1" ]]; then
   mkdir -p "${ARTIFACTS}"
@@ -203,8 +203,8 @@ run_raw() {
 
 RESULT_ROWS=()
 for worker_count in "${WORKER_COUNT_LIST[@]}"; do
-  run_raw "bupp_raw" "${BUILD_DIR}/examples/raw_echo/bupp_raw_echo" \
-    "${BUPP_PORT_RAW}" "raw-bupp" "${worker_count}"
+  run_raw "bnio_raw" "${BUILD_DIR}/examples/raw_echo/bnio_raw_echo" \
+    "${BNIO_PORT_RAW}" "raw-bnio" "${worker_count}"
   run_raw "asio_raw" "${BUILD_DIR}/examples/raw_echo/asio_raw_echo" \
     "${ASIO_PORT_RAW}" "raw-asio" "${worker_count}"
 done

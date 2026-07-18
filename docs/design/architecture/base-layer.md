@@ -1,7 +1,7 @@
-# Layer 1: `bupp::base` — Thin System Call Wrappers
+# Layer 1: `bnio::base` — Thin System Call Wrappers
 
-Namespace `bupp::base`. Linux headers in `include/bupp/base/linux/`, BSD
-headers in `include/bupp/base/bsd/`.
+Namespace `bnio::base`. Linux headers in `include/bnio/base/linux/`, BSD
+headers in `include/bnio/base/bsd/`.
 
 On Linux, maps the `liburing` C API to C++ objects with RAII where appropriate.
 Method names drop the `io_uring_` prefix (e.g. `io_uring_submit` →
@@ -64,7 +64,7 @@ Read all needed fields **before** calling `cqe_seen()`.
 ### `kqueue` — kqueue Descriptor Owner
 
 RAII wrapper around a native kqueue fd. **The sole owner of the kqueue
-instance.** Available under `bupp::base` on BSD platforms.
+instance.** Available under `bnio::base` on BSD platforms.
 
 ```cpp
 class kqueue {

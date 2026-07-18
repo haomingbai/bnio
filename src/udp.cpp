@@ -1,6 +1,6 @@
-#include <bupp/async_io/socket_view.h>
-#include <bupp/ip.h>
-#include <bupp/udp/socket.h>
+#include <bnio/async_io/socket_view.h>
+#include <bnio/ip.h>
+#include <bnio/udp/socket.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -10,7 +10,7 @@
 #include <system_error>
 #include <utility>
 
-namespace bupp::udp {
+namespace bnio::udp {
 namespace {
 
 [[nodiscard]] std::error_code make_errno_error(int value) noexcept {
@@ -124,4 +124,4 @@ std::error_code socket::remote_endpoint(ip::endpoint& endpoint) const noexcept {
   return view().remote_endpoint(endpoint);
 }
 
-}  // namespace bupp::udp
+}  // namespace bnio::udp

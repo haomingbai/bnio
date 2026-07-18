@@ -38,7 +38,7 @@ jobs:
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
           -DBUILD_SHARED_LIBS=ON
-          -DBUPP_BUILD_EXAMPLES=OFF
+          -DBNIO_BUILD_EXAMPLES=OFF
 
       - name: Build
         run: cmake --build build
@@ -89,10 +89,10 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/usr
           -DCMAKE_INSTALL_LIBDIR=lib
           -DBUILD_SHARED_LIBS=ON
-          -DBUPP_BUILD_TESTS=OFF
-          -DBUPP_BUILD_EXAMPLES=OFF
-          -DBUPP_PACKAGE=ON
-          -DBUPP_BEXEC_PROVIDER=FIND_PACKAGE
+          -DBNIO_BUILD_TESTS=OFF
+          -DBNIO_BUILD_EXAMPLES=OFF
+          -DBNIO_PACKAGE=ON
+          -DBNIO_BEXEC_PROVIDER=FIND_PACKAGE
 
       - name: Build
         run: cmake --build package-build

@@ -16,7 +16,7 @@
 
 namespace {
 
-using namespace bupp_async_io_kqueue_test;
+using namespace bnio_async_io_kqueue_test;
 
 TEST(KqueueSenderTest, post_operation_runs_on_context_thread) {
   kqueue_context context;

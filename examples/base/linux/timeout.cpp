@@ -1,6 +1,6 @@
-#include <bupp/base/linux/completion_queue_entry.h>
-#include <bupp/base/linux/ring.h>
-#include <bupp/base/linux/submission_queue_entry.h>
+#include <bnio/base/linux/completion_queue_entry.h>
+#include <bnio/base/linux/ring.h>
+#include <bnio/base/linux/submission_queue_entry.h>
 
 #include <cerrno>
 #include <chrono>
@@ -10,18 +10,18 @@
 #include "example_support.h"
 
 int main() {
-  bupp::base::ring ring;
-  switch (bupp::examples::base::init_ring(ring, 8, "timeout")) {
-    case bupp::examples::base::ring_init_result::ready:
+  bnio::base::ring ring;
+  switch (bnio::examples::base::init_ring(ring, 8, "timeout")) {
+    case bnio::examples::base::ring_init_result::ready:
       break;
-    case bupp::examples::base::ring_init_result::unavailable:
+    case bnio::examples::base::ring_init_result::unavailable:
       return 0;
-    case bupp::examples::base::ring_init_result::failed:
+    case bnio::examples::base::ring_init_result::failed:
       return 1;
   }
 
-  bupp::base::submission_queue_entry sqe =
-      bupp::examples::base::get_sqe_or_log(ring, "timeout");
+  bnio::base::submission_queue_entry sqe =
+      bnio::examples::base::get_sqe_or_log(ring, "timeout");
   if (sqe.raw() == nullptr) {
     return 1;
   }
@@ -34,7 +34,7 @@ int main() {
 
   const auto started_at = std::chrono::steady_clock::now();
   const int result =
-      bupp::examples::base::submit_and_wait_one(ring, k_user_data, "timeout");
+      bnio::examples::base::submit_and_wait_one(ring, k_user_data, "timeout");
   const auto finished_at = std::chrono::steady_clock::now();
 
   const auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(

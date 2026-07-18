@@ -12,7 +12,7 @@
 
 namespace {
 
-using namespace bupp_async_io_io_uring_test;
+using namespace bnio_async_io_io_uring_test;
 
 struct concurrent_post_state {
   std::atomic<unsigned> completed{0};

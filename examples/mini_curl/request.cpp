@@ -172,7 +172,7 @@ std::string build_request(const request_options& options) {
   request += options.target;
   request += " HTTP/1.1\r\nHost: ";
   request += host_header_value(options);
-  request += "\r\nUser-Agent: bupp-mini-curl/0.2\r\nAccept: */*\r\n";
+  request += "\r\nUser-Agent: bnio-mini-curl/0.2\r\nAccept: */*\r\n";
 
   bool has_content_type = false;
   bool has_content_length = false;

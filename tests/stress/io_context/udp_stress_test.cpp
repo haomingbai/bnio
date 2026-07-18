@@ -1,8 +1,8 @@
-#include <bupp/async_io/ip/address.h>
-#include <bupp/async_io/ip/endpoint.h>
-#include <bupp/io_context.h>
-#include <bupp/ip.h>
-#include <bupp/udp.h>
+#include <bnio/async_io/ip/address.h>
+#include <bnio/async_io/ip/endpoint.h>
+#include <bnio/io_context.h>
+#include <bnio/ip.h>
+#include <bnio/udp.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -35,7 +35,7 @@ struct stress_state {
 
 struct stress_receiver {
   stress_state* state;
-  bupp::io_context* context;
+  bnio::io_context* context;
   std::size_t index;
   bool receive;
 
@@ -69,36 +69,36 @@ struct stress_receiver {
 };
 
 void run_stress_test() {
-  bupp::io_context_options options;
+  bnio::io_context_options options;
   constexpr unsigned worker_count = 4;
   options.concurrency_hint = worker_count;
-#if defined(BUPP_SYSTEM_LINUX)
+#if defined(BNIO_SYSTEM_LINUX)
   options.platform.uring.entries = 512;
 #else
   options.platform.kqueue.entries = 512;
 #endif
-  bupp::io_context context(options);
+  bnio::io_context context(options);
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
   auto scheduler = context.get_post_scheduler();
 
-  bupp::udp::socket receiver_socket;
-  bupp::udp::socket sender_socket;
-  EXPECT_FALSE(receiver_socket.open(bupp::ip::udp::v4()));
-  EXPECT_FALSE(sender_socket.open(bupp::ip::udp::v4()));
-  EXPECT_FALSE(receiver_socket.bind(bupp::ip::endpoint::loopback_v4(0)));
-  EXPECT_FALSE(sender_socket.bind(bupp::ip::endpoint::loopback_v4(0)));
+  bnio::udp::socket receiver_socket;
+  bnio::udp::socket sender_socket;
+  EXPECT_FALSE(receiver_socket.open(bnio::ip::udp::v4()));
+  EXPECT_FALSE(sender_socket.open(bnio::ip::udp::v4()));
+  EXPECT_FALSE(receiver_socket.bind(bnio::ip::endpoint::loopback_v4(0)));
+  EXPECT_FALSE(sender_socket.bind(bnio::ip::endpoint::loopback_v4(0)));
 
-  bupp::ip::endpoint receiver_endpoint;
-  bupp::ip::endpoint sender_endpoint;
+  bnio::ip::endpoint receiver_endpoint;
+  bnio::ip::endpoint sender_endpoint;
   EXPECT_FALSE(receiver_socket.local_endpoint(receiver_endpoint));
   EXPECT_FALSE(sender_socket.local_endpoint(sender_endpoint));
 
   using bytes = std::array<char, datagram_size>;
   std::array<bytes, datagram_count> sent{};
   std::array<bytes, datagram_count> received{};
-  std::array<bupp::ip::endpoint, datagram_count> sources{};
+  std::array<bnio::ip::endpoint, datagram_count> sources{};
   for (std::size_t index = 0; index < datagram_count; ++index) {
     const auto value = static_cast<std::uint32_t>(index);
     std::memcpy(sent[index].data(), &value, sizeof(value));

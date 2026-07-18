@@ -1,8 +1,8 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_MINI_CURL_REQUEST_HPP_
-#define BUPP_EXAMPLES_MINI_CURL_REQUEST_HPP_
+#ifndef BNIO_EXAMPLES_MINI_CURL_REQUEST_HPP_
+#define BNIO_EXAMPLES_MINI_CURL_REQUEST_HPP_
 
-#include <bupp/bupp.h>
+#include <bnio/bnio.h>
 
 #include <cstddef>
 #include <string>
@@ -37,8 +37,8 @@ struct request_options {
   std::string output_file;
 
   /** Address family preference used during DNS resolution. */
-  bupp::ip::address::version address_version =
-      bupp::ip::address::version::unspecified;
+  bnio::ip::address::version address_version =
+      bnio::ip::address::version::unspecified;
 
   /** Whether to use TLS for the connection. */
   bool use_tls = false;
@@ -120,4 +120,4 @@ struct request_options {
 
 }  // namespace mini_curl
 
-#endif  // BUPP_EXAMPLES_MINI_CURL_REQUEST_HPP_
+#endif  // BNIO_EXAMPLES_MINI_CURL_REQUEST_HPP_

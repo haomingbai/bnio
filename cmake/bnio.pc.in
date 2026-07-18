@@ -1,0 +1,11 @@
+prefix=${pcfiledir}/@BNIO_PC_PREFIX_RELATIVE@
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: bnio
+Description: @PROJECT_DESCRIPTION@
+URL: https://github.com/haomingbai/bnio
+Version: @PROJECT_VERSION@
+Requires: @BNIO_PC_REQUIRES@
+Libs: -L${libdir} -lbnio
+Cflags: -I${includedir}@BNIO_PC_SHARED_CFLAGS@

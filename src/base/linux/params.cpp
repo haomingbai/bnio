@@ -1,6 +1,6 @@
-#include <bupp/base/linux/params.h>
+#include <bnio/base/linux/params.h>
 
-namespace bupp::base {
+namespace bnio::base {
 
 params::params() noexcept = default;
 
@@ -52,4 +52,4 @@ std::uint32_t params::wq_fd() const noexcept { return params_.wq_fd; }
 
 void params::set_wq_fd(std::uint32_t wq_fd) noexcept { params_.wq_fd = wq_fd; }
 
-}  // namespace bupp::base
+}  // namespace bnio::base

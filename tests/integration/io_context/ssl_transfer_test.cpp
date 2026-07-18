@@ -7,7 +7,7 @@ namespace {
 TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
   test_certificate_files files;
 
-  bupp::ssl_context server_context(bupp::ssl_context_method::tls_server);
+  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -15,7 +15,7 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  bupp::ssl_context client_context(bupp::ssl_context_method::tls_client);
+  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -23,11 +23,11 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bupp::ssl_stream client{bupp::tcp_socket(sockets[0]), client_context};
-  bupp::ssl_stream server{bupp::tcp_socket(sockets[1]), server_context};
+  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   {
-    bupp::io_context context;
+    bnio::io_context context;
     if (!context.is_open()) {
       return;
     }
@@ -38,9 +38,9 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
     handshake_receiver server_receiver{state, &context};
 
     auto client_sender =
-        client.async_handshake(scheduler, bupp::ssl_handshake_type::client);
+        client.async_handshake(scheduler, bnio::ssl_handshake_type::client);
     auto server_sender =
-        server.async_handshake(scheduler, bupp::ssl_handshake_type::server);
+        server.async_handshake(scheduler, bnio::ssl_handshake_type::server);
 
     auto client_operation =
         bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -56,7 +56,7 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
     EXPECT_EQ(state->stopped, 0);
   }
 
-#if defined(BUPP_HAS_IO_CONTEXT_BSD)
+#if defined(BNIO_HAS_IO_CONTEXT_BSD)
   // Keep one application write below the conservative AF_UNIX socket buffer
   // size. The test waits for that write before issuing the next SSL read.
   constexpr std::size_t payload_size = 8 * 1024;
@@ -72,7 +72,7 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
   std::size_t sent = 0;
   std::size_t received_size = 0;
   while (received_size < payload.size()) {
-    bupp::io_context context;
+    bnio::io_context context;
     if (!context.is_open()) {
       return;
     }
@@ -86,13 +86,13 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
     transfer_receiver write_receiver{write_state, &context, &completions,
                                      target};
 
-    auto read_buffer = bupp::buffer(received.data() + received_size,
+    auto read_buffer = bnio::buffer(received.data() + received_size,
                                     received.size() - received_size);
     auto read_sender = server.async_read(scheduler, read_buffer);
 
     if (sent < payload.size()) {
       auto write_buffer =
-          bupp::buffer(payload.data() + sent, payload.size() - sent);
+          bnio::buffer(payload.data() + sent, payload.size() - sent);
       auto write_sender =
           client.async_write(scheduler, write_buffer, MSG_NOSIGNAL);
 
@@ -137,7 +137,7 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
               0);
 
   test_require(!client.lowest_layer().close());
-  bupp::io_context error_context;
+  bnio::io_context error_context;
   if (!error_context.is_open()) {
     return;
   }

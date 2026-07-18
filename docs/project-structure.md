@@ -2,11 +2,11 @@
 
 This repository is a CMake-based C++20 async I/O library.
 
-## Public Headers (`include/bupp/`)
+## Public Headers (`include/bnio/`)
 
 ### Umbrella headers
 
-- `bupp.h` — top-level public umbrella header.
+- `bnio.h` — top-level public umbrella header.
 - `base.h` — base-layer umbrella header (Linux: `base/linux/`; BSD: `base/bsd/`).
 - `async_io.h` — async-I/O-layer umbrella header.
 - `io_context.h` — high-level `io_context` umbrella.
@@ -16,7 +16,7 @@ This repository is a CMake-based C++20 async I/O library.
 - `ssl.h` — SSL context/stream umbrella.
 - `ip.h` — IP address/endpoint convenience re-exports.
 
-### Layer 1 — `bupp::base`
+### Layer 1 — `bnio::base`
 
 Thin system call wrappers. Platform-specific headers under `base/linux/` and
 `base/bsd/`.
@@ -32,7 +32,7 @@ Thin system call wrappers. Platform-specific headers under `base/linux/` and
 - `base/bsd/event.h` — `struct kevent` wrapper.
 - `base/bsd/event_list_view.h` — non-owning view over `kevent` arrays.
 
-### Layer 2 — `bupp::async_io`
+### Layer 2 — `bnio::async_io`
 
 Platform-neutral vocabulary types and the platform-native event-loop context.
 
@@ -82,7 +82,7 @@ Platform-neutral vocabulary types and the platform-native event-loop context.
 - `bsd/socket_address.h` — BSD-native socket address storage and endpoint conversion.
 - `bsd/detail/kqueue_receiver_operation.h` — receiver-based I/O operation adapter.
 
-### Layer 3 — `bupp`
+### Layer 3 — `bnio`
 
 High-level async runtime, stream owners, and buffer types.
 
@@ -223,7 +223,7 @@ High-level async runtime, stream owners, and buffer types.
 
 - `examples/base/linux/` — low-level `liburing` wrapper examples (nop, probe,
   timeout, poll, echo_server).
-- `examples/raw_echo/` — TCP echo server (`bupp_raw_echo.cpp`), Asio comparison
+- `examples/raw_echo/` — TCP echo server (`bnio_raw_echo.cpp`), Asio comparison
   (`asio_raw_echo.cpp`), and shared benchmark client (`client.cpp`).
 - `examples/mini_curl/` — full HTTP/HTTPS client:
   - `mini_curl.cpp` — `main()` and argument parsing.
@@ -255,7 +255,7 @@ High-level async runtime, stream owners, and buffer types.
 - `CMakeLists.txt` — top-level CMake project.
 - `cmake/bexec.cmake` — resolves `bexec` from an installed CMake package, a
   local source tree, or FetchContent.
-- `cmake/buppConfig.cmake.in` — installed CMake package configuration.
-- `cmake/bupp.pc.in` — relocatable pkg-config metadata template.
+- `cmake/bnioConfig.cmake.in` — installed CMake package configuration.
+- `cmake/bnio.pc.in` — relocatable pkg-config metadata template.
 - `tests/packaging/` — source, installed-CMake, and pkg-config consumers.
 - `scripts/` — project helper commands (format, check-doc, benchmark).

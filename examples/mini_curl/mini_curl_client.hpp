@@ -1,6 +1,6 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_MINI_CURL_CLIENT_HPP_
-#define BUPP_EXAMPLES_MINI_CURL_CLIENT_HPP_
+#ifndef BNIO_EXAMPLES_MINI_CURL_CLIENT_HPP_
+#define BNIO_EXAMPLES_MINI_CURL_CLIENT_HPP_
 
 #include "mini_curl/client.hpp"
 #include "mini_curl/client_connection.hpp"
@@ -11,4 +11,4 @@
 #include "mini_curl/operation_registry.hpp"
 #include "mini_curl/request.hpp"
 
-#endif  // BUPP_EXAMPLES_MINI_CURL_CLIENT_HPP_
+#endif  // BNIO_EXAMPLES_MINI_CURL_CLIENT_HPP_

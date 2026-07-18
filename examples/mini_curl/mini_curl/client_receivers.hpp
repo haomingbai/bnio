@@ -1,6 +1,6 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_MINI_CURL_CLIENT_RECEIVERS_HPP_
-#define BUPP_EXAMPLES_MINI_CURL_CLIENT_RECEIVERS_HPP_
+#ifndef BNIO_EXAMPLES_MINI_CURL_CLIENT_RECEIVERS_HPP_
+#define BNIO_EXAMPLES_MINI_CURL_CLIENT_RECEIVERS_HPP_
 
 #include <memory>
 
@@ -11,7 +11,7 @@ namespace mini_curl {
 // ============================================================
 // Receiver implementations (must be in header for template spawn)
 // ============================================================
-/** @cond BUPP_DETAIL */
+/** @cond BNIO_DETAIL */
 
 struct mini_curl_client::resolve_receiver {
   std::shared_ptr<mini_curl_client> client;
@@ -77,4 +77,4 @@ struct mini_curl_client::shutdown_receiver {
 
 }  // namespace mini_curl
 
-#endif  // BUPP_EXAMPLES_MINI_CURL_CLIENT_RECEIVERS_HPP_
+#endif  // BNIO_EXAMPLES_MINI_CURL_CLIENT_RECEIVERS_HPP_

@@ -17,10 +17,10 @@
 
 ## Base Layer Rules
 
-- `bupp::base` is a thin C API to C++ object mapping.
+- `bnio::base` is a thin C API to C++ object mapping.
 - On Linux, public wrapper headers declare API; method implementations live under
-  `src/base/linux/` and are compiled into `bupp`.
-- On BSD, wrapper headers live in `include/bupp/base/bsd/` and implementations
+  `src/base/linux/` and are compiled into `bnio`.
+- On BSD, wrapper headers live in `include/bnio/base/bsd/` and implementations
   in `src/base/bsd/`.
 - Keep system call return semantics: successful values are non-negative and
   failures are negative `errno` values.
@@ -36,11 +36,11 @@
 - Keep ownership explicit: `ring`, `probe`, and `kqueue` own resources, while
   SQE, CQE, and `event` wrappers are non-owning views.
 - Match existing method shape before introducing a new abstraction.
-- On Linux, add declarations to `include/bupp/base/linux/` and definitions to
+- On Linux, add declarations to `include/bnio/base/linux/` and definitions to
   `src/base/linux/`.
-- On BSD, add declarations to `include/bupp/base/bsd/` and definitions to
+- On BSD, add declarations to `include/bnio/base/bsd/` and definitions to
   `src/base/bsd/`.
-- Keep `bupp` buildable as both a static and shared library with
+- Keep `bnio` buildable as both a static and shared library with
   `BUILD_SHARED_LIBS`.
 
 ## Doxygen
@@ -53,7 +53,7 @@
 ## Tests
 
 - Write runtime tests as focused GoogleTest `TEST` cases and register them with
-  the shared `bupp_add_gtest` CMake helper.
+  the shared `bnio_add_gtest` CMake helper.
 - Use `GTEST_SKIP()` when a supported backend is unavailable on the host; do
   not silently return from a runtime test.
 - Exercise production defaults in behavioral regression tests. Do not clear

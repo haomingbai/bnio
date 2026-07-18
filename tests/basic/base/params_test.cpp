@@ -1,9 +1,9 @@
-#include <bupp/base/linux/liburing.h>
-#include <bupp/base/linux/params.h>
+#include <bnio/base/linux/liburing.h>
+#include <bnio/base/linux/params.h>
 #include <gtest/gtest.h>
 
 TEST(ParamsTest, behavior) {
-  bupp::base::params params;
+  bnio::base::params params;
 
   EXPECT_NE(params.raw(), nullptr);
   EXPECT_EQ(params.sq_entries(), 0);

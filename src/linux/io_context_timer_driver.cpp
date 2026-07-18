@@ -1,4 +1,4 @@
-#include <bupp/linux/io_context.h>
+#include <bnio/linux/io_context.h>
 
 #include <algorithm>
 #include <atomic>
@@ -8,10 +8,10 @@
 #include <utility>
 #include <vector>
 
-#include "bupp/async_io/linux/io_uring_context_base/context.h"
-#include "bupp/linux/detail/io_context_timer_types.h"
+#include "bnio/async_io/linux/io_uring_context_base/context.h"
+#include "bnio/linux/detail/io_context_timer_types.h"
 
-namespace bupp {
+namespace bnio {
 
 void io_context::on_timer_wakeup() noexcept {
   {
@@ -228,4 +228,4 @@ void io_context::queue_timer_update_locked(time_point deadline) noexcept {
   timers_.mark_update_queued(deadline);
 }
 
-}  // namespace bupp
+}  // namespace bnio

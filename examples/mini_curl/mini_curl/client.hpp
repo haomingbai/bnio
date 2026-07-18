@@ -1,8 +1,8 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_MINI_CURL_CLIENT_CLASS_HPP_
-#define BUPP_EXAMPLES_MINI_CURL_CLIENT_CLASS_HPP_
+#ifndef BNIO_EXAMPLES_MINI_CURL_CLIENT_CLASS_HPP_
+#define BNIO_EXAMPLES_MINI_CURL_CLIENT_CLASS_HPP_
 
-#include <bupp/bupp.h>
+#include <bnio/bnio.h>
 
 #include <array>
 #include <cstddef>
@@ -30,7 +30,7 @@ class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
    * Creates a client bound to an io_context, parsed request options, and
    * operation registry.
    */
-  mini_curl_client(bupp::io_context& context, request_options options,
+  mini_curl_client(bnio::io_context& context, request_options options,
                    operation_registry& registry);
 
   /**
@@ -89,13 +89,13 @@ class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
   void fail(std::string_view message, std::error_code error) noexcept;
   void finish(int code) noexcept;
 
-  bupp::io_context& context_;
+  bnio::io_context& context_;
   operation_registry& registry_;
   request_options options_;
-  bupp::tcp_socket socket_;
-  bupp::ssl_context ssl_context_{bupp::ssl_context_method::tls_client};
-  std::unique_ptr<bupp::ssl_stream<bupp::tcp_socket>> ssl_stream_;
-  std::array<bupp::ip::endpoint, k_max_endpoints> endpoints_{};
+  bnio::tcp_socket socket_;
+  bnio::ssl_context ssl_context_{bnio::ssl_context_method::tls_client};
+  std::unique_ptr<bnio::ssl_stream<bnio::tcp_socket>> ssl_stream_;
+  std::array<bnio::ip::endpoint, k_max_endpoints> endpoints_{};
   std::array<char, k_receive_size> receive_buffer_{};
   std::size_t endpoint_count_ = 0;
   std::size_t endpoint_index_ = 0;
@@ -111,4 +111,4 @@ class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
 
 }  // namespace mini_curl
 
-#endif  // BUPP_EXAMPLES_MINI_CURL_CLIENT_CLASS_HPP_
+#endif  // BNIO_EXAMPLES_MINI_CURL_CLIENT_CLASS_HPP_

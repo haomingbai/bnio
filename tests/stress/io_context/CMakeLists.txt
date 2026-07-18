@@ -1,13 +1,13 @@
 find_package(Threads REQUIRED)
 
-function(bupp_add_stress_io_context_test name source)
-  add_executable(bupp_stress_io_context_${name}_test ${source})
-  target_link_libraries(bupp_stress_io_context_${name}_test PRIVATE bupp::bupp
+function(bnio_add_stress_io_context_test name source)
+  add_executable(bnio_stress_io_context_${name}_test ${source})
+  target_link_libraries(bnio_stress_io_context_${name}_test PRIVATE bnio::bnio
                                                                    Threads::Threads)
-  bupp_add_gtest(bupp_stress_io_context_${name}_test
-                 bupp.stress.io_context.${name}
+  bnio_add_gtest(bnio_stress_io_context_${name}_test
+                 bnio.stress.io_context.${name}
                  PROPERTIES LABELS "stress;io_context;${name}" ${ARGN})
 endfunction()
 
-bupp_add_stress_io_context_test(udp_stress udp_stress_test.cpp
+bnio_add_stress_io_context_test(udp_stress udp_stress_test.cpp
                                 PROPERTIES TIMEOUT 10)

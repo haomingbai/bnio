@@ -9,21 +9,21 @@
 
 namespace {
 
-using namespace bupp_async_io_io_uring_test;
+using namespace bnio_async_io_io_uring_test;
 
 struct queue_test_operation : io_uring_operation_base {
   void execute() noexcept override {}
 };
 
 struct io_queue_test_operation
-    : bupp::async_io::linux_native::io_uring_io_operation_base {
-  void prepare(bupp::base::submission_queue_entry&) noexcept override {}
+    : bnio::async_io::linux_native::io_uring_io_operation_base {
+  void prepare(bnio::base::submission_queue_entry&) noexcept override {}
   void complete_submit_error(int) noexcept override {}
   void execute() noexcept override {}
 };
 
 TEST(IoUringOperationTraitsTest, shared_task_queue_separates_cpu_and_io) {
-  bupp::async_io::linux_native::io_uring_task_queue_state queue;
+  bnio::async_io::linux_native::io_uring_task_queue_state queue;
   queue_test_operation cpu;
   std::array<io_queue_test_operation, 3> io;
 
@@ -72,7 +72,7 @@ TEST(IoUringOperationTraitsTest, operation_state_concepts) {
 
   using resolve_sender =
       decltype(std::declval<io_uring_context&>().async_resolve(
-          bupp::async_io::dns_query{}, bupp::async_io::dns_result_view{}));
+          bnio::async_io::dns_query{}, bnio::async_io::dns_result_view{}));
   using poll_sender = decltype(std::declval<io_uring_context&>().async_poll(
       descriptor_view{}, static_cast<unsigned>(POLLIN)));
   static_assert(bexec::sender<poll_sender>);
@@ -81,11 +81,11 @@ TEST(IoUringOperationTraitsTest, operation_state_concepts) {
   static_assert(
       !std::is_constructible_v<io_uring_accept_operation<receiver>,
                                io_uring_context&, datagram_socket_view,
-                               bupp::async_io::ip::endpoint&, int, receiver>);
+                               bnio::async_io::ip::endpoint&, int, receiver>);
   static_assert(
       !std::is_constructible_v<io_uring_connect_operation<receiver>,
                                io_uring_context&, datagram_socket_view,
-                               const bupp::async_io::ip::endpoint&, receiver>);
+                               const bnio::async_io::ip::endpoint&, receiver>);
   static_assert(
       !std::is_constructible_v<io_uring_recv_operation<receiver>,
                                io_uring_context&, datagram_socket_view,
@@ -113,14 +113,14 @@ TEST(IoUringOperationTraitsTest, io_operations_accept_async_io_views) {
 
   char data[16]{};
   buffer_view buffer{data, sizeof(data)};
-  bupp::async_io::ip::endpoint remote_endpoint =
-      bupp::async_io::ip::endpoint::loopback_v4(80);
+  bnio::async_io::ip::endpoint remote_endpoint =
+      bnio::async_io::ip::endpoint::loopback_v4(80);
   msghdr message{};
   mutable_message_view receive_message(message);
   const_message_view send_message(message);
   iovec vector{data, sizeof(data)};
   buffer_sequence_view vectors(&vector, 1);
-  bupp::async_io::duration timeout{};
+  bnio::async_io::duration timeout{};
 
   [[maybe_unused]] io_uring_timeout_operation timeout_operation(
       context, timeout, 0, 0, receiver{});
@@ -158,16 +158,16 @@ TEST(IoUringOperationTraitsTest, io_operations_accept_async_io_views) {
       context, descriptor, vectors, 0, receiver{});
   [[maybe_unused]] io_uring_writev_operation writev_operation(
       context, descriptor, vectors, 0, receiver{});
-  bupp::async_io::ip::endpoint resolved_endpoints[4]{};
+  bnio::async_io::ip::endpoint resolved_endpoints[4]{};
   [[maybe_unused]] io_uring_resolve_operation resolve_operation(
-      context, bupp::async_io::dns_query("127.0.0.1", "80"),
-      bupp::async_io::dns_result_view(resolved_endpoints), resolve_receiver{});
+      context, bnio::async_io::dns_query("127.0.0.1", "80"),
+      bnio::async_io::dns_result_view(resolved_endpoints), resolve_receiver{});
 }
 
 TEST(IoUringOperationTraitsTest, timeout_operation_prepares_async_io_time) {
   io_uring_context context;
   io_uring_sqe raw_sqe{};
-  bupp::base::submission_queue_entry sqe(&raw_sqe);
+  bnio::base::submission_queue_entry sqe(&raw_sqe);
 
   io_uring_timeout_operation operation(
       context, std::chrono::seconds(2) + std::chrono::nanoseconds(5), 3,

@@ -7,7 +7,7 @@
 namespace {
 
 TEST(IoContextSchedulerTest, post_scheduler_schedule_posts_fifo) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -57,7 +57,7 @@ TEST(IoContextSchedulerTest, post_scheduler_schedule_posts_fifo) {
 
 TEST(IoContextSchedulerTest,
      dispatch_scheduler_schedule_posts_outside_context) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -85,7 +85,7 @@ TEST(IoContextSchedulerTest,
 
 TEST(IoContextSchedulerTest,
      dispatch_scheduler_schedule_runs_inline_in_context) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -106,7 +106,7 @@ TEST(IoContextSchedulerTest,
 }
 
 TEST(IoContextSchedulerTest, scheduler_schedule_pre_stopped_token_stops) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -129,7 +129,7 @@ TEST(IoContextSchedulerTest, scheduler_schedule_pre_stopped_token_stops) {
 }
 
 TEST(IoContextSchedulerTest, default_context_runs_on_a_different_thread) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }

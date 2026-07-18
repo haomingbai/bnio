@@ -1,10 +1,10 @@
 include("${PROJECT_SOURCE_DIR}/cmake/googletest.cmake")
-bupp_resolve_googletest_dependency()
+bnio_resolve_googletest_dependency()
 include(GoogleTest)
 
-function(bupp_add_gtest target test_prefix)
+function(bnio_add_gtest target test_prefix)
   target_link_libraries(${target} PRIVATE GTest::gtest_main)
-  bupp_set_project_warnings(${target})
+  bnio_set_project_warnings(${target})
   gtest_discover_tests(
     ${target}
     TEST_PREFIX "${test_prefix}."

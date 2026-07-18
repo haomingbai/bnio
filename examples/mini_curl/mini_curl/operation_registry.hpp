@@ -1,6 +1,6 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_MINI_CURL_OPERATION_REGISTRY_HPP_
-#define BUPP_EXAMPLES_MINI_CURL_OPERATION_REGISTRY_HPP_
+#ifndef BNIO_EXAMPLES_MINI_CURL_OPERATION_REGISTRY_HPP_
+#define BNIO_EXAMPLES_MINI_CURL_OPERATION_REGISTRY_HPP_
 
 #include <bexec/bexec.hpp>
 #include <memory>
@@ -65,4 +65,4 @@ class operation_registry {
 
 }  // namespace mini_curl
 
-#endif  // BUPP_EXAMPLES_MINI_CURL_OPERATION_REGISTRY_HPP_
+#endif  // BNIO_EXAMPLES_MINI_CURL_OPERATION_REGISTRY_HPP_

@@ -1,4 +1,4 @@
-#include <bupp/base/linux/probe.h>
+#include <bnio/base/linux/probe.h>
 #include <liburing.h>
 
 #include <array>
@@ -14,7 +14,7 @@ struct opcode_row {
 }  // namespace
 
 int main() {
-  bupp::base::probe probe;
+  bnio::base::probe probe;
   if (probe.get_probe() == nullptr) {
     std::cerr << "io_uring probe is not available\n";
     return 0;

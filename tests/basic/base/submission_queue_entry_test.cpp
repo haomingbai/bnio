@@ -1,4 +1,4 @@
-#include <bupp/base/linux/submission_queue_entry.h>
+#include <bnio/base/linux/submission_queue_entry.h>
 #include <gtest/gtest.h>
 #include <liburing.h>
 #include <poll.h>
@@ -12,14 +12,14 @@ namespace {
 
 constexpr std::uint64_t k_user_data = 0x62757070ULL;
 
-bupp::base::submission_queue_entry reset_sqe(io_uring_sqe& raw_sqe) {
+bnio::base::submission_queue_entry reset_sqe(io_uring_sqe& raw_sqe) {
   raw_sqe = {};
-  return bupp::base::submission_queue_entry(&raw_sqe);
+  return bnio::base::submission_queue_entry(&raw_sqe);
 }
 
 void test_metadata_helpers(io_uring_sqe& raw_sqe) {
   int marker = 0;
-  bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
+  bnio::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
 
   sqe.set_data(&marker);
   EXPECT_EQ(raw_sqe.user_data, reinterpret_cast<std::uintptr_t>(&marker));
@@ -36,7 +36,7 @@ void test_network_preps(io_uring_sqe& raw_sqe) {
   socklen_t addrlen = static_cast<socklen_t>(sizeof(storage));
   msghdr message{};
 
-  bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
+  bnio::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
   sqe.prep_accept(-1, addr, &addrlen, 0);
   EXPECT_EQ(raw_sqe.opcode, IORING_OP_ACCEPT);
 
@@ -64,7 +64,7 @@ void test_network_preps(io_uring_sqe& raw_sqe) {
 void test_poll_and_timeout_preps(io_uring_sqe& raw_sqe) {
   __kernel_timespec timeout{.tv_sec = 0, .tv_nsec = 1000};
 
-  bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
+  bnio::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
   sqe.prep_poll_add(-1, static_cast<unsigned>(POLLIN));
   EXPECT_EQ(raw_sqe.opcode, IORING_OP_POLL_ADD);
 
@@ -82,7 +82,7 @@ void test_filesystem_preps(io_uring_sqe& raw_sqe) {
   const unsigned buffer_size = static_cast<unsigned>(buffer.size());
   iovec iov{.iov_base = buffer.data(), .iov_len = buffer.size()};
 
-  bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
+  bnio::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
   sqe.prep_read(-1, buffer.data(), buffer_size, 0);
   EXPECT_EQ(raw_sqe.opcode, IORING_OP_READ);
 
@@ -104,7 +104,7 @@ void test_filesystem_preps(io_uring_sqe& raw_sqe) {
 TEST(SubmissionQueueEntryTest, behavior) {
   io_uring_sqe raw_sqe{};
 
-  bupp::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
+  bnio::base::submission_queue_entry sqe = reset_sqe(raw_sqe);
   sqe.prep_nop();
   EXPECT_EQ(raw_sqe.opcode, IORING_OP_NOP);
 

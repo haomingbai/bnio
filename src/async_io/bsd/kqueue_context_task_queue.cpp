@@ -3,7 +3,7 @@
 
 #include "kqueue_context_internal.h"
 
-namespace bupp::async_io::bsd_native {
+namespace bnio::async_io::bsd_native {
 
 int kqueue_context::post(kqueue_operation_base& operation) noexcept {
   assert_running();
@@ -106,7 +106,7 @@ int kqueue_context::trigger_wakeup() noexcept {
     return -EINVAL;
   }
 
-  bupp::base::event trigger(options_.wakeup_ident, EVFILT_USER, 0, NOTE_TRIGGER,
+  bnio::base::event trigger(options_.wakeup_ident, EVFILT_USER, 0, NOTE_TRIGGER,
                             0, wakeup_user_data());
   return queue_.control(&trigger, 1, nullptr, 0, nullptr);
 }
@@ -116,4 +116,4 @@ void* kqueue_context::wakeup_user_data() noexcept {
   return &wakeup_sentinel;
 }
 
-}  // namespace bupp::async_io::bsd_native
+}  // namespace bnio::async_io::bsd_native

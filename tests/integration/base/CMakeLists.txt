@@ -1,9 +1,9 @@
-function(bupp_add_integration_base_test name source)
-  add_executable(bupp_integration_base_${name}_test ${source})
-  target_link_libraries(bupp_integration_base_${name}_test PRIVATE bupp::bupp)
-  bupp_add_gtest(bupp_integration_base_${name}_test
-                 bupp.integration.base.${name}
+function(bnio_add_integration_base_test name source)
+  add_executable(bnio_integration_base_${name}_test ${source})
+  target_link_libraries(bnio_integration_base_${name}_test PRIVATE bnio::bnio)
+  bnio_add_gtest(bnio_integration_base_${name}_test
+                 bnio.integration.base.${name}
                  PROPERTIES LABELS "integration;base;${name}" ${ARGN})
 endfunction()
 
-bupp_add_integration_base_test(ring ring_test.cpp PROPERTIES TIMEOUT 10)
+bnio_add_integration_base_test(ring ring_test.cpp PROPERTIES TIMEOUT 10)

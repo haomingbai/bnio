@@ -1,6 +1,6 @@
-#include <bupp/async_io/ip/address.h>
+#include <bnio/async_io/ip/address.h>
 
-namespace bupp::async_io::ip {
+namespace bnio::async_io::ip {
 namespace {
 
 constexpr address::v4_bytes k_any_v4{0, 0, 0, 0};
@@ -95,4 +95,4 @@ std::uint32_t address::to_v4() const noexcept {
   return is_v4() ? v4_bytes_to_host_order(v4_) : 0;
 }
 
-}  // namespace bupp::async_io::ip
+}  // namespace bnio::async_io::ip

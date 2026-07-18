@@ -1,10 +1,10 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_BASE_EXAMPLE_SUPPORT_H_
-#define BUPP_EXAMPLES_BASE_EXAMPLE_SUPPORT_H_
+#ifndef BNIO_EXAMPLES_BASE_EXAMPLE_SUPPORT_H_
+#define BNIO_EXAMPLES_BASE_EXAMPLE_SUPPORT_H_
 
-#include <bupp/base/linux/completion_queue_entry.h>
-#include <bupp/base/linux/ring.h>
-#include <bupp/base/linux/submission_queue_entry.h>
+#include <bnio/base/linux/completion_queue_entry.h>
+#include <bnio/base/linux/ring.h>
+#include <bnio/base/linux/submission_queue_entry.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -13,7 +13,7 @@
 #include <string_view>
 #include <utility>
 
-namespace bupp::examples::base {
+namespace bnio::examples::base {
 
 /**
  * RAII owner for a POSIX file descriptor used by examples.
@@ -134,7 +134,7 @@ enum class ring_init_result {
 /**
  * Initializes a ring and logs example-friendly diagnostics on failure.
  */
-[[nodiscard]] inline ring_init_result init_ring(bupp::base::ring& ring,
+[[nodiscard]] inline ring_init_result init_ring(bnio::base::ring& ring,
                                                 unsigned entries,
                                                 std::string_view name) {
   const int result = ring.queue_init(entries);
@@ -154,9 +154,9 @@ enum class ring_init_result {
 /**
  * Returns an SQE or logs that the submission queue is full.
  */
-[[nodiscard]] inline bupp::base::submission_queue_entry get_sqe_or_log(
-    bupp::base::ring& ring, std::string_view label) {
-  bupp::base::submission_queue_entry sqe = ring.get_sqe();
+[[nodiscard]] inline bnio::base::submission_queue_entry get_sqe_or_log(
+    bnio::base::ring& ring, std::string_view label) {
+  bnio::base::submission_queue_entry sqe = ring.get_sqe();
   if (sqe.raw() == nullptr) {
     std::cerr << label << ": submission queue is full\n";
   }
@@ -166,7 +166,7 @@ enum class ring_init_result {
 /**
  * Submits pending SQEs and waits for one expected completion.
  */
-[[nodiscard]] inline int submit_and_wait_one(bupp::base::ring& ring,
+[[nodiscard]] inline int submit_and_wait_one(bnio::base::ring& ring,
                                              std::uint64_t expected_user_data,
                                              std::string_view label) {
   const int submit_result = ring.submit();
@@ -175,7 +175,7 @@ enum class ring_init_result {
     return submit_result;
   }
 
-  bupp::base::completion_queue_entry cqe;
+  bnio::base::completion_queue_entry cqe;
   const int wait_result = ring.wait_cqe(cqe);
   if (wait_result < 0) {
     std::cerr << label << ": io_uring_wait_cqe failed: " << wait_result << '\n';
@@ -194,6 +194,6 @@ enum class ring_init_result {
   return result;
 }
 
-}  // namespace bupp::examples::base
+}  // namespace bnio::examples::base
 
-#endif  // BUPP_EXAMPLES_BASE_EXAMPLE_SUPPORT_H_
+#endif  // BNIO_EXAMPLES_BASE_EXAMPLE_SUPPORT_H_

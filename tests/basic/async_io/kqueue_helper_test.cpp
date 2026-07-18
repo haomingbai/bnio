@@ -1,4 +1,4 @@
-#include <bupp/async_io/bsd/kqueue_helper.h>
+#include <bnio/async_io/bsd/kqueue_helper.h>
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -6,8 +6,8 @@
 
 namespace {
 
-using bupp::async_io::bsd_native::kqueue_helper;
-using bupp::async_io::bsd_native::kqueue_task;
+using bnio::async_io::bsd_native::kqueue_helper;
+using bnio::async_io::bsd_native::kqueue_task;
 
 TEST(KqueueHelperTest, nop_has_no_native_event) {
   kqueue_helper helper;

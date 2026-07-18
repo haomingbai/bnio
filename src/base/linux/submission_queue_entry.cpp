@@ -1,9 +1,9 @@
-#include <bupp/base/linux/submission_queue_entry.h>
+#include <bnio/base/linux/submission_queue_entry.h>
 #include <liburing.h>
 
-#include "bupp/base/linux/liburing.h"
+#include "bnio/base/linux/liburing.h"
 
-namespace bupp::base {
+namespace bnio::base {
 
 submission_queue_entry::submission_queue_entry() noexcept = default;
 
@@ -96,4 +96,4 @@ void submission_queue_entry::prep_writev(int fd, const iovec* iovecs,
   io_uring_prep_writev(sqe_, fd, iovecs, nr_vecs, offset);
 }
 
-}  // namespace bupp::base
+}  // namespace bnio::base

@@ -1,6 +1,6 @@
-#include <bupp/base/bsd/event.h>
+#include <bnio/base/bsd/event.h>
 
-namespace bupp::base {
+namespace bnio::base {
 
 event::event() noexcept = default;
 
@@ -50,4 +50,4 @@ bool event::has_error() const noexcept {
 
 bool event::has_eof() const noexcept { return (event_.flags & EV_EOF) != 0; }
 
-}  // namespace bupp::base
+}  // namespace bnio::base

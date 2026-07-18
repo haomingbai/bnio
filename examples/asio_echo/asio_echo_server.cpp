@@ -70,7 +70,7 @@ class session : public std::enable_shared_from_this<session> {
 //    operation_aborted and their handlers call on_session_closed().
 // 3. When the last session is gone, ctx_.stop() is called and run() returns.
 //
-// This mirrors bupp::io_context's semantics (drain in-flight work before
+// This mirrors bnio::io_context's semantics (drain in-flight work before
 // stopping), unlike a raw asio::io_context::stop() which exits immediately
 // and drops pending operations.
 // ---------------------------------------------------------------------------

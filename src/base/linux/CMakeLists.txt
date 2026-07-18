@@ -1,5 +1,5 @@
 target_sources(
-  bupp
+  bnio
   PRIVATE completion_queue_entry.cpp
           params.cpp
           probe.cpp

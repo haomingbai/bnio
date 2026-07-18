@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.20)
 
-set(BUPP_VERSION "0.0.3" CACHE STRING "bupp package version")
+set(BNIO_VERSION "0.0.3" CACHE STRING "bnio package version")
 
 project(
-  bupp
-  VERSION "${BUPP_VERSION}"
+  bnio
+  VERSION "${BNIO_VERSION}"
   DESCRIPTION "A small native asynchronous I/O library"
   LANGUAGES CXX)
 
@@ -13,68 +13,68 @@ include(GNUInstallDirs)
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/bexec.cmake")
 
 if(CMAKE_SOURCE_DIR STREQUAL PROJECT_SOURCE_DIR)
-  set(BUPP_IS_TOP_LEVEL ON)
+  set(BNIO_IS_TOP_LEVEL ON)
 else()
-  set(BUPP_IS_TOP_LEVEL OFF)
+  set(BNIO_IS_TOP_LEVEL OFF)
 endif()
 
 # ---- Platform detection ----
 #
-# bupp uses io_uring on Linux and kqueue on Darwin/FreeBSD. Platform-native
+# bnio uses io_uring on Linux and kqueue on Darwin/FreeBSD. Platform-native
 # headers and dependencies are compiled only for their matching backend.
-set(BUPP_PLATFORM_LINUX_DEFAULT OFF)
+set(BNIO_PLATFORM_LINUX_DEFAULT OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set(BUPP_PLATFORM_LINUX_DEFAULT ON)
+  set(BNIO_PLATFORM_LINUX_DEFAULT ON)
 endif()
-option(BUPP_PLATFORM_LINUX "Build the Linux io_uring backend"
-       ${BUPP_PLATFORM_LINUX_DEFAULT})
+option(BNIO_PLATFORM_LINUX "Build the Linux io_uring backend"
+       ${BNIO_PLATFORM_LINUX_DEFAULT})
 
-set(BUPP_PLATFORM_BSD_DEFAULT OFF)
+set(BNIO_PLATFORM_BSD_DEFAULT OFF)
 if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-  set(BUPP_PLATFORM_BSD_DEFAULT ON)
+  set(BNIO_PLATFORM_BSD_DEFAULT ON)
 endif()
-option(BUPP_PLATFORM_BSD "Build the BSD kqueue backend"
-       ${BUPP_PLATFORM_BSD_DEFAULT})
+option(BNIO_PLATFORM_BSD "Build the BSD kqueue backend"
+       ${BNIO_PLATFORM_BSD_DEFAULT})
 
-if(BUPP_PLATFORM_LINUX OR BUPP_PLATFORM_BSD)
+if(BNIO_PLATFORM_LINUX OR BNIO_PLATFORM_BSD)
   find_package(OpenSSL REQUIRED)
 endif()
 
-if(BUPP_PLATFORM_LINUX)
+if(BNIO_PLATFORM_LINUX)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.1)
 endif()
 
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
-option(BUPP_BUILD_TESTS "Build bupp tests" ${BUPP_IS_TOP_LEVEL})
-option(BUPP_BUILD_EXAMPLES "Build bupp examples" ${BUPP_IS_TOP_LEVEL})
-option(BUPP_BUILD_ASIO_EXAMPLES "Build standalone Asio echo server example (auto-fetches Asio)" OFF)
-option(BUPP_ENABLE_WARNINGS "Enable compiler warnings for bupp targets" ON)
-option(BUPP_ENABLE_TSAN "Build bupp targets with ThreadSanitizer" OFF)
-option(BUPP_ENABLE_COVERAGE "Instrument bupp targets for coverage reporting" OFF)
-option(BUPP_INSTALL "Generate bupp installation rules" ${BUPP_IS_TOP_LEVEL})
-option(BUPP_PACKAGE "Generate CPack packaging rules" OFF)
+option(BNIO_BUILD_TESTS "Build bnio tests" ${BNIO_IS_TOP_LEVEL})
+option(BNIO_BUILD_EXAMPLES "Build bnio examples" ${BNIO_IS_TOP_LEVEL})
+option(BNIO_BUILD_ASIO_EXAMPLES "Build standalone Asio echo server example (auto-fetches Asio)" OFF)
+option(BNIO_ENABLE_WARNINGS "Enable compiler warnings for bnio targets" ON)
+option(BNIO_ENABLE_TSAN "Build bnio targets with ThreadSanitizer" OFF)
+option(BNIO_ENABLE_COVERAGE "Instrument bnio targets for coverage reporting" OFF)
+option(BNIO_INSTALL "Generate bnio installation rules" ${BNIO_IS_TOP_LEVEL})
+option(BNIO_PACKAGE "Generate CPack packaging rules" OFF)
 
-if(BUPP_INSTALL)
+if(BNIO_INSTALL)
   set(
-    BUPP_INSTALL_CMAKEDIR
-    "${CMAKE_INSTALL_LIBDIR}/cmake/bupp"
-    CACHE STRING "Directory in which to install the bupp CMake package")
+    BNIO_INSTALL_CMAKEDIR
+    "${CMAKE_INSTALL_LIBDIR}/cmake/bnio"
+    CACHE STRING "Directory in which to install the bnio CMake package")
 endif()
 
-if(BUPP_BUILD_TESTS)
+if(BNIO_BUILD_TESTS)
   include(CTest)
   enable_testing()
 endif()
 
-bupp_resolve_bexec_dependency()
+bnio_resolve_bexec_dependency()
 
 # ---- Standalone Asio dependency resolution ----
 #
-# Call bupp_resolve_asio_dependency() to ensure asio::asio is available.
+# Call bnio_resolve_asio_dependency() to ensure asio::asio is available.
 # Tries find_package first; falls back to FetchContent from GitHub.
 
-function(bupp_resolve_asio_dependency)
+function(bnio_resolve_asio_dependency)
   if(TARGET asio::asio)
     return()
   endif()
@@ -109,12 +109,12 @@ function(bupp_resolve_asio_dependency)
   message(STATUS "Asio fetched successfully (asio::asio)")
 endfunction()
 
-if(BUPP_BUILD_ASIO_EXAMPLES)
-  bupp_resolve_asio_dependency()
+if(BNIO_BUILD_ASIO_EXAMPLES)
+  bnio_resolve_asio_dependency()
 endif()
 
-function(bupp_set_project_warnings target)
-  if(NOT BUPP_ENABLE_WARNINGS)
+function(bnio_set_project_warnings target)
+  if(NOT BNIO_ENABLE_WARNINGS)
     return()
   endif()
 
@@ -125,77 +125,77 @@ function(bupp_set_project_warnings target)
   endif()
 endfunction()
 
-if(BUPP_ENABLE_TSAN)
+if(BNIO_ENABLE_TSAN)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
     add_link_options(-fsanitize=thread)
   else()
-    message(FATAL_ERROR "BUPP_ENABLE_TSAN requires GCC or Clang")
+    message(FATAL_ERROR "BNIO_ENABLE_TSAN requires GCC or Clang")
   endif()
 endif()
 
-if(BUPP_ENABLE_COVERAGE)
-  if(BUPP_ENABLE_TSAN)
+if(BNIO_ENABLE_COVERAGE)
+  if(BNIO_ENABLE_TSAN)
     message(FATAL_ERROR
-            "BUPP_ENABLE_COVERAGE cannot be combined with BUPP_ENABLE_TSAN")
+            "BNIO_ENABLE_COVERAGE cannot be combined with BNIO_ENABLE_TSAN")
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-O0 -g --coverage)
     add_link_options(--coverage)
   else()
     message(FATAL_ERROR
-            "BUPP_ENABLE_COVERAGE requires GCC, Clang, or AppleClang")
+            "BNIO_ENABLE_COVERAGE requires GCC, Clang, or AppleClang")
   endif()
 endif()
 
 add_subdirectory(include)
 add_subdirectory(src)
 
-if(BUPP_BUILD_EXAMPLES)
+if(BNIO_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
 
-if(BUPP_BUILD_TESTS)
+if(BNIO_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
-if(BUPP_INSTALL)
+if(BNIO_INSTALL)
   configure_package_config_file(
-    cmake/buppConfig.cmake.in
-    "${CMAKE_CURRENT_BINARY_DIR}/buppConfig.cmake"
-    INSTALL_DESTINATION "${BUPP_INSTALL_CMAKEDIR}")
+    cmake/bnioConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/bnioConfig.cmake"
+    INSTALL_DESTINATION "${BNIO_INSTALL_CMAKEDIR}")
   write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/buppConfigVersion.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/bnioConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
     COMPATIBILITY SameMajorVersion)
   install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/buppConfig.cmake"
-          "${CMAKE_CURRENT_BINARY_DIR}/buppConfigVersion.cmake"
-    DESTINATION "${BUPP_INSTALL_CMAKEDIR}"
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/bnioConfig.cmake"
+          "${CMAKE_CURRENT_BINARY_DIR}/bnioConfigVersion.cmake"
+    DESTINATION "${BNIO_INSTALL_CMAKEDIR}"
     COMPONENT development)
 
   if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
     file(
-      RELATIVE_PATH BUPP_PC_PREFIX_RELATIVE
+      RELATIVE_PATH BNIO_PC_PREFIX_RELATIVE
       "${CMAKE_INSTALL_LIBDIR}/pkgconfig" "${CMAKE_INSTALL_PREFIX}")
   else()
     file(
-      RELATIVE_PATH BUPP_PC_PREFIX_RELATIVE
+      RELATIVE_PATH BNIO_PC_PREFIX_RELATIVE
       "/${CMAKE_INSTALL_LIBDIR}/pkgconfig" "/")
   endif()
 
-  set(BUPP_PC_REQUIRES "bexec >= ${BUPP_BEXEC_MIN_VERSION}, openssl")
-  if(BUPP_PLATFORM_LINUX)
-    string(APPEND BUPP_PC_REQUIRES ", liburing >= 2.1")
+  set(BNIO_PC_REQUIRES "bexec >= ${BNIO_BEXEC_MIN_VERSION}, openssl")
+  if(BNIO_PLATFORM_LINUX)
+    string(APPEND BNIO_PC_REQUIRES ", liburing >= 2.1")
   endif()
   if(BUILD_SHARED_LIBS)
-    set(BUPP_PC_SHARED_CFLAGS " -DBUPP_SHARED_LIBRARY")
+    set(BNIO_PC_SHARED_CFLAGS " -DBNIO_SHARED_LIBRARY")
   else()
-    set(BUPP_PC_SHARED_CFLAGS "")
+    set(BNIO_PC_SHARED_CFLAGS "")
   endif()
-  configure_file(cmake/bupp.pc.in "${CMAKE_CURRENT_BINARY_DIR}/bupp.pc"
+  configure_file(cmake/bnio.pc.in "${CMAKE_CURRENT_BINARY_DIR}/bnio.pc"
                  @ONLY)
   install(
-    FILES "${CMAKE_CURRENT_BINARY_DIR}/bupp.pc"
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/bnio.pc"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig"
     COMPONENT development)
   install(FILES LICENSE README.md
@@ -204,6 +204,6 @@ if(BUPP_INSTALL)
 endif()
 
 # ---- CPack packaging ----
-if(BUPP_PACKAGE)
+if(BNIO_PACKAGE)
   include("${CMAKE_CURRENT_LIST_DIR}/cmake/cpack.cmake")
 endif()

@@ -1,10 +1,10 @@
-#include <bupp/base/linux/completion_queue_entry.h>
+#include <bnio/base/linux/completion_queue_entry.h>
 
 #include <cerrno>
 
 #include "io_uring_context_internal.h"
 
-namespace bupp::async_io::linux_native {
+namespace bnio::async_io::linux_native {
 
 int io_uring_context::wait_for_cqe_event() noexcept {
   if (!ring_.is_open()) {
@@ -13,7 +13,7 @@ int io_uring_context::wait_for_cqe_event() noexcept {
   const int ring_fd = ring_.native_fd();
 
   for (;;) {
-    const int result = bupp::base::ring::wait_cqe_event(ring_fd, 1);
+    const int result = bnio::base::ring::wait_cqe_event(ring_fd, 1);
     if (result == -EINTR) {
       continue;
     }
@@ -42,7 +42,7 @@ unsigned io_uring_context::collect_cqe_tasks(
   (void)ring_.consume_ready_cqes(
       options_.cqe_batch_window,
       [this, &cqe_tasks,
-       &task_count](bupp::base::completion_queue_entry cqe) noexcept {
+       &task_count](bnio::base::completion_queue_entry cqe) noexcept {
         cqe_data data;
         data.user_data = cqe.get_data();
         data.result = cqe.res();
@@ -102,4 +102,4 @@ bool io_uring_context::enqueue_cqe_task(const cqe_data& data,
   return true;
 }
 
-}  // namespace bupp::async_io::linux_native
+}  // namespace bnio::async_io::linux_native

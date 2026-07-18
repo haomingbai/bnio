@@ -1,4 +1,4 @@
-#include <bupp/async_io/time.h>
+#include <bnio/async_io/time.h>
 #include <gtest/gtest.h>
 
 #include <chrono>
@@ -8,17 +8,17 @@ namespace {
 
 TEST(TimeTest, chrono_aliases) {
   static_assert(
-      std::is_same_v<bupp::async_io::steady_clock, std::chrono::steady_clock>);
+      std::is_same_v<bnio::async_io::steady_clock, std::chrono::steady_clock>);
   static_assert(
-      std::is_same_v<bupp::async_io::clock, bupp::async_io::steady_clock>);
+      std::is_same_v<bnio::async_io::clock, bnio::async_io::steady_clock>);
   static_assert(
-      std::is_same_v<bupp::async_io::system_clock, std::chrono::system_clock>);
-  static_assert(std::is_same_v<bupp::async_io::duration,
-                               bupp::async_io::clock::duration>);
-  static_assert(std::is_same_v<bupp::async_io::time_point,
-                               bupp::async_io::clock::time_point>);
-  static_assert(std::is_same_v<bupp::async_io::system_time_point,
-                               bupp::async_io::system_clock::time_point>);
+      std::is_same_v<bnio::async_io::system_clock, std::chrono::system_clock>);
+  static_assert(std::is_same_v<bnio::async_io::duration,
+                               bnio::async_io::clock::duration>);
+  static_assert(std::is_same_v<bnio::async_io::time_point,
+                               bnio::async_io::clock::time_point>);
+  static_assert(std::is_same_v<bnio::async_io::system_time_point,
+                               bnio::async_io::system_clock::time_point>);
 }
 
 }  // namespace

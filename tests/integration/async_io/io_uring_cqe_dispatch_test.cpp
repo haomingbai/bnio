@@ -10,7 +10,7 @@
 
 namespace {
 
-using namespace bupp_async_io_io_uring_test;
+using namespace bnio_async_io_io_uring_test;
 
 TEST(IoUringCqeDispatchTest, cqe_batch_window_drains_multiple_rounds) {
   io_uring_context context;

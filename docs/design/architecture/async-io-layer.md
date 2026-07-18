@@ -1,6 +1,6 @@
-# Layer 2: `bupp::async_io` — Platform-Neutral Vocabulary Types
+# Layer 2: `bnio::async_io` — Platform-Neutral Vocabulary Types
 
-Namespace `bupp::async_io`. Headers in `include/bupp/async_io/`.
+Namespace `bnio::async_io`. Headers in `include/bnio/async_io/`.
 
 This layer defines **vocabulary types only**: non-owning views and value types.
 It intentionally contains **zero RAII owners**.
@@ -51,7 +51,7 @@ These are copyable, self-contained value types.
 
 ### `linux_native::io_uring_context` — Platform Event Loop
 
-Within `bupp::async_io::linux_native`, `io_uring_context` owns a `base::ring`
+Within `bnio::async_io::linux_native`, `io_uring_context` owns a `base::ring`
 and provides a single-threaded event loop. Under the **one-thread-one-uring**
 model, each run-loop thread owns its own `io_uring_context` (allocated from
 `io_context`'s native worker pool). All workers in one high-level context share

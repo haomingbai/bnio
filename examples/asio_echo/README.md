@@ -8,8 +8,8 @@ Asio is fetched automatically by CMake — no system package required.
 ## Build
 
 ```sh
-cmake -S . -B build-asio -DCMAKE_BUILD_TYPE=Debug -DBUPP_BUILD_ASIO_EXAMPLES=ON
-cmake --build build-asio --target bupp_asio_echo_server
+cmake -S . -B build-asio -DCMAKE_BUILD_TYPE=Debug -DBNIO_BUILD_ASIO_EXAMPLES=ON
+cmake --build build-asio --target bnio_asio_echo_server
 ```
 
 If you already have standalone Asio installed system-wide, CMake will use that
@@ -18,10 +18,10 @@ copy instead of fetching.
 ## Run
 
 ```sh
-./build-asio/examples/asio_echo/bupp_asio_echo_server [port]
+./build-asio/examples/asio_echo/bnio_asio_echo_server [port]
 ```
 
-Default port is **8082** (8080 = bupp `io_context` server, 8081 = benchmark
+Default port is **8082** (8080 = bnio `io_context` server, 8081 = benchmark
 Asio server).
 
 ## Try it
@@ -47,7 +47,7 @@ Press Ctrl‑C (SIGINT) or send SIGTERM. The server:
 3. Each handler removes its session from the server's session set.
 4. When the last session is gone, `ctx.stop()` is called and `run()` returns.
 
-This mirrors `bupp::io_context`'s graceful shutdown semantics (drain in-flight
+This mirrors `bnio::io_context`'s graceful shutdown semantics (drain in-flight
 work before stopping the loop), unlike a naive `ctx.stop()` which exits
 immediately and drops pending operations.
 

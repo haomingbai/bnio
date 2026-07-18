@@ -1,11 +1,11 @@
-#include <bupp/base/linux/probe.h>
+#include <bnio/base/linux/probe.h>
 #include <liburing.h>
 
 #include <utility>
 
-#include "bupp/base/linux/ring.h"
+#include "bnio/base/linux/ring.h"
 
-namespace bupp::base {
+namespace bnio::base {
 
 probe::probe() noexcept = default;
 
@@ -54,4 +54,4 @@ const io_uring_probe* probe::raw() const noexcept { return probe_; }
 
 bool probe::is_open() const noexcept { return probe_ != nullptr; }
 
-}  // namespace bupp::base
+}  // namespace bnio::base

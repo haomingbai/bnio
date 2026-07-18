@@ -1,6 +1,6 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_MINI_CURL_CLIENT_REDIRECT_HPP_
-#define BUPP_EXAMPLES_MINI_CURL_CLIENT_REDIRECT_HPP_
+#ifndef BNIO_EXAMPLES_MINI_CURL_CLIENT_REDIRECT_HPP_
+#define BNIO_EXAMPLES_MINI_CURL_CLIENT_REDIRECT_HPP_
 
 #include <iostream>
 #include <utility>
@@ -60,4 +60,4 @@ inline void mini_curl_client::follow_redirect(std::string location) {
 
 }  // namespace mini_curl
 
-#endif  // BUPP_EXAMPLES_MINI_CURL_CLIENT_REDIRECT_HPP_
+#endif  // BNIO_EXAMPLES_MINI_CURL_CLIENT_REDIRECT_HPP_

@@ -8,7 +8,7 @@ namespace {
 
 struct pair_byte_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
   unsigned* completions = nullptr;
   unsigned target = 1;
 
@@ -50,7 +50,7 @@ struct stopped_byte_receiver : byte_receiver {
 };
 
 TEST(IoContextReadWriteTest, ready_socket_read_completes_without_queue) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -59,8 +59,8 @@ TEST(IoContextReadWriteTest, ready_socket_read_completes_without_queue) {
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
             0);
-  bupp::tcp_socket receiver_socket(sockets[0]);
-  bupp::tcp_socket sender_socket(sockets[1]);
+  bnio::tcp_socket receiver_socket(sockets[0]);
+  bnio::tcp_socket sender_socket(sockets[1]);
 
   constexpr std::string_view payload = "ready";
   EXPECT_EQ(::send(sender_socket.native_handle(), payload.data(),
@@ -72,7 +72,7 @@ TEST(IoContextReadWriteTest, ready_socket_read_completes_without_queue) {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = receiver_socket.async_read(scheduler, bupp::buffer(bytes));
+  auto sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -83,7 +83,7 @@ TEST(IoContextReadWriteTest, ready_socket_read_completes_without_queue) {
 }
 
 TEST(IoContextReadWriteTest, passive_drain_reads_io) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -92,15 +92,15 @@ TEST(IoContextReadWriteTest, passive_drain_reads_io) {
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
             0);
-  bupp::tcp_socket receiver_socket(sockets[0]);
-  bupp::tcp_socket sender_socket(sockets[1]);
+  bnio::tcp_socket receiver_socket(sockets[0]);
+  bnio::tcp_socket sender_socket(sockets[1]);
 
   std::array<char, 16> bytes{};
   byte_receiver receiver;
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = receiver_socket.async_read(scheduler, bupp::buffer(bytes));
+  auto sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   constexpr std::string_view payload = "passive";
@@ -116,7 +116,7 @@ TEST(IoContextReadWriteTest, passive_drain_reads_io) {
 }
 
 TEST(IoContextReadWriteTest, ready_socket_write_completes_without_queue) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -125,8 +125,8 @@ TEST(IoContextReadWriteTest, ready_socket_write_completes_without_queue) {
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
             0);
-  bupp::tcp_socket sender_socket(sockets[0]);
-  bupp::tcp_socket receiver_socket(sockets[1]);
+  bnio::tcp_socket sender_socket(sockets[0]);
+  bnio::tcp_socket receiver_socket(sockets[1]);
 
   constexpr std::string_view payload = "ready write";
   byte_receiver receiver;
@@ -134,7 +134,7 @@ TEST(IoContextReadWriteTest, ready_socket_write_completes_without_queue) {
   auto state = receiver.state;
 
   auto sender =
-      sender_socket.async_write(scheduler, bupp::buffer(payload), MSG_NOSIGNAL);
+      sender_socket.async_write(scheduler, bnio::buffer(payload), MSG_NOSIGNAL);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -149,7 +149,7 @@ TEST(IoContextReadWriteTest, ready_socket_write_completes_without_queue) {
 }
 
 TEST(IoContextReadWriteTest, blocked_socket_write_falls_back_to_queue) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -158,8 +158,8 @@ TEST(IoContextReadWriteTest, blocked_socket_write_falls_back_to_queue) {
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
             0);
-  bupp::tcp_socket sender_socket(sockets[0]);
-  bupp::tcp_socket receiver_socket(sockets[1]);
+  bnio::tcp_socket sender_socket(sockets[0]);
+  bnio::tcp_socket receiver_socket(sockets[1]);
 
   const int sender_flags = ::fcntl(sender_socket.native_handle(), F_GETFL, 0);
   EXPECT_TRUE(sender_flags >= 0);
@@ -185,7 +185,7 @@ TEST(IoContextReadWriteTest, blocked_socket_write_falls_back_to_queue) {
   byte_receiver receiver;
   receiver.context = &context;
   auto state = receiver.state;
-  auto sender = sender_socket.async_write_some(scheduler, bupp::buffer(payload),
+  auto sender = sender_socket.async_write_some(scheduler, bnio::buffer(payload),
                                                MSG_NOSIGNAL);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
@@ -215,7 +215,7 @@ TEST(IoContextReadWriteTest, blocked_socket_write_falls_back_to_queue) {
 }
 
 TEST(IoContextReadWriteTest, io_idle_drain_reads) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -224,15 +224,15 @@ TEST(IoContextReadWriteTest, io_idle_drain_reads) {
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
             0);
-  bupp::tcp_socket receiver_socket(sockets[0]);
-  bupp::tcp_socket sender_socket(sockets[1]);
+  bnio::tcp_socket receiver_socket(sockets[0]);
+  bnio::tcp_socket sender_socket(sockets[1]);
 
   std::array<char, 16> bytes{};
   byte_receiver receiver;
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = receiver_socket.async_read(scheduler, bupp::buffer(bytes));
+  auto sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   constexpr std::string_view payload = "auto";
@@ -248,7 +248,7 @@ TEST(IoContextReadWriteTest, io_idle_drain_reads) {
 }
 
 TEST(IoContextReadWriteTest, io_idle_drain_read_write_pair) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -257,8 +257,8 @@ TEST(IoContextReadWriteTest, io_idle_drain_read_write_pair) {
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
             0);
-  bupp::tcp_socket receiver_socket(sockets[0]);
-  bupp::tcp_socket sender_socket(sockets[1]);
+  bnio::tcp_socket receiver_socket(sockets[0]);
+  bnio::tcp_socket sender_socket(sockets[1]);
 
   constexpr std::string_view payload = "auto pair";
   std::array<char, 32> bytes{};
@@ -276,9 +276,9 @@ TEST(IoContextReadWriteTest, io_idle_drain_read_write_pair) {
   write_receiver.target = 2;
   auto write_state = write_receiver.state;
 
-  auto read_sender = receiver_socket.async_read(scheduler, bupp::buffer(bytes));
+  auto read_sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
   auto write_sender =
-      sender_socket.async_write(scheduler, bupp::buffer(payload), MSG_NOSIGNAL);
+      sender_socket.async_write(scheduler, bnio::buffer(payload), MSG_NOSIGNAL);
   auto read_operation =
       bexec::connect(std::move(read_sender), std::move(read_receiver));
   auto write_operation =
@@ -297,7 +297,7 @@ TEST(IoContextReadWriteTest, io_idle_drain_read_write_pair) {
 }
 
 TEST(IoContextReadWriteTest, descriptor_pipe_read_write_pair) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -322,9 +322,9 @@ TEST(IoContextReadWriteTest, descriptor_pipe_read_write_pair) {
   auto write_state = write_receiver.state;
 
   auto read_sender = scheduler.async_read(
-      bupp::async_io::descriptor_view(descriptors[0]), bupp::buffer(bytes));
+      bnio::async_io::descriptor_view(descriptors[0]), bnio::buffer(bytes));
   auto write_sender = scheduler.async_write(
-      bupp::async_io::descriptor_view(descriptors[1]), bupp::buffer(payload));
+      bnio::async_io::descriptor_view(descriptors[1]), bnio::buffer(payload));
   auto read_operation =
       bexec::connect(std::move(read_sender), std::move(read_receiver));
   auto write_operation =
@@ -346,7 +346,7 @@ TEST(IoContextReadWriteTest, descriptor_pipe_read_write_pair) {
 
 TEST(IoContextReadWriteTest,
      invalid_descriptor_read_reports_bad_file_descriptor) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -357,8 +357,8 @@ TEST(IoContextReadWriteTest,
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_read(bupp::async_io::descriptor_view(),
-                                     bupp::buffer(bytes));
+  auto sender = scheduler.async_read(bnio::async_io::descriptor_view(),
+                                     bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -369,7 +369,7 @@ TEST(IoContextReadWriteTest,
 
 TEST(IoContextReadWriteTest,
      invalid_descriptor_write_reports_bad_file_descriptor) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -380,8 +380,8 @@ TEST(IoContextReadWriteTest,
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_write(bupp::async_io::descriptor_view(),
-                                      bupp::buffer(payload));
+  auto sender = scheduler.async_write(bnio::async_io::descriptor_view(),
+                                      bnio::buffer(payload));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -391,7 +391,7 @@ TEST(IoContextReadWriteTest,
 }
 
 TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_reports_stopped) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -406,8 +406,8 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_reports_stopped) {
   receiver.env = stop_env{source.get_token()};
   auto state = receiver.state;
 
-  auto sender = scheduler.async_read(bupp::async_io::descriptor_view(),
-                                     bupp::buffer(bytes));
+  auto sender = scheduler.async_read(bnio::async_io::descriptor_view(),
+                                     bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -416,7 +416,7 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_reports_stopped) {
 }
 
 TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_reports_stopped) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -431,8 +431,8 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_reports_stopped) {
   receiver.env = stop_env{source.get_token()};
   auto state = receiver.state;
 
-  auto sender = scheduler.async_write(bupp::async_io::descriptor_view(),
-                                      bupp::buffer(payload));
+  auto sender = scheduler.async_write(bnio::async_io::descriptor_view(),
+                                      bnio::buffer(payload));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
@@ -440,7 +440,7 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_reports_stopped) {
 }
 
 TEST(IoContextReadWriteTest, file_write_and_read) {
-  std::string path = "/tmp/bupp-io-context-file-XXXXXX";
+  std::string path = "/tmp/bnio-io-context-file-XXXXXX";
   const int fd = ::mkstemp(path.data());
   EXPECT_TRUE(fd >= 0);
   EXPECT_EQ(::unlink(path.c_str()), 0);
@@ -448,7 +448,7 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
   constexpr std::string_view payload = "file through io_uring";
 
   {
-    bupp::io_context context;
+    bnio::io_context context;
     if (!context_available(context)) {
       EXPECT_EQ(::close(fd), 0);
       GTEST_SKIP() << "native I/O context is unavailable";
@@ -460,13 +460,13 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
     auto state = receiver.state;
 
     auto sender =
-        bupp::async_write(scheduler, bupp::async_io::descriptor_view(fd),
-                          bupp::buffer(payload), 0);
+        bnio::async_write(scheduler, bnio::async_io::descriptor_view(fd),
+                          bnio::buffer(payload), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
 
     EXPECT_EQ(state->signal, signal_kind::none);
-#if defined(BUPP_SYSTEM_BSD)
+#if defined(BNIO_SYSTEM_BSD)
     std::array<char, 64> started_bytes{};
     EXPECT_EQ(::pread(fd, started_bytes.data(), started_bytes.size(), 0),
               static_cast<ssize_t>(payload.size()));
@@ -480,7 +480,7 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
   }
 
   {
-    bupp::io_context context;
+    bnio::io_context context;
     if (!context_available(context)) {
       EXPECT_EQ(::close(fd), 0);
       GTEST_SKIP() << "native I/O context is unavailable";
@@ -492,12 +492,12 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = bupp::async_read(
-        scheduler, bupp::async_io::descriptor_view(fd), bupp::buffer(bytes), 0);
+    auto sender = bnio::async_read(
+        scheduler, bnio::async_io::descriptor_view(fd), bnio::buffer(bytes), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     EXPECT_EQ(state->signal, signal_kind::none);
-#if defined(BUPP_SYSTEM_BSD)
+#if defined(BNIO_SYSTEM_BSD)
     EXPECT_TRUE(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
 #endif
     context.run();

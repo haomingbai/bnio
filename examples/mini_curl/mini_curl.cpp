@@ -77,11 +77,11 @@ void print_usage(const char* program) {
       continue;
     }
     if (arg == "--ipv4") {
-      options.address_version = bupp::ip::address::version::v4;
+      options.address_version = bnio::ip::address::version::v4;
       continue;
     }
     if (arg == "--ipv6") {
-      options.address_version = bupp::ip::address::version::v6;
+      options.address_version = bnio::ip::address::version::v6;
       continue;
     }
     if (arg == "-X" || arg == "--request") {
@@ -229,7 +229,7 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context.is_open()) {
     std::cerr << "io_context unavailable\n";
     return 1;

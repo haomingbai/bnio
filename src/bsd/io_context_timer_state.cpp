@@ -2,10 +2,10 @@
 #include <utility>
 #include <vector>
 
-#include "bupp/async_io/time.h"
-#include "bupp/bsd/detail/io_context_timer_types.h"
+#include "bnio/async_io/time.h"
+#include "bnio/bsd/detail/io_context_timer_types.h"
 
-namespace bupp {
+namespace bnio {
 
 bool detail::timer_state_data::queue_driver() noexcept {
   if (driver == queued_operation_state::posted) {
@@ -87,4 +87,4 @@ bool detail::timer_state_data::heap_item_less(
   return left.timer_id < right.timer_id;
 }
 
-}  // namespace bupp
+}  // namespace bnio

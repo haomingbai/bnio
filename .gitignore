@@ -13,3 +13,5 @@ Testing/
 .artifacts/
 coverage/
 .cache/
+
+.agent

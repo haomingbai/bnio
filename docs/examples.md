@@ -1,6 +1,6 @@
 # Examples
 
-This page collects runnable examples for `bupp`. The examples are intentionally
+This page collects runnable examples for `bnio`. The examples are intentionally
 small and show the lifetime rules around the event loop.
 
 ## Build Examples
@@ -15,12 +15,12 @@ cmake --build build
 To disable them:
 
 ```sh
-cmake -S . -B build -DBUPP_BUILD_EXAMPLES=OFF
+cmake -S . -B build -DBNIO_BUILD_EXAMPLES=OFF
 ```
 
 ## Running an `io_context` Event Loop
 
-`bupp::io_context` owns the event loop. Streams such as `tcp_socket`,
+`bnio::io_context` owns the event loop. Streams such as `tcp_socket`,
 `tcp_acceptor`, and `ssl_stream` expose the high-level async I/O sender
 factories. The scheduler provides the low-level ability to operate on socket
 views and file descriptors. Calling an async factory creates a sender.
@@ -30,12 +30,12 @@ then waits for completion events and
 delivers receiver callbacks.
 
 ```cpp
-bupp::io_context ctx;
+bnio::io_context ctx;
 auto scheduler = ctx.get_post_scheduler();
-bupp::tcp_socket socket;
+bnio::tcp_socket socket;
 std::array<char, 4096> bytes{};
 
-auto sender = socket.async_read(scheduler, bupp::buffer(bytes), 0);
+auto sender = socket.async_read(scheduler, bnio::buffer(bytes), 0);
 auto op = bexec::connect(std::move(sender), my_receiver{});
 
 bexec::start(op);
@@ -68,8 +68,8 @@ Build and run it:
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --target bupp_raw_echo
-./build/examples/raw_echo/bupp_raw_echo 8090
+cmake --build build --target bnio_raw_echo
+./build/examples/raw_echo/bnio_raw_echo 8090
 ```
 
 ## Base Linux Examples
@@ -80,13 +80,13 @@ to understand the layer under `io_context`.
 
 ## Raw Echo Benchmark
 
-The benchmark helper builds the bupp raw echo server, the Asio raw echo server,
+The benchmark helper builds the bnio raw echo server, the Asio raw echo server,
 and one shared Asio-based client. The same client runs against both servers with
 the same connection count, duration, and message size.
 
 | Option | What it does |
 |--------|-------------|
-| `BUPP_BUILD_ASIO_EXAMPLES=ON` | Build the Asio comparison server and benchmark client |
+| `BNIO_BUILD_ASIO_EXAMPLES=ON` | Build the Asio comparison server and benchmark client |
 
 Run the helper script:
 
@@ -107,8 +107,8 @@ The `examples/asio_echo` directory contains an HTTP/1.1 echo server built on
 with:
 
 ```sh
-cmake -S . -B build-asio -DCMAKE_BUILD_TYPE=Debug -DBUPP_BUILD_ASIO_EXAMPLES=ON
-cmake --build build-asio --target bupp_asio_echo_server
+cmake -S . -B build-asio -DCMAKE_BUILD_TYPE=Debug -DBNIO_BUILD_ASIO_EXAMPLES=ON
+cmake --build build-asio --target bnio_asio_echo_server
 ```
 
 CMake auto-fetches Asio from GitHub. If you already have Asio installed
@@ -126,17 +126,17 @@ calls `ctx.stop()` directly):
 4. Each handler removes its session from the server's session set
 5. When the last session is gone → `ctx.stop()` → `run()` returns
 
-This mirrors `bupp::io_context`'s shutdown semantics (drain in-flight work
+This mirrors `bnio::io_context`'s shutdown semantics (drain in-flight work
 before stopping), while a raw `asio::io_context::stop()` exits immediately and
 drops pending operations.
 
 ### Run
 
 ```sh
-./build-asio/examples/asio_echo/bupp_asio_echo_server [port]
+./build-asio/examples/asio_echo/bnio_asio_echo_server [port]
 ```
 
-Default port is **8082** (8080 = bupp `io_context` server, 8081 = benchmark
+Default port is **8082** (8080 = bnio `io_context` server, 8081 = benchmark
 Asio server).
 
 ```sh

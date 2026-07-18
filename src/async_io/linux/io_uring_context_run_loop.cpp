@@ -2,7 +2,7 @@
 
 #include "io_uring_context_internal.h"
 
-namespace bupp::async_io::linux_native {
+namespace bnio::async_io::linux_native {
 
 void io_uring_context::run() noexcept {
   assert_running();
@@ -186,4 +186,4 @@ void io_uring_context::finish() noexcept {
   state_.store(context_state::finished, std::memory_order_release);
 }
 
-}  // namespace bupp::async_io::linux_native
+}  // namespace bnio::async_io::linux_native

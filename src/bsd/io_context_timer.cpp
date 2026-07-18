@@ -1,4 +1,4 @@
-#include <bupp/bsd/io_context.h>
+#include <bnio/bsd/io_context.h>
 
 #include <atomic>
 #include <cstddef>
@@ -7,11 +7,11 @@
 #include <unordered_map>
 #include <utility>
 
-#include "bupp/async_io/time.h"
-#include "bupp/bsd/detail/io_context_timer_types.h"
-#include "bupp/bsd/detail/steady_timer.h"
+#include "bnio/async_io/time.h"
+#include "bnio/bsd/detail/io_context_timer_types.h"
+#include "bnio/bsd/detail/steady_timer.h"
 
-namespace bupp {
+namespace bnio {
 
 namespace detail {
 
@@ -184,4 +184,4 @@ std::size_t steady_timer::cancel() noexcept {
   return timer_.context->cancel_timer(timer_);
 }
 
-}  // namespace bupp
+}  // namespace bnio

@@ -1,12 +1,12 @@
-#include <bupp/async_io/linux/io_uring_context.h>
-#include <bupp/base/linux/submission_queue_entry.h>
+#include <bnio/async_io/linux/io_uring_context.h>
+#include <bnio/base/linux/submission_queue_entry.h>
 
 #include <cassert>
 #include <cerrno>
 
 #include "io_uring_context_internal.h"
 
-namespace bupp::async_io::linux_native {
+namespace bnio::async_io::linux_native {
 
 bool io_uring_context::consume_io_tasks() noexcept {
   io_uring_io_operation_base* operations = global_state_->pop_io_all();
@@ -80,7 +80,7 @@ int io_uring_context::prepare_io(
     return -EINVAL;
   }
 
-  bupp::base::submission_queue_entry sqe = ring_.get_sqe();
+  bnio::base::submission_queue_entry sqe = ring_.get_sqe();
   if (sqe.raw() == nullptr) {
     return -EAGAIN;
   }
@@ -118,4 +118,4 @@ void io_uring_context::assert_running() const noexcept {
 #endif
 }
 
-}  // namespace bupp::async_io::linux_native
+}  // namespace bnio::async_io::linux_native

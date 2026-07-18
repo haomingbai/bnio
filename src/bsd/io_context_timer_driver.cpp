@@ -1,4 +1,4 @@
-#include <bupp/bsd/io_context.h>
+#include <bnio/bsd/io_context.h>
 
 #include <algorithm>
 #include <atomic>
@@ -8,10 +8,10 @@
 #include <utility>
 #include <vector>
 
-#include "bupp/async_io/bsd/kqueue_context_base/context.h"
-#include "bupp/bsd/detail/io_context_timer_types.h"
+#include "bnio/async_io/bsd/kqueue_context_base/context.h"
+#include "bnio/bsd/detail/io_context_timer_types.h"
 
-namespace bupp {
+namespace bnio {
 
 void io_context::on_timer_driver() noexcept {
   bool wake_waiter = false;
@@ -208,4 +208,4 @@ void io_context::post_timer_operations(
   }
 }
 
-}  // namespace bupp
+}  // namespace bnio

@@ -1,9 +1,9 @@
-#include <bupp/async_io/bsd/kqueue_context_base/operation_base.h>
-#include <bupp/async_io/bsd/kqueue_helper.h>
+#include <bnio/async_io/bsd/kqueue_context_base/operation_base.h>
+#include <bnio/async_io/bsd/kqueue_helper.h>
 
 #include <cerrno>
 
-namespace bupp::async_io::bsd_native {
+namespace bnio::async_io::bsd_native {
 namespace {
 
 [[nodiscard]] constexpr unsigned read_poll_mask() noexcept {
@@ -80,4 +80,4 @@ void kqueue_helper::set_udata(void* data) noexcept {
   }
 }
 
-}  // namespace bupp::async_io::bsd_native
+}  // namespace bnio::async_io::bsd_native

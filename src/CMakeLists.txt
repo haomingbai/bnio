@@ -1,20 +1,20 @@
-add_library(bupp)
-add_library(bupp::bupp ALIAS bupp)
+add_library(bnio)
+add_library(bnio::bnio ALIAS bnio)
 
 add_subdirectory(async_io)
 
-target_compile_features(bupp PUBLIC cxx_std_20)
+target_compile_features(bnio PUBLIC cxx_std_20)
 target_link_libraries(
-  bupp PUBLIC $<BUILD_INTERFACE:bexec::bexec>
+  bnio PUBLIC $<BUILD_INTERFACE:bexec::bexec>
               $<INSTALL_INTERFACE:bexec::bexec>)
 
-if(BUPP_PLATFORM_LINUX)
+if(BNIO_PLATFORM_LINUX)
   add_subdirectory(base/linux)
-  target_link_libraries(bupp PUBLIC PkgConfig::LIBURING
+  target_link_libraries(bnio PUBLIC PkgConfig::LIBURING
                                     OpenSSL::SSL
                                     OpenSSL::Crypto)
   target_sources(
-    bupp
+    bnio
     PRIVATE linux/io_context.cpp
             linux/io_context_queue.cpp
             linux/io_context_timer.cpp
@@ -25,17 +25,17 @@ if(BUPP_PLATFORM_LINUX)
             udp.cpp)
 else()
   target_compile_definitions(
-    bupp
-    PUBLIC BUPP_DISABLE_ASYNC_IO_LINUX=1
-           BUPP_DISABLE_BASE_LINUX=1
-           BUPP_DISABLE_IO_CONTEXT_LINUX=1)
+    bnio
+    PUBLIC BNIO_DISABLE_ASYNC_IO_LINUX=1
+           BNIO_DISABLE_BASE_LINUX=1
+           BNIO_DISABLE_IO_CONTEXT_LINUX=1)
 endif()
 
-if(BUPP_PLATFORM_BSD)
+if(BNIO_PLATFORM_BSD)
   add_subdirectory(base/bsd)
-  target_link_libraries(bupp PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+  target_link_libraries(bnio PUBLIC OpenSSL::SSL OpenSSL::Crypto)
   target_sources(
-    bupp
+    bnio
     PRIVATE bsd/io_context.cpp
             bsd/io_context_queue.cpp
             bsd/io_context_timer.cpp
@@ -45,44 +45,44 @@ if(BUPP_PLATFORM_BSD)
             tcp.cpp
             udp.cpp)
 else()
-  target_compile_definitions(bupp PUBLIC BUPP_DISABLE_BASE_BSD=1)
+  target_compile_definitions(bnio PUBLIC BNIO_DISABLE_BASE_BSD=1)
 endif()
 
 target_include_directories(
-  bupp
+  bnio
   PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
          $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-get_target_property(BUPP_TARGET_TYPE bupp TYPE)
-if(BUPP_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
-  target_compile_definitions(bupp PUBLIC BUPP_SHARED_LIBRARY)
-  target_compile_definitions(bupp PRIVATE BUPP_BUILDING_LIBRARY)
+get_target_property(BNIO_TARGET_TYPE bnio TYPE)
+if(BNIO_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
+  target_compile_definitions(bnio PUBLIC BNIO_SHARED_LIBRARY)
+  target_compile_definitions(bnio PRIVATE BNIO_BUILDING_LIBRARY)
   set_target_properties(
-    bupp
+    bnio
     PROPERTIES VERSION "${PROJECT_VERSION}"
                SOVERSION "${PROJECT_VERSION_MAJOR}"
                CXX_VISIBILITY_PRESET hidden
                VISIBILITY_INLINES_HIDDEN YES)
 endif()
 
-target_sources(bupp PRIVATE ${BUPP_PUBLIC_HEADERS})
+target_sources(bnio PRIVATE ${BNIO_PUBLIC_HEADERS})
 
-bupp_set_project_warnings(bupp)
+bnio_set_project_warnings(bnio)
 
-if(BUPP_INSTALL)
+if(BNIO_INSTALL)
   install(
-    TARGETS bupp
-    EXPORT buppTargets
+    TARGETS bnio
+    EXPORT bnioTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT development
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime)
-  install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/bupp"
+  install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/bnio"
           DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
           COMPONENT development)
   install(
-    EXPORT buppTargets
-    FILE buppTargets.cmake
-    NAMESPACE bupp::
-    DESTINATION "${BUPP_INSTALL_CMAKEDIR}"
+    EXPORT bnioTargets
+    FILE bnioTargets.cmake
+    NAMESPACE bnio::
+    DESTINATION "${BNIO_INSTALL_CMAKEDIR}"
     COMPONENT development)
 endif()

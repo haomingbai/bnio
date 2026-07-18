@@ -1,9 +1,9 @@
 #include <arpa/inet.h>
-#include <bupp/async_io/ip/address.h>
+#include <bnio/async_io/ip/address.h>
 
 #include <string>
 
-namespace bupp::async_io::ip {
+namespace bnio::async_io::ip {
 
 std::optional<address> make_address(std::string_view text) {
   if (auto address = make_v4_address(text)) {
@@ -34,4 +34,4 @@ std::optional<address> make_v6_address(std::string_view text) {
   return address::v6(parsed);
 }
 
-}  // namespace bupp::async_io::ip
+}  // namespace bnio::async_io::ip

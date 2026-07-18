@@ -1,9 +1,9 @@
-#include <bupp/async_io/buffer_view.h>
-#include <bupp/async_io/ip/address.h>
-#include <bupp/async_io/ip/endpoint.h>
-#include <bupp/async_io/linux/io_uring_context_base/context.h>
-#include <bupp/async_io/linux/io_uring_operations/socket.h>
-#include <bupp/async_io/socket_view.h>
+#include <bnio/async_io/buffer_view.h>
+#include <bnio/async_io/ip/address.h>
+#include <bnio/async_io/ip/endpoint.h>
+#include <bnio/async_io/linux/io_uring_context_base/context.h>
+#include <bnio/async_io/linux/io_uring_operations/socket.h>
+#include <bnio/async_io/socket_view.h>
 #include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -19,7 +19,7 @@
 
 namespace {
 
-using namespace bupp_async_io_io_uring_test;
+using namespace bnio_async_io_io_uring_test;
 
 struct transfer_state {
   unsigned completions = 0;
@@ -71,13 +71,13 @@ TEST(UdpIoUringTest, send_to_receive_from_operations) {
   datagram_socket_view receiver_socket(receiver_fd);
   datagram_socket_view sender_socket(sender_fd);
   EXPECT_FALSE(
-      receiver_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
-  bupp::async_io::ip::endpoint receiver_endpoint;
+      receiver_socket.bind(bnio::async_io::ip::endpoint::loopback_v4(0)));
+  bnio::async_io::ip::endpoint receiver_endpoint;
   EXPECT_FALSE(receiver_socket.local_endpoint(receiver_endpoint));
 
   constexpr std::string_view payload = "low-level UDP";
   std::array<char, 32> bytes{};
-  bupp::async_io::ip::endpoint source;
+  bnio::async_io::ip::endpoint source;
   transfer_state state;
 
   io_uring_receive_from_operation receive_operation(
@@ -120,12 +120,12 @@ TEST(UdpIoUringTest, connected_datagram_operations) {
   datagram_socket_view receiver_socket(receiver_fd);
   datagram_socket_view sender_socket(sender_fd);
   EXPECT_FALSE(
-      receiver_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
+      receiver_socket.bind(bnio::async_io::ip::endpoint::loopback_v4(0)));
   EXPECT_FALSE(
-      sender_socket.bind(bupp::async_io::ip::endpoint::loopback_v4(0)));
+      sender_socket.bind(bnio::async_io::ip::endpoint::loopback_v4(0)));
 
-  bupp::async_io::ip::endpoint receiver_endpoint;
-  bupp::async_io::ip::endpoint sender_endpoint;
+  bnio::async_io::ip::endpoint receiver_endpoint;
+  bnio::async_io::ip::endpoint sender_endpoint;
   EXPECT_FALSE(receiver_socket.local_endpoint(receiver_endpoint));
   EXPECT_FALSE(sender_socket.local_endpoint(sender_endpoint));
   EXPECT_FALSE(receiver_socket.connect(sender_endpoint));

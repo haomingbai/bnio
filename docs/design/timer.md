@@ -5,7 +5,7 @@ around one rule: timer operations are ordinary operations; the important logic
 is when they are moved between queues and posted.
 
 Timer implementation types live in the matching
-`include/bupp/{linux,bsd}/detail/` directory:
+`include/bnio/{linux,bsd}/detail/` directory:
 
 - `io_context_timer_types.h` contains `timer_slot`, `timer_heap_item`,
   `timer_operation_base`, the reusable timer operations, and

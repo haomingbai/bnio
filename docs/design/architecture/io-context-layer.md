@@ -1,7 +1,7 @@
-# Layer 3: `bupp::io_context` — High-Level Async I/O Context
+# Layer 3: `bnio::io_context` — High-Level Async I/O Context
 
-Namespace `bupp`. Public umbrella `include/bupp/io_context.h` selects
-`include/bupp/linux/io_context.h` or `include/bupp/bsd/io_context.h`, with
+Namespace `bnio`. Public umbrella `include/bnio/io_context.h` selects
+`include/bnio/linux/io_context.h` or `include/bnio/bsd/io_context.h`, with
 matching detail headers under the platform directory.
 
 `io_context` is the event-loop owner and scheduler factory:
@@ -189,7 +189,7 @@ detail directory. Its native file, socket, poll, and DNS requests live under
 `async_io/bsd/kqueue_operations/`; the high-level forwarding functions select
 and compose those layer-2 senders. Detail headers are installable because
 public inline templates reference them. User code should normally include
-`bupp/io_context.h`, not the detail headers directly.
+`bnio/io_context.h`, not the detail headers directly.
 
 ### Read/Write Semantic Split
 
@@ -305,7 +305,7 @@ sequenceDiagram
 
 ### Sender/Receiver Model & CPOs
 
-`bupp` uses `bexec`'s sender/receiver model. Customization Point Objects
+`bnio` uses `bexec`'s sender/receiver model. Customization Point Objects
 (CPOs) enable generic code to call async operations on any provider:
 
 ```cpp
@@ -317,24 +317,24 @@ auto s = socket.async_read(scheduler, buffer, 0);
 auto low = scheduler.async_read(socket.view(), buffer, 0);
 
 // Through CPO (generic):
-auto s = bupp::async_read(scheduler, socket, buffer);
+auto s = bnio::async_read(scheduler, socket, buffer);
 ```
 
 | CPO | Invokes | Header |
 |-----|---------|--------|
-| `bupp::async_read(provider, stream, buf)` | `stream.async_read(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bupp::async_read_some(provider, stream, buf)` | `stream.async_read_some(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bupp::async_write(provider, stream, buf)` | `stream.async_write(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bupp::async_write_some(provider, stream, buf)` | `stream.async_write_some(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bupp::async_accept` | `acceptor.async_accept(provider)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bupp::async_connect` | `stream.async_connect(provider, ep)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bupp::async_read(provider, descriptor, buf, offset)` | `provider.async_read(descriptor, buf, offset)` | `io_context_cpo.h` |
-| `bupp::async_read_some(provider, descriptor, buf, offset)` | `provider.async_read_some(descriptor, buf, offset)` | `io_context_cpo.h` |
-| `bupp::async_write(provider, descriptor, buf, offset)` | `provider.async_write(descriptor, buf, offset)` | `io_context_cpo.h` |
-| `bupp::async_write_some(provider, descriptor, buf, offset)` | `provider.async_write_some(descriptor, buf, offset)` | `io_context_cpo.h` |
-| `bupp::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
-| `bupp::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
-| `bupp::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
+| `bnio::async_read(provider, stream, buf)` | `stream.async_read(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bnio::async_read_some(provider, stream, buf)` | `stream.async_read_some(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bnio::async_write(provider, stream, buf)` | `stream.async_write(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bnio::async_write_some(provider, stream, buf)` | `stream.async_write_some(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bnio::async_accept` | `acceptor.async_accept(provider)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bnio::async_connect` | `stream.async_connect(provider, ep)` or lowest-layer fallback | `io_context_cpo.h` |
+| `bnio::async_read(provider, descriptor, buf, offset)` | `provider.async_read(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bnio::async_read_some(provider, descriptor, buf, offset)` | `provider.async_read_some(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bnio::async_write(provider, descriptor, buf, offset)` | `provider.async_write(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bnio::async_write_some(provider, descriptor, buf, offset)` | `provider.async_write_some(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bnio::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
+| `bnio::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
+| `bnio::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
 
 Provider concepts:
 

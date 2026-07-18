@@ -1,4 +1,4 @@
-#include <bupp/bsd/io_context.h>
+#include <bnio/bsd/io_context.h>
 
 #include <algorithm>
 #include <atomic>
@@ -8,13 +8,13 @@
 #include <utility>
 #include <vector>
 
-#include "bupp/async_io/bsd/kqueue_context_base/context.h"
-#include "bupp/bsd/detail/io_context_options.h"
-#include "bupp/bsd/detail/io_context_state.h"
-#include "bupp/bsd/detail/io_context_state/native_worker.h"
-#include "bupp/bsd/detail/io_context_timer_types.h"
+#include "bnio/async_io/bsd/kqueue_context_base/context.h"
+#include "bnio/bsd/detail/io_context_options.h"
+#include "bnio/bsd/detail/io_context_state.h"
+#include "bnio/bsd/detail/io_context_state/native_worker.h"
+#include "bnio/bsd/detail/io_context_timer_types.h"
 
-namespace bupp {
+namespace bnio {
 
 using detail::native_worker;
 
@@ -261,4 +261,4 @@ detail::native_worker* io_context::register_run_worker() noexcept {
   return worker;
 }
 
-}  // namespace bupp
+}  // namespace bnio

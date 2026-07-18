@@ -2,7 +2,7 @@
 
 ```mermaid
 graph TB
-    subgraph L3["Layer 3 — bupp::io_context"]
+    subgraph L3["Layer 3 — bnio::io_context"]
         C3_ctx["io_context<br/>(event loop + scheduler factory)"]
         C3_tcp["tcp_socket / tcp_acceptor<br/>(RAII fd owners)"]
         C3_udp["udp::socket<br/>(RAII fd owner)"]
@@ -10,7 +10,7 @@ graph TB
         C3_buf["mutable_buffer / const_buffer<br/>dynamic_string_buffer<br/>(non-owning views / adapters)"]
     end
 
-    subgraph L2["Layer 2 — bupp::async_io"]
+    subgraph L2["Layer 2 — bnio::async_io"]
         C2_buf["buffer_view<br/>(non-owning)"]
         C2_desc["descriptor_view<br/>(non-owning)"]
         C2_stream["stream_socket_view<br/>(non-owning)"]
@@ -19,7 +19,7 @@ graph TB
         C2_native["linux_native::io_uring_*<br/>(platform operations)"]
     end
 
-    subgraph L1["Layer 1 — bupp::base"]
+    subgraph L1["Layer 1 — bnio::base"]
         C1_linux["Linux: ring, submission_queue_entry<br/>completion_queue_entry, probe, params"]
         C1_bsd["BSD: kqueue, event, event_list_view"]
     end
@@ -50,7 +50,7 @@ are **non-owning references**:
 | Layer 2 (`async_io`) | `buffer_view`, `descriptor_view`, `stream_socket_view`, `datagram_socket_view` | `linux_native::io_uring_context` |
 | Layer 3 (`io_context`) | `mutable_buffer`, `const_buffer`, `dynamic_string_buffer` | `tcp::socket`, `tcp::acceptor`, `udp::socket`, `ssl_context`, `ssl_stream`, `io_context` |
 
-**Key invariant:** Layer 2 (`bupp::async_io`) vocabulary types are deliberately
+**Key invariant:** Layer 2 (`bnio::async_io`) vocabulary types are deliberately
 non-owning views or pure value types. The `linux_native::io_uring_context` is
 the exception — it is the platform-level RAII event-loop owner, one per run-loop
 thread. It lives inside `io_context`'s native worker slots.

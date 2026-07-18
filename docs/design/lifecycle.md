@@ -1,6 +1,6 @@
 # Lifecycle & Ownership
 
-**The most critical concept in bupp.** Every type falls into one of three
+**The most critical concept in bnio.** Every type falls into one of three
 categories: RAII owner, non-owning view, or pure value type. Misunderstanding
 which is which leads to use-after-free, double-close, or dangling file
 descriptors.
@@ -39,7 +39,7 @@ graph TB
     subgraph VAL["Value Types — copy = independent"]
         VL1["async_io::ip::address"]
         VL2["async_io::ip::endpoint"]
-        VL3["bupp::ip::tcp"]
+        VL3["bnio::ip::tcp"]
         VL4["base::params"]
     end
 ```
@@ -80,15 +80,15 @@ the ring is destroyed, those pointers dangle.
 
 ```cpp
 // WRONG — sqe dangles after ring is destroyed
-bupp::base::submission_queue_entry get_sqe() {
-    bupp::base::ring ring;
+bnio::base::submission_queue_entry get_sqe() {
+    bnio::base::ring ring;
     ring.queue_init(8);
     return ring.get_sqe();   // points into ring; ring dies here
 }
 
 // RIGHT — ring outlives all SQE/CQE use
 void ok() {
-    bupp::base::ring ring;
+    bnio::base::ring ring;
     ring.queue_init(8);
     auto sqe = ring.get_sqe();
     // ... use sqe, submit, wait for cqe ...
@@ -105,18 +105,18 @@ outlive the full composed operation, not just the first native submission.
 
 ```cpp
 // WRONG — stack buffer dies before operation completes
-void bad(bupp::io_context& ctx, bupp::tcp_socket& sock) {
+void bad(bnio::io_context& ctx, bnio::tcp_socket& sock) {
     auto scheduler = ctx.get_post_scheduler();
     std::string msg = "hello";
-    auto sender = sock.async_write(scheduler, bupp::buffer(msg), 0);
+    auto sender = sock.async_write(scheduler, bnio::buffer(msg), 0);
     // msg goes out of scope; the write reads freed memory
 }
 
 // RIGHT — keep buffer alive until completion
-void good(bupp::io_context& ctx, bupp::tcp_socket& sock) {
+void good(bnio::io_context& ctx, bnio::tcp_socket& sock) {
     auto scheduler = ctx.get_post_scheduler();
     auto msg = std::make_shared<std::string>("hello");
-    auto sender = sock.async_write(scheduler, bupp::buffer(*msg), 0);
+    auto sender = sock.async_write(scheduler, bnio::buffer(*msg), 0);
     // receiver captures msg via shared_ptr — alive until completion
 }
 ```
@@ -132,10 +132,10 @@ has run, and `io_context` must also outlive all operations submitted on it.
 ```cpp
 // WRONG — ctx destroyed before operation completes
 void bad() {
-    bupp::io_context ctx;
+    bnio::io_context ctx;
     auto scheduler = ctx.get_post_scheduler();
-    bupp::tcp_socket sock;
-    sock.open(bupp::ip::tcp::v4());
+    bnio::tcp_socket sock;
+    sock.open(bnio::ip::tcp::v4());
     auto sender = sock.async_read(scheduler, some_buffer, 0);
     // ... connect, start ...
 }   // ctx destroyed; operation in pending_io list dangles
@@ -149,8 +149,8 @@ as the owner exists.
 
 ```cpp
 // RIGHT — high-level stream API keeps the owner explicit
-bupp::tcp_socket sock;                        // owner
-sock.open(bupp::ip::tcp::v4());
+bnio::tcp_socket sock;                        // owner
+sock.open(bnio::ip::tcp::v4());
 sock.async_read(scheduler, buffer, 0);     // sock outlives op
 
 // Also right — explicit low-level view, same lifetime
@@ -164,7 +164,7 @@ scheduler.async_read(view, buffer, 0);     // fine: sock still alive
 immediately. Always read all needed fields first.
 
 ```cpp
-bupp::base::completion_queue_entry cqe;
+bnio::base::completion_queue_entry cqe;
 ring.wait_cqe(cqe);
 
 int res = cqe.res();                // ✓ read first
@@ -182,18 +182,18 @@ pointer.
 
 ```cpp
 // WRONG — ssl_ctx dies, ssl_stream holds SSL* from that SSL_CTX*
-bupp::ssl_stream<bupp::tcp_socket> make_stream() {
-    bupp::ssl_context ctx;                     // local
-    bupp::tcp_socket sock;
-    sock.open(bupp::ip::tcp::v4());
-    return bupp::ssl_stream(std::move(sock), ctx);
+bnio::ssl_stream<bnio::tcp_socket> make_stream() {
+    bnio::ssl_context ctx;                     // local
+    bnio::tcp_socket sock;
+    sock.open(bnio::ip::tcp::v4());
+    return bnio::ssl_stream(std::move(sock), ctx);
 }   // ctx destroyed → SSL_CTX freed → returned stream's SSL* dangles
 
 // RIGHT — ssl_context outlives ssl_stream
-bupp::ssl_context ctx;                         // outer scope
-bupp::tcp_socket sock;
-sock.open(bupp::ip::tcp::v4());
-bupp::ssl_stream stream(std::move(sock), ctx); // ctx outlives stream
+bnio::ssl_context ctx;                         // outer scope
+bnio::tcp_socket sock;
+sock.open(bnio::ip::tcp::v4());
+bnio::ssl_stream stream(std::move(sock), ctx); // ctx outlives stream
 ```
 
 ## Operation Lifecycle
@@ -290,14 +290,14 @@ they own non-transferable runtime state:
 //   io_context c2 = std::move(c1);  // move deleted
 
 // Move is allowed for move-only types:
-bupp::tcp_socket a;
-a.open(bupp::ip::tcp::v4());
-bupp::tcp_socket b = std::move(a);  // ok; a is now closed
+bnio::tcp_socket a;
+a.open(bnio::ip::tcp::v4());
+bnio::tcp_socket b = std::move(a);  // ok; a is now closed
 ```
 
 ## Quick Checklist
 
-Before writing bupp code, verify:
+Before writing bnio code, verify:
 
 - [ ] `ring` / `io_context` outlives all submitted operations.
 - [ ] Operation storage outlives each operation's terminal completion.

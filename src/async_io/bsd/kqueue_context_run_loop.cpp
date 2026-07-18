@@ -3,7 +3,7 @@
 
 #include "kqueue_context_internal.h"
 
-namespace bupp::async_io::bsd_native {
+namespace bnio::async_io::bsd_native {
 
 void kqueue_context::run() noexcept {
   assert_running();
@@ -180,4 +180,4 @@ void kqueue_context::finish() noexcept {
   state_.store(context_state::finished, std::memory_order_release);
 }
 
-}  // namespace bupp::async_io::bsd_native
+}  // namespace bnio::async_io::bsd_native

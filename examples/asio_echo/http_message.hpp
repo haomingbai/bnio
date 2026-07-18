@@ -1,6 +1,6 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_ASIO_ECHO_HTTP_MESSAGE_HPP_
-#define BUPP_EXAMPLES_ASIO_ECHO_HTTP_MESSAGE_HPP_
+#ifndef BNIO_EXAMPLES_ASIO_ECHO_HTTP_MESSAGE_HPP_
+#define BNIO_EXAMPLES_ASIO_ECHO_HTTP_MESSAGE_HPP_
 
 #include <string>
 #include <string_view>
@@ -29,4 +29,4 @@ struct parsed_request {
 
 }  // namespace asio_echo
 
-#endif  // BUPP_EXAMPLES_ASIO_ECHO_HTTP_MESSAGE_HPP_
+#endif  // BNIO_EXAMPLES_ASIO_ECHO_HTTP_MESSAGE_HPP_

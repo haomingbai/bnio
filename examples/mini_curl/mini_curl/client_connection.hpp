@@ -1,6 +1,6 @@
 #pragma once
-#ifndef BUPP_EXAMPLES_MINI_CURL_CLIENT_CONNECTION_HPP_
-#define BUPP_EXAMPLES_MINI_CURL_CLIENT_CONNECTION_HPP_
+#ifndef BNIO_EXAMPLES_MINI_CURL_CLIENT_CONNECTION_HPP_
+#define BNIO_EXAMPLES_MINI_CURL_CLIENT_CONNECTION_HPP_
 
 #include <iostream>
 #include <memory>
@@ -10,7 +10,7 @@
 
 namespace mini_curl {
 
-inline mini_curl_client::mini_curl_client(bupp::io_context& context,
+inline mini_curl_client::mini_curl_client(bnio::io_context& context,
                                           request_options options,
                                           operation_registry& registry)
     : context_(context), registry_(registry), options_(std::move(options)) {
@@ -30,15 +30,15 @@ inline void mini_curl_client::resolve() {
     std::cerr << '\n';
   }
 
-  bupp::dns_query query(options_.host, options_.service);
+  bnio::dns_query query(options_.host, options_.service);
   query.set_address_version(options_.address_version);
-  query.set_transport(bupp::dns_transport::tcp);
+  query.set_transport(bnio::dns_transport::tcp);
 
   const auto scheduler = context_.get_post_scheduler();
   registry_.spawn(
       scheduler.async_resolve(
           std::move(query),
-          bupp::dns_result_view(endpoints_.data(), endpoints_.size())),
+          bnio::dns_result_view(endpoints_.data(), endpoints_.size())),
       resolve_receiver{shared_from_this()});
 }
 
@@ -66,15 +66,15 @@ inline void mini_curl_client::connect_next() noexcept {
   }
 
   (void)socket_.close();
-  const bupp::ip::endpoint endpoint = endpoints_[endpoint_index_];
+  const bnio::ip::endpoint endpoint = endpoints_[endpoint_index_];
   ++endpoint_index_;
 
-  const bupp::ip::address::version version = endpoint.version();
+  const bnio::ip::address::version version = endpoint.version();
   std::error_code open_error;
-  if (version == bupp::ip::address::version::v4) {
-    open_error = socket_.open(bupp::ip::tcp::v4());
-  } else if (version == bupp::ip::address::version::v6) {
-    open_error = socket_.open(bupp::ip::tcp::v6());
+  if (version == bnio::ip::address::version::v4) {
+    open_error = socket_.open(bnio::ip::tcp::v4());
+  } else if (version == bnio::ip::address::version::v6) {
+    open_error = socket_.open(bnio::ip::tcp::v6());
   } else {
     // Record unknown version and try next endpoint
     if (options_.verbose) {
@@ -126,12 +126,12 @@ inline void mini_curl_client::on_connected() noexcept {
 }
 
 inline void mini_curl_client::do_handshake() noexcept {
-  ssl_stream_ = std::make_unique<bupp::ssl_stream<bupp::tcp_socket>>(
+  ssl_stream_ = std::make_unique<bnio::ssl_stream<bnio::tcp_socket>>(
       std::move(socket_), ssl_context_);
 
   const auto scheduler = context_.get_post_scheduler();
   registry_.spawn(
-      ssl_stream_->async_handshake(scheduler, bupp::ssl_handshake_type::client),
+      ssl_stream_->async_handshake(scheduler, bnio::ssl_handshake_type::client),
       handshake_receiver{shared_from_this()});
 }
 
@@ -144,4 +144,4 @@ inline void mini_curl_client::on_handshake_complete() noexcept {
 
 }  // namespace mini_curl
 
-#endif  // BUPP_EXAMPLES_MINI_CURL_CLIENT_CONNECTION_HPP_
+#endif  // BNIO_EXAMPLES_MINI_CURL_CLIENT_CONNECTION_HPP_

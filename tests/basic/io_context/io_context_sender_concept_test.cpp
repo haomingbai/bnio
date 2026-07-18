@@ -5,45 +5,45 @@
 namespace {
 
 TEST(IoContextSenderConceptTest, sender_concepts) {
-  bupp::io_context context;
+  bnio::io_context context;
   auto scheduler = context.get_post_scheduler();
-  bupp::tcp_socket socket(3);
+  bnio::tcp_socket socket(3);
   std::array<char, 8> bytes{};
   constexpr std::string_view text = "abc";
 
   using stream_read_sender =
-      decltype(socket.async_read(scheduler, bupp::buffer(bytes)));
+      decltype(socket.async_read(scheduler, bnio::buffer(bytes)));
   using stream_read_some_sender =
-      decltype(socket.async_read_some(scheduler, bupp::buffer(bytes)));
+      decltype(socket.async_read_some(scheduler, bnio::buffer(bytes)));
   using low_read_sender =
-      decltype(scheduler.async_read(socket.view(), bupp::buffer(bytes)));
+      decltype(scheduler.async_read(socket.view(), bnio::buffer(bytes)));
   using low_read_some_sender =
-      decltype(scheduler.async_read_some(socket.view(), bupp::buffer(bytes)));
+      decltype(scheduler.async_read_some(socket.view(), bnio::buffer(bytes)));
   using low_write_sender =
-      decltype(scheduler.async_write(socket.view(), bupp::buffer(text)));
+      decltype(scheduler.async_write(socket.view(), bnio::buffer(text)));
   using low_write_some_sender =
-      decltype(scheduler.async_write_some(socket.view(), bupp::buffer(text)));
+      decltype(scheduler.async_write_some(socket.view(), bnio::buffer(text)));
   using stream_write_sender = decltype(socket.async_write(scheduler, text));
   using stream_write_some_sender =
       decltype(socket.async_write_some(scheduler, text));
   using accept_sender =
-      decltype(std::declval<bupp::tcp_acceptor&>().async_accept(scheduler));
+      decltype(std::declval<bnio::tcp_acceptor&>().async_accept(scheduler));
   using connect_sender =
-      decltype(std::declval<bupp::tcp_socket&>().async_connect(
-          scheduler, std::declval<const bupp::ip::endpoint&>()));
+      decltype(std::declval<bnio::tcp_socket&>().async_connect(
+          scheduler, std::declval<const bnio::ip::endpoint&>()));
   using descriptor_read_sender = decltype(scheduler.async_read(
-      bupp::async_io::descriptor_view(3), bupp::buffer(bytes)));
+      bnio::async_io::descriptor_view(3), bnio::buffer(bytes)));
   using descriptor_read_some_sender = decltype(scheduler.async_read_some(
-      bupp::async_io::descriptor_view(3), bupp::buffer(bytes)));
+      bnio::async_io::descriptor_view(3), bnio::buffer(bytes)));
   using descriptor_write_sender = decltype(scheduler.async_write(
-      bupp::async_io::descriptor_view(3), bupp::buffer(text)));
+      bnio::async_io::descriptor_view(3), bnio::buffer(text)));
   using descriptor_write_some_sender = decltype(scheduler.async_write_some(
-      bupp::async_io::descriptor_view(3), bupp::buffer(text)));
+      bnio::async_io::descriptor_view(3), bnio::buffer(text)));
   using poll_sender = decltype(scheduler.async_poll(
-      bupp::async_io::descriptor_view(3), static_cast<unsigned>(POLLIN)));
+      bnio::async_io::descriptor_view(3), static_cast<unsigned>(POLLIN)));
   using schedule_sender = decltype(bexec::schedule(scheduler));
   using timer_wait_sender =
-      decltype(std::declval<bupp::steady_timer&>().async_wait());
+      decltype(std::declval<bnio::steady_timer&>().async_wait());
   static_assert(bexec::sender<stream_read_sender>);
   static_assert(bexec::sender<stream_read_some_sender>);
   static_assert(bexec::sender<low_read_sender>);
@@ -61,38 +61,38 @@ TEST(IoContextSenderConceptTest, sender_concepts) {
   static_assert(bexec::sender<poll_sender>);
   static_assert(bexec::sender<schedule_sender>);
   static_assert(bexec::sender<timer_wait_sender>);
-  static_assert(bexec::scheduler<bupp::io_context::dispatch_scheduler>);
-  static_assert(bexec::scheduler<bupp::io_context::post_scheduler>);
+  static_assert(bexec::scheduler<bnio::io_context::dispatch_scheduler>);
+  static_assert(bexec::scheduler<bnio::io_context::post_scheduler>);
   static_assert(
-      !scheduler_can_read_stream<bupp::io_context::post_scheduler,
-                                 bupp::tcp_socket, bupp::mutable_buffer>);
+      !scheduler_can_read_stream<bnio::io_context::post_scheduler,
+                                 bnio::tcp_socket, bnio::mutable_buffer>);
   static_assert(
-      !scheduler_can_write_stream<bupp::io_context::post_scheduler,
-                                  bupp::tcp_socket, bupp::const_buffer>);
-  static_assert(bupp::reads_bytes<bupp::io_context::post_scheduler,
-                                  bupp::tcp_socket, bupp::mutable_buffer>);
-  static_assert(bupp::reads_bytes<bupp::io_context::dispatch_scheduler,
-                                  bupp::tcp_socket, bupp::mutable_buffer>);
-  static_assert(bupp::writes_bytes<bupp::io_context::post_scheduler,
-                                   bupp::tcp_socket, bupp::const_buffer>);
-  static_assert(bupp::writes_bytes<bupp::io_context::dispatch_scheduler,
-                                   bupp::tcp_socket, bupp::const_buffer>);
-  static_assert(bupp::accepts_connections<bupp::io_context::post_scheduler,
-                                          bupp::tcp_acceptor>);
+      !scheduler_can_write_stream<bnio::io_context::post_scheduler,
+                                  bnio::tcp_socket, bnio::const_buffer>);
+  static_assert(bnio::reads_bytes<bnio::io_context::post_scheduler,
+                                  bnio::tcp_socket, bnio::mutable_buffer>);
+  static_assert(bnio::reads_bytes<bnio::io_context::dispatch_scheduler,
+                                  bnio::tcp_socket, bnio::mutable_buffer>);
+  static_assert(bnio::writes_bytes<bnio::io_context::post_scheduler,
+                                   bnio::tcp_socket, bnio::const_buffer>);
+  static_assert(bnio::writes_bytes<bnio::io_context::dispatch_scheduler,
+                                   bnio::tcp_socket, bnio::const_buffer>);
+  static_assert(bnio::accepts_connections<bnio::io_context::post_scheduler,
+                                          bnio::tcp_acceptor>);
   static_assert(
-      bupp::connects_stream<bupp::io_context::post_scheduler, bupp::tcp_socket,
-                            const bupp::ip::endpoint&>);
+      bnio::connects_stream<bnio::io_context::post_scheduler, bnio::tcp_socket,
+                            const bnio::ip::endpoint&>);
   static_assert(
-      bupp::reads_bytes<bupp::io_context::post_scheduler,
-                        bupp::async_io::descriptor_view, bupp::mutable_buffer>);
+      bnio::reads_bytes<bnio::io_context::post_scheduler,
+                        bnio::async_io::descriptor_view, bnio::mutable_buffer>);
   static_assert(
-      bupp::writes_bytes<bupp::io_context::post_scheduler,
-                         bupp::async_io::descriptor_view, bupp::const_buffer>);
-  static_assert(bupp::polls_descriptor<bupp::io_context::post_scheduler,
-                                       bupp::async_io::descriptor_view>);
+      bnio::writes_bytes<bnio::io_context::post_scheduler,
+                         bnio::async_io::descriptor_view, bnio::const_buffer>);
+  static_assert(bnio::polls_descriptor<bnio::io_context::post_scheduler,
+                                       bnio::async_io::descriptor_view>);
 
   byte_receiver receiver;
-  auto sender = socket.async_read(scheduler, bupp::buffer(bytes));
+  auto sender = socket.async_read(scheduler, bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   static_assert(bexec::operation_state<decltype(operation)>);
 

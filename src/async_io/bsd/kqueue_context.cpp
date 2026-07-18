@@ -1,4 +1,4 @@
-#include <bupp/async_io/bsd/kqueue_context.h>
+#include <bnio/async_io/bsd/kqueue_context.h>
 
 #include <cassert>
 #include <cerrno>
@@ -7,7 +7,7 @@
 
 #include "kqueue_context_internal.h"
 
-namespace bupp::async_io::bsd_native {
+namespace bnio::async_io::bsd_native {
 
 thread_local kqueue_context* kqueue_context::current_context_ = nullptr;
 
@@ -44,8 +44,8 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
   const std::size_t active_capacity = entries * 2;
   auto active = std::unique_ptr<active_registration[]>(
       new (std::nothrow) active_registration[active_capacity]);
-  auto events = std::unique_ptr<bupp::base::event[]>(
-      new (std::nothrow) bupp::base::event[options_.event_batch_window]);
+  auto events = std::unique_ptr<bnio::base::event[]>(
+      new (std::nothrow) bnio::base::event[options_.event_batch_window]);
   if (!active || !events) {
     return -ENOMEM;
   }
@@ -55,7 +55,7 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
     return open_result;
   }
 
-  bupp::base::event wakeup_event(options_.wakeup_ident, EVFILT_USER,
+  bnio::base::event wakeup_event(options_.wakeup_ident, EVFILT_USER,
                                  EV_ADD | EV_CLEAR, 0, 0, wakeup_user_data());
   const int wakeup_result =
       queue_.control(&wakeup_event, 1, nullptr, 0, nullptr);
@@ -105,4 +105,4 @@ void kqueue_context::assert_running() const noexcept {
 #endif
 }
 
-}  // namespace bupp::async_io::bsd_native
+}  // namespace bnio::async_io::bsd_native

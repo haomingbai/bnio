@@ -1,4 +1,4 @@
-#include <bupp/ssl.h>
+#include <bnio/ssl.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
@@ -7,9 +7,9 @@
 #include <system_error>
 #include <utility>
 
-#include "bupp/ssl/context.h"
+#include "bnio/ssl/context.h"
 
-namespace bupp {
+namespace bnio {
 
 namespace {
 
@@ -105,4 +105,4 @@ void ssl_context::set_verify_mode(int mode) noexcept {
   SSL_CTX_set_verify(context_, mode, nullptr);
 }
 
-}  // namespace bupp
+}  // namespace bnio

@@ -1,22 +1,22 @@
 # Header Dependency Graph
 
 ```
-bupp/bupp.h  (umbrella)
-├── bupp/base.h
+bnio/bnio.h  (umbrella)
+├── bnio/base.h
 │   ├── base/linux/{ring, submission_queue_entry, completion_queue_entry,
 │   │               params, probe, liburing}.h
 │   └── base/bsd/{kqueue, event, event_list_view}.h
-├── bupp/async_io.h
+├── bnio/async_io.h
 │   ├── async_io/{buffer_view, descriptor_view, socket_view, time,
 │   │             address, tcp_endpoint, config}.h
 │   ├── async_io/ip/{address, endpoint, tcp, udp}.h
 │   └── async_io/dns/{query, result, resolve, types}.h
-├── bupp/io_context.h
+├── bnio/io_context.h
 │   ├── linux/io_context.h → linux/detail/* → async_io/linux/io_uring_context.h
 │   └── bsd/io_context.h → bsd/detail/* → async_io/bsd/kqueue_context.h
 │       └── bsd/detail/io_context_native_io/{common, timer_wait,
 │           write_all}.h
-├── bupp/async_io/linux/io_uring_context.h
+├── bnio/async_io/linux/io_uring_context.h
 │   ├── async_io/linux/io_uring_context_base.h
 │   │   ├── async_io/linux/io_uring_context_base/context.h
 │   │   ├── async_io/linux/io_uring_context_base/operation_base.h
@@ -24,31 +24,31 @@ bupp/bupp.h  (umbrella)
 │   └── async_io/linux/io_uring_operations.h
 │       └── async_io/linux/io_uring_operations/{core, file,
 │           helpers, poll, resolve, socket, views}.h
-├── bupp/async_io/bsd/kqueue_context.h
+├── bnio/async_io/bsd/kqueue_context.h
 │   ├── async_io/bsd/kqueue_context_base.h
 │   ├── async_io/bsd/kqueue_helper.h
 │   └── async_io/bsd/kqueue_operations/{core, file, poll, resolve,
 │       socket}.h
-├── bupp/ip.h
-├── bupp/buffer.h
+├── bnio/ip.h
+├── bnio/buffer.h
 │   └── buffer/{basic, dynamic_string, dynamic_byte_vector, holders}.h
-├── bupp/tcp.h
+├── bnio/tcp.h
 │   └── tcp/{socket, acceptor, async_operations, layers}.h
-├── bupp/ssl.h
+├── bnio/ssl.h
 │   └── ssl/{context, stream_class, stream, stream_operations, cpo}.h
-├── bupp/io_context_cpo.h
+├── bnio/io_context_cpo.h
 │   └── io_context_cpo/{instances, concepts, read, write,
 │                       connection, poll, resolve}.h
-└── bupp/export.h
+└── bnio/export.h
 ```
 
 For smaller translation units, include individual sub-headers (e.g.
-`bupp/base.h`) instead of `bupp/bupp.h`.
+`bnio/base.h`) instead of `bnio/bnio.h`.
 
 ## Namespace Map
 
 ```
-bupp
+bnio
 ├── base                                  Layer 1: system call wrappers
 │   ├── Linux:
 │   │   ├── ring                          io_uring RAII owner

@@ -1,4 +1,4 @@
-#include <bupp/async_io/bsd/kqueue_context.h>
+#include <bnio/async_io/bsd/kqueue_context.h>
 
 #include <array>
 #include <cerrno>
@@ -7,7 +7,7 @@
 
 #include "kqueue_context_internal.h"
 
-namespace bupp::async_io::bsd_native {
+namespace bnio::async_io::bsd_native {
 namespace {
 
 // MPSC publication is LIFO; restore producer order before registering events.
@@ -170,10 +170,10 @@ int kqueue_context::register_operation(
 
 int kqueue_context::arm_registration(
     active_registration& registration) noexcept {
-  bupp::base::event change = registration.event;
+  bnio::base::event change = registration.event;
   change.set_flags(change.flags() | EV_RECEIPT);
   change.set_udata(registration.operation);
-  bupp::base::event receipt;
+  bnio::base::event receipt;
   timespec no_wait{};
   const int result = queue_.control(&change, 1, &receipt, 1, &no_wait);
   if (result < 0) {
@@ -233,7 +233,7 @@ void kqueue_context::unregister_operation(
       continue;
     }
     if (active.armed) {
-      bupp::base::event deletion(active.event.ident(), active.event.filter(),
+      bnio::base::event deletion(active.event.ident(), active.event.filter(),
                                  EV_DELETE, 0, 0, &operation);
       (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
       released[released_count++] =
@@ -247,7 +247,7 @@ void kqueue_context::unregister_operation(
 }
 
 bool kqueue_context::take_registration(
-    const bupp::base::event& event,
+    const bnio::base::event& event,
     active_registration& registration) noexcept {
   for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
     active_registration& active = active_registrations_[index];
@@ -262,4 +262,4 @@ bool kqueue_context::take_registration(
   return false;
 }
 
-}  // namespace bupp::async_io::bsd_native
+}  // namespace bnio::async_io::bsd_native

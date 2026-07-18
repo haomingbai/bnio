@@ -1,10 +1,10 @@
-#include <bupp/base/bsd/kqueue.h>
+#include <bnio/base/bsd/kqueue.h>
 #include <unistd.h>
 
 #include <cerrno>
 #include <utility>
 
-namespace bupp::base {
+namespace bnio::base {
 
 kqueue::kqueue() noexcept = default;
 
@@ -59,4 +59,4 @@ int kqueue::control(const event* changelist, int nchanges, event* eventlist,
   return result;
 }
 
-}  // namespace bupp::base
+}  // namespace bnio::base

@@ -1,11 +1,11 @@
 target_sources(
-  bupp
+  bnio
   PRIVATE address.cpp
           tcp_endpoint.cpp)
 
-if(BUPP_PLATFORM_LINUX)
+if(BNIO_PLATFORM_LINUX)
   target_sources(
-    bupp
+    bnio
     PRIVATE linux/address.cpp
             linux/dns.cpp
             linux/io_uring_context.cpp
@@ -17,9 +17,9 @@ if(BUPP_PLATFORM_LINUX)
             linux/socket_view.cpp)
 endif()
 
-if(BUPP_PLATFORM_BSD)
+if(BNIO_PLATFORM_BSD)
   target_sources(
-    bupp
+    bnio
     PRIVATE bsd/address.cpp
             bsd/dns.cpp
             bsd/kqueue_context.cpp

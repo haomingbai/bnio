@@ -1,5 +1,5 @@
-#include <bupp/async_io/bsd/socket_address.h>
-#include <bupp/async_io/dns.h>
+#include <bnio/async_io/bsd/socket_address.h>
+#include <bnio/async_io/dns.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -7,13 +7,13 @@
 #include <cerrno>
 #include <string>
 
-namespace bupp::async_io {
+namespace bnio::async_io {
 namespace {
 
 class dns_error_category final : public std::error_category {
  public:
   [[nodiscard]] const char* name() const noexcept override {
-    return "bupp.dns";
+    return "bnio.dns";
   }
 
   [[nodiscard]] std::string message(int condition) const override {
@@ -135,4 +135,4 @@ std::error_code resolve_dns_platform(dns_query_view query,
 }
 
 }  // namespace detail
-}  // namespace bupp::async_io
+}  // namespace bnio::async_io

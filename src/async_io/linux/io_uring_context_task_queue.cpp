@@ -6,7 +6,7 @@
 
 #include "io_uring_context_internal.h"
 
-namespace bupp::async_io::linux_native {
+namespace bnio::async_io::linux_native {
 
 int io_uring_context::post(io_uring_operation_base& operation) noexcept {
   assert_running();
@@ -132,7 +132,7 @@ int io_uring_context::submit_eventfd_poll() noexcept {
   }
 
   for (unsigned attempt = 0; attempt < 2; ++attempt) {
-    bupp::base::submission_queue_entry sqe = ring_.get_sqe();
+    bnio::base::submission_queue_entry sqe = ring_.get_sqe();
     if (sqe.raw() == nullptr) {
       const int submit_result = submit_ring();
       if (submit_result < 0) {
@@ -161,4 +161,4 @@ void* io_uring_context::eventfd_user_data() noexcept {
   return &eventfd_sentinel;
 }
 
-}  // namespace bupp::async_io::linux_native
+}  // namespace bnio::async_io::linux_native

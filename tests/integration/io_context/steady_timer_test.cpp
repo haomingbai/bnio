@@ -9,7 +9,7 @@ namespace {
 
 struct ordered_timer_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
   std::atomic<unsigned>* next_order = nullptr;
   std::atomic<unsigned>* observed_order = nullptr;
   std::atomic<unsigned>* completions = nullptr;
@@ -42,12 +42,12 @@ struct ordered_timer_receiver {
 };
 
 TEST(SteadyTimerTest, steady_timer_completes) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
 
-  bupp::steady_timer timer(context);
+  bnio::steady_timer timer(context);
   EXPECT_EQ(timer.expires_after(std::chrono::milliseconds(1)), 0);
 
   void_receiver receiver;
@@ -63,12 +63,12 @@ TEST(SteadyTimerTest, steady_timer_completes) {
 }
 
 TEST(SteadyTimerTest, steady_timer_cancel_stops_wait) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
 
-  bupp::steady_timer timer(context);
+  bnio::steady_timer timer(context);
   EXPECT_EQ(timer.expires_after(std::chrono::seconds(30)), 0);
 
   void_receiver receiver;
@@ -86,12 +86,12 @@ TEST(SteadyTimerTest, steady_timer_cancel_stops_wait) {
 }
 
 TEST(SteadyTimerTest, steady_timer_expires_after_stops_old_wait) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
 
-  bupp::steady_timer timer(context);
+  bnio::steady_timer timer(context);
   EXPECT_EQ(timer.expires_after(std::chrono::seconds(30)), 0);
 
   void_receiver receiver;
@@ -109,12 +109,12 @@ TEST(SteadyTimerTest, steady_timer_expires_after_stops_old_wait) {
 }
 
 TEST(SteadyTimerTest, steady_timer_multiple_waits_complete) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
 
-  bupp::steady_timer timer(context);
+  bnio::steady_timer timer(context);
   EXPECT_EQ(timer.expires_after(std::chrono::milliseconds(1)), 0);
 
   unsigned completions = 0;
@@ -146,12 +146,12 @@ TEST(SteadyTimerTest, steady_timer_multiple_waits_complete) {
 }
 
 TEST(SteadyTimerTest, steady_timer_move_stops_old_wait) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
 
-  bupp::steady_timer timer(context);
+  bnio::steady_timer timer(context);
   EXPECT_EQ(timer.expires_after(std::chrono::seconds(30)), 0);
 
   unsigned completions = 0;
@@ -165,7 +165,7 @@ TEST(SteadyTimerTest, steady_timer_move_stops_old_wait) {
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
-  bupp::steady_timer moved_timer(std::move(timer));
+  bnio::steady_timer moved_timer(std::move(timer));
   EXPECT_EQ(moved_timer.expires_after(std::chrono::milliseconds(1)), 0);
 
   void_receiver moved_receiver;
@@ -185,14 +185,14 @@ TEST(SteadyTimerTest, steady_timer_move_stops_old_wait) {
 }
 
 TEST(SteadyTimerTest, steady_timer_pre_stopped_token_stops_wait) {
-  bupp::io_context context;
+  bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   bexec::inplace_stop_source source;
   EXPECT_TRUE(source.request_stop());
-  bupp::steady_timer timer(context);
+  bnio::steady_timer timer(context);
   EXPECT_EQ(timer.expires_after(std::chrono::seconds(30)), 0);
 
   stopped_void_receiver receiver;
@@ -211,9 +211,9 @@ TEST(SteadyTimerTest, steady_timer_pre_stopped_token_stops_wait) {
 TEST(SteadyTimerTest,
      timer_update_stays_on_primary_context_with_multiple_workers) {
   constexpr unsigned worker_count = 4;
-  bupp::io_context_options options;
+  bnio::io_context_options options;
   options.concurrency_hint = worker_count;
-  bupp::io_context context(options);
+  bnio::io_context context(options);
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
@@ -222,7 +222,7 @@ TEST(SteadyTimerTest,
   std::atomic<unsigned> next_order{0};
   std::atomic<unsigned> first_order{0};
   std::atomic<unsigned> second_order{0};
-  bupp::steady_timer first_timer(context);
+  bnio::steady_timer first_timer(context);
   EXPECT_EQ(first_timer.expires_after(std::chrono::milliseconds(60)), 0);
 
   ordered_timer_receiver first_receiver;
@@ -242,7 +242,7 @@ TEST(SteadyTimerTest,
   }
 
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  bupp::steady_timer second_timer(context);
+  bnio::steady_timer second_timer(context);
   EXPECT_EQ(second_timer.expires_after(std::chrono::milliseconds(5)), 0);
 
   ordered_timer_receiver second_receiver;

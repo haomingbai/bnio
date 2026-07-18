@@ -1,6 +1,6 @@
 # Usage Guide
 
-This guide introduces bupp in the order most users need it: first the
+This guide introduces bnio in the order most users need it: first the
 sender/receiver operation model, then the available operation families, then
 the scheduler capability concepts used by generic code, followed by submission
 mode choices and coroutine integration.
@@ -42,20 +42,20 @@ operation state alive until completion. In this small example the operation
 lives on the stack until `ctx.run()` returns:
 
 ```cpp
-#include <bupp/bupp.h>
+#include <bnio/bnio.h>
 #include <bexec/bexec.hpp>
 
 #include <array>
 
 int main() {
-  bupp::io_context ctx;
+  bnio::io_context ctx;
   auto scheduler = ctx.get_post_scheduler();
 
-  bupp::tcp_socket socket;
+  bnio::tcp_socket socket;
   // Assume socket has already been opened and connected.
 
   std::array<char, 4096> bytes{};
-  auto sender = socket.async_read(scheduler, bupp::buffer(bytes), 0);
+  auto sender = socket.async_read(scheduler, bnio::buffer(bytes), 0);
   auto operation = bexec::connect(std::move(sender), read_receiver{});
 
   bexec::start(operation);
@@ -71,7 +71,7 @@ queries.
 Schedulers are lightweight handles produced by `io_context`:
 
 ```cpp
-bupp::io_context ctx;
+bnio::io_context ctx;
 
 auto post = ctx.get_post_scheduler();       // schedule() always posts.
 auto dispatch = ctx.get_dispatch_scheduler(); // schedule() may run inline.
@@ -143,18 +143,18 @@ that descriptor in a `tcp_socket`.
 ## 3. Express scheduler capability with concepts
 
 Generic code should usually talk about capabilities instead of concrete
-scheduler types. bupp provides CPOs and concepts in `bupp/io_context_cpo.h` for
+scheduler types. bnio provides CPOs and concepts in `bnio/io_context_cpo.h` for
 that purpose.
 
 The CPOs include:
 
 ```cpp
-bupp::async_read(scheduler, source, buffer);
-bupp::async_write(scheduler, sink, buffer);
-bupp::async_accept(scheduler, acceptor);
-bupp::async_connect(scheduler, stream, endpoint);
-bupp::async_poll(scheduler, descriptor, poll_mask);
-bupp::async_resolve(scheduler, query, result_view);
+bnio::async_read(scheduler, source, buffer);
+bnio::async_write(scheduler, sink, buffer);
+bnio::async_accept(scheduler, acceptor);
+bnio::async_connect(scheduler, stream, endpoint);
+bnio::async_poll(scheduler, descriptor, poll_mask);
+bnio::async_resolve(scheduler, query, result_view);
 ```
 
 For stream objects, the CPO calls the stream customization first, such as
@@ -166,23 +166,23 @@ The matching concepts describe the operations a scheduler can provide:
 | Concept | Meaning |
 |---------|---------|
 | `bexec::scheduler<Scheduler>` | `Scheduler` provides the standard scheduler interface. |
-| `bupp::reads_bytes<Scheduler, Source, Buffer>` | `async_read(scheduler, source, buffer)` returns a sender. |
-| `bupp::writes_bytes<Scheduler, Sink, Buffer>` | `async_write(scheduler, sink, buffer)` returns a sender. |
-| `bupp::accepts_connections<Scheduler, Acceptor>` | `async_accept(scheduler, acceptor)` returns a sender. |
-| `bupp::connects_stream<Scheduler, Stream, Endpoint>` | `async_connect(scheduler, stream, endpoint)` returns a sender. |
-| `bupp::polls_descriptor<Scheduler, Descriptor>` | `async_poll(scheduler, descriptor, mask)` returns a sender. |
-| `bupp::resolves_dns<Scheduler, Query>` | `async_resolve(scheduler, query, result_view)` returns a sender. |
+| `bnio::reads_bytes<Scheduler, Source, Buffer>` | `async_read(scheduler, source, buffer)` returns a sender. |
+| `bnio::writes_bytes<Scheduler, Sink, Buffer>` | `async_write(scheduler, sink, buffer)` returns a sender. |
+| `bnio::accepts_connections<Scheduler, Acceptor>` | `async_accept(scheduler, acceptor)` returns a sender. |
+| `bnio::connects_stream<Scheduler, Stream, Endpoint>` | `async_connect(scheduler, stream, endpoint)` returns a sender. |
+| `bnio::polls_descriptor<Scheduler, Descriptor>` | `async_poll(scheduler, descriptor, mask)` returns a sender. |
+| `bnio::resolves_dns<Scheduler, Query>` | `async_resolve(scheduler, query, result_view)` returns a sender. |
 
 That lets application code express requirements directly:
 
 ```cpp
 template <class Scheduler, class Stream>
-  requires bupp::reads_bytes<Scheduler, Stream, bupp::mutable_buffer> &&
-           bupp::writes_bytes<Scheduler, Stream, bupp::const_buffer>
+  requires bnio::reads_bytes<Scheduler, Stream, bnio::mutable_buffer> &&
+           bnio::writes_bytes<Scheduler, Stream, bnio::const_buffer>
 auto echo_once(Scheduler scheduler, Stream& stream,
-               bupp::mutable_buffer input, bupp::const_buffer output) {
-  auto read_sender = bupp::async_read(scheduler, stream, input);
-  auto write_sender = bupp::async_write(scheduler, stream, output);
+               bnio::mutable_buffer input, bnio::const_buffer output) {
+  auto read_sender = bnio::async_read(scheduler, stream, input);
+  auto write_sender = bnio::async_write(scheduler, stream, output);
 
   // Compose or connect the returned senders as needed.
   (void)read_sender;
@@ -198,8 +198,8 @@ future type that satisfies the same CPO contract.
 All I/O factories use one passive submission path:
 
 ```cpp
-auto read = socket.async_read(scheduler, bupp::buffer(bytes));
-auto write = socket.async_write(scheduler, bupp::buffer(payload));
+auto read = socket.async_read(scheduler, bnio::buffer(bytes));
+auto write = socket.async_write(scheduler, bnio::buffer(payload));
 ```
 
 Operations enter the shared, lower-priority I/O queue. A worker always handles
@@ -219,9 +219,9 @@ write attempt. The same rule applies to TCP, UDP, descriptors, and TLS.
 
 ## 5. Coroutine support through bexec senders
 
-bupp's coroutine examples are adapters over ordinary senders, not a separate
+bnio's coroutine examples are adapters over ordinary senders, not a separate
 async API. The raw echo example shows the pattern in
-[`../../examples/raw_echo/bupp_raw_echo.cpp`](../../examples/raw_echo/bupp_raw_echo.cpp).
+[`../../examples/raw_echo/bnio_raw_echo.cpp`](../../examples/raw_echo/bnio_raw_echo.cpp).
 
 The adapter connects a sender to a receiver, starts the operation when the
 coroutine suspends, stores the completion, and resumes the awaiting coroutine.
@@ -290,7 +290,7 @@ The important properties are the same as for manual sender/receiver usage:
 - The receiver still receives `set_value`, `set_error`, or `set_stopped`.
 - The operation state is stored inside the awaiter and must remain alive until
   completion.
-- Any compatible bupp sender can be adapted this way with an awaiter that
+- Any compatible bnio sender can be adapted this way with an awaiter that
   matches its `set_value` shape, including TCP, TLS, DNS, polling, timers, and
   scheduler operations.
 
@@ -299,7 +299,7 @@ sender model:
 
 ```cpp
 auto result =
-    co_await async_result(socket.async_read(scheduler, bupp::buffer(bytes)));
+    co_await async_result(socket.async_read(scheduler, bnio::buffer(bytes)));
 
 if (!result || result.value() == 0) {
   co_return;

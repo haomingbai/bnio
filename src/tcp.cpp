@@ -1,4 +1,4 @@
-#include <bupp/tcp.h>
+#include <bnio/tcp.h>
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -7,12 +7,12 @@
 #include <system_error>
 #include <utility>
 
-#include "bupp/async_io/socket_view.h"
-#include "bupp/ip.h"
-#include "bupp/tcp/acceptor.h"
-#include "bupp/tcp/socket.h"
+#include "bnio/async_io/socket_view.h"
+#include "bnio/ip.h"
+#include "bnio/tcp/acceptor.h"
+#include "bnio/tcp/socket.h"
 
-namespace bupp::tcp {
+namespace bnio::tcp {
 
 namespace {
 
@@ -183,4 +183,4 @@ std::error_code acceptor::set_reuse_address(bool enabled) noexcept {
   return view().set_reuse_address(enabled);
 }
 
-}  // namespace bupp::tcp
+}  // namespace bnio::tcp

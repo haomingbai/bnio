@@ -1,7 +1,7 @@
 #include <arpa/inet.h>
-#include <bupp/base/linux/completion_queue_entry.h>
-#include <bupp/base/linux/ring.h>
-#include <bupp/base/linux/submission_queue_entry.h>
+#include <bnio/base/linux/completion_queue_entry.h>
+#include <bnio/base/linux/ring.h>
+#include <bnio/base/linux/submission_queue_entry.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 
@@ -29,7 +29,7 @@ enum class operation : std::uint8_t {
 };
 
 struct connection {
-  bupp::examples::base::unique_fd fd;
+  bnio::examples::base::unique_fd fd;
   std::array<char, 4096> buffer{};
   std::size_t bytes = 0;
   std::size_t sent = 0;
@@ -52,8 +52,8 @@ int unpack_fd(std::uint64_t user_data) noexcept {
   return static_cast<int>(static_cast<std::uint32_t>(user_data));
 }
 
-bupp::examples::base::unique_fd make_listener() {
-  bupp::examples::base::unique_fd listener(
+bnio::examples::base::unique_fd make_listener() {
+  bnio::examples::base::unique_fd listener(
       ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
   if (!listener.is_open()) {
     std::cerr << "echo_server: socket failed\n";
@@ -86,9 +86,9 @@ bupp::examples::base::unique_fd make_listener() {
   return listener;
 }
 
-bool queue_accept(bupp::base::ring& ring, int listener_fd) {
-  bupp::base::submission_queue_entry sqe =
-      bupp::examples::base::get_sqe_or_log(ring, "echo_server accept");
+bool queue_accept(bnio::base::ring& ring, int listener_fd) {
+  bnio::base::submission_queue_entry sqe =
+      bnio::examples::base::get_sqe_or_log(ring, "echo_server accept");
   if (sqe.raw() == nullptr) {
     return false;
   }
@@ -98,9 +98,9 @@ bool queue_accept(bupp::base::ring& ring, int listener_fd) {
   return true;
 }
 
-bool queue_recv(bupp::base::ring& ring, connection& client) {
-  bupp::base::submission_queue_entry sqe =
-      bupp::examples::base::get_sqe_or_log(ring, "echo_server recv");
+bool queue_recv(bnio::base::ring& ring, connection& client) {
+  bnio::base::submission_queue_entry sqe =
+      bnio::examples::base::get_sqe_or_log(ring, "echo_server recv");
   if (sqe.raw() == nullptr) {
     return false;
   }
@@ -110,9 +110,9 @@ bool queue_recv(bupp::base::ring& ring, connection& client) {
   return true;
 }
 
-bool queue_send(bupp::base::ring& ring, connection& client) {
-  bupp::base::submission_queue_entry sqe =
-      bupp::examples::base::get_sqe_or_log(ring, "echo_server send");
+bool queue_send(bnio::base::ring& ring, connection& client) {
+  bnio::base::submission_queue_entry sqe =
+      bnio::examples::base::get_sqe_or_log(ring, "echo_server send");
   if (sqe.raw() == nullptr) {
     return false;
   }
@@ -131,7 +131,7 @@ void close_connection(connection_map& connections, int fd) {
   }
 }
 
-bool submit_pending(bupp::base::ring& ring) {
+bool submit_pending(bnio::base::ring& ring) {
   const int result = ring.submit();
   if (result < 0) {
     std::cerr << "echo_server: submit failed: " << result << '\n';
@@ -146,17 +146,17 @@ int main() {
   std::signal(SIGINT, handle_signal);
   std::signal(SIGTERM, handle_signal);
 
-  bupp::base::ring ring;
-  switch (bupp::examples::base::init_ring(ring, 256, "echo_server")) {
-    case bupp::examples::base::ring_init_result::ready:
+  bnio::base::ring ring;
+  switch (bnio::examples::base::init_ring(ring, 256, "echo_server")) {
+    case bnio::examples::base::ring_init_result::ready:
       break;
-    case bupp::examples::base::ring_init_result::unavailable:
+    case bnio::examples::base::ring_init_result::unavailable:
       return 0;
-    case bupp::examples::base::ring_init_result::failed:
+    case bnio::examples::base::ring_init_result::failed:
       return 1;
   }
 
-  bupp::examples::base::unique_fd listener = make_listener();
+  bnio::examples::base::unique_fd listener = make_listener();
   if (!listener.is_open()) {
     return 1;
   }
@@ -169,7 +169,7 @@ int main() {
   std::cout << "echo_server: listening on 127.0.0.1:" << k_port << '\n';
 
   while (stop_requested == 0) {
-    bupp::base::completion_queue_entry cqe;
+    bnio::base::completion_queue_entry cqe;
     const int wait_result = ring.wait_cqe(cqe);
     if (wait_result < 0) {
       if (wait_result == -EINTR && stop_requested != 0) {

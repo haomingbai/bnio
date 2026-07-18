@@ -1,9 +1,9 @@
-#include <bupp/base/linux/completion_queue_entry.h>
+#include <bnio/base/linux/completion_queue_entry.h>
 #include <liburing.h>
 
-#include "bupp/base/linux/liburing.h"
+#include "bnio/base/linux/liburing.h"
 
-namespace bupp::base {
+namespace bnio::base {
 
 completion_queue_entry::completion_queue_entry() noexcept = default;
 
@@ -28,4 +28,4 @@ std::uint64_t completion_queue_entry::get_data64() const noexcept {
   return detail::io_uring_cqe_get_data64(cqe_);
 }
 
-}  // namespace bupp::base
+}  // namespace bnio::base

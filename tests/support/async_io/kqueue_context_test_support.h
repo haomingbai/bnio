@@ -1,29 +1,29 @@
 #pragma once
-#ifndef BUPP_TESTS_ASYNC_IO_KQUEUE_CONTEXT_TEST_SUPPORT_H_
-#define BUPP_TESTS_ASYNC_IO_KQUEUE_CONTEXT_TEST_SUPPORT_H_
+#ifndef BNIO_TESTS_ASYNC_IO_KQUEUE_CONTEXT_TEST_SUPPORT_H_
+#define BNIO_TESTS_ASYNC_IO_KQUEUE_CONTEXT_TEST_SUPPORT_H_
 
-#include <bupp/async_io/bsd/kqueue_context.h>
+#include <bnio/async_io/bsd/kqueue_context.h>
 
 #include <bexec/stop_token.hpp>
 #include <memory>
 #include <system_error>
 
-namespace bupp_async_io_kqueue_test {
+namespace bnio_async_io_kqueue_test {
 
-using bupp::async_io::buffer_view;
-using bupp::async_io::descriptor_view;
-using bupp::async_io::bsd_native::kqueue_context;
-using bupp::async_io::bsd_native::kqueue_context_options;
-using bupp::async_io::bsd_native::kqueue_helper;
-using bupp::async_io::bsd_native::kqueue_io_operation_base;
-using bupp::async_io::bsd_native::kqueue_nop_operation;
-using bupp::async_io::bsd_native::kqueue_operation_base;
-using bupp::async_io::bsd_native::kqueue_poll_operation;
-using bupp::async_io::bsd_native::kqueue_post_operation;
-using bupp::async_io::bsd_native::kqueue_raw_operation;
-using bupp::async_io::bsd_native::kqueue_read_operation;
-using bupp::async_io::bsd_native::kqueue_task_queue_state;
-using bupp::async_io::bsd_native::kqueue_write_operation;
+using bnio::async_io::buffer_view;
+using bnio::async_io::descriptor_view;
+using bnio::async_io::bsd_native::kqueue_context;
+using bnio::async_io::bsd_native::kqueue_context_options;
+using bnio::async_io::bsd_native::kqueue_helper;
+using bnio::async_io::bsd_native::kqueue_io_operation_base;
+using bnio::async_io::bsd_native::kqueue_nop_operation;
+using bnio::async_io::bsd_native::kqueue_operation_base;
+using bnio::async_io::bsd_native::kqueue_poll_operation;
+using bnio::async_io::bsd_native::kqueue_post_operation;
+using bnio::async_io::bsd_native::kqueue_raw_operation;
+using bnio::async_io::bsd_native::kqueue_read_operation;
+using bnio::async_io::bsd_native::kqueue_task_queue_state;
+using bnio::async_io::bsd_native::kqueue_write_operation;
 
 enum class signal_kind {
   none,
@@ -122,6 +122,6 @@ struct stopped_receiver : receiver {
   [[nodiscard]] stop_env get_env() const noexcept { return environment; }
 };
 
-}  // namespace bupp_async_io_kqueue_test
+}  // namespace bnio_async_io_kqueue_test
 
-#endif  // BUPP_TESTS_ASYNC_IO_KQUEUE_CONTEXT_TEST_SUPPORT_H_
+#endif  // BNIO_TESTS_ASYNC_IO_KQUEUE_CONTEXT_TEST_SUPPORT_H_

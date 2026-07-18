@@ -1,8 +1,8 @@
-#include <bupp/base/linux/completion_queue_entry.h>
-#include <bupp/base/linux/liburing.h>
-#include <bupp/base/linux/params.h>
-#include <bupp/base/linux/ring.h>
-#include <bupp/base/linux/submission_queue_entry.h>
+#include <bnio/base/linux/completion_queue_entry.h>
+#include <bnio/base/linux/liburing.h>
+#include <bnio/base/linux/params.h>
+#include <bnio/base/linux/ring.h>
+#include <bnio/base/linux/submission_queue_entry.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -20,20 +20,20 @@ bool is_unsupported_ring_error(int result) {
 }
 
 TEST(RingTest, move_closed_ring) {
-  bupp::base::ring first;
-  bupp::base::ring second(std::move(first));
+  bnio::base::ring first;
+  bnio::base::ring second(std::move(first));
   EXPECT_FALSE(first.is_open());
   EXPECT_FALSE(second.is_open());
 
-  bupp::base::ring third;
+  bnio::base::ring third;
   third = std::move(second);
   EXPECT_FALSE(second.is_open());
   EXPECT_FALSE(third.is_open());
 }
 
 TEST(RingTest, nop_round_trip) {
-  bupp::base::ring ring;
-  bupp::base::params params;
+  bnio::base::ring ring;
+  bnio::base::params params;
 
   const int init_result = ring.queue_init_params(8, params);
   if (init_result < 0) {
@@ -45,7 +45,7 @@ TEST(RingTest, nop_round_trip) {
   EXPECT_TRUE(ring.is_open());
   EXPECT_NE(ring.raw(), nullptr);
 
-  bupp::base::submission_queue_entry sqe = ring.get_sqe();
+  bnio::base::submission_queue_entry sqe = ring.get_sqe();
   EXPECT_NE(sqe.raw(), nullptr);
 
   sqe.prep_nop();
@@ -54,7 +54,7 @@ TEST(RingTest, nop_round_trip) {
   const int submit_result = ring.submit();
   EXPECT_TRUE(submit_result >= 0);
 
-  bupp::base::completion_queue_entry cqe;
+  bnio::base::completion_queue_entry cqe;
   const int wait_result = ring.wait_cqe(cqe);
   EXPECT_EQ(wait_result, 0);
   EXPECT_NE(cqe.raw(), nullptr);
@@ -63,13 +63,13 @@ TEST(RingTest, nop_round_trip) {
 
   ring.cqe_seen(cqe);
 
-  bupp::base::ring moved(std::move(ring));
+  bnio::base::ring moved(std::move(ring));
   EXPECT_FALSE(ring.is_open());
   EXPECT_TRUE(moved.is_open());
 }
 
 TEST(RingTest, consume_ready_cqes_respects_window) {
-  bupp::base::ring ring;
+  bnio::base::ring ring;
 
   const int init_result = ring.queue_init(8);
   if (init_result < 0) {
@@ -80,7 +80,7 @@ TEST(RingTest, consume_ready_cqes_respects_window) {
 
   constexpr unsigned k_count = 3;
   for (unsigned index = 0; index < k_count; ++index) {
-    bupp::base::submission_queue_entry sqe = ring.get_sqe();
+    bnio::base::submission_queue_entry sqe = ring.get_sqe();
     EXPECT_NE(sqe.raw(), nullptr);
     sqe.prep_nop();
     sqe.set_data64(k_user_data + index);
@@ -92,7 +92,7 @@ TEST(RingTest, consume_ready_cqes_respects_window) {
   unsigned seen_count = 0;
   std::uint64_t seen_sum = 0;
   const auto record_cqe = [&seen_count, &seen_sum](
-                              bupp::base::completion_queue_entry cqe) noexcept {
+                              bnio::base::completion_queue_entry cqe) noexcept {
     EXPECT_NE(cqe.raw(), nullptr);
     EXPECT_EQ(cqe.res(), 0);
     seen_sum += cqe.get_data64();
@@ -110,15 +110,15 @@ TEST(RingTest, consume_ready_cqes_respects_window) {
 }
 
 TEST(RingTest, disabled_single_issuer_is_claimed_by_enabling_thread) {
-  if (bupp::base::detail::io_uring_setup_r_disabled == 0 ||
-      bupp::base::detail::io_uring_setup_single_issuer == 0) {
+  if (bnio::base::detail::io_uring_setup_r_disabled == 0 ||
+      bnio::base::detail::io_uring_setup_single_issuer == 0) {
     GTEST_SKIP() << "liburing headers do not expose issuer handoff flags";
   }
 
-  bupp::base::ring ring;
-  bupp::base::params params;
-  params.set_flags(bupp::base::detail::io_uring_setup_r_disabled |
-                   bupp::base::detail::io_uring_setup_single_issuer);
+  bnio::base::ring ring;
+  bnio::base::params params;
+  params.set_flags(bnio::base::detail::io_uring_setup_r_disabled |
+                   bnio::base::detail::io_uring_setup_single_issuer);
   const int init_result = ring.queue_init_params(8, params);
   if (init_result == -EINVAL) {
     GTEST_SKIP() << "kernel does not support issuer handoff flags";
@@ -139,7 +139,7 @@ TEST(RingTest, disabled_single_issuer_is_claimed_by_enabling_thread) {
       return;
     }
 
-    bupp::base::submission_queue_entry sqe = ring.get_sqe();
+    bnio::base::submission_queue_entry sqe = ring.get_sqe();
     if (sqe.raw() == nullptr) {
       return;
     }
@@ -150,7 +150,7 @@ TEST(RingTest, disabled_single_issuer_is_claimed_by_enabling_thread) {
       return;
     }
 
-    bupp::base::completion_queue_entry cqe;
+    bnio::base::completion_queue_entry cqe;
     wait_result = ring.wait_cqe(cqe);
     if (wait_result < 0 || cqe.raw() == nullptr) {
       return;

@@ -1,5 +1,5 @@
 #include <arpa/inet.h>
-#include <bupp/async_io/linux/socket_address.h>
+#include <bnio/async_io/linux/socket_address.h>
 #include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -8,10 +8,10 @@
 
 namespace {
 
-using bupp::async_io::ip::address;
-using bupp::async_io::ip::endpoint;
-using bupp::async_io::linux_native::make_endpoint;
-using bupp::async_io::linux_native::socket_address;
+using bnio::async_io::ip::address;
+using bnio::async_io::ip::endpoint;
+using bnio::async_io::linux_native::make_endpoint;
+using bnio::async_io::linux_native::socket_address;
 
 constexpr address::v4_bytes k_loopback_v4{127, 0, 0, 1};
 constexpr address::v6_bytes k_loopback_v6{0, 0, 0, 0, 0, 0, 0, 0,

@@ -1,11 +1,11 @@
-#include <bupp/async_io/bsd/kqueue_context.h>
+#include <bnio/async_io/bsd/kqueue_context.h>
 
 #include <cerrno>
 #include <cstddef>
 
 #include "kqueue_context_internal.h"
 
-namespace bupp::async_io::bsd_native {
+namespace bnio::async_io::bsd_native {
 
 bool kqueue_context::collect_ready_events(
     bool wait, const timespec* wait_timeout) noexcept {
@@ -71,7 +71,7 @@ void kqueue_context::dispatch_event_tasks(operation_queue& event_tasks,
   push_cpu_tasks(event_tasks);
 }
 
-bool kqueue_context::process_event(const bupp::base::event& event,
+bool kqueue_context::process_event(const bnio::base::event& event,
                                    operation_queue& tasks) noexcept {
   if (event.udata() == wakeup_user_data()) {
     return false;
@@ -122,7 +122,7 @@ bool kqueue_context::process_event(const bupp::base::event& event,
 }
 
 unsigned kqueue_context::poll_result(
-    unsigned poll_mask, const bupp::base::event& event) const noexcept {
+    unsigned poll_mask, const bnio::base::event& event) const noexcept {
   unsigned result = 0;
   if (event.filter() == EVFILT_READ) {
     result |= poll_mask & static_cast<unsigned>(POLLIN | POLLPRI);
@@ -150,4 +150,4 @@ unsigned kqueue_context::poll_result(
   return result;
 }
 
-}  // namespace bupp::async_io::bsd_native
+}  // namespace bnio::async_io::bsd_native

@@ -1,6 +1,6 @@
-#include <bupp/base/bsd/event.h>
-#include <bupp/base/bsd/event_list_view.h>
-#include <bupp/base/bsd/kqueue.h>
+#include <bnio/base/bsd/event.h>
+#include <bnio/base/bsd/event_list_view.h>
+#include <bnio/base/bsd/kqueue.h>
 #include <gtest/gtest.h>
 #include <unistd.h>
 
@@ -17,7 +17,7 @@ constexpr std::uint64_t k_user_data = 0x62757070ULL;
 
 TEST(KqueueTest, event_accessors) {
   void* const data = reinterpret_cast<void*>(k_user_data);
-  bupp::base::event event(k_user_event_ident, EVFILT_USER, EV_ADD | EV_CLEAR,
+  bnio::base::event event(k_user_event_ident, EVFILT_USER, EV_ADD | EV_CLEAR,
                           NOTE_FFNOP, 7, data);
 
   EXPECT_EQ(event.ident(), k_user_event_ident);
@@ -43,8 +43,8 @@ TEST(KqueueTest, event_accessors) {
 }
 
 TEST(KqueueTest, event_list_view) {
-  std::array<bupp::base::event, 2> events{};
-  bupp::base::event_list_view view(events.data(), events.size());
+  std::array<bnio::base::event, 2> events{};
+  bnio::base::event_list_view view(events.data(), events.size());
 
   EXPECT_EQ(view.data(), events.data());
   EXPECT_EQ(view.size(), events.size());
@@ -55,19 +55,19 @@ TEST(KqueueTest, event_list_view) {
 }
 
 TEST(KqueueTest, move_closed_kqueue) {
-  bupp::base::kqueue first;
-  bupp::base::kqueue second(std::move(first));
+  bnio::base::kqueue first;
+  bnio::base::kqueue second(std::move(first));
   EXPECT_FALSE(first.is_open());
   EXPECT_FALSE(second.is_open());
 
-  bupp::base::kqueue third;
+  bnio::base::kqueue third;
   third = std::move(second);
   EXPECT_FALSE(second.is_open());
   EXPECT_FALSE(third.is_open());
 }
 
 TEST(KqueueTest, open_close_move_kqueue) {
-  bupp::base::kqueue queue;
+  bnio::base::kqueue queue;
   EXPECT_FALSE(queue.is_open());
   EXPECT_LT(queue.native_fd(), 0);
 
@@ -76,7 +76,7 @@ TEST(KqueueTest, open_close_move_kqueue) {
   EXPECT_TRUE(queue.is_open());
   EXPECT_TRUE(queue.native_fd() >= 0);
 
-  bupp::base::kqueue moved(std::move(queue));
+  bnio::base::kqueue moved(std::move(queue));
   EXPECT_FALSE(queue.is_open());
   EXPECT_TRUE(moved.is_open());
 
@@ -85,19 +85,19 @@ TEST(KqueueTest, open_close_move_kqueue) {
 }
 
 TEST(KqueueTest, user_event_wakeup) {
-  bupp::base::kqueue queue;
+  bnio::base::kqueue queue;
   EXPECT_EQ(queue.open(), 0);
 
   void* const data = reinterpret_cast<void*>(k_user_data);
-  bupp::base::event add_event(k_user_event_ident, EVFILT_USER,
+  bnio::base::event add_event(k_user_event_ident, EVFILT_USER,
                               EV_ADD | EV_CLEAR, 0, 0, data);
   EXPECT_EQ(queue.control(&add_event, 1, nullptr, 0, nullptr), 0);
 
-  bupp::base::event trigger_event(k_user_event_ident, EVFILT_USER, 0,
+  bnio::base::event trigger_event(k_user_event_ident, EVFILT_USER, 0,
                                   NOTE_TRIGGER, 0, data);
   EXPECT_EQ(queue.control(&trigger_event, 1, nullptr, 0, nullptr), 0);
 
-  bupp::base::event ready_event;
+  bnio::base::event ready_event;
   const int ready_count = queue.control(nullptr, 0, &ready_event, 1, nullptr);
   EXPECT_EQ(ready_count, 1);
   EXPECT_EQ(ready_event.ident(), k_user_event_ident);
@@ -109,18 +109,18 @@ TEST(KqueueTest, pipe_readiness) {
   int pipe_fds[2] = {-1, -1};
   EXPECT_EQ(pipe(pipe_fds), 0);
 
-  bupp::base::kqueue queue;
+  bnio::base::kqueue queue;
   EXPECT_EQ(queue.open(), 0);
 
   void* const data = reinterpret_cast<void*>(k_user_data);
-  bupp::base::event read_event(static_cast<std::uintptr_t>(pipe_fds[0]),
+  bnio::base::event read_event(static_cast<std::uintptr_t>(pipe_fds[0]),
                                EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, data);
   EXPECT_EQ(queue.control(&read_event, 1, nullptr, 0, nullptr), 0);
 
   constexpr char byte = 'x';
   EXPECT_EQ(write(pipe_fds[1], &byte, 1), 1);
 
-  bupp::base::event ready_event;
+  bnio::base::event ready_event;
   const int ready_count = queue.control(nullptr, 0, &ready_event, 1, nullptr);
   EXPECT_EQ(ready_count, 1);
   EXPECT_EQ(ready_event.ident(), static_cast<std::uintptr_t>(pipe_fds[0]));
@@ -133,10 +133,10 @@ TEST(KqueueTest, pipe_readiness) {
 }
 
 TEST(KqueueTest, timeout) {
-  bupp::base::kqueue queue;
+  bnio::base::kqueue queue;
   EXPECT_EQ(queue.open(), 0);
 
-  bupp::base::event ready_event;
+  bnio::base::event ready_event;
   timespec timeout{};
   timeout.tv_nsec = 1;
 

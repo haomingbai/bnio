@@ -1,17 +1,17 @@
-#if defined(BUPP_HEADER_TEST_BUFFER)
-#include <bupp/buffer.h>
-#elif defined(BUPP_HEADER_TEST_IO_CONTEXT)
-#include <bupp/io_context.h>
-#elif defined(BUPP_HEADER_TEST_IO_CONTEXT_CPO)
-#include <bupp/io_context_cpo.h>
-#elif defined(BUPP_HEADER_TEST_IP)
-#include <bupp/ip.h>
-#elif defined(BUPP_HEADER_TEST_SSL)
-#include <bupp/ssl.h>
-#elif defined(BUPP_HEADER_TEST_TCP)
-#include <bupp/tcp.h>
-#elif defined(BUPP_HEADER_TEST_UDP)
-#include <bupp/udp.h>
+#if defined(BNIO_HEADER_TEST_BUFFER)
+#include <bnio/buffer.h>
+#elif defined(BNIO_HEADER_TEST_IO_CONTEXT)
+#include <bnio/io_context.h>
+#elif defined(BNIO_HEADER_TEST_IO_CONTEXT_CPO)
+#include <bnio/io_context_cpo.h>
+#elif defined(BNIO_HEADER_TEST_IP)
+#include <bnio/ip.h>
+#elif defined(BNIO_HEADER_TEST_SSL)
+#include <bnio/ssl.h>
+#elif defined(BNIO_HEADER_TEST_TCP)
+#include <bnio/tcp.h>
+#elif defined(BNIO_HEADER_TEST_UDP)
+#include <bnio/udp.h>
 #else
 #error "missing header self-contained test definition"
 #endif

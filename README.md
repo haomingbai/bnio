@@ -1,6 +1,6 @@
-# bupp
+# bnio
 
-**bupp** is a modern C++20 async I/O library. It provides a
+**bnio** is a modern C++20 async I/O library. It provides a
 scheduler-based async model — every I/O operation is a lazy sender that composes
 with the standard receiver pattern. TCP, TLS (OpenSSL), DNS resolution, timers,
 and composed writes all ship out of the box.
@@ -13,7 +13,7 @@ and composed writes all ship out of the box.
 
 ## Table of Contents
 
-- [bupp](#bupp)
+- [bnio](#bnio)
   - [Table of Contents](#table-of-contents)
   - [Dependencies](#dependencies)
   - [Quick Start](#quick-start)
@@ -33,7 +33,7 @@ and composed writes all ship out of the box.
     - [bexec dependency providers](#bexec-dependency-providers)
     - [Using a local bexec checkout](#using-a-local-bexec-checkout)
     - [Shared library build](#shared-library-build)
-    - [Use bupp as a dependency](#use-bupp-as-a-dependency)
+    - [Use bnio as a dependency](#use-bnio-as-a-dependency)
       - [Installed CMake package](#installed-cmake-package)
       - [pkg-config](#pkg-config)
       - [Source tree](#source-tree)
@@ -68,15 +68,15 @@ ctest --test-dir build --output-on-failure
 ### Minimal Example
 
 ```cpp
-#include <bupp/bupp.h>
+#include <bnio/bnio.h>
 
 int main() {
-  bupp::base::ring ring;
+  bnio::base::ring ring;
   if (ring.queue_init(8) < 0) {
     return 1;
   }
 
-  bupp::base::submission_queue_entry sqe = ring.get_sqe();
+  bnio::base::submission_queue_entry sqe = ring.get_sqe();
   if (sqe.raw() == nullptr) {
     return 1;
   }
@@ -88,7 +88,7 @@ int main() {
     return 1;
   }
 
-  bupp::base::completion_queue_entry cqe;
+  bnio::base::completion_queue_entry cqe;
   if (ring.wait_cqe(cqe) < 0) {
     return 1;
   }
@@ -113,23 +113,23 @@ HTTP request/response, and graceful shutdown — all via the scheduler API.
 
 ```sh
 # HTTP GET
-bupp_mini_curl http://httpbin.org/get
+bnio_mini_curl http://httpbin.org/get
 
 # HTTPS GET (auto-detected from https:// scheme)
-bupp_mini_curl https://httpbin.org/get
+bnio_mini_curl https://httpbin.org/get
 
 # POST JSON data
-bupp_mini_curl -X POST -H "Content-Type: application/json" \
+bnio_mini_curl -X POST -H "Content-Type: application/json" \
   -d '{"key":"value"}' https://httpbin.org/post
 
 # Download to file, follow redirects
-bupp_mini_curl -L -o output.html https://example.com
+bnio_mini_curl -L -o output.html https://example.com
 
 # HEAD request with verbose progress
-bupp_mini_curl -I -v https://httpbin.org/status/200
+bnio_mini_curl -I -v https://httpbin.org/status/200
 
 # IPv4-only resolution, skip TLS verification
-bupp_mini_curl -k --ipv4 https://localhost:8443/test
+bnio_mini_curl -k --ipv4 https://localhost:8443/test
 ```
 
 #### Options
@@ -197,30 +197,30 @@ Key patterns demonstrated:
 ### Low-level base examples
 
 `examples/base/linux/` contains small, direct programs that demonstrate the
-`bupp::base` thin wrapper around `liburing`:
+`bnio::base` thin wrapper around `liburing`:
 
 | Executable                    | What it does                                              |
 | ----------------------------- | --------------------------------------------------------- |
-| `bupp_base_probe`             | Print kernel opcode support                               |
-| `bupp_base_nop`               | Smallest possible operation with `user_data` validation   |
-| `bupp_base_timeout`           | Kernel timer completions                                  |
-| `bupp_base_poll`              | Wait for pipe readiness                                   |
-| `bupp_base_echo_server`       | Echo server event loop (accept → recv → send)             |
+| `bnio_base_probe`             | Print kernel opcode support                               |
+| `bnio_base_nop`               | Smallest possible operation with `user_data` validation   |
+| `bnio_base_timeout`           | Kernel timer completions                                  |
+| `bnio_base_poll`              | Wait for pipe readiness                                   |
+| `bnio_base_echo_server`       | Echo server event loop (accept → recv → send)             |
 
 ```sh
 # Run any example
-./build/examples/base/linux/bupp_base_probe
-./build/examples/base/linux/bupp_base_echo_server  # starts on port 7000
+./build/examples/base/linux/bnio_base_probe
+./build/examples/base/linux/bnio_base_echo_server  # starts on port 7000
 ```
 
 ### Raw TCP echo
 
 `examples/raw_echo/` contains a raw TCP echo server built on
-`bupp::io_context`. It demonstrates the sender/receiver operation lifecycle and
+`bnio::io_context`. It demonstrates the sender/receiver operation lifecycle and
 uses `ctx.run()` as the event loop.
 
 ```sh
-./build/examples/raw_echo/bupp_raw_echo [port]
+./build/examples/raw_echo/bnio_raw_echo [port]
 # Default port: 8080
 # Connect: printf 'hello' | nc 127.0.0.1 8080
 ```
@@ -231,9 +231,9 @@ uses `ctx.run()` as the event loop.
 against **standalone Asio** (no Boost, no Beast). Disabled by default.
 
 ```sh
-cmake -S . -B build-asio -DBUPP_BUILD_ASIO_EXAMPLES=ON
-cmake --build build-asio --target bupp_asio_echo_server
-./build-asio/examples/asio_echo/bupp_asio_echo_server [port]
+cmake -S . -B build-asio -DBNIO_BUILD_ASIO_EXAMPLES=ON
+cmake --build build-asio --target bnio_asio_echo_server
+./build-asio/examples/asio_echo/bnio_asio_echo_server [port]
 ```
 
 ---
@@ -242,43 +242,43 @@ cmake --build build-asio --target bupp_asio_echo_server
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  bupp::io_context  (event loop + scheduler)     │
-│  bupp::ssl_stream  (TLS over any next layer)     │
-│  bupp::tcp::{socket, acceptor} / udp::socket     │
+│  bnio::io_context  (event loop + scheduler)     │
+│  bnio::ssl_stream  (TLS over any next layer)     │
+│  bnio::tcp::{socket, acceptor} / udp::socket     │
 ├─────────────────────────────────────────────────┤
-│  bupp::async_io  (non-owning views + DNS)        │
+│  bnio::async_io  (non-owning views + DNS)        │
 │  buffer/descriptor/stream/datagram socket views  │
 │  Linux: io_uring_context  BSD: kqueue_context    │
 ├─────────────────────────────────────────────────┤
-│  bupp::base  (thin system call wrappers)         │
+│  bnio::base  (thin system call wrappers)         │
 │  Linux: ring  submission_queue_entry             │
 │         completion_queue_entry                   │
 │  BSD:   kqueue  event  event_list_view           │
 └─────────────────────────────────────────────────┘
 ```text
 
-- **`bupp::base`** — the thinnest possible wrapper around system call APIs.
+- **`bnio::base`** — the thinnest possible wrapper around system call APIs.
   Linux: owns the ring fd, exposes SQE preparation and CQE walking. BSD: owns a
   kqueue fd, exposes kevent registration and polling.
-- **`bupp::async_io`** — platform-neutral vocabulary types. Non-owning views
+- **`bnio::async_io`** — platform-neutral vocabulary types. Non-owning views
   for descriptors, buffers, socket views, IP addresses/endpoints, and DNS
   queries. This layer intentionally has no RAII owners.
   `linux_native::io_uring_context` and `bsd_native::kqueue_context` provide the
   platform-level event loop selected by the target system.
-- **`bupp::io_context`** — the high-level async runtime. Uses
+- **`bnio::io_context`** — the high-level async runtime. Uses
   `concurrency_hint` to allocate native run-loop slots; each thread entering
   `run()` claims a slot with its own native context. Produces schedulers
   (dispatch and post semantics), and provides sender factories for socket views,
   descriptors, DNS, polling, and timers. Stream owners build their higher-level
   senders on top.
-- **`bupp::ssl_stream`** — an RAII TLS stream that layers over any next layer
+- **`bnio::ssl_stream`** — an RAII TLS stream that layers over any next layer
   (default: `tcp_socket`). Owns the SSL object and transport BIO pairs. Senders
   for handshake, read, write, and shutdown are produced by the stream.
 
 ### Scheduler model
 
 ```cpp
-bupp::io_context ctx;
+bnio::io_context ctx;
 
 // Post scheduler: schedule() always posts through the event loop.
 auto sched = ctx.get_post_scheduler();
@@ -320,74 +320,74 @@ bounded write attempt and returns that attempt's byte count.
 
 | Option                         | Default      | Description                                  |
 | ------------------------------ | ------------ | -------------------------------------------- |
-| `BUILD_SHARED_LIBS`            | `OFF`        | Build `bupp` as a shared library             |
-| `BUPP_BUILD_TESTS`             | top-level    | Build GoogleTest tests and enable CTest      |
-| `BUPP_BUILD_EXAMPLES`          | top-level    | Build example executables                    |
-| `BUPP_BUILD_ASIO_EXAMPLES`     | `OFF`        | Build Asio examples and fetch Asio           |
-| `BUPP_INSTALL`                 | top-level    | Generate installation and package files      |
-| `BUPP_ENABLE_COVERAGE`         | `OFF`        | Instrument GCC/Clang builds for coverage     |
-| `BUPP_GOOGLETEST_PROVIDER`     | `AUTO`       | `AUTO`, `FIND_PACKAGE`, `FETCH` (tests only)  |
-| `BUPP_GOOGLETEST_GIT_TAG`      | `v1.17.0`    | Git ref used by the test-only `FETCH` provider |
-| `BUPP_BEXEC_PROVIDER`          | `AUTO`       | `AUTO`, `FIND_PACKAGE`, `SOURCE`, `FETCH`     |
-| `BUPP_BEXEC_SOURCE_DIR`        | empty        | Path used by the `SOURCE` provider            |
-| `BUPP_BEXEC_GIT_TAG`           | `main`       | Git ref used by the `FETCH` provider          |
+| `BUILD_SHARED_LIBS`            | `OFF`        | Build `bnio` as a shared library             |
+| `BNIO_BUILD_TESTS`             | top-level    | Build GoogleTest tests and enable CTest      |
+| `BNIO_BUILD_EXAMPLES`          | top-level    | Build example executables                    |
+| `BNIO_BUILD_ASIO_EXAMPLES`     | `OFF`        | Build Asio examples and fetch Asio           |
+| `BNIO_INSTALL`                 | top-level    | Generate installation and package files      |
+| `BNIO_ENABLE_COVERAGE`         | `OFF`        | Instrument GCC/Clang builds for coverage     |
+| `BNIO_GOOGLETEST_PROVIDER`     | `AUTO`       | `AUTO`, `FIND_PACKAGE`, `FETCH` (tests only)  |
+| `BNIO_GOOGLETEST_GIT_TAG`      | `v1.17.0`    | Git ref used by the test-only `FETCH` provider |
+| `BNIO_BEXEC_PROVIDER`          | `AUTO`       | `AUTO`, `FIND_PACKAGE`, `SOURCE`, `FETCH`     |
+| `BNIO_BEXEC_SOURCE_DIR`        | empty        | Path used by the `SOURCE` provider            |
+| `BNIO_BEXEC_GIT_TAG`           | `main`       | Git ref used by the `FETCH` provider          |
 
-When `bupp` is included with `add_subdirectory()` or `FetchContent`, tests,
+When `bnio` is included with `add_subdirectory()` or `FetchContent`, tests,
 examples, and installation rules default to off so they do not modify the
 parent project's build.
 
 ### GoogleTest dependency
 
-GoogleTest is resolved only after `BUPP_BUILD_TESTS` enables the `tests/`
-subdirectory. With tests disabled, bupp does not call `find_package(GTest)`,
-download GoogleTest, create GoogleTest targets, or expose it through the bupp
+GoogleTest is resolved only after `BNIO_BUILD_TESTS` enables the `tests/`
+subdirectory. With tests disabled, bnio does not call `find_package(GTest)`,
+download GoogleTest, create GoogleTest targets, or expose it through the bnio
 package.
 
 The default `AUTO` provider accepts an existing `GTest::gtest_main` target,
 tries `find_package(GTest)` (config and module modes), and then fetches the
-pinned `BUPP_GOOGLETEST_GIT_TAG` as a fallback. The fetched copy does not build
+pinned `BNIO_GOOGLETEST_GIT_TAG` as a fallback. The fetched copy does not build
 GoogleMock and does not add GoogleTest installation rules.
 
 ```sh
 # Require a preinstalled GoogleTest package; never download it.
 cmake -S . -B build \
-  -DBUPP_BUILD_TESTS=ON \
-  -DBUPP_GOOGLETEST_PROVIDER=FIND_PACKAGE
+  -DBNIO_BUILD_TESTS=ON \
+  -DBNIO_GOOGLETEST_PROVIDER=FIND_PACKAGE
 
 # Skip all GoogleTest discovery and download work.
-cmake -S . -B build-library -DBUPP_BUILD_TESTS=OFF
+cmake -S . -B build-library -DBNIO_BUILD_TESTS=OFF
 ```
 
 ### bexec dependency providers
 
-`bupp` always exposes the same `bupp::bupp` target, independently of how
+`bnio` always exposes the same `bnio::bnio` target, independently of how
 `bexec` is supplied:
 
 ```sh
 # Use an installed bexecConfig.cmake.
 cmake -S . -B build \
-  -DBUPP_BEXEC_PROVIDER=FIND_PACKAGE \
+  -DBNIO_BEXEC_PROVIDER=FIND_PACKAGE \
   -DCMAKE_PREFIX_PATH=/path/to/bexec
 
 # Use a local bexec source checkout.
 cmake -S . -B build \
-  -DBUPP_BEXEC_PROVIDER=SOURCE \
-  -DBUPP_BEXEC_SOURCE_DIR=/path/to/bexec
+  -DBNIO_BEXEC_PROVIDER=SOURCE \
+  -DBNIO_BEXEC_SOURCE_DIR=/path/to/bexec
 
 # Clone bexec during configuration.
-cmake -S . -B build -DBUPP_BEXEC_PROVIDER=FETCH
+cmake -S . -B build -DBNIO_BEXEC_PROVIDER=FETCH
 ```
 
 `AUTO` first accepts an existing `bexec::bexec` target, then uses
-`BUPP_BEXEC_SOURCE_DIR` when set, tries `find_package(bexec CONFIG)`, and
+`BNIO_BEXEC_SOURCE_DIR` when set, tries `find_package(bexec CONFIG)`, and
 finally falls back to `FETCH`.
 
 ### Using a local bexec checkout
 
 ```sh
 cmake -S . -B build \
-  -DBUPP_BEXEC_PROVIDER=SOURCE \
-  -DBUPP_BEXEC_SOURCE_DIR=/path/to/bexec
+  -DBNIO_BEXEC_PROVIDER=SOURCE \
+  -DBNIO_BEXEC_SOURCE_DIR=/path/to/bexec
 ```
 
 ### Shared library build
@@ -397,22 +397,22 @@ cmake -S . -B build-shared -DBUILD_SHARED_LIBS=ON
 cmake --build build-shared
 ```
 
-Shared builds export the `BUPP_SHARED_LIBRARY` usage requirement, hide
+Shared builds export the `BNIO_SHARED_LIBRARY` usage requirement, hide
 non-public symbols, and install versioned library names with ABI version `0`.
 
-### Use bupp as a dependency
+### Use bnio as a dependency
 
-All three consumption modes provide the `bupp::bupp` CMake target or equivalent
+All three consumption modes provide the `bnio::bnio` CMake target or equivalent
 pkg-config link information.
 
 #### Installed CMake package
 
-Install `bexec` first, then build and install `bupp` against that package:
+Install `bexec` first, then build and install `bnio` against that package:
 
 ```sh
 cmake -S . -B build-install \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUPP_BEXEC_PROVIDER=FIND_PACKAGE \
+  -DBNIO_BEXEC_PROVIDER=FIND_PACKAGE \
   -DCMAKE_PREFIX_PATH=/install/prefix
 cmake --build build-install
 cmake --install build-install --prefix /install/prefix
@@ -421,25 +421,25 @@ cmake --install build-install --prefix /install/prefix
 A CMake consumer can then use:
 
 ```cmake
-find_package(bupp 0.0.1 CONFIG REQUIRED)
-target_link_libraries(your_target PRIVATE bupp::bupp)
+find_package(bnio 0.0.1 CONFIG REQUIRED)
+target_link_libraries(your_target PRIVATE bnio::bnio)
 ```
 
 #### pkg-config
 
-The installation provides `bupp.pc`. On Linux it carries the required
+The installation provides `bnio.pc`. On Linux it carries the required
 `bexec`, OpenSSL, and liburing metadata:
 
 ```sh
-c++ app.cpp $(pkg-config --cflags --libs bupp)
+c++ app.cpp $(pkg-config --cflags --libs bnio)
 ```
 
 It can also be consumed as an imported CMake target:
 
 ```cmake
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(BUPP REQUIRED IMPORTED_TARGET bupp>=0.0.1)
-target_link_libraries(your_target PRIVATE PkgConfig::BUPP)
+pkg_check_modules(BNIO REQUIRED IMPORTED_TARGET bnio>=0.0.1)
+target_link_libraries(your_target PRIVATE PkgConfig::BNIO)
 ```
 
 #### Source tree
@@ -447,13 +447,13 @@ target_link_libraries(your_target PRIVATE PkgConfig::BUPP)
 Direct source inclusion keeps the same namespaced target:
 
 ```cmake
-add_subdirectory(path/to/bupp)
-target_link_libraries(your_target PRIVATE bupp::bupp)
+add_subdirectory(path/to/bnio)
+target_link_libraries(your_target PRIVATE bnio::bnio)
 ```
 
 The parent may provide `bexec::bexec` first, select an installed package with
-`BUPP_BEXEC_PROVIDER=FIND_PACKAGE`, point to a checkout with `SOURCE`, or allow
-`bupp` to fetch it.
+`BNIO_BEXEC_PROVIDER=FIND_PACKAGE`, point to a checkout with `SOURCE`, or allow
+`bnio` to fetch it.
 
 ### Coverage report
 
@@ -465,8 +465,8 @@ python3 -m venv .venv
 .venv/bin/python -m pip install gcovr==8.6
 cmake -S . -B build-coverage \
   -DCMAKE_BUILD_TYPE=Debug \
-  -DBUPP_BUILD_EXAMPLES=OFF \
-  -DBUPP_ENABLE_COVERAGE=ON
+  -DBNIO_BUILD_EXAMPLES=OFF \
+  -DBNIO_ENABLE_COVERAGE=ON
 cmake --build build-coverage
 ctest --test-dir build-coverage --output-on-failure
 cmake -E make_directory coverage

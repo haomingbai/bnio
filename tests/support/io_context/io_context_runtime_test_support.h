@@ -4,7 +4,7 @@
 
 namespace {
 
-[[nodiscard]] bool context_available(const bupp::io_context& context) {
+[[nodiscard]] bool context_available(const bnio::io_context& context) {
   return context.is_open();
 }
 

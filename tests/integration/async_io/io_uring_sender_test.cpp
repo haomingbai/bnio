@@ -7,7 +7,7 @@
 
 namespace {
 
-using namespace bupp_async_io_io_uring_test;
+using namespace bnio_async_io_io_uring_test;
 
 TEST(IoUringSenderTest, post_operation_runs_on_context_thread) {
   io_uring_context context;
@@ -87,9 +87,9 @@ TEST(IoUringSenderTest, resolve_sender_runs_on_context_thread) {
     GTEST_SKIP() << "io_uring is unavailable";
   }
 
-  bupp::async_io::dns_query query("127.0.0.1", "8080");
-  query.set_address_version(bupp::async_io::ip::address::version::v4);
-  std::array<bupp::async_io::ip::endpoint, 8> results{};
+  bnio::async_io::dns_query query("127.0.0.1", "8080");
+  query.set_address_version(bnio::async_io::ip::address::version::v4);
+  std::array<bnio::async_io::ip::endpoint, 8> results{};
 
   resolve_receiver recv;
   resolve_state state;
@@ -97,7 +97,7 @@ TEST(IoUringSenderTest, resolve_sender_runs_on_context_thread) {
   recv.context = &context;
 
   auto sender = context.async_resolve(std::move(query),
-                                      bupp::async_io::dns_result_view(results));
+                                      bnio::async_io::dns_result_view(results));
   auto operation = bexec::connect(std::move(sender), std::move(recv));
   bexec::start(operation);
   context.run();
@@ -106,7 +106,7 @@ TEST(IoUringSenderTest, resolve_sender_runs_on_context_thread) {
   EXPECT_GT(state.endpoint_count, 0);
   EXPECT_EQ(results[0].port(), 8080);
   EXPECT_EQ(results[0].address().type(),
-            bupp::async_io::ip::address::version::v4);
+            bnio::async_io::ip::address::version::v4);
   EXPECT_TRUE(state.in_context);
 }
 

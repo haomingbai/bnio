@@ -1,4 +1,4 @@
-#include <bupp/base/linux/ring.h>
+#include <bnio/base/linux/ring.h>
 #include <liburing.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -6,11 +6,11 @@
 #include <cerrno>
 #include <utility>
 
-#include "bupp/base/linux/completion_queue_entry.h"
-#include "bupp/base/linux/params.h"
-#include "bupp/base/linux/submission_queue_entry.h"
+#include "bnio/base/linux/completion_queue_entry.h"
+#include "bnio/base/linux/params.h"
+#include "bnio/base/linux/submission_queue_entry.h"
 
-namespace bupp::base {
+namespace bnio::base {
 
 ring::ring() noexcept = default;
 
@@ -115,4 +115,4 @@ int ring::wait_cqe_event(int ring_fd, unsigned wait_nr) noexcept {
 
 bool ring::is_open() const noexcept { return open_; }
 
-}  // namespace bupp::base
+}  // namespace bnio::base

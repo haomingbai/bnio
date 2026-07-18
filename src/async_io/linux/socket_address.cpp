@@ -1,9 +1,9 @@
 #include <arpa/inet.h>
-#include <bupp/async_io/linux/socket_address.h>
+#include <bnio/async_io/linux/socket_address.h>
 
 #include <cstring>
 
-namespace bupp::async_io::linux_native {
+namespace bnio::async_io::linux_native {
 namespace {
 
 void copy_v4_address(sockaddr_in& output,
@@ -100,4 +100,4 @@ std::optional<ip::endpoint> make_endpoint(const sockaddr* address,
   }
 }
 
-}  // namespace bupp::async_io::linux_native
+}  // namespace bnio::async_io::linux_native

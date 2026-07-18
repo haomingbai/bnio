@@ -1,5 +1,5 @@
-#include <bupp/io_context.h>
-#include <bupp/tcp.h>
+#include <bnio/io_context.h>
+#include <bnio/tcp.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <poll.h>
@@ -49,7 +49,7 @@ struct schedule_state {
 
 struct byte_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
 
   void set_value(std::size_t size) noexcept {
     state->signal = signal_kind::value;
@@ -77,11 +77,11 @@ struct byte_receiver {
 
 struct socket_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
   unsigned* completions = nullptr;
   unsigned target = 1;
 
-  void set_value(bupp::tcp_socket socket) noexcept {
+  void set_value(bnio::tcp_socket socket) noexcept {
     state->signal = signal_kind::value;
     state->fd = socket.release();
     if (completions != nullptr) {
@@ -119,7 +119,7 @@ struct socket_receiver {
 
 struct void_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
   unsigned* completions = nullptr;
   unsigned target = 1;
 
@@ -160,7 +160,7 @@ struct void_receiver {
 
 struct poll_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
 
   void set_value(unsigned events) noexcept {
     state->signal = signal_kind::value;
@@ -203,7 +203,7 @@ struct stopped_void_receiver : void_receiver {
 
 struct schedule_receiver {
   std::shared_ptr<schedule_state> state = std::make_shared<schedule_state>();
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
   int value = 0;
   unsigned target = 1;
 
@@ -241,7 +241,7 @@ struct stopped_schedule_receiver : schedule_receiver {
 
 struct dispatch_inline_outer_receiver {
   std::shared_ptr<schedule_state> state;
-  bupp::io_context* context = nullptr;
+  bnio::io_context* context = nullptr;
 
   void set_value() noexcept {
     schedule_receiver inner;

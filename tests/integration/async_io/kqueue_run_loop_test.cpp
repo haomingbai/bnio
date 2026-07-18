@@ -12,7 +12,7 @@
 
 namespace {
 
-using namespace bupp_async_io_kqueue_test;
+using namespace bnio_async_io_kqueue_test;
 
 struct concurrent_state {
   std::atomic<unsigned> completed{0};

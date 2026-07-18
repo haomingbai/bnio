@@ -1,10 +1,10 @@
 #pragma once
-#ifndef BUPP_SRC_ASYNC_IO_LINUX_IO_URING_CONTEXT_INTERNAL_H_
-#define BUPP_SRC_ASYNC_IO_LINUX_IO_URING_CONTEXT_INTERNAL_H_
+#ifndef BNIO_SRC_ASYNC_IO_LINUX_IO_URING_CONTEXT_INTERNAL_H_
+#define BNIO_SRC_ASYNC_IO_LINUX_IO_URING_CONTEXT_INTERNAL_H_
 
-#include <bupp/async_io/linux/io_uring_context.h>
+#include <bnio/async_io/linux/io_uring_context.h>
 
-namespace bupp::async_io::linux_native {
+namespace bnio::async_io::linux_native {
 
 inline void io_uring_context::operation_queue::push(
     io_uring_operation_base& operation) noexcept {
@@ -44,6 +44,6 @@ struct io_uring_context::cqe_data {
   unsigned flags = 0;
 };
 
-}  // namespace bupp::async_io::linux_native
+}  // namespace bnio::async_io::linux_native
 
-#endif  // BUPP_SRC_ASYNC_IO_LINUX_IO_URING_CONTEXT_INTERNAL_H_
+#endif  // BNIO_SRC_ASYNC_IO_LINUX_IO_URING_CONTEXT_INTERNAL_H_

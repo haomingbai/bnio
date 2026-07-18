@@ -1,6 +1,6 @@
-#include <bupp/async_io/linux/io_uring_context.h>
-#include <bupp/base/linux/liburing.h>
-#include <bupp/base/linux/params.h>
+#include <bnio/async_io/linux/io_uring_context.h>
+#include <bnio/base/linux/liburing.h>
+#include <bnio/base/linux/params.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 
@@ -9,15 +9,15 @@
 
 #include "io_uring_context_internal.h"
 
-namespace bupp::async_io::linux_native {
+namespace bnio::async_io::linux_native {
 
 namespace {
 
 unsigned prepare_queue_params(const io_uring_context_options& options,
-                              bupp::base::params& queue_params) noexcept {
+                              bnio::base::params& queue_params) noexcept {
   unsigned flags = options.setup_flags;
-  if ((flags & bupp::base::detail::io_uring_setup_single_issuer) != 0) {
-    flags |= bupp::base::detail::io_uring_setup_r_disabled;
+  if ((flags & bnio::base::detail::io_uring_setup_single_issuer) != 0) {
+    flags |= bnio::base::detail::io_uring_setup_r_disabled;
   }
   if (options.enable_sqpoll) {
     flags |= IORING_SETUP_SQPOLL;
@@ -72,14 +72,14 @@ int io_uring_context::queue_init(
     owns_event_fd_ = true;
   }
 
-  bupp::base::params queue_params;
+  bnio::base::params queue_params;
   const unsigned flags = prepare_queue_params(options_, queue_params);
   const int result = init_ring_params(options_.entries, flags, queue_params);
 
   if (result >= 0) {
     kernel_features_ = queue_params.features();
     ring_disabled_ = (queue_params.flags() &
-                      bupp::base::detail::io_uring_setup_r_disabled) != 0;
+                      bnio::base::detail::io_uring_setup_r_disabled) != 0;
   } else {
     kernel_features_ = 0;
     ring_disabled_ = false;
@@ -101,7 +101,7 @@ int io_uring_context::queue_init(
 
 int io_uring_context::init_ring_params(
     unsigned entries, unsigned flags,
-    bupp::base::params& queue_params) noexcept {
+    bnio::base::params& queue_params) noexcept {
   queue_params.set_flags(flags);
 
   int result = ring_.queue_init_params(entries, queue_params);
@@ -114,9 +114,9 @@ int io_uring_context::init_ring_params(
   // propagated instead of being silently converted to a different mode.
   if (result == -EINVAL && flags != 0) {
     queue_params.reset();
-    flags &= ~(bupp::base::detail::io_uring_setup_coop_taskrun |
-               bupp::base::detail::io_uring_setup_single_issuer |
-               bupp::base::detail::io_uring_setup_r_disabled);
+    flags &= ~(bnio::base::detail::io_uring_setup_coop_taskrun |
+               bnio::base::detail::io_uring_setup_single_issuer |
+               bnio::base::detail::io_uring_setup_r_disabled);
     queue_params.set_flags(flags);
     if ((flags & IORING_SETUP_SQPOLL) != 0) {
       queue_params.set_sq_thread_cpu(options_.sqpoll_thread_cpu);
@@ -152,4 +152,4 @@ void io_uring_context::set_global_state(
   global_state_ = &state;
 }
 
-}  // namespace bupp::async_io::linux_native
+}  // namespace bnio::async_io::linux_native

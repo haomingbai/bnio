@@ -8,7 +8,7 @@ differences.
 The existing Linux implementation is built around `io_uring`, which is a
 proactor-style interface: the kernel performs the requested I/O and later
 returns a completion. `kqueue` is a reactor-style interface: the kernel reports
-that an fd is ready, and bupp must then perform the actual `accept`, `connect`,
+that an fd is ready, and bnio must then perform the actual `accept`, `connect`,
 `read`, `write`, or `poll` step before completing the sender.
 
 ## Goals
@@ -40,18 +40,18 @@ The platform split should evolve from the current Linux-only shape into this:
 
 | Layer | Linux | macOS / BSD |
 |-------|-------|-------------|
-| `base` | `include/bupp/base/linux/`, `src/base/linux/` ✅ | `include/bupp/base/bsd/`, `src/base/bsd/` ✅ |
+| `base` | `include/bnio/base/linux/`, `src/base/linux/` ✅ | `include/bnio/base/bsd/`, `src/base/bsd/` ✅ |
 | `async_io` native backend | `async_io::linux_native::io_uring_context` ✅ | `async_io::bsd_native::kqueue_context` ✅ |
-| high-level runtime | `include/bupp/linux/io_context.h`, `src/linux/` ✅ | `include/bupp/bsd/io_context.h`, `src/bsd/` ✅ |
-| system macros | `BUPP_SYSTEM_LINUX` ✅ | `BUPP_SYSTEM_DARWIN`, `BUPP_SYSTEM_FREEBSD`, `BUPP_SYSTEM_BSD` ✅ |
+| high-level runtime | `include/bnio/linux/io_context.h`, `src/linux/` ✅ | `include/bnio/bsd/io_context.h`, `src/bsd/` ✅ |
+| system macros | `BNIO_SYSTEM_LINUX` ✅ | `BNIO_SYSTEM_DARWIN`, `BNIO_SYSTEM_FREEBSD`, `BNIO_SYSTEM_BSD` ✅ |
 
 The public umbrella headers should eventually select the platform runtime
-through `include/bupp/config/system.h`, while platform-native headers remain
+through `include/bnio/config/system.h`, while platform-native headers remain
 available for users that explicitly opt into a backend.
 
 ## Reactor vs. Proactor Mapping
 
-`io_uring` reports completed work. `kqueue` reports readiness, so bupp must run
+`io_uring` reports completed work. `kqueue` reports readiness, so bnio must run
 the nonblocking I/O attempt between the readiness event and the sender
 completion.
 
@@ -163,7 +163,7 @@ public:
 Base-layer rules:
 
 - Return non-negative values on success and negative `errno` values on failure,
-  matching the rest of bupp's base-layer style instead of exposing `errno`
+  matching the rest of bnio's base-layer style instead of exposing `errno`
   directly.
 - Do not own user fds, buffers, socket addresses, or event arrays.
 - Do not expose sender/receiver concepts.
@@ -186,7 +186,7 @@ Likely base tests:
 should remain shared. The macOS/BSD work belongs in a new native backend:
 
 ```text
-include/bupp/async_io/bsd/
+include/bnio/async_io/bsd/
 src/async_io/bsd/
 ```
 
@@ -289,11 +289,11 @@ CPU/I/O work and stop requests. Timer heap ownership stays in high-level
 ## High-Level io_context Work
 
 Although this roadmap focuses on `base` and `async_io`, the public port finishes
-only when `bupp::io_context` can select the BSD backend.
+only when `bnio::io_context` can select the BSD backend.
 
 Expected work:
 
-- add `include/bupp/bsd/io_context.h` and `src/bsd/io_context.cpp`;
+- add `include/bnio/bsd/io_context.h` and `src/bsd/io_context.cpp`;
 - introduce `bsd_io_context_options`;
 - make `platform_io_context_options` select Linux or BSD options from
   `config/system.h`;
@@ -312,13 +312,13 @@ attempt, while `async_write` is the composed write-all loop.
 
 - [x] Add the roadmap.
 - [x] Extend `config/system.h` with FreeBSD and a shared BSD-family macro
-  (`BUPP_SYSTEM_DARWIN`, `BUPP_SYSTEM_FREEBSD`, `BUPP_SYSTEM_BSD`).
+  (`BNIO_SYSTEM_DARWIN`, `BNIO_SYSTEM_FREEBSD`, `BNIO_SYSTEM_BSD`).
 - [x] Teach CMake to compile platform sources conditionally.
 
 ### Phase 2: BSD Base Wrappers ✅
 
 - [x] Add `base::kqueue`, `base::event`, and `base::event_list_view` in
-  `include/bupp/base/bsd/` and `src/base/bsd/`.
+  `include/bnio/base/bsd/` and `src/base/bsd/`.
 - [x] Add unit tests for open/close and header self-containment in
   `tests/base/bsd/`.
 - [x] Keep this phase independent from senders and high-level runtime code.
@@ -343,7 +343,7 @@ attempt, while `async_write` is the composed write-all loop.
 
 ### Phase 5: High-Level Runtime Integration ✅
 
-- [x] Wire `bupp::io_context` to the BSD native backend.
+- [x] Wire `bnio::io_context` to the BSD native backend.
 - [x] Reuse the public scheduler/CPO surface, TCP/TLS owners, DNS vocabulary,
   timer heap, and write-all composition.
 - [x] Implement the passive kernel deadline with `EVFILT_TIMER`.

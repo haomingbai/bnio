@@ -1,6 +1,6 @@
-#include <bupp/base/bsd/event_list_view.h>
+#include <bnio/base/bsd/event_list_view.h>
 
-namespace bupp::base {
+namespace bnio::base {
 
 event_list_view::event_list_view() noexcept = default;
 
@@ -23,4 +23,4 @@ const event& event_list_view::operator[](std::size_t index) const noexcept {
   return events_[index];
 }
 
-}  // namespace bupp::base
+}  // namespace bnio::base
