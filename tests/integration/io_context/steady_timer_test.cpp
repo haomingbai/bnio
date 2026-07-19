@@ -223,7 +223,10 @@ TEST(SteadyTimerTest,
   std::atomic<unsigned> first_order{0};
   std::atomic<unsigned> second_order{0};
   bnio::steady_timer first_timer(context);
-  EXPECT_EQ(first_timer.expires_after(std::chrono::milliseconds(60)), 0);
+  // Use a generous expiry so CI scheduling jitter cannot cause the first
+  // timer to fire before the shorter second timer is even drained into the
+  // timer heap by the primary worker.
+  EXPECT_EQ(first_timer.expires_after(std::chrono::milliseconds(500)), 0);
 
   ordered_timer_receiver first_receiver;
   first_receiver.context = &context;
@@ -241,9 +244,12 @@ TEST(SteadyTimerTest,
     workers.emplace_back([&context] { context.run(); });
   }
 
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  // Give the primary worker enough time to drain the first timer submission
+  // and settle before scheduling the second, shorter timer. On macOS CI
+  // runners sleep_for can overshoot significantly, so a wide gap is used.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
   bnio::steady_timer second_timer(context);
-  EXPECT_EQ(second_timer.expires_after(std::chrono::milliseconds(5)), 0);
+  EXPECT_EQ(second_timer.expires_after(std::chrono::milliseconds(20)), 0);
 
   ordered_timer_receiver second_receiver;
   second_receiver.context = &context;
