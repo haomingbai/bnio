@@ -223,14 +223,19 @@ High-level async runtime, stream owners, and buffer types.
 
 - `examples/base/linux/` — low-level `liburing` wrapper examples (nop, probe,
   timeout, poll, echo_server).
-- `examples/raw_echo/` — TCP echo server (`bnio_raw_echo.cpp`), Asio comparison
-  (`asio_raw_echo.cpp`), and shared benchmark client (`client.cpp`).
 - `examples/mini_curl/` — full HTTP/HTTPS client:
   - `mini_curl.cpp` — `main()` and argument parsing.
   - `request.cpp` — HTTP request construction.
   - `mini_curl/` subdirectory — client components (client, connection,
     receivers, redirect, transfer, output, operation_registry, request).
 - `examples/asio_echo/` — standalone Asio HTTP echo server (disabled by default).
+
+## Benchmarks (`benchmarks/`)
+
+- `benchmarks/throughput/` — functionally equivalent bnio and standalone-Asio
+  TCP echo servers plus one shared client.
+- `benchmarks/timer_churn/` — bnio and standalone-Asio active timer churn
+  benchmarks with shared workload parsing and output formatting.
 
 ## Docs (`docs/`)
 

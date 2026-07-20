@@ -148,7 +148,8 @@ int main(int argc, char** argv) {
 
   asio::co_spawn(ctx, accept_loop(a), asio::detached);
 
-  std::cout << "asio_raw_echo " << port << " workers " << worker_count
-            << " bind " << bind_address.to_string() << std::endl;
+  std::cout << "asio_throughput_benchmark " << port << " workers "
+            << worker_count << " bind " << bind_address.to_string()
+            << std::endl;
   run_context(ctx, worker_count);
 }

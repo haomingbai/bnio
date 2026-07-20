@@ -51,53 +51,34 @@ Read operations return one available chunk. Write operations send the whole
 provided buffer before completing; use `async_write_some(...)` when an example
 or application needs to observe and retry short writes manually.
 
-## Raw TCP Echo Server
-
-The standalone example is in
-[`examples/raw_echo`](../examples/raw_echo).
-It demonstrates:
-
-- `tcp_acceptor` setup with `open`, `set_reuse_address`, `bind`, and `listen`
-- repeated `acceptor.async_accept(...)`
-- per-connection chunk reads with `socket.async_read(...)`
-- whole-buffer responses with `socket.async_write(...)`
-- `ctx.run()` as the server event loop
-- explicit operation lifetime management for a long-running server
-
-Build and run it:
-
-```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
-cmake --build build --target bnio_raw_echo
-./build/examples/raw_echo/bnio_raw_echo 8090
-```
-
 ## Base Linux Examples
 
 The `examples/base/linux` directory demonstrates the low-level wrapper around
 `liburing`. These examples use raw SQE/CQE handling and are useful when you want
 to understand the layer under `io_context`.
 
-## Raw Echo Benchmark
+## TCP Throughput Benchmark
 
-The benchmark helper builds the bnio raw echo server, the Asio raw echo server,
-and one shared Asio-based client. The same client runs against both servers with
-the same connection count, duration, and message size.
+The throughput benchmark is in
+[`benchmarks/throughput`](../benchmarks/throughput). It builds a bnio TCP echo
+server, an Asio TCP echo server, and one shared Asio-based client. The same
+client runs against both servers with the same connection count, duration, and
+message size.
 
 | Option | What it does |
 |--------|-------------|
-| `BNIO_BUILD_ASIO_EXAMPLES=ON` | Build the Asio comparison server and benchmark client |
+| `BNIO_BUILD_BENCHMARKS=ON` | Build throughput and timer benchmark targets |
 
 Run the helper script:
 
 ```sh
-scripts/benchmark.sh --fetch-asio
+scripts/benchmark.sh
 ```
 
 Override defaults with environment variables:
 
 ```sh
-CONNECTIONS=256 DURATION=30s MSG_SIZE=1024 scripts/benchmark.sh --fetch-asio
+CONNECTIONS=256 DURATION=30s MSG_SIZE=1024 scripts/benchmark.sh
 ```
 
 ## Standalone Asio Echo Server

@@ -3,7 +3,6 @@ if(BNIO_PLATFORM_LINUX)
 endif()
 
 if(BNIO_PLATFORM_LINUX OR BNIO_PLATFORM_BSD)
-  add_subdirectory(raw_echo)
   add_subdirectory(mini_curl)
 endif()
 

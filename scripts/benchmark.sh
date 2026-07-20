@@ -14,7 +14,6 @@ BNIO_PORT_RAW="${BNIO_PORT_RAW:-8090}"
 ASIO_PORT_RAW="${ASIO_PORT_RAW:-8091}"
 CLIENT_WORKERS="${CLIENT_WORKERS:-match}"
 
-FETCH_ASIO=false
 EXTRA_CMAKE_ARGS=()
 ARTIFACTS="${ROOT_DIR}/.artifacts"
 
@@ -25,7 +24,6 @@ usage: ${SCRIPT_NAME} [FLAGS...]
 Flags:
   --build-dir DIR     CMake build directory (default: /tmp/bnio-bench)
   --perf              Record perf.data to .artifacts/
-  --fetch-asio        Pass -DBNIO_BUILD_ASIO_EXAMPLES=ON (auto-fetch Asio)
   --cmake-args "..."  Extra arguments forwarded to cmake
   --help, -h          Show this message
 
@@ -46,7 +44,6 @@ while [[ $# -gt 0 ]]; do
     --build-dir) BUILD_DIR="$2"; shift 2 ;;
     --build-dir=*) BUILD_DIR="${1#*=}"; shift ;;
     --perf) PERF=1; shift ;;
-    --fetch-asio) FETCH_ASIO=true; shift ;;
     --cmake-args) EXTRA_CMAKE_ARGS+=($2); shift 2 ;;
     --cmake-args=*) EXTRA_CMAKE_ARGS+=("${1#*=}"); shift ;;
     --help|-h) usage ;;
@@ -121,21 +118,19 @@ fi
 
 CMAKE_ARGS=(
   -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
-  -DBNIO_BUILD_EXAMPLES=ON
-  -DBNIO_BUILD_ASIO_EXAMPLES=ON
+  -DBNIO_BUILD_TESTS=OFF
+  -DBNIO_BUILD_EXAMPLES=OFF
+  -DBNIO_BUILD_BENCHMARKS=ON
 )
-
-if ${FETCH_ASIO}; then
-  CMAKE_ARGS+=(-DBNIO_BUILD_ASIO_EXAMPLES=ON)
-fi
 
 CMAKE_ARGS+=("${EXTRA_CMAKE_ARGS[@]}")
 
 echo "=== cmake configure ==="
 cmake -S "${ROOT_DIR}" -B "${BUILD_DIR}" "${CMAKE_ARGS[@]}"
 
-echo "=== build raw echo targets ==="
-cmake --build "${BUILD_DIR}" --target bnio_raw_echo asio_raw_echo raw_echo_client
+echo "=== build throughput benchmark targets ==="
+cmake --build "${BUILD_DIR}" --target bnio_throughput_benchmark \
+  asio_throughput_benchmark throughput_benchmark_client
 
 if [[ "${PERF}" == "1" ]]; then
   mkdir -p "${ARTIFACTS}"
@@ -187,7 +182,8 @@ run_raw() {
   fi
 
   local output
-  output="$("${perf_cmd[@]}" "${BUILD_DIR}/examples/raw_echo/raw_echo_client" \
+  output="$("${perf_cmd[@]}" \
+    "${BUILD_DIR}/benchmarks/throughput/throughput_benchmark_client" \
     "${port}" "${CONNECTIONS}" "${DURATION_SEC}" "${MSG_SIZE}" "${client_workers}")"
   echo "${output}"
 
@@ -203,10 +199,12 @@ run_raw() {
 
 RESULT_ROWS=()
 for worker_count in "${WORKER_COUNT_LIST[@]}"; do
-  run_raw "bnio_raw" "${BUILD_DIR}/examples/raw_echo/bnio_raw_echo" \
-    "${BNIO_PORT_RAW}" "raw-bnio" "${worker_count}"
-  run_raw "asio_raw" "${BUILD_DIR}/examples/raw_echo/asio_raw_echo" \
-    "${ASIO_PORT_RAW}" "raw-asio" "${worker_count}"
+  run_raw "bnio" \
+    "${BUILD_DIR}/benchmarks/throughput/bnio_throughput_benchmark" \
+    "${BNIO_PORT_RAW}" "throughput-bnio" "${worker_count}"
+  run_raw "asio" \
+    "${BUILD_DIR}/benchmarks/throughput/asio_throughput_benchmark" \
+    "${ASIO_PORT_RAW}" "throughput-asio" "${worker_count}"
 done
 
 if [[ "${PERF}" == "1" ]]; then

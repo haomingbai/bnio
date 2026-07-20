@@ -48,6 +48,7 @@ endif()
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(BNIO_BUILD_TESTS "Build bnio tests" ${BNIO_IS_TOP_LEVEL})
 option(BNIO_BUILD_EXAMPLES "Build bnio examples" ${BNIO_IS_TOP_LEVEL})
+option(BNIO_BUILD_BENCHMARKS "Build bnio benchmark executables" OFF)
 option(BNIO_BUILD_ASIO_EXAMPLES "Build standalone Asio echo server example (auto-fetches Asio)" OFF)
 option(BNIO_ENABLE_WARNINGS "Enable compiler warnings for bnio targets" ON)
 option(BNIO_ENABLE_TSAN "Build bnio targets with ThreadSanitizer" OFF)
@@ -109,7 +110,7 @@ function(bnio_resolve_asio_dependency)
   message(STATUS "Asio fetched successfully (asio::asio)")
 endfunction()
 
-if(BNIO_BUILD_ASIO_EXAMPLES)
+if(BNIO_BUILD_ASIO_EXAMPLES OR BNIO_BUILD_BENCHMARKS)
   bnio_resolve_asio_dependency()
 endif()
 
@@ -152,6 +153,10 @@ add_subdirectory(src)
 
 if(BNIO_BUILD_EXAMPLES)
   add_subdirectory(examples)
+endif()
+
+if(BNIO_BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
 endif()
 
 if(BNIO_BUILD_TESTS)

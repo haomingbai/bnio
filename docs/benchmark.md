@@ -25,8 +25,8 @@ Hostnames, usernames, absolute paths, and network addresses are intentionally om
 
 The benchmark compares two functionally equivalent TCP echo servers:
 
-- **`bnio_raw_echo`**: C++20 coroutine echo server using bnio on io_uring (Linux).
-- **`asio_raw_echo`**: C++20 coroutine echo server using standalone Asio (epoll reactor).
+- **`bnio_throughput_benchmark`**: C++20 coroutine echo server using bnio on io_uring (Linux).
+- **`asio_throughput_benchmark`**: C++20 coroutine echo server using standalone Asio (epoll reactor).
 - **Client**: A neutral Python `asyncio` TCP echo load generator — neither bnio nor asio.
 
 Each connection runs a strict ping-pong loop: send one fixed-size payload, read the echoed payload, then repeat. The warmup phase is excluded from throughput and latency samples. Latency values are sampled round-trip times in microseconds. Throughput is reported as completed echo requests per second; MB/s counts the echoed payload size once per completed request.
@@ -247,21 +247,21 @@ Hostnames, usernames, absolute paths, and network addresses are intentionally om
 
 The benchmark compares two functionally equivalent TCP echo servers, identical in source to the Linux run:
 
-- **`bnio_raw_echo`**: C++20 coroutine echo server using bnio on kqueue (macOS).
-- **`asio_raw_echo`**: C++20 coroutine echo server using standalone Asio (kqueue reactor).
-- **Client**: the neutral C++ `raw_echo_client` TCP echo load generator (the same binary drives both servers; it is neither bnio nor asio).
+- **`bnio_throughput_benchmark`**: C++20 coroutine echo server using bnio on kqueue (macOS).
+- **`asio_throughput_benchmark`**: C++20 coroutine echo server using standalone Asio (kqueue reactor).
+- **Client**: the neutral C++ `throughput_benchmark_client` TCP echo load generator (the same binary drives both servers; it is neither bnio nor asio).
 
 Each connection runs a strict ping-pong loop: send one fixed-size payload, read the echoed payload, then repeat. Throughput is reported as completed echo requests per second; MB/s counts the echoed payload size once per completed request.
 
 ### Fairness Controls
 
 - Both servers rebuilt in **Release** mode with `-march=native` immediately before testing.
-- The **same C++ `raw_echo_client`** drives both servers.
+- The **same C++ `throughput_benchmark_client`** drives both servers.
 - Server process **restarted** for every measured configuration.
 - Each configuration runs **3 iterations**; results are median-aggregated.
 - Warmup phase (5 s) excluded from measurement (15 s).
 
-> **Metric-availability note:** the C++ `raw_echo_client` reports only total echoes, req/s, and MB/s. It does **not** collect latency percentiles (p50/p99/p999), so those columns from the Linux section are **omitted here** (marked N/A where a comparison would otherwise expect them). All figures below are clean throughput measurements.
+> **Metric-availability note:** the C++ `throughput_benchmark_client` reports only total echoes, req/s, and MB/s. It does **not** collect latency percentiles (p50/p99/p999), so those columns from the Linux section are **omitted here** (marked N/A where a comparison would otherwise expect them). All figures below are clean throughput measurements.
 
 ### 8.3 Configuration Matrix
 

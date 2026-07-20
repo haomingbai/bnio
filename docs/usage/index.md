@@ -220,8 +220,8 @@ write attempt. The same rule applies to TCP, UDP, descriptors, and TLS.
 ## 5. Coroutine support through bexec senders
 
 bnio's coroutine examples are adapters over ordinary senders, not a separate
-async API. The raw echo example shows the pattern in
-[`../../examples/raw_echo/bnio_raw_echo.cpp`](../../examples/raw_echo/bnio_raw_echo.cpp).
+async API. The bnio throughput benchmark shows the pattern in
+[`../../benchmarks/throughput/bnio_throughput_benchmark.cpp`](../../benchmarks/throughput/bnio_throughput_benchmark.cpp).
 
 The adapter connects a sender to a receiver, starts the operation when the
 coroutine suspends, stores the completion, and resumes the awaiting coroutine.

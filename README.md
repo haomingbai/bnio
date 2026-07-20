@@ -213,16 +213,19 @@ Key patterns demonstrated:
 ./build/examples/base/linux/bnio_base_echo_server  # starts on port 7000
 ```
 
-### Raw TCP echo
+### TCP throughput benchmark
 
-`examples/raw_echo/` contains a raw TCP echo server built on
-`bnio::io_context`. It demonstrates the sender/receiver operation lifecycle and
-uses `ctx.run()` as the event loop.
+`benchmarks/throughput/` contains functionally equivalent bnio and
+standalone-Asio TCP echo servers plus one shared load client. It exercises the
+sender/receiver operation lifecycle and uses `ctx.run()` as the bnio server's
+event loop.
 
 ```sh
-./build/examples/raw_echo/bnio_raw_echo [port]
-# Default port: 8080
-# Connect: printf 'hello' | nc 127.0.0.1 8080
+cmake -S . -B build-bench -DCMAKE_BUILD_TYPE=Release \
+  -DBNIO_BUILD_BENCHMARKS=ON
+cmake --build build-bench --target bnio_throughput_benchmark \
+  asio_throughput_benchmark throughput_benchmark_client
+scripts/benchmark.sh --build-dir build-bench
 ```
 
 ### Standalone Asio echo
@@ -323,6 +326,7 @@ bounded write attempt and returns that attempt's byte count.
 | `BUILD_SHARED_LIBS`            | `OFF`        | Build `bnio` as a shared library             |
 | `BNIO_BUILD_TESTS`             | top-level    | Build GoogleTest tests and enable CTest      |
 | `BNIO_BUILD_EXAMPLES`          | top-level    | Build example executables                    |
+| `BNIO_BUILD_BENCHMARKS`        | `OFF`        | Build bnio/Asio benchmark pairs and fetch Asio |
 | `BNIO_BUILD_ASIO_EXAMPLES`     | `OFF`        | Build Asio examples and fetch Asio           |
 | `BNIO_INSTALL`                 | top-level    | Generate installation and package files      |
 | `BNIO_ENABLE_COVERAGE`         | `OFF`        | Instrument GCC/Clang builds for coverage     |

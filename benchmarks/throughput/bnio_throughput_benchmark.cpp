@@ -383,7 +383,8 @@ int main(int argc, char** argv) {
 
   start(accept_loop(ctx, a));
 
-  std::cout << "bnio_raw_echo " << port << " workers " << worker_count
-            << " bind " << (bind_any_v4 ? "0.0.0.0" : "127.0.0.1") << std::endl;
+  std::cout << "bnio_throughput_benchmark " << port << " workers "
+            << worker_count << " bind "
+            << (bind_any_v4 ? "0.0.0.0" : "127.0.0.1") << std::endl;
   run_context(ctx, worker_count);
 }

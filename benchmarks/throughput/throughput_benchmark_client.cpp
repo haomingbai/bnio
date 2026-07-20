@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+// Neutral load generator shared by the bnio and standalone-Asio servers.
 using asio::ip::tcp;
 
 constexpr std::size_t k_default_message_size = 1024;
