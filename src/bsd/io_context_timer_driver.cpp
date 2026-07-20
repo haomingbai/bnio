@@ -27,7 +27,7 @@ void io_context::on_timer_driver() noexcept {
       if (timer == nullptr) {
         continue;
       }
-      (void)drain_timer_submissions_locked(*timer);
+      drain_timer_submissions_locked(*timer);
     }
     const time_point new_deadline = timers_.heap.empty()
                                         ? time_point::max()
@@ -67,7 +67,6 @@ bool io_context::try_fetch_timeout_operations(time_point& deadline,
     detail::timer_operation_base* operations = timer->waiting_head;
     timer->waiting_head = nullptr;
     if (operations != nullptr) {
-      operations = reverse_timer_operations(operations);
       detail::timer_operation_base* tail = operations;
       while (tail->timer_next_ != nullptr) {
         tail = tail->timer_next_;
@@ -111,21 +110,18 @@ void io_context::post_timer_driver() noexcept {
   }
 }
 
-std::size_t io_context::drain_timer_submissions_locked(
+void io_context::drain_timer_submissions_locked(
     detail::timer_slot& timer) noexcept {
   std::lock_guard timer_lock(timer.mutex);
   if (timer.context != this) {
-    return 0;
+    return;
   }
 
   detail::timer_operation_base* submitted =
       timer.submitted_head.exchange(nullptr, std::memory_order_acq_rel);
   if (submitted == nullptr) {
-    return 0;
+    return;
   }
-
-  submitted = reverse_timer_operations(submitted);
-  const std::size_t count = count_timer_operations(submitted);
 
   detail::timer_operation_base* tail = submitted;
   while (tail->timer_next_ != nullptr) {
@@ -138,28 +134,18 @@ std::size_t io_context::drain_timer_submissions_locked(
       .timer_id = timer.id,
       .generation = timer.generation,
   });
-
-  return count;
 }
 
-detail::timer_operation_base* io_context::take_timer_waiters_locked(
+detail::submitted_timer_operations
+io_context::take_all_submitted_timer_operations(
     detail::timer_slot& timer) noexcept {
-  detail::timer_operation_base* submitted =
-      timer.submitted_head.exchange(nullptr, std::memory_order_acq_rel);
-  detail::timer_operation_base* waiting = timer.waiting_head;
+  detail::submitted_timer_operations operations{
+      .submitted =
+          timer.submitted_head.exchange(nullptr, std::memory_order_acq_rel),
+      .waiting = timer.waiting_head,
+  };
   timer.waiting_head = nullptr;
-
-  if (submitted == nullptr) {
-    return waiting;
-  }
-
-  submitted = reverse_timer_operations(submitted);
-  detail::timer_operation_base* tail = submitted;
-  while (tail->timer_next_ != nullptr) {
-    tail = tail->timer_next_;
-  }
-  tail->timer_next_ = waiting;
-  return submitted;
+  return operations;
 }
 
 void io_context::push_timer_operation(
@@ -194,6 +180,20 @@ std::size_t io_context::count_timer_operations(
     operations = operations->timer_next_;
   }
   return count;
+}
+
+std::size_t io_context::count_submitted_timer_operations(
+    const detail::submitted_timer_operations& operations) noexcept {
+  return count_timer_operations(operations.submitted) +
+         count_timer_operations(operations.waiting);
+}
+
+void io_context::post_submitted_timer_operations(
+    detail::submitted_timer_operations operations,
+    detail::timer_completion_kind completion) noexcept {
+  operations.submitted = reverse_timer_operations(operations.submitted);
+  post_timer_operations(operations.submitted, completion);
+  post_timer_operations(operations.waiting, completion);
 }
 
 void io_context::post_timer_operations(

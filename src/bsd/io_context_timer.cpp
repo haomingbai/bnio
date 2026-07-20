@@ -47,7 +47,7 @@ void io_context::register_timer(detail::timer_slot& timer) noexcept {
 }
 
 void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
-  detail::timer_operation_base* canceled = nullptr;
+  detail::submitted_timer_operations canceled;
   {
     std::lock_guard context_lock(timers_.mutex);
     std::lock_guard timer_lock(timer.mutex);
@@ -65,14 +65,15 @@ void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
 
     ++timer.generation;
     timer.context = nullptr;
-    canceled = take_timer_waiters_locked(timer);
+    canceled = take_all_submitted_timer_operations(timer);
   }
 
-  post_timer_operations(canceled, detail::timer_completion_kind::stopped);
+  post_submitted_timer_operations(canceled,
+                                  detail::timer_completion_kind::stopped);
 }
 
 std::size_t io_context::cancel_timer(detail::timer_slot& timer) noexcept {
-  detail::timer_operation_base* canceled = nullptr;
+  detail::submitted_timer_operations canceled;
   std::size_t count = 0;
   {
     std::lock_guard context_lock(timers_.mutex);
@@ -82,18 +83,19 @@ std::size_t io_context::cancel_timer(detail::timer_slot& timer) noexcept {
     }
 
     ++timer.generation;
-    canceled = take_timer_waiters_locked(timer);
-    count = count_timer_operations(canceled);
+    canceled = take_all_submitted_timer_operations(timer);
   }
 
-  post_timer_operations(canceled, detail::timer_completion_kind::stopped);
+  count = count_submitted_timer_operations(canceled);
+  post_submitted_timer_operations(canceled,
+                                  detail::timer_completion_kind::stopped);
   post_timer_driver();
   return count;
 }
 
 std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
                                          time_point expiry) noexcept {
-  detail::timer_operation_base* canceled = nullptr;
+  detail::submitted_timer_operations canceled;
   std::size_t count = 0;
   {
     std::lock_guard context_lock(timers_.mutex);
@@ -104,11 +106,12 @@ std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
 
     timer.expiry = expiry;
     ++timer.generation;
-    canceled = take_timer_waiters_locked(timer);
-    count = count_timer_operations(canceled);
+    canceled = take_all_submitted_timer_operations(timer);
   }
 
-  post_timer_operations(canceled, detail::timer_completion_kind::stopped);
+  count = count_submitted_timer_operations(canceled);
+  post_submitted_timer_operations(canceled,
+                                  detail::timer_completion_kind::stopped);
   post_timer_driver();
   return count;
 }

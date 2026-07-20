@@ -585,11 +585,11 @@ class BNIO_EXPORT io_context {
 
   void post_timer_driver() noexcept;
 
-  [[nodiscard]] std::size_t drain_timer_submissions_locked(
-      detail::timer_slot& timer) noexcept;
+  void drain_timer_submissions_locked(detail::timer_slot& timer) noexcept;
 
-  [[nodiscard]] detail::timer_operation_base* take_timer_waiters_locked(
-      detail::timer_slot& timer) noexcept;
+  // Consumes all pending timer operations as part of timer cancellation.
+  [[nodiscard]] detail::submitted_timer_operations
+  take_all_submitted_timer_operations(detail::timer_slot& timer) noexcept;
 
   void push_timer_operation(std::atomic<detail::timer_operation_base*>& head,
                             detail::timer_operation_base& operation) noexcept;
@@ -599,6 +599,13 @@ class BNIO_EXPORT io_context {
 
   [[nodiscard]] static std::size_t count_timer_operations(
       detail::timer_operation_base* operations) noexcept;
+
+  [[nodiscard]] static std::size_t count_submitted_timer_operations(
+      const detail::submitted_timer_operations& operations) noexcept;
+
+  void post_submitted_timer_operations(
+      detail::submitted_timer_operations operations,
+      detail::timer_completion_kind completion) noexcept;
 
   void post_timer_operations(detail::timer_operation_base* operations,
                              detail::timer_completion_kind completion) noexcept;

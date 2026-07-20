@@ -70,6 +70,12 @@ class BNIO_EXPORT timer_operation_base
   timer_completion_kind timer_completion_ = timer_completion_kind::value;
 };
 
+// Operations consumed from a timer during cancellation.
+struct submitted_timer_operations {
+  timer_operation_base* submitted = nullptr;
+  timer_operation_base* waiting = nullptr;
+};
+
 class timer_wakeup_operation
     : public async_io::linux_native::io_uring_io_operation_base {
  public:
