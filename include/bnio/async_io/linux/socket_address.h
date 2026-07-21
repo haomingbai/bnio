@@ -1,3 +1,8 @@
+/**
+ * @file socket_address.h
+ * @brief Sockaddr storage wrapper for io_uring.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_SOCKET_ADDRESS_H_
 #define BNIO_ASYNC_IO_LINUX_SOCKET_ADDRESS_H_

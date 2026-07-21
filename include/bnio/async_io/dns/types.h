@@ -1,3 +1,8 @@
+/**
+ * @file types.h
+ * @brief DNS type aliases.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_DNS_TYPES_H_
 #define BNIO_ASYNC_IO_DNS_TYPES_H_

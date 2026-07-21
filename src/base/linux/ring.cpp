@@ -1,3 +1,8 @@
+/**
+ * @file ring.cpp
+ * @brief io_uring ring RAII wrapper implementation.
+ */
+
 #include <bnio/base/linux/ring.h>
 #include <liburing.h>
 #include <sys/syscall.h>
@@ -9,7 +14,6 @@
 #include "bnio/base/linux/completion_queue_entry.h"
 #include "bnio/base/linux/params.h"
 #include "bnio/base/linux/submission_queue_entry.h"
-
 namespace bnio::base {
 
 ring::ring() noexcept = default;

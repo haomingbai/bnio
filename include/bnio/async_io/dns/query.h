@@ -1,3 +1,8 @@
+/**
+ * @file query.h
+ * @brief DNS query parameters.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_DNS_QUERY_H_
 #define BNIO_ASYNC_IO_DNS_QUERY_H_

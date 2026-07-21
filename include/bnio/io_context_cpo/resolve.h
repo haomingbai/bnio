@@ -1,3 +1,8 @@
+/**
+ * @file resolve.h
+ * @brief Resolve CPO (async_resolve).
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CPO_RESOLVE_H_
 #define BNIO_IO_CONTEXT_CPO_RESOLVE_H_

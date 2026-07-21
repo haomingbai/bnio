@@ -1,3 +1,8 @@
+/**
+ * @file resolve.h
+ * @brief DNS resolution sender.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_DNS_RESOLVE_H_
 #define BNIO_ASYNC_IO_DNS_RESOLVE_H_

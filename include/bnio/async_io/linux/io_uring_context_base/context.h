@@ -1,3 +1,8 @@
+/**
+ * @file context.h
+ * @brief io_uring_context class declaration.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_CONTEXT_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_CONTEXT_H_

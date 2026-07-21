@@ -1,5 +1,9 @@
-#include <bnio/base/bsd/event_list_view.h>
+/**
+ * @file event_list_view.cpp
+ * @brief kevent array view implementation.
+ */
 
+#include <bnio/base/bsd/event_list_view.h>
 namespace bnio::base {
 
 event_list_view::event_list_view() noexcept = default;

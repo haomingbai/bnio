@@ -1,3 +1,9 @@
+/**
+ * @file io_context_timer.cpp
+ * @brief io_context timer registration, cancellation, completion queue
+ * management, and timeout fetch.
+ */
+
 #include <bnio/io_context.h>
 
 #include <atomic>
@@ -32,6 +38,9 @@ void io_context::register_timer(detail::timer_slot& timer) noexcept {
     timer.child = nullptr;
     timer.next = nullptr;
     const time_point previous_deadline = timers_.heap_deadline();
+    // If the timer has already expired, place it directly in the inactive
+    // (ready) list so it fires immediately. Otherwise insert it into the
+    // pairing heap ordered by expiry.
     if (timer.expiry > clock::now()) {
       timers_.push_heap(timer);
       wake_worker = timers_.heap_deadline() < previous_deadline;
@@ -171,6 +180,8 @@ void io_context::start_timer_wait(detail::timer_operation_base& operation,
 
 detail::timer_operation_queue io_context::take_timer_operations_locked(
     detail::timer_slot& timer) noexcept {
+  // Drain all submitted wait operations from this timer slot into a detached
+  // queue. Caller must hold timers_.mutex.
   const detail::timer_operation_queue operations = timer.submitted;
   timer.submitted = {};
   return operations;
@@ -179,6 +190,8 @@ detail::timer_operation_queue io_context::take_timer_operations_locked(
 void io_context::enqueue_timer_operations_locked(
     detail::timer_operation_base* operations,
     detail::timer_completion_kind completion) noexcept {
+  // Prepend each operation to the ready list, setting the completion kind
+  // so the run loop can dispatch them. Caller must hold timers_.mutex.
   while (operations != nullptr) {
     detail::timer_operation_base* const operation = operations;
     operations = operation->timer_next_;
@@ -202,16 +215,18 @@ void io_context::queue_timer_completion(
 bool io_context::try_fetch_timeout_operations(
     time_point& deadline, detail::native_operation_base*& operations) noexcept {
   operations = nullptr;
+  // Use a lock-free CAS gate to serialize concurrent workers trying to
+  // drain the timer heap. Workers that lose the CAS skip the expensive
+  // heap walk entirely.
   bool expected = false;
-  // Concurrent workers check timers on every loop pass. Serialize only the
-  // non-blocking fetch attempt first, so losing workers do not contend on the
-  // structural mutex.
   if (!timers_.timeout_fetching.compare_exchange_strong(
           expected, true, std::memory_order_acq_rel,
           std::memory_order_acquire)) {
     return false;
   }
 
+  // The CAS gate won, now attempt the structural lock. If the mutex is
+  // already held, release the gate and return so the caller can retry.
   std::unique_lock context_lock(timers_.mutex, std::try_to_lock);
   if (!context_lock.owns_lock()) {
     timers_.timeout_fetching.store(false, std::memory_order_release);

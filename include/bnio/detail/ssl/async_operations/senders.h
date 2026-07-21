@@ -1,3 +1,8 @@
+/**
+ * @file senders.h
+ * @brief SSL async operation sender types.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SENDERS_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SENDERS_H_

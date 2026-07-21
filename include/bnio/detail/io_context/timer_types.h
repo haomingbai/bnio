@@ -1,3 +1,8 @@
+/**
+ * @file timer_types.h
+ * @brief Internal timer slot and queue types.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_IO_CONTEXT_TIMER_TYPES_H_
 #define BNIO_DETAIL_IO_CONTEXT_TIMER_TYPES_H_

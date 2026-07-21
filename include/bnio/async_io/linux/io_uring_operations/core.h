@@ -1,3 +1,8 @@
+/**
+ * @file core.h
+ * @brief Core io_uring operations (nop, timeout).
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_CORE_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_CORE_H_

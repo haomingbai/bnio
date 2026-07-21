@@ -1,3 +1,8 @@
+/**
+ * @file kqueue_context_events.cpp
+ * @brief Event collection, processing, dispatch, and re-arming logic.
+ */
+
 #include <bnio/async_io/bsd/kqueue_context.h>
 
 #include <cerrno>
@@ -71,6 +76,24 @@ void kqueue_context::dispatch_event_tasks(operation_queue& event_tasks,
   push_cpu_tasks(event_tasks);
 }
 
+bool kqueue_context::try_rearm_operation(
+    kqueue_io_operation_base& operation,
+    const active_registration& registration) noexcept {
+  prepared_operation rearm;
+  rearm.operation = &operation;
+  rearm.event_count = 1;
+  rearm.task = registration.task;
+  rearm.poll_mask = registration.poll_mask;
+  rearm.events[0].set(registration.event.ident(), registration.event.filter(),
+                      EV_ADD | EV_ONESHOT, 0, 0, &operation);
+  const int rearm_result = register_operation(rearm);
+  if (rearm_result >= 0) {
+    return true;
+  }
+  operation.result = rearm_result;
+  return false;
+}
+
 bool kqueue_context::process_event(const bnio::base::event& event,
                                    operation_queue& tasks) noexcept {
   if (event.udata() == wakeup_user_data()) {
@@ -82,12 +105,18 @@ bool kqueue_context::process_event(const bnio::base::event& event,
       registration.operation == nullptr) {
     return false;
   }
+  // Arm the next queued registration on the same descriptor / filter pair.
   arm_next_registration(registration.event.ident(),
                         registration.event.filter());
 
   kqueue_io_operation_base& operation = *registration.operation;
   operation.flags = event.flags();
 
+  // Event-type dispatch:
+  //   poll: convert the kevent filter/flags into a POLL mask.
+  //   error (non-zero data): propagate the errno from the kevent.
+  //   write EOF: translate to EPIPE or fflags.
+  //   otherwise: perform the actual I/O step; retry on EAGAIN.
   if (registration.task == kqueue_task::poll) {
     operation.result =
         static_cast<int>(poll_result(registration.poll_mask, event));
@@ -100,19 +129,9 @@ bool kqueue_context::process_event(const bnio::base::event& event,
     operation.result =
         operation.owns_io_step() ? operation.perform_io() : -EOPNOTSUPP;
     if (operation.result == -EAGAIN || operation.result == -EWOULDBLOCK) {
-      prepared_operation rearm;
-      rearm.operation = &operation;
-      rearm.event_count = 1;
-      rearm.task = registration.task;
-      rearm.poll_mask = registration.poll_mask;
-      rearm.events[0].set(registration.event.ident(),
-                          registration.event.filter(), EV_ADD | EV_ONESHOT, 0,
-                          0, &operation);
-      const int rearm_result = register_operation(rearm);
-      if (rearm_result >= 0) {
+      if (try_rearm_operation(operation, registration)) {
         return false;
       }
-      operation.result = rearm_result;
     }
   }
 
@@ -123,6 +142,8 @@ bool kqueue_context::process_event(const bnio::base::event& event,
 
 unsigned kqueue_context::poll_result(
     unsigned poll_mask, const bnio::base::event& event) const noexcept {
+  // Convert kevent filter/flags to a POLL mask. Only the bits that were
+  // requested in poll_mask are set in the result.
   unsigned result = 0;
   if (event.filter() == EVFILT_READ) {
     result |= poll_mask & static_cast<unsigned>(POLLIN | POLLPRI);

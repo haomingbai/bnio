@@ -1,3 +1,8 @@
+/**
+ * @file operation_base.h
+ * @brief Base classes for io_uring operations.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPERATION_BASE_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPERATION_BASE_H_

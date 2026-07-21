@@ -1,3 +1,8 @@
+/**
+ * @file poll.h
+ * @brief kqueue poll operations.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_POLL_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_POLL_H_

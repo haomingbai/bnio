@@ -1,3 +1,8 @@
+/**
+ * @file dynamic_byte_vector.h
+ * @brief Dynamic buffer backed by std::vector<std::byte>.
+ */
+
 #pragma once
 #ifndef BNIO_BUFFER_DYNAMIC_BYTE_VECTOR_H_
 #define BNIO_BUFFER_DYNAMIC_BYTE_VECTOR_H_

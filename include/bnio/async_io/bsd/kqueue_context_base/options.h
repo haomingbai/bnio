@@ -1,3 +1,8 @@
+/**
+ * @file options.h
+ * @brief kqueue context options.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPTIONS_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPTIONS_H_

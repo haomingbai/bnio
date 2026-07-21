@@ -1,3 +1,8 @@
+/**
+ * @file stream_class.h
+ * @brief ssl_stream class template definition.
+ */
+
 #pragma once
 #ifndef BNIO_SSL_STREAM_CLASS_H_
 #define BNIO_SSL_STREAM_CLASS_H_

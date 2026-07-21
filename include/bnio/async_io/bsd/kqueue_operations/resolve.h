@@ -1,3 +1,8 @@
+/**
+ * @file resolve.h
+ * @brief kqueue DNS resolve operations.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_RESOLVE_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_RESOLVE_H_

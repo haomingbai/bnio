@@ -1,3 +1,8 @@
+/**
+ * @file context.h
+ * @brief RAII SSL_CTX owner.
+ */
+
 #pragma once
 #ifndef BNIO_SSL_CONTEXT_H_
 #define BNIO_SSL_CONTEXT_H_

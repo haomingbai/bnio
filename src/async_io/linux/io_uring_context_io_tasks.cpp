@@ -1,3 +1,9 @@
+/**
+ * @file io_uring_context_io_tasks.cpp
+ * @brief I/O task submission: batch prepare, submit on SQ full, and error
+ * handling.
+ */
+
 #include <bnio/async_io/linux/io_uring_context.h>
 #include <bnio/base/linux/submission_queue_entry.h>
 
@@ -15,6 +21,9 @@ bool io_uring_context::consume_io_tasks() noexcept {
   }
 
   io_uring_io_operation_base* prepared = nullptr;
+  // Prepare SQEs in a batch. If the SQ is full (EAGAIN), submit the
+  // prepared entries and retry the current operation. On any submission
+  // error, fail all prepared and remaining operations.
   const auto release_prepared = [&prepared]() noexcept {
     while (prepared != nullptr) {
       io_uring_io_operation_base* operation = prepared;
@@ -32,6 +41,9 @@ bool io_uring_context::consume_io_tasks() noexcept {
     }
   };
 
+  // Prepare each I/O operation into an SQE. Either batch it into the
+  // prepared list or, on EAGAIN, flush pending SQEs and retry.  A submit
+  // failure fails all remaining operations inline.
   while (operations != nullptr) {
     io_uring_io_operation_base* operation = operations;
     const int prepare_result = prepare_io(*operation);

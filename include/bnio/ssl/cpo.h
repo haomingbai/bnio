@@ -1,3 +1,8 @@
+/**
+ * @file cpo.h
+ * @brief SSL CPO instances.
+ */
+
 #pragma once
 #ifndef BNIO_SSL_CPO_H_
 #define BNIO_SSL_CPO_H_

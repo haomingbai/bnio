@@ -1,3 +1,8 @@
+/**
+ * @file state_machine.h
+ * @brief SSL async operation state machine base.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_STATE_MACHINE_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_STATE_MACHINE_H_

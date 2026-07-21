@@ -1,3 +1,8 @@
+/**
+ * @file dynamic_string.h
+ * @brief Dynamic buffer backed by std::string.
+ */
+
 #pragma once
 #ifndef BNIO_BUFFER_DYNAMIC_STRING_H_
 #define BNIO_BUFFER_DYNAMIC_STRING_H_

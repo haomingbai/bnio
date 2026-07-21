@@ -1,3 +1,8 @@
+/**
+ * @file export.h
+ * @brief Symbol export macros.
+ */
+
 #pragma once
 #ifndef BNIO_EXPORT_H_
 #define BNIO_EXPORT_H_

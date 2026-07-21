@@ -1,3 +1,8 @@
+/**
+ * @file socket.h
+ * @brief kqueue socket operations (accept, connect, read, write).
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_SOCKET_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_SOCKET_H_

@@ -1,3 +1,8 @@
+/**
+ * @file stream_operations.h
+ * @brief ssl_stream async operation sender factories.
+ */
+
 #pragma once
 #ifndef BNIO_SSL_STREAM_OPERATIONS_H_
 #define BNIO_SSL_STREAM_OPERATIONS_H_

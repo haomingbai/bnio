@@ -1,3 +1,8 @@
+/**
+ * @file address.h
+ * @brief IP address type alias re-export.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_ADDRESS_H_
 #define BNIO_ASYNC_IO_ADDRESS_H_

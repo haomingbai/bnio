@@ -1,3 +1,8 @@
+/**
+ * @file io_uring_context.h
+ * @brief io_uring-based async I/O context.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_H_

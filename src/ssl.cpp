@@ -1,3 +1,8 @@
+/**
+ * @file ssl.cpp
+ * @brief SSL context RAII owner and OpenSSL error category implementation.
+ */
+
 #include <bnio/ssl.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -8,7 +13,6 @@
 #include <utility>
 
 #include "bnio/ssl/context.h"
-
 namespace bnio {
 
 namespace {

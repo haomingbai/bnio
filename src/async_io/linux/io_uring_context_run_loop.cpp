@@ -1,3 +1,8 @@
+/**
+ * @file io_uring_context_run_loop.cpp
+ * @brief io_uring_context event loop: run, spin, wait, and finish phases.
+ */
+
 #include <algorithm>
 #include <cassert>
 #include <cerrno>
@@ -6,6 +11,28 @@
 #include "io_uring_context_internal.h"
 
 namespace bnio::async_io::linux_native {
+namespace {
+
+/**
+ * @brief Fills a __kernel_timespec with the remaining duration until deadline.
+ *
+ * @param deadline The deadline time point to compute against.
+ * @param timeout  The timespec to fill with the remaining duration in seconds
+ * and nanoseconds.
+ */
+void compute_wait_timespec(async_io::time_point deadline,
+                           __kernel_timespec& timeout) noexcept {
+  const auto remaining =
+      std::max(deadline - async_io::clock::now(), async_io::duration::zero());
+  const auto nanoseconds =
+      std::chrono::ceil<std::chrono::nanoseconds>(remaining);
+  constexpr auto billion = std::chrono::nanoseconds::period::den;
+  timeout.tv_sec =
+      static_cast<__kernel_time64_t>(nanoseconds.count() / billion);
+  timeout.tv_nsec = static_cast<long long>(nanoseconds.count() % billion);
+}
+
+}  // namespace
 
 void io_uring_context::run() noexcept {
   assert_running();
@@ -47,6 +74,9 @@ void io_uring_context::run() noexcept {
 
   run_phase phase = run_phase::run_ready_tasks;
 
+  // Run-loop phase machine:
+  //   run_ready_tasks -> wait_for_work -> finish_drain -> finished
+  // Each phase returns the next phase to enter. The loop stops at finished.
   while (phase != run_phase::finished) {
     switch (phase) {
       case run_phase::run_ready_tasks:
@@ -148,6 +178,9 @@ io_uring_context::run_phase io_uring_context::handle_finish_drain() noexcept {
 }
 
 io_uring_context::run_phase io_uring_context::spin_for_work() noexcept {
+  // Bounded busy-spin: check for new CQEs, CPU tasks, and expired timers up
+  // to wait_spin_count times before falling through to a blocking wait.
+  // This avoids the syscall cost when completions arrive quickly.
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
     if (collect_ready_cqes() || move_cpu_tasks() ||
         consume_timeout_operations()) {
@@ -162,6 +195,8 @@ io_uring_context::run_phase io_uring_context::spin_for_work() noexcept {
 }
 
 io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
+  // Wrap the wait section with begin_wait/end_wait so task-queue
+  // publishers can detect a sleeping worker and wake it via eventfd.
   begin_wait();
 
   if (collect_ready_cqes() || move_cpu_tasks() ||
@@ -190,14 +225,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
       }
 
       if (deadline != async_io::time_point::max()) {
-        const auto remaining = std::max(deadline - async_io::clock::now(),
-                                        async_io::duration::zero());
-        const auto nanoseconds =
-            std::chrono::ceil<std::chrono::nanoseconds>(remaining);
-        constexpr auto billion = std::chrono::nanoseconds::period::den;
-        timeout.tv_sec =
-            static_cast<__kernel_time64_t>(nanoseconds.count() / billion);
-        timeout.tv_nsec = static_cast<long long>(nanoseconds.count() % billion);
+        compute_wait_timespec(deadline, timeout);
         timeout_pointer = &timeout;
       }
     }
@@ -234,6 +262,9 @@ bool io_uring_context::should_finish() const noexcept {
 }
 
 void io_uring_context::finish() noexcept {
+  // Drain loop: pull CPU tasks, then CQEs, then CPU tasks again (CQEs may
+  // have generated CPU work). Execute local tasks. Repeat until no more
+  // work is available.
   for (;;) {
     (void)move_cpu_tasks();
     (void)collect_ready_cqes();

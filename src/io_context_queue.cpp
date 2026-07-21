@@ -1,10 +1,14 @@
+/**
+ * @file io_context_queue.cpp
+ * @brief io_context I/O and CPU work queue operations and worker wakeup.
+ */
+
 #include <bnio/io_context.h>
 
 #include <atomic>
 #include <cstddef>
 
 #include "bnio/detail/io_context/native_worker.h"
-
 namespace bnio {
 
 using detail::native_worker;

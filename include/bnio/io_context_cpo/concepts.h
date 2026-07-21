@@ -1,3 +1,8 @@
+/**
+ * @file concepts.h
+ * @brief I/O customization point concepts.
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CPO_CONCEPTS_H_
 #define BNIO_IO_CONTEXT_CPO_CONCEPTS_H_

@@ -1,3 +1,8 @@
+/**
+ * @file dns.h
+ * @brief Aggregate header for DNS resolution types.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_DNS_H_
 #define BNIO_ASYNC_IO_DNS_H_

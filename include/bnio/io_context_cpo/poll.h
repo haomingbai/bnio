@@ -1,3 +1,8 @@
+/**
+ * @file poll.h
+ * @brief Poll CPO (async_poll).
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CPO_POLL_H_
 #define BNIO_IO_CONTEXT_CPO_POLL_H_

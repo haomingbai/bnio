@@ -1,3 +1,8 @@
+/**
+ * @file poll.h
+ * @brief io_uring poll operations.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_POLL_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_POLL_H_

@@ -1,8 +1,12 @@
+/**
+ * @file submission_queue_entry.cpp
+ * @brief io_uring SQE wrapper implementation.
+ */
+
 #include <bnio/base/linux/submission_queue_entry.h>
 #include <liburing.h>
 
 #include "bnio/base/linux/liburing.h"
-
 namespace bnio::base {
 
 submission_queue_entry::submission_queue_entry() noexcept = default;

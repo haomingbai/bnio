@@ -1,3 +1,8 @@
+/**
+ * @file udp.cpp
+ * @brief UDP socket RAII operations (open, close, bind, connect).
+ */
+
 #include <bnio/async_io/socket_view.h>
 #include <bnio/ip.h>
 #include <bnio/udp/socket.h>
@@ -9,7 +14,6 @@
 #include <cerrno>
 #include <system_error>
 #include <utility>
-
 namespace bnio::udp {
 namespace {
 

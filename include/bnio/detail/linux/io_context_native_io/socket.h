@@ -1,3 +1,8 @@
+/**
+ * @file socket.h
+ * @brief Linux native socket I/O operations.
+ */
+
 #ifndef BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_SOCKET_H_
 #ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>

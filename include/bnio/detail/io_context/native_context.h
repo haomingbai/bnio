@@ -1,3 +1,8 @@
+/**
+ * @file native_context.h
+ * @brief Platform-native context type alias.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_IO_CONTEXT_NATIVE_CONTEXT_H_
 #define BNIO_DETAIL_IO_CONTEXT_NATIVE_CONTEXT_H_

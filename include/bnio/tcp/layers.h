@@ -1,3 +1,8 @@
+/**
+ * @file layers.h
+ * @brief TCP next_layer and lowest_layer customization.
+ */
+
 #pragma once
 #ifndef BNIO_TCP_LAYERS_H_
 #define BNIO_TCP_LAYERS_H_

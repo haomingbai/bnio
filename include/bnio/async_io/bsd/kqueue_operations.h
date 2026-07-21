@@ -1,3 +1,8 @@
+/**
+ * @file kqueue_operations.h
+ * @brief Aggregate header for all kqueue operation types.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_H_

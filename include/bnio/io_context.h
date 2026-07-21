@@ -1,3 +1,8 @@
+/**
+ * @file io_context.h
+ * @brief bnio::io_context - the central async runtime.
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_H_
 #define BNIO_IO_CONTEXT_H_

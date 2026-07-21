@@ -1,3 +1,8 @@
+/**
+ * @file liburing.h
+ * @brief liburing capability detection.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_LINUX_LIBURING_H_
 #define BNIO_BASE_LINUX_LIBURING_H_

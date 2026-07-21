@@ -1,3 +1,8 @@
+/**
+ * @file core.h
+ * @brief Core kqueue operations (post, nop).
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_CORE_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_CORE_H_

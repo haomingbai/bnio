@@ -1,3 +1,9 @@
+/**
+ * @file kqueue_context_io_tasks.cpp
+ * @brief IO task submission, registration slot management, arm/disarm, and
+ * dedup.
+ */
+
 #include <bnio/async_io/bsd/kqueue_context.h>
 
 #include <array>
@@ -31,6 +37,9 @@ bool kqueue_context::consume_io_tasks() noexcept {
   kqueue_io_operation_base* global_io =
       std::exchange(incoming_io_tasks_, nullptr);
 
+  // Merge local and global IO queues. Both are MPSC-LIFO, so each is
+  // reversed individually to restore FIFO producer order, then the global
+  // list is appended to the local tail.
   kqueue_io_operation_base* operations = reverse_io_tasks(queue_local);
   kqueue_io_operation_base** tail = &operations;
   while (*tail != nullptr) {
@@ -104,6 +113,27 @@ int kqueue_context::prepare_io(kqueue_io_operation_base& operation,
   return 0;
 }
 
+active_registration* kqueue_context::find_free_registration_slot() noexcept {
+  for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
+    if (active_registrations_[index].operation == nullptr) {
+      return &active_registrations_[index];
+    }
+  }
+  return nullptr;
+}
+
+bool kqueue_context::is_event_already_armed(
+    std::uintptr_t ident, std::int16_t filter) const noexcept {
+  for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
+    const active_registration& active = active_registrations_[index];
+    if (active.operation != nullptr && active.armed &&
+        active.event.ident() == ident && active.event.filter() == filter) {
+      return true;
+    }
+  }
+  return false;
+}
+
 int kqueue_context::register_operation(
     const prepared_operation& prepared) noexcept {
   if (prepared.operation == nullptr || prepared.event_count == 0 ||
@@ -127,29 +157,17 @@ int kqueue_context::register_operation(
   }
 
   for (std::size_t index = 0; index < prepared.event_count; ++index) {
-    active_registration* slot = nullptr;
-    for (std::size_t active_index = 0;
-         active_index < active_registration_capacity_; ++active_index) {
-      if (active_registrations_[active_index].operation == nullptr) {
-        slot = &active_registrations_[active_index];
-        break;
-      }
-    }
+    active_registration* slot = find_free_registration_slot();
     if (slot == nullptr) {
       unregister_operation(*prepared.operation);
       return -EAGAIN;
     }
-    bool already_armed = false;
-    for (std::size_t active_index = 0;
-         active_index < active_registration_capacity_; ++active_index) {
-      const active_registration& active = active_registrations_[active_index];
-      if (active.operation != nullptr && active.armed &&
-          active.event.ident() == prepared.events[index].ident() &&
-          active.event.filter() == prepared.events[index].filter()) {
-        already_armed = true;
-        break;
-      }
-    }
+    // Allocate a slot for each event in the prepared operation.
+    // Skip arm if an identical (ident, filter) registration is already
+    // armed (dedup), otherwise add with EV_RECEIPT for synchronous
+    // error detection.
+    const bool already_armed = is_event_already_armed(
+        prepared.events[index].ident(), prepared.events[index].filter());
 
     *slot = active_registration{prepared.operation,
                                 prepared.events[index],
@@ -170,6 +188,8 @@ int kqueue_context::register_operation(
 
 int kqueue_context::arm_registration(
     active_registration& registration) noexcept {
+  // Use EV_RECEIPT to detect synchronous errors (e.g. invalid descriptor)
+  // immediately, before the event loop would otherwise discover them.
   bnio::base::event change = registration.event;
   change.set_flags(change.flags() | EV_RECEIPT);
   change.set_udata(registration.operation);
@@ -193,6 +213,9 @@ void kqueue_context::arm_next_registration(std::uintptr_t descriptor,
                                            std::int16_t filter) noexcept {
   for (;;) {
     active_registration* next = nullptr;
+    // Find the lowest-sequence unarmed registration on this
+    // descriptor/filter pair so events are delivered in submission
+    // order.
     for (std::size_t index = 0; index < active_registration_capacity_;
          ++index) {
       active_registration& active = active_registrations_[index];
@@ -227,6 +250,9 @@ void kqueue_context::unregister_operation(
     kqueue_io_operation_base& operation) noexcept {
   std::array<std::pair<std::uintptr_t, std::int16_t>, 2> released{};
   std::size_t released_count = 0;
+  // Clear every armed registration slot owned by this operation.
+  // For each armed slot, issue EV_DELETE to remove the kevent filter,
+  // then re-arm the next queued registration on the same ident/filter.
   for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
     active_registration& active = active_registrations_[index];
     if (active.operation != &operation) {
@@ -249,6 +275,8 @@ void kqueue_context::unregister_operation(
 bool kqueue_context::take_registration(
     const bnio::base::event& event,
     active_registration& registration) noexcept {
+  // Match the first armed registration by udata (operation pointer) plus
+  // ident and filter. Clear the slot so it can be reused.
   for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
     active_registration& active = active_registrations_[index];
     if (active.operation == event.udata() && active.armed &&

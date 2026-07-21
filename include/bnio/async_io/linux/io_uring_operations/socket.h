@@ -1,3 +1,8 @@
+/**
+ * @file socket.h
+ * @brief io_uring socket operations (accept, connect, read, write).
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_SOCKET_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_SOCKET_H_

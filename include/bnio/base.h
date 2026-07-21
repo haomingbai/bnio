@@ -1,3 +1,8 @@
+/**
+ * @file base.h
+ * @brief Aggregate header for the bnio::base layer.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_H_
 #define BNIO_BASE_H_

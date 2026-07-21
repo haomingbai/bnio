@@ -1,3 +1,8 @@
+/**
+ * @file class.h
+ * @brief io_context class declaration.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
 #define BNIO_DETAIL_IO_CONTEXT_CLASS_H_

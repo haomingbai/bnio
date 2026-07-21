@@ -1,3 +1,8 @@
+/**
+ * @file file.h
+ * @brief Linux native file I/O operations.
+ */
+
 #ifndef BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_FILE_H_
 #ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>

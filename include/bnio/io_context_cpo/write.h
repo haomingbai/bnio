@@ -1,3 +1,8 @@
+/**
+ * @file write.h
+ * @brief Write CPO (async_write, async_write_some).
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CPO_WRITE_H_
 #define BNIO_IO_CONTEXT_CPO_WRITE_H_

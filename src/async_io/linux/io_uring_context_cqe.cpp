@@ -1,3 +1,8 @@
+/**
+ * @file io_uring_context_cqe.cpp
+ * @brief CQE collection and tiered dispatch (inline, local, shared CPU queue).
+ */
+
 #include <bnio/base/linux/completion_queue_entry.h>
 
 #include <cerrno>
@@ -55,6 +60,9 @@ unsigned io_uring_context::collect_cqe_tasks(
         data.flags = cqe.flags();
 
         if (data.user_data == eventfd_user_data()) {
+          // Self-pipe notification: the eventfd poll CQE arrived.
+          // Drain all queued eventfd notifications and re-arm the poll
+          // so the ring can wake us again when new work arrives.
           eventfd_poll_pending_ = false;
           drain_eventfd();
           if (submit_eventfd_poll() < 0) {

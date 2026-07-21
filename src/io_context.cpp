@@ -1,3 +1,9 @@
+/**
+ * @file io_context.cpp
+ * @brief io_context construction, destruction, run loop entry, and worker
+ * registration.
+ */
+
 #include <bnio/io_context.h>
 
 #include <atomic>
@@ -106,12 +112,18 @@ detail::native_worker* io_context::register_run_worker() noexcept {
   }
   worker->context.set_global_state(&global_state_);
 
+  // A close may have been requested after the initial check above but before
+  // the native context was fully opened. Stop the worker now to avoid leaking
+  // a live context.
   if (global_state_.closing.load(std::memory_order_acquire)) {
     (void)worker->context.stop();
     delete worker;
     return nullptr;
   }
 
+  // CAS-insert this worker at the head of the lock-free worker list. The
+  // retry loop handles concurrent insertions from other threads calling
+  // run().
   native_worker* head = native_workers_.head.load(std::memory_order_relaxed);
   do {
     worker->next = head;

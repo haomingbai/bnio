@@ -1,3 +1,8 @@
+/**
+ * @file async_operations.h
+ * @brief UDP async operation sender factories.
+ */
+
 #pragma once
 #ifndef BNIO_UDP_ASYNC_OPERATIONS_H_
 #define BNIO_UDP_ASYNC_OPERATIONS_H_

@@ -1,3 +1,8 @@
+/**
+ * @file system.h
+ * @brief Platform detection and feature macros.
+ */
+
 #pragma once
 #ifndef BNIO_CONFIG_SYSTEM_H_
 #define BNIO_CONFIG_SYSTEM_H_

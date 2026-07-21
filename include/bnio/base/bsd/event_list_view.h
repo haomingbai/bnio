@@ -1,3 +1,8 @@
+/**
+ * @file event_list_view.h
+ * @brief Non-owning view of a kevent array.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_BSD_EVENT_LIST_VIEW_H_
 #define BNIO_BASE_BSD_EVENT_LIST_VIEW_H_

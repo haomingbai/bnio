@@ -1,3 +1,8 @@
+/**
+ * @file connection.h
+ * @brief Connection CPO (async_connect, async_accept).
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CPO_CONNECTION_H_
 #define BNIO_IO_CONTEXT_CPO_CONNECTION_H_

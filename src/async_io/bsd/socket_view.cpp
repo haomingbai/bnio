@@ -1,3 +1,8 @@
+/**
+ * @file socket_view.cpp
+ * @brief BSD socket view operations.
+ */
+
 #include <bnio/async_io/bsd/socket_address.h>
 #include <bnio/async_io/ip/endpoint.h>
 #include <bnio/async_io/socket_view.h>
@@ -5,7 +10,6 @@
 
 #include <cerrno>
 #include <system_error>
-
 namespace bnio::async_io {
 namespace {
 

@@ -1,5 +1,9 @@
-#include <bnio/base/linux/params.h>
+/**
+ * @file params.cpp
+ * @brief io_uring_params wrapper implementation.
+ */
 
+#include <bnio/base/linux/params.h>
 namespace bnio::base {
 
 params::params() noexcept = default;

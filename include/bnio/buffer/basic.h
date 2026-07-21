@@ -1,3 +1,8 @@
+/**
+ * @file basic.h
+ * @brief Non-owning mutable and constant buffer views.
+ */
+
 #pragma once
 #ifndef BNIO_BUFFER_BASIC_H_
 #define BNIO_BUFFER_BASIC_H_

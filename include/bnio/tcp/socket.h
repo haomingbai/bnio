@@ -1,3 +1,8 @@
+/**
+ * @file socket.h
+ * @brief RAII TCP stream socket owner.
+ */
+
 #pragma once
 #ifndef BNIO_TCP_SOCKET_H_
 #define BNIO_TCP_SOCKET_H_

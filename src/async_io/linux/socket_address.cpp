@@ -1,8 +1,12 @@
+/**
+ * @file socket_address.cpp
+ * @brief Linux socket address storage wrapper.
+ */
+
 #include <arpa/inet.h>
 #include <bnio/async_io/linux/socket_address.h>
 
 #include <cstring>
-
 namespace bnio::async_io::linux_native {
 namespace {
 

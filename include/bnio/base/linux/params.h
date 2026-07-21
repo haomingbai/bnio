@@ -1,3 +1,8 @@
+/**
+ * @file params.h
+ * @brief Wrapper for io_uring_params.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_LINUX_PARAMS_H_
 #define BNIO_BASE_LINUX_PARAMS_H_

@@ -1,3 +1,8 @@
+/**
+ * @file options.h
+ * @brief io_context options type.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_IO_CONTEXT_OPTIONS_H_
 #define BNIO_DETAIL_IO_CONTEXT_OPTIONS_H_

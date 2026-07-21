@@ -1,3 +1,8 @@
+/**
+ * @file helpers.h
+ * @brief io_uring operation helper types.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_HELPERS_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_HELPERS_H_

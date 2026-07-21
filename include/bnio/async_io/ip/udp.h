@@ -1,3 +1,8 @@
+/**
+ * @file udp.h
+ * @brief UDP protocol tag and endpoint types.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_IP_UDP_H_
 #define BNIO_ASYNC_IO_IP_UDP_H_

@@ -1,3 +1,8 @@
+/**
+ * @file udp.h
+ * @brief Aggregate header for bnio UDP support.
+ */
+
 #pragma once
 #ifndef BNIO_UDP_H_
 #define BNIO_UDP_H_

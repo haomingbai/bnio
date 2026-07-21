@@ -1,3 +1,8 @@
+/**
+ * @file ssl.h
+ * @brief Aggregate header for bnio SSL/TLS support.
+ */
+
 #pragma once
 #ifndef BNIO_SSL_H_
 #define BNIO_SSL_H_

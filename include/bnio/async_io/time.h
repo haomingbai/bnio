@@ -1,3 +1,8 @@
+/**
+ * @file time.h
+ * @brief Clock and duration type aliases for async I/O.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_TIME_H_
 #define BNIO_ASYNC_IO_TIME_H_

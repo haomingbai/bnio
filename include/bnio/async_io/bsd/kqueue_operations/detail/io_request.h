@@ -1,3 +1,8 @@
+/**
+ * @file io_request.h
+ * @brief Internal kqueue I/O request types.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_DETAIL_IO_REQUEST_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_DETAIL_IO_REQUEST_H_

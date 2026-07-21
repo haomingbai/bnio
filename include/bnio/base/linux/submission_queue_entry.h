@@ -1,3 +1,8 @@
+/**
+ * @file submission_queue_entry.h
+ * @brief Wrapper for an io_uring submission queue entry.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_LINUX_SUBMISSION_QUEUE_ENTRY_H_
 #define BNIO_BASE_LINUX_SUBMISSION_QUEUE_ENTRY_H_

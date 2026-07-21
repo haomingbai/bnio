@@ -1,3 +1,8 @@
+/**
+ * @file socket.h
+ * @brief RAII UDP datagram socket owner.
+ */
+
 #pragma once
 #ifndef BNIO_UDP_SOCKET_H_
 #define BNIO_UDP_SOCKET_H_

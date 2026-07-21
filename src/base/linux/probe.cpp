@@ -1,10 +1,14 @@
+/**
+ * @file probe.cpp
+ * @brief io_uring_probe wrapper implementation.
+ */
+
 #include <bnio/base/linux/probe.h>
 #include <liburing.h>
 
 #include <utility>
 
 #include "bnio/base/linux/ring.h"
-
 namespace bnio::base {
 
 probe::probe() noexcept = default;

@@ -1,3 +1,8 @@
+/**
+ * @file holders.h
+ * @brief Owning buffer holder types.
+ */
+
 #pragma once
 #ifndef BNIO_BUFFER_HOLDERS_H_
 #define BNIO_BUFFER_HOLDERS_H_

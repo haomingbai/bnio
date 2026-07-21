@@ -1,3 +1,8 @@
+/**
+ * @file write_all.h
+ * @brief write-all composite async operation.
+ */
+
 #ifndef BNIO_DETAIL_IO_CONTEXT_WRITE_ALL_H_
 #ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>

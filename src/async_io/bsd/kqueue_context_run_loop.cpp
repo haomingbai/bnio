@@ -1,9 +1,35 @@
+/**
+ * @file kqueue_context_run_loop.cpp
+ * @brief kqueue_context event loop: run, spin, wait, and finish phases.
+ */
+
 #include <chrono>
 #include <limits>
 
 #include "kqueue_context_internal.h"
 
 namespace bnio::async_io::bsd_native {
+namespace {
+
+/**
+ * @brief Fills a timespec with the remaining duration until deadline.
+ *
+ * @param deadline The deadline time point to compute against.
+ * @param timeout  The timespec to fill with the remaining duration in seconds
+ * and nanoseconds.
+ */
+void compute_wait_timespec(async_io::time_point deadline,
+                           timespec& timeout) noexcept {
+  const auto remaining =
+      std::max(deadline - async_io::clock::now(), async_io::duration::zero());
+  const auto nanoseconds =
+      std::chrono::ceil<std::chrono::nanoseconds>(remaining);
+  constexpr auto billion = std::chrono::nanoseconds::period::den;
+  timeout.tv_sec = static_cast<time_t>(nanoseconds.count() / billion);
+  timeout.tv_nsec = static_cast<long>(nanoseconds.count() % billion);
+}
+
+}  // namespace
 
 void kqueue_context::run() noexcept {
   assert_running();
@@ -27,6 +53,8 @@ void kqueue_context::run() noexcept {
   }
 
   run_phase phase = run_phase::run_ready_tasks;
+  // Run-loop phase machine:
+  //   run_ready_tasks -> wait_for_work -> finish_drain -> finished
   while (phase != run_phase::finished) {
     switch (phase) {
       case run_phase::run_ready_tasks:
@@ -121,6 +149,8 @@ kqueue_context::run_phase kqueue_context::handle_finish_drain() noexcept {
 }
 
 kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
+  // Bounded busy-spin: check for new events and CPU tasks up to
+  // wait_spin_count times before falling through to kevent().
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
     if (collect_ready_events(false) || consume_global_state() ||
         consume_timeout_operations()) {
@@ -134,6 +164,8 @@ kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
 }
 
 kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
+  // begin_wait/end_wait sandwich: allows task publishers to detect a sleeping
+  // worker and wake it via EVFILT_USER trigger.
   begin_wait();
 
   if (collect_ready_events(false) || consume_global_state() ||
@@ -162,13 +194,7 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
                                : run_phase::run_ready_tasks;
       }
       if (deadline != async_io::time_point::max()) {
-        const auto remaining = std::max(deadline - async_io::clock::now(),
-                                        async_io::duration::zero());
-        const auto nanoseconds =
-            std::chrono::ceil<std::chrono::nanoseconds>(remaining);
-        constexpr auto billion = std::chrono::nanoseconds::period::den;
-        timeout.tv_sec = static_cast<time_t>(nanoseconds.count() / billion);
-        timeout.tv_nsec = static_cast<long>(nanoseconds.count() % billion);
+        compute_wait_timespec(deadline, timeout);
         timeout_pointer = &timeout;
       }
     }
@@ -194,6 +220,9 @@ bool kqueue_context::should_finish() const noexcept {
 }
 
 void kqueue_context::finish() noexcept {
+  // Drain loop: pull CPU tasks, then events, then CPU tasks again
+  // (events may have generated CPU work). Execute local tasks. Repeat
+  // until no more work is available.
   for (;;) {
     (void)consume_global_state();
     (void)collect_ready_events(false);

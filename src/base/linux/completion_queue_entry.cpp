@@ -1,8 +1,12 @@
+/**
+ * @file completion_queue_entry.cpp
+ * @brief io_uring CQE wrapper implementation.
+ */
+
 #include <bnio/base/linux/completion_queue_entry.h>
 #include <liburing.h>
 
 #include "bnio/base/linux/liburing.h"
-
 namespace bnio::base {
 
 completion_queue_entry::completion_queue_entry() noexcept = default;

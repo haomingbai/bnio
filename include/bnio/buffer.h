@@ -1,3 +1,8 @@
+/**
+ * @file buffer.h
+ * @brief Aggregate header for bnio buffer types.
+ */
+
 #pragma once
 #ifndef BNIO_BUFFER_H_
 #define BNIO_BUFFER_H_

@@ -1,3 +1,8 @@
+/**
+ * @file async_operations.h
+ * @brief Internal TCP async operation implementations.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_TCP_ASYNC_OPERATIONS_H_
 #define BNIO_DETAIL_TCP_ASYNC_OPERATIONS_H_

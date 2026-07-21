@@ -1,5 +1,9 @@
-#include <bnio/base/bsd/event.h>
+/**
+ * @file event.cpp
+ * @brief kevent wrapper implementation.
+ */
 
+#include <bnio/base/bsd/event.h>
 namespace bnio::base {
 
 event::event() noexcept = default;

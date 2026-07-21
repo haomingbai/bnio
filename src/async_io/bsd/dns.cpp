@@ -1,3 +1,8 @@
+/**
+ * @file dns.cpp
+ * @brief BSD DNS resolution implementation.
+ */
+
 #include <bnio/async_io/bsd/socket_address.h>
 #include <bnio/async_io/dns.h>
 #include <netdb.h>
@@ -6,7 +11,6 @@
 
 #include <cerrno>
 #include <string>
-
 namespace bnio::async_io {
 namespace {
 

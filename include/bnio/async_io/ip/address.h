@@ -1,3 +1,8 @@
+/**
+ * @file address.h
+ * @brief Generic IPv4/IPv6 address type.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_IP_ADDRESS_H_
 #define BNIO_ASYNC_IO_IP_ADDRESS_H_

@@ -1,3 +1,8 @@
+/**
+ * @file native_io.h
+ * @brief Native I/O operation sender factories.
+ */
+
 #ifndef BNIO_DETAIL_IO_CONTEXT_NATIVE_IO_H_
 #ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>

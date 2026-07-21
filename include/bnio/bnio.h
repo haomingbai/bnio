@@ -1,3 +1,8 @@
+/**
+ * @file bnio.h
+ * @brief Aggregate header for the entire bnio library.
+ */
+
 #pragma once
 #ifndef BNIO_BNIO_H_
 #define BNIO_BNIO_H_

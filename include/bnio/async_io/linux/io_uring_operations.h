@@ -1,3 +1,8 @@
+/**
+ * @file io_uring_operations.h
+ * @brief Aggregate header for all io_uring operation types.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_H_

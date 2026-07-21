@@ -1,3 +1,8 @@
+/**
+ * @file shutdown.h
+ * @brief SSL shutdown async operation.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SHUTDOWN_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SHUTDOWN_H_

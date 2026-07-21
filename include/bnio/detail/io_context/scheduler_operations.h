@@ -1,3 +1,8 @@
+/**
+ * @file scheduler_operations.h
+ * @brief Scheduler sender types (dispatch, post).
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_IO_CONTEXT_SCHEDULER_OPERATIONS_H_
 #define BNIO_DETAIL_IO_CONTEXT_SCHEDULER_OPERATIONS_H_

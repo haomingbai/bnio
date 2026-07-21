@@ -1,3 +1,8 @@
+/**
+ * @file instances.h
+ * @brief I/O CPO instance definitions.
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CPO_INSTANCES_H_
 #define BNIO_IO_CONTEXT_CPO_INSTANCES_H_

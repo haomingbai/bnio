@@ -1,3 +1,8 @@
+/**
+ * @file operation.h
+ * @brief SSL read/write operation state.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_OPERATION_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_OPERATION_H_

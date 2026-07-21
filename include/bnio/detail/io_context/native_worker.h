@@ -1,3 +1,8 @@
+/**
+ * @file native_worker.h
+ * @brief Worker thread wrapper for native contexts.
+ */
+
 #ifndef BNIO_DETAIL_IO_CONTEXT_NATIVE_WORKER_H_
 #ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>

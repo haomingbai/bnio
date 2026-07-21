@@ -1,3 +1,8 @@
+/**
+ * @file kqueue_context.h
+ * @brief kqueue-based async I/O context.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_H_

@@ -1,3 +1,8 @@
+/**
+ * @file timer_wait.h
+ * @brief Timer wait async operation.
+ */
+
 #ifndef BNIO_DETAIL_IO_CONTEXT_TIMER_WAIT_H_
 #ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>

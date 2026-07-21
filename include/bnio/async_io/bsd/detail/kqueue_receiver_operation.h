@@ -1,3 +1,8 @@
+/**
+ * @file kqueue_receiver_operation.h
+ * @brief Internal kqueue receiver operation state.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_DETAIL_KQUEUE_RECEIVER_OPERATION_H_
 #define BNIO_ASYNC_IO_BSD_DETAIL_KQUEUE_RECEIVER_OPERATION_H_

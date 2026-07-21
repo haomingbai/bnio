@@ -1,3 +1,8 @@
+/**
+ * @file ip.h
+ * @brief Aggregate header for IP address and endpoint types.
+ */
+
 #pragma once
 #ifndef BNIO_IP_H_
 #define BNIO_IP_H_

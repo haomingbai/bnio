@@ -1,3 +1,8 @@
+/**
+ * @file config.h
+ * @brief io_context layer configuration and feature detection.
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CONFIG_H_
 #define BNIO_IO_CONTEXT_CONFIG_H_

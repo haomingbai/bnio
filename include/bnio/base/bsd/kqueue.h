@@ -1,3 +1,8 @@
+/**
+ * @file kqueue.h
+ * @brief RAII wrapper for a kqueue descriptor.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_BSD_KQUEUE_H_
 #define BNIO_BASE_BSD_KQUEUE_H_

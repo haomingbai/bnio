@@ -1,3 +1,8 @@
+/**
+ * @file context.h
+ * @brief kqueue_context class declaration.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_CONTEXT_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_CONTEXT_H_
@@ -241,6 +246,23 @@ class BNIO_EXPORT kqueue_context {
       active_registration& registration) noexcept;
   [[nodiscard]] unsigned poll_result(
       unsigned poll_mask, const bnio::base::event& event) const noexcept;
+
+  /** @brief Finds a free registration slot, or nullptr if all are occupied. */
+  [[nodiscard]] active_registration* find_free_registration_slot() noexcept;
+
+  /** @brief Checks whether an armed registration already exists for
+   * ident+filter. */
+  [[nodiscard]] bool is_event_already_armed(std::uintptr_t ident,
+                                            std::int16_t filter) const noexcept;
+
+  /** @brief Attempts to rearm a registration after EAGAIN/EWOULDBLOCK.
+   *
+   * @return true if rearm succeeded (caller should not complete the operation),
+   *         false if rearm failed and operation.result has been set.
+   */
+  [[nodiscard]] bool try_rearm_operation(
+      kqueue_io_operation_base& operation,
+      const active_registration& registration) noexcept;
 
   bnio::base::kqueue queue_;
   kqueue_context_options options_{};

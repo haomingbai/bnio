@@ -1,6 +1,10 @@
+/**
+ * @file tcp_endpoint.cpp
+ * @brief TCP endpoint (address + port) implementation.
+ */
+
 #include <bnio/async_io/ip/tcp.h>
 #include <bnio/async_io/ip/udp.h>
-
 namespace bnio::async_io::ip {
 
 endpoint::endpoint() noexcept = default;

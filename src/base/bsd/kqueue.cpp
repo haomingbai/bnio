@@ -1,9 +1,13 @@
+/**
+ * @file kqueue.cpp
+ * @brief kqueue descriptor RAII wrapper implementation.
+ */
+
 #include <bnio/base/bsd/kqueue.h>
 #include <unistd.h>
 
 #include <cerrno>
 #include <utility>
-
 namespace bnio::base {
 
 kqueue::kqueue() noexcept = default;

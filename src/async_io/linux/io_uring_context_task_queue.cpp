@@ -1,3 +1,9 @@
+/**
+ * @file io_uring_context_task_queue.cpp
+ * @brief Task queue operations: post, publish, CPU push, wait/notify, and
+ * eventfd I/O.
+ */
+
 #include <poll.h>
 #include <unistd.h>
 
@@ -80,6 +86,8 @@ int io_uring_context::signal_eventfd() noexcept {
     return -EINVAL;
   }
 
+  // Retry loop: eventfd writes may be partial (EAGAIN when counter is
+  // saturated) or interrupted (EINTR). Retry only the remaining bytes.
   const std::uint64_t value = 1;
   const auto* bytes = reinterpret_cast<const char*>(&value);
   std::size_t offset = 0;
@@ -106,6 +114,8 @@ void io_uring_context::drain_eventfd() noexcept {
     return;
   }
 
+  // Read loop: drain all available eventfd notifications (counter-based
+  // semaphore) until the fd goes empty (EAGAIN).
   for (;;) {
     std::uint64_t value = 0;
     const ssize_t result = ::read(event_fd_, &value, sizeof(value));
@@ -131,6 +141,8 @@ int io_uring_context::submit_eventfd_poll() noexcept {
     return 0;
   }
 
+  // 2-attempt retry: when the SQ is full, submit and try again. After two
+  // failures, return EAGAIN so the caller can retry later.
   for (unsigned attempt = 0; attempt < 2; ++attempt) {
     bnio::base::submission_queue_entry sqe = ring_.get_sqe();
     if (sqe.raw() == nullptr) {

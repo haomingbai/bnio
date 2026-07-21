@@ -1,3 +1,8 @@
+/**
+ * @file io_uring_receiver_operation.h
+ * @brief Internal io_uring receiver operation state.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_DETAIL_IO_URING_RECEIVER_OPERATION_H_
 #define BNIO_ASYNC_IO_LINUX_DETAIL_IO_URING_RECEIVER_OPERATION_H_

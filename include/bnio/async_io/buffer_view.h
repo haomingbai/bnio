@@ -1,3 +1,8 @@
+/**
+ * @file buffer_view.h
+ * @brief Non-owning view of a contiguous byte buffer.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BUFFER_VIEW_H_
 #define BNIO_ASYNC_IO_BUFFER_VIEW_H_

@@ -1,3 +1,8 @@
+/**
+ * @file read.h
+ * @brief Read CPO (async_read, async_read_some).
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CPO_READ_H_
 #define BNIO_IO_CONTEXT_CPO_READ_H_

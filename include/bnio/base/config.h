@@ -1,3 +1,8 @@
+/**
+ * @file config.h
+ * @brief Base layer configuration and feature detection.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_CONFIG_H_
 #define BNIO_BASE_CONFIG_H_

@@ -1,3 +1,8 @@
+/**
+ * @file steady_timer.h
+ * @brief steady_timer sender type.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_IO_CONTEXT_STEADY_TIMER_H_
 #define BNIO_DETAIL_IO_CONTEXT_STEADY_TIMER_H_

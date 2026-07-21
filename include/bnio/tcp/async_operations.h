@@ -1,3 +1,8 @@
+/**
+ * @file async_operations.h
+ * @brief TCP async operation sender factories.
+ */
+
 #pragma once
 #ifndef BNIO_TCP_ASYNC_OPERATIONS_H_
 #define BNIO_TCP_ASYNC_OPERATIONS_H_

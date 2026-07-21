@@ -1,3 +1,8 @@
+/**
+ * @file socket_address.h
+ * @brief Sockaddr storage wrapper for kqueue.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_SOCKET_ADDRESS_H_
 #define BNIO_ASYNC_IO_BSD_SOCKET_ADDRESS_H_

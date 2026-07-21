@@ -1,3 +1,8 @@
+/**
+ * @file tcp.h
+ * @brief TCP protocol tag and endpoint types.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_IP_TCP_H_
 #define BNIO_ASYNC_IO_IP_TCP_H_

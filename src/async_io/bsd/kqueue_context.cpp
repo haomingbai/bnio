@@ -1,3 +1,8 @@
+/**
+ * @file kqueue_context.cpp
+ * @brief kqueue_context lifecycle and queue initialization.
+ */
+
 #include <bnio/async_io/bsd/kqueue_context.h>
 
 #include <cassert>

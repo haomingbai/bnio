@@ -1,3 +1,8 @@
+/**
+ * @file ring.h
+ * @brief RAII wrapper for an io_uring instance.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_LINUX_RING_H_
 #define BNIO_BASE_LINUX_RING_H_

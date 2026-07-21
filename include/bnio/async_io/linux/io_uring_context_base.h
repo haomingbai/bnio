@@ -1,3 +1,8 @@
+/**
+ * @file io_uring_context_base.h
+ * @brief Base types and options for io_uring_context.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_H_

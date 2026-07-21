@@ -1,3 +1,8 @@
+/**
+ * @file tcp.cpp
+ * @brief TCP socket and acceptor RAII operations (open, close, bind, listen).
+ */
+
 #include <bnio/tcp.h>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -11,7 +16,6 @@
 #include "bnio/ip.h"
 #include "bnio/tcp/acceptor.h"
 #include "bnio/tcp/socket.h"
-
 namespace bnio::tcp {
 
 namespace {

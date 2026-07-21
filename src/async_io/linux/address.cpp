@@ -1,8 +1,12 @@
+/**
+ * @file address.cpp
+ * @brief Linux sockaddr-based IP address construction.
+ */
+
 #include <arpa/inet.h>
 #include <bnio/async_io/ip/address.h>
 
 #include <string>
-
 namespace bnio::async_io::ip {
 
 std::optional<address> make_address(std::string_view text) {

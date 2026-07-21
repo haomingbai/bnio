@@ -1,3 +1,8 @@
+/**
+ * @file descriptor_view.h
+ * @brief Non-owning view of a file descriptor.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_DESCRIPTOR_VIEW_H_
 #define BNIO_ASYNC_IO_DESCRIPTOR_VIEW_H_

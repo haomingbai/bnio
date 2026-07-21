@@ -1,3 +1,8 @@
+/**
+ * @file event.h
+ * @brief Wrapper for a kevent structure.
+ */
+
 #pragma once
 #ifndef BNIO_BASE_BSD_EVENT_H_
 #define BNIO_BASE_BSD_EVENT_H_

@@ -1,3 +1,8 @@
+/**
+ * @file operation_base.h
+ * @brief Base classes for kqueue operations.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPERATION_BASE_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPERATION_BASE_H_

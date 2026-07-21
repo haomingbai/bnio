@@ -1,3 +1,8 @@
+/**
+ * @file options.h
+ * @brief io_uring context options.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPTIONS_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPTIONS_H_

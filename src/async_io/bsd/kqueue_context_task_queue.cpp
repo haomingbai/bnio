@@ -1,3 +1,8 @@
+/**
+ * @file kqueue_context_task_queue.cpp
+ * @brief Task queue operations: post, publish, CPU push, wait/notify.
+ */
+
 #include <cassert>
 #include <cerrno>
 

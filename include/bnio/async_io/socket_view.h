@@ -1,3 +1,8 @@
+/**
+ * @file socket_view.h
+ * @brief Non-owning views (stream_socket_view, datagram_socket_view).
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_SOCKET_VIEW_H_
 #define BNIO_ASYNC_IO_SOCKET_VIEW_H_

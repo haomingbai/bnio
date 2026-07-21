@@ -1,3 +1,8 @@
+/**
+ * @file state.h
+ * @brief io_context internal shared state.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_IO_CONTEXT_STATE_H_
 #define BNIO_DETAIL_IO_CONTEXT_STATE_H_

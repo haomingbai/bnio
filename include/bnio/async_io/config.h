@@ -1,3 +1,8 @@
+/**
+ * @file config.h
+ * @brief Async I/O layer configuration and feature detection.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_CONFIG_H_
 #define BNIO_ASYNC_IO_CONFIG_H_

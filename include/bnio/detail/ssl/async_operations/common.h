@@ -1,3 +1,8 @@
+/**
+ * @file common.h
+ * @brief Common SSL async operation support.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_COMMON_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_COMMON_H_

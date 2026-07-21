@@ -1,3 +1,8 @@
+/**
+ * @file endpoint.h
+ * @brief IP endpoint (address + port).
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_IP_ENDPOINT_H_
 #define BNIO_ASYNC_IO_IP_ENDPOINT_H_

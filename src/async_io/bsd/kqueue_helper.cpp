@@ -1,8 +1,12 @@
+/**
+ * @file kqueue_helper.cpp
+ * @brief kqueue I/O registration helper.
+ */
+
 #include <bnio/async_io/bsd/kqueue_context_base/operation_base.h>
 #include <bnio/async_io/bsd/kqueue_helper.h>
 
 #include <cerrno>
-
 namespace bnio::async_io::bsd_native {
 namespace {
 

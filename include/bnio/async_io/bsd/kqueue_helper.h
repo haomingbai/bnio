@@ -1,3 +1,8 @@
+/**
+ * @file kqueue_helper.h
+ * @brief Helper for building kqueue I/O registrations.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_HELPER_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_HELPER_H_

@@ -1,3 +1,8 @@
+/**
+ * @file io_context_cpo.h
+ * @brief Aggregate header for I/O customization point objects.
+ */
+
 #pragma once
 #ifndef BNIO_IO_CONTEXT_CPO_H_
 #define BNIO_IO_CONTEXT_CPO_H_

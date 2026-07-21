@@ -1,3 +1,8 @@
+/**
+ * @file io_uring_context.cpp
+ * @brief io_uring_context lifecycle, queue initialization, and fallback logic.
+ */
+
 #include <bnio/async_io/linux/io_uring_context.h>
 #include <bnio/base/linux/liburing.h>
 #include <bnio/base/linux/params.h>

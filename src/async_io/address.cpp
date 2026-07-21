@@ -1,5 +1,9 @@
-#include <bnio/async_io/ip/address.h>
+/**
+ * @file address.cpp
+ * @brief IP address construction and parsing implementation.
+ */
 
+#include <bnio/async_io/ip/address.h>
 namespace bnio::async_io::ip {
 namespace {
 

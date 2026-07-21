@@ -1,3 +1,8 @@
+/**
+ * @file tcp.h
+ * @brief Aggregate header for bnio TCP support.
+ */
+
 #pragma once
 #ifndef BNIO_TCP_H_
 #define BNIO_TCP_H_

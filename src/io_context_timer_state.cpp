@@ -1,3 +1,8 @@
+/**
+ * @file io_context_timer_state.cpp
+ * @brief Pairing-heap timer state management for the internal timer queue.
+ */
+
 #include <utility>
 
 #include "bnio/async_io/time.h"
@@ -14,6 +19,7 @@ void detail::timer_state_data::push_heap(detail::timer_slot& timer) noexcept {
   timer.child = nullptr;
   timer.next = nullptr;
   timer.active = true;
+  // Pairing-heap insert: meld the new single-node heap into the root.
   heap = meld(heap, &timer);
 }
 
@@ -30,6 +36,9 @@ void detail::timer_state_data::erase_heap(detail::timer_slot& timer) noexcept {
     return;
   }
 
+  // Cut the node out of the sibling list. If it has a parent, fix the
+  // parent's child pointer. Otherwise it is the root and we replace it
+  // with its next sibling.
   if (timer.previous != nullptr) {
     if (timer.previous->child == &timer) {
       timer.previous->child = timer.next;
@@ -49,6 +58,9 @@ void detail::timer_state_data::erase_heap(detail::timer_slot& timer) noexcept {
     }
   }
 
+  // Replace the removed node with the merged result of its children (the
+  // standard pairing-heap delete-min). Meld the replacement back into the
+  // root.
   timer_slot* const replacement = merge_pairs(timer.child);
   timer.previous = nullptr;
   timer.child = nullptr;
@@ -64,6 +76,7 @@ void detail::timer_state_data::push_inactive(
     return;
   }
 
+  // Insert at the head of the inactive (already-expired) doubly-linked list.
   timer.child = nullptr;
   timer.previous = nullptr;
   timer.next = inactive;
@@ -79,6 +92,7 @@ void detail::timer_state_data::erase_inactive(
     return;
   }
 
+  // Unlink from the inactive doubly-linked list.
   if (timer.previous != nullptr) {
     timer.previous->next = timer.next;
   } else if (inactive == &timer) {
@@ -128,10 +142,12 @@ detail::timer_slot* detail::timer_state_data::meld(
   if (second == nullptr) {
     return first;
   }
+  // Ensure first has the earlier expiry (min-heap invariant).
   if (timer_less(*second, *first)) {
     std::swap(first, second);
   }
 
+  // Link second as the first child of first (pairing-heap link).
   second->previous = first;
   second->next = first->child;
   if (first->child != nullptr) {
@@ -143,6 +159,9 @@ detail::timer_slot* detail::timer_state_data::meld(
 
 detail::timer_slot* detail::timer_state_data::merge_pairs(
     detail::timer_slot* first) noexcept {
+  // Pairwise merge pass: traverse the sibling list, melding adjacent
+  // siblings and accumulating results into a single heap. Standard
+  // two-pass pairing-heap merge-pairs.
   timer_slot* result = nullptr;
   while (first != nullptr) {
     timer_slot* const second = first->next;

@@ -1,3 +1,8 @@
+/**
+ * @file resolve.h
+ * @brief io_uring DNS resolve operations.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_RESOLVE_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_RESOLVE_H_

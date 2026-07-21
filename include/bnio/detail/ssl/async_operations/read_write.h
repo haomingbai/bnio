@@ -1,3 +1,8 @@
+/**
+ * @file read_write.h
+ * @brief Aggregate header for SSL read/write operations.
+ */
+
 #pragma once
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_H_

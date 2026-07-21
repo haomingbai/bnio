@@ -1,3 +1,8 @@
+/**
+ * @file result.h
+ * @brief DNS resolution result.
+ */
+
 #pragma once
 #ifndef BNIO_ASYNC_IO_DNS_RESULT_H_
 #define BNIO_ASYNC_IO_DNS_RESULT_H_

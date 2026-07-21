@@ -1,3 +1,8 @@
+/**
+ * @file acceptor.h
+ * @brief RAII TCP acceptor (listening socket) owner.
+ */
+
 #pragma once
 #ifndef BNIO_TCP_ACCEPTOR_H_
 #define BNIO_TCP_ACCEPTOR_H_
