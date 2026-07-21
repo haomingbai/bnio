@@ -7,6 +7,7 @@
 #ifndef BNIO_IO_CONTEXT_CPO_WRITE_H_
 #define BNIO_IO_CONTEXT_CPO_WRITE_H_
 
+#include <cstdint>
 #include <utility>
 
 namespace bnio {
@@ -30,7 +31,8 @@ struct async_write_t {
           std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
       return std::forward<Provider>(provider).async_write(
-          std::forward<Sink>(sink), std::forward<Buffer>(buffer), mode);
+          std::forward<Sink>(sink), std::forward<Buffer>(buffer),
+          static_cast<std::uint64_t>(mode));
     }
   }
 };
@@ -55,7 +57,8 @@ struct async_write_some_t {
           std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
       return std::forward<Provider>(provider).async_write_some(
-          std::forward<Sink>(sink), std::forward<Buffer>(buffer), mode);
+          std::forward<Sink>(sink), std::forward<Buffer>(buffer),
+          static_cast<std::uint64_t>(mode));
     }
   }
 };

@@ -7,6 +7,7 @@
 #ifndef BNIO_IO_CONTEXT_CPO_READ_H_
 #define BNIO_IO_CONTEXT_CPO_READ_H_
 
+#include <cstdint>
 #include <utility>
 
 namespace bnio {
@@ -30,7 +31,8 @@ struct async_read_t {
           std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
       return std::forward<Provider>(provider).async_read(
-          std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
+          std::forward<Source>(source), std::forward<Buffer>(buffer),
+          static_cast<std::uint64_t>(mode));
     }
   }
 };
@@ -55,7 +57,8 @@ struct async_read_some_t {
           std::forward<Provider>(provider), std::forward<Buffer>(buffer), mode);
     } else {
       return std::forward<Provider>(provider).async_read_some(
-          std::forward<Source>(source), std::forward<Buffer>(buffer), mode);
+          std::forward<Source>(source), std::forward<Buffer>(buffer),
+          static_cast<std::uint64_t>(mode));
     }
   }
 };
