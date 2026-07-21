@@ -1,13 +1,4 @@
-#include <bnio/config/system.h>
-
-#if defined(BNIO_SYSTEM_LINUX)
-#include <bnio/linux/detail/io_context_timer_types.h>
-#elif defined(BNIO_SYSTEM_BSD)
-#include <bnio/bsd/detail/io_context_timer_types.h>
-#else
-#error "timer_state_test requires a supported POSIX timer backend"
-#endif
-
+#include <bnio/detail/io_context/timer_types.h>
 #include <gtest/gtest.h>
 
 #include <array>

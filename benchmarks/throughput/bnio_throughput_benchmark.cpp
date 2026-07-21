@@ -350,11 +350,7 @@ int main(int argc, char** argv) {
 
   io_context_options opts;
   opts.concurrency_hint = worker_count;
-#if defined(BNIO_HAS_IO_CONTEXT_LINUX)
-  opts.platform.uring.entries = 1024;
-#elif defined(BNIO_HAS_IO_CONTEXT_BSD)
-  opts.platform.kqueue.entries = 1024;
-#endif
+  opts.platform.entries = 1024;
   io_context ctx(opts);
   if (!ctx.is_open()) {
     std::cerr << "ctx unavailable\n";

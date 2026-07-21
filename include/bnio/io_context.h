@@ -5,9 +5,9 @@
 #include <bnio/io_context/config.h>
 
 #if defined(BNIO_HAS_IO_CONTEXT_LINUX)
-#include <bnio/linux/io_context.h>
+#include <bnio/detail/io_context/class.h>
 #elif defined(BNIO_HAS_IO_CONTEXT_BSD)
-#include <bnio/bsd/io_context.h>
+#include <bnio/detail/io_context/class.h>
 #else
 #error "bnio::io_context requires a supported native backend."
 #endif

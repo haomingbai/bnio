@@ -4,8 +4,8 @@
 
 #include <bnio/io_context/config.h>
 
-#if defined(BNIO_HAS_IO_CONTEXT_LINUX)
-#include <bnio/linux/io_context.h>
+#if defined(BNIO_HAS_IO_CONTEXT)
+#include <bnio/io_context.h>
 #endif
 
 #endif  // BNIO_DETAIL_IO_CONTEXT_SCHEDULER_OPERATIONS_H_

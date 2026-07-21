@@ -1,8 +1,10 @@
 # Layer 3: `bnio::io_context` — High-Level Async I/O Context
 
-Namespace `bnio`. Public umbrella `include/bnio/io_context.h` selects
-`include/bnio/linux/io_context.h` or `include/bnio/bsd/io_context.h`, with
-matching detail headers under the platform directory.
+Namespace `bnio`. Public umbrella `include/bnio/io_context.h` exposes one
+platform-neutral class definition. `detail::native_context` aliases the
+configured `io_uring_context` or `kqueue_context`; the shared runtime state,
+worker ownership, timers, and source implementation live under
+`detail/io_context/` and `src/io_context*.cpp`.
 
 `io_context` is the event-loop owner and scheduler factory:
 
@@ -18,16 +20,20 @@ cohesive `detail` state objects rather than defining all internal data inline:
 
 | State / Detail Type | Header | Responsibility |
 |---------------------|--------|----------------|
-| `detail::native_context_state` | `{linux,bsd}/detail/io_context_state.h` | Platform options used to create native contexts lazily. |
-| `detail::native_worker_state` | `{linux,bsd}/detail/io_context_state.h` | Atomically published head of the native-worker list. |
-| `detail::native_worker` | `{linux,bsd}/detail/io_context_state/native_worker.h` | Per-run-thread owner of one native context. |
+| `detail::native_context` and related aliases | `detail/io_context/native_context.h` | Select the native context, options, operation bases, and shared task state. |
+| `detail::native_context_state` | `detail/io_context/state.h` | Native options used to create contexts lazily. |
+| `detail::native_worker_state` | `detail/io_context/state.h` | Atomically published head of the native-worker list. |
+| `detail::native_worker` | `detail/io_context/native_worker.h` | Per-run-thread owner of one native context. |
 | platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake-worker count, and worker-group closing state. |
-| `detail::timer_state_data` | `{linux,bsd}/detail/io_context_timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
+| `detail::timer_state_data` | `detail/io_context/timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
 
-Template implementation types are grouped by operation family under the
-platform's `detail/io_context_native_io/`. The aggregate detail header is
-included after the complete `io_context` declaration, so templates can call
-private context hooks without splitting a class definition across files.
+The aggregate `detail/io_context/native_io.h` is included after the complete
+`io_context` declaration, so templates can call private context hooks without
+splitting a class definition across files. It owns the shared forwarding,
+timer-wait, and write-all templates, then selects only the backend request
+factories under `detail/{linux,bsd}/io_context_native_io/`. Those factories
+intentionally retain the distinct readiness versus completion semantics of the
+two native backends.
 
 ### Passive I/O Publication
 
@@ -65,9 +71,8 @@ provides asynchronous regular-file kernel work.
 ### Configuration
 
 ```cpp
-struct linux_io_context_options {
-    async_io::linux_native::io_uring_context_options uring{};
-};
+using platform_io_context_options =
+    /* io_uring_context_options or kqueue_context_options */;
 
 struct io_context_options {
     std::uint32_t concurrency_hint = 1;
@@ -169,29 +174,26 @@ All senders also complete with `set_error(std::error_code)` or `set_stopped()`.
 
 ### Internal Header Layout
 
-Each platform `io_context` layer uses the same detail-header layout to keep
-operation families separate while preserving a single public class declaration:
+The shared `io_context` layer keeps one class declaration and one source
+implementation:
 
 | Header | Contents |
 |--------|----------|
-| `linux/io_context.h` | `io_context`, scheduler handles, operation base, public and private member declarations. |
-| `linux/detail/io_context_state.h` | Non-template grouped runtime state: native options and worker-list head. |
-| `linux/detail/io_context_state/native_worker.h` | Complete `detail::native_worker` definition; included after `io_context` is complete. |
-| `linux/detail/io_context_timer_types.h` | Timer slots, intrusive timer queues, and `timer_state_data`. |
-| `linux/detail/io_context_native_io/common.h` | Error/stop helpers plus generic `native_io_operation` and `native_io_sender` templates. |
-| `linux/detail/io_context_native_io/file.h` | Descriptor read/write operation models. |
-| `linux/detail/io_context_native_io/socket.h` | Stream and datagram read/write/send/receive/accept/connect operation models. |
-| `linux/detail/io_context_native_io/poll.h` | Poll operation model. |
-| `linux/detail/io_context_native_io/timer_wait.h` | Timer wait sender and operation templates. |
-| `linux/detail/io_context_native_io/write_all.h` | Write-all state, step sender, and composed operation templates. |
-| `linux/detail/io_context_native_io.h` | Aggregates the native-I/O detail headers and defines inline scheduler/context forwarding functions. |
+| `io_context.h` | Public `io_context` umbrella. |
+| `detail/io_context/class.h` | `io_context`, schedulers, operation base, and private hooks. |
+| `detail/io_context/native_context.h` | Backend-selected native type aliases. |
+| `detail/io_context/{options,state,native_worker}.h` | Options, shared worker list, and per-thread native owner. |
+| `detail/io_context/{timer_types,steady_timer}.h` | Timer slots, queues, state, and public `steady_timer`. |
+| `detail/io_context/native_io.h` | Shared scheduler/context forwarding functions; selects backend request factories. |
+| `detail/io_context/{timer_wait,write_all}.h` | Shared timer wait and composed full-write sender templates. |
+| `detail/{linux,bsd}/io_context_native_io/` | Backend-specific request adapters, factories, and (on Linux) SQE models. |
+| `src/io_context{,_queue,_timer,_timer_state}.cpp` | Shared lifecycle, queue, timer, and timer-state implementations. |
 
-BSD keeps only `common.h`, `timer_wait.h`, and `write_all.h` in the layer-3
-detail directory. Its file, socket, poll, and DNS request objects live under
-`async_io/bsd/kqueue_operations/`; layer 3 wraps those request objects in
-shared-queue senders rather than selecting a kqueue context. Detail headers
-are installable because public inline templates reference them. User code
-should normally include `bnio/io_context.h`, not the detail headers directly.
+The request adapters are deliberately not macro-normalized: kqueue owns a
+readiness/retry step while io_uring owns SQE preparation and CQE completion.
+Detail headers are installable because public inline templates reference them.
+User code should normally include `bnio/io_context.h`, not the detail headers
+directly.
 
 ### Read/Write Semantic Split
 

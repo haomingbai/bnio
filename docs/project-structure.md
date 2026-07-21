@@ -86,30 +86,26 @@ Platform-neutral vocabulary types and the platform-native event-loop context.
 
 High-level async runtime, stream owners, and buffer types.
 
-- `io_context.h` → the selected `linux/io_context.h` or `bsd/io_context.h`.
-- `linux/io_context.h` — `io_context` class definition and public scheduler
-  surface; implementation detail types live under `linux/detail/`.
-- `linux/detail/io_context_options.h` — `io_context_options`.
-- `linux/detail/io_context_state.h` — grouped `io_context` native-context and
-  worker-list state. Shared CPU/I/O queue state lives in the async-io layer.
-- `linux/detail/io_context_state/native_worker.h` — per-run-thread native
-  worker that directly owns its native context.
-- `linux/detail/io_context_timer_types.h` — timer operations, timer state, slot,
-  and heap types.
-- `linux/detail/steady_timer.h` — `steady_timer` class definition.
-- `linux/detail/io_context_native_io.h` — umbrella for native I/O operation templates.
-- `linux/detail/io_context_native_io/common.h` — shared native-I/O helpers and
-  the generic native operation/sender templates.
-- `linux/detail/io_context_native_io/file.h` — descriptor read/write operation
-  models.
-- `linux/detail/io_context_native_io/poll.h` — poll operations.
-- `linux/detail/io_context_native_io/socket.h` — stream and datagram socket
-  accept/connect/read/write/send/receive operation models.
-- `linux/detail/io_context_native_io/timer_wait.h` — timer wait operations.
-- `linux/detail/io_context_native_io/write_all.h` — composed write-all sender.
-- `bsd/io_context.h` and `bsd/detail/` — the matching kqueue-backed runtime,
-  timer, scheduler, and readiness-operation implementation with the same
-  public surface.
+- `io_context.h` — public platform-neutral `io_context` umbrella.
+- `detail/io_context/class.h` — the shared `io_context` class definition and
+  scheduler surface.
+- `detail/io_context/native_context.h` — aliases the selected native context,
+  options, operation bases, and task-queue state.
+- `detail/io_context/options.h` — `io_context_options` and the selected native
+  context options.
+- `detail/io_context/state.h` and `native_worker.h` — grouped runtime state and
+  the per-run-thread owner of a native context.
+- `detail/io_context/timer_types.h` and `steady_timer.h` — timer operations,
+  timer state, slot/heap types, and `steady_timer`.
+- `detail/io_context/native_io.h` — shared context/scheduler forwarding
+  functions; selects backend request factories after the complete class
+  definition.
+- `detail/io_context/timer_wait.h` and `write_all.h` — shared timer wait and
+  composed full-write sender templates.
+- `detail/{linux,bsd}/io_context_native_io/` — backend-specific request
+  adapters and factories (plus Linux SQE models); they remain explicit because
+  readiness/retry and SQE/CQE lifecycles cannot be represented by an alias
+  alone.
 - `detail/io_context/scheduler_operations.h` — scheduler-level I/O senders.
 - `detail/ssl/async_operations.h` — umbrella for SSL async operations.
 - `detail/ssl/async_operations/common.h` — shared SSL operation helpers.
@@ -181,14 +177,10 @@ High-level async runtime, stream owners, and buffer types.
   - `kqueue_context_task_queue.cpp` — shared CPU/I/O publication and `EVFILT_USER` wakeup.
   - `kqueue_context_internal.h` — internal local task queue helpers.
   - `kqueue_helper.cpp` — readiness registration builder implementation.
-- `src/linux/` — high-level Linux `io_context` implementations:
-  - `io_context.cpp` — lifecycle, schedulers, and native workers.
-  - `io_context_queue.cpp` — passive I/O publication and worker wakeup.
-  - `io_context_timer.cpp` — timer slot management, passive timer fetch, and
-    local completion handoff.
-  - `io_context_timer_state.cpp` — intrusive timer heap/list maintenance.
-- `src/bsd/` — the parallel high-level kqueue `io_context` lifecycle, queue,
-  passive timer fetch, timer operations, and intrusive timer-state implementations.
+- `src/io_context.cpp`, `src/io_context_queue.cpp`, `src/io_context_timer.cpp`,
+  and `src/io_context_timer_state.cpp` — shared high-level `io_context`
+  lifecycle, queue, timer, and timer-state implementations selected through
+  `detail::native_context`.
 - `src/tcp.cpp` — TCP socket and acceptor methods.
 - `src/ssl.cpp` — SSL context and stream methods.
 

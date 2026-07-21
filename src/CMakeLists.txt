@@ -13,15 +13,6 @@ if(BNIO_PLATFORM_LINUX)
   target_link_libraries(bnio PUBLIC PkgConfig::LIBURING
                                     OpenSSL::SSL
                                     OpenSSL::Crypto)
-  target_sources(
-    bnio
-    PRIVATE linux/io_context.cpp
-            linux/io_context_queue.cpp
-            linux/io_context_timer.cpp
-            linux/io_context_timer_state.cpp
-            ssl.cpp
-            tcp.cpp
-            udp.cpp)
 else()
   target_compile_definitions(
     bnio
@@ -33,17 +24,20 @@ endif()
 if(BNIO_PLATFORM_BSD)
   add_subdirectory(base/bsd)
   target_link_libraries(bnio PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+else()
+  target_compile_definitions(bnio PUBLIC BNIO_DISABLE_BASE_BSD=1)
+endif()
+
+if(BNIO_PLATFORM_LINUX OR BNIO_PLATFORM_BSD)
   target_sources(
     bnio
-    PRIVATE bsd/io_context.cpp
-            bsd/io_context_queue.cpp
-            bsd/io_context_timer.cpp
-            bsd/io_context_timer_state.cpp
+    PRIVATE io_context.cpp
+            io_context_queue.cpp
+            io_context_timer.cpp
+            io_context_timer_state.cpp
             ssl.cpp
             tcp.cpp
             udp.cpp)
-else()
-  target_compile_definitions(bnio PUBLIC BNIO_DISABLE_BASE_BSD=1)
 endif()
 
 target_include_directories(

@@ -36,6 +36,11 @@ endif()
 option(BNIO_PLATFORM_BSD "Build the BSD kqueue backend"
        ${BNIO_PLATFORM_BSD_DEFAULT})
 
+if(BNIO_PLATFORM_LINUX AND BNIO_PLATFORM_BSD)
+  message(FATAL_ERROR
+          "bnio builds exactly one native backend per target; select Linux or BSD, not both.")
+endif()
+
 if(BNIO_PLATFORM_LINUX OR BNIO_PLATFORM_BSD)
   find_package(OpenSSL REQUIRED)
 endif()

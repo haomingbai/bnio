@@ -12,10 +12,17 @@ bnio/bnio.h  (umbrella)
 │   ├── async_io/ip/{address, endpoint, tcp, udp}.h
 │   └── async_io/dns/{query, result, resolve, types}.h
 ├── bnio/io_context.h
-│   ├── linux/io_context.h → linux/detail/* → async_io/linux/io_uring_context.h
-│   └── bsd/io_context.h → bsd/detail/* → async_io/bsd/kqueue_context.h
-│       └── bsd/detail/io_context_native_io/{common, timer_wait,
-│           write_all}.h
+│   ├── detail/io_context/class.h
+│   ├── detail/io_context/native_context.h
+│   │   ├── async_io/linux/io_uring_context.h
+│   │   └── async_io/bsd/kqueue_context.h
+│   ├── detail/io_context/{options, state, native_worker,
+│   │                      timer_types, steady_timer}.h
+│   └── detail/io_context/native_io.h
+│       ├── detail/io_context/{timer_wait, write_all}.h
+│       ├── detail/linux/io_context_native_io/{common, factories,
+│       │                                           file, poll, socket}.h
+│       └── detail/bsd/io_context_native_io/{common, factories}.h
 ├── bnio/async_io/linux/io_uring_context.h
 │   ├── async_io/linux/io_uring_context_base.h
 │   │   ├── async_io/linux/io_uring_context_base/context.h

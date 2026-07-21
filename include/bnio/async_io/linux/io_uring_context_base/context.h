@@ -162,7 +162,7 @@ class BNIO_EXPORT io_uring_context {
    * work or calling run(). The state must remain valid until this context
    * stops running.
    */
-  void set_global_state(io_uring_task_queue_state& state) noexcept;
+  void set_global_state(io_uring_task_queue_state* state) noexcept;
 
   /**
    * Wakes the run loop through the context eventfd.

@@ -42,7 +42,7 @@ The platform split should evolve from the current Linux-only shape into this:
 |-------|-------|-------------|
 | `base` | `include/bnio/base/linux/`, `src/base/linux/` ✅ | `include/bnio/base/bsd/`, `src/base/bsd/` ✅ |
 | `async_io` native backend | `async_io::linux_native::io_uring_context` ✅ | `async_io::bsd_native::kqueue_context` ✅ |
-| high-level runtime | `include/bnio/linux/io_context.h`, `src/linux/` ✅ | `include/bnio/bsd/io_context.h`, `src/bsd/` ✅ |
+| high-level runtime | `include/bnio/io_context.h`, `detail::native_context` aliases, `src/io_context*.cpp` ✅ | same shared runtime; BSD-native request adapters remain explicit ✅ |
 | system macros | `BNIO_SYSTEM_LINUX` ✅ | `BNIO_SYSTEM_DARWIN`, `BNIO_SYSTEM_FREEBSD`, `BNIO_SYSTEM_BSD` ✅ |
 
 The public umbrella headers should eventually select the platform runtime
@@ -292,15 +292,17 @@ CPU/I/O work and stop requests. Timer heap ownership stays in high-level
 Although this roadmap focuses on `base` and `async_io`, the public port finishes
 only when `bnio::io_context` can select the BSD backend.
 
-Expected work:
+Completed consolidation:
 
-- add `include/bnio/bsd/io_context.h` and `src/bsd/io_context.cpp`;
-- introduce `bsd_io_context_options`;
-- make `platform_io_context_options` select Linux or BSD options from
-  `config/system.h`;
-- reuse the existing scheduler factory, passive I/O queue policy, timer heap,
-  TCP owner types, SSL stream integration, and CPO surface;
-- keep Linux names out of cross-platform public headers.
+- `detail::native_context` aliases the selected context, options, operation
+  bases, and shared task-queue state;
+- one `io_context` class and one set of lifecycle, queue, and timer sources
+  serve both backends;
+- `platform_io_context_options` directly aliases the selected native options;
+- the scheduler factory, passive I/O queue policy, timer heap, TCP owner types,
+  SSL stream integration, and CPO surface are shared;
+- backend-specific request adapters remain explicit rather than being hidden
+  behind a macro compatibility layer.
 
 The BSD backend keeps one passive publication path: collect ready-to-register
 operations in the shared I/O queue and wake a sleeping loop when needed. The

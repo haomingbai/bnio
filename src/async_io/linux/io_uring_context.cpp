@@ -148,8 +148,8 @@ void io_uring_context::queue_exit() noexcept {
 bool io_uring_context::is_open() const noexcept { return ring_.is_open(); }
 
 void io_uring_context::set_global_state(
-    io_uring_task_queue_state& state) noexcept {
-  global_state_ = &state;
+    io_uring_task_queue_state* state) noexcept {
+  global_state_ = state;
 }
 
 }  // namespace bnio::async_io::linux_native

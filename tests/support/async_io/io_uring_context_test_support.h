@@ -348,7 +348,7 @@ inline bool queue_init_with_state_or_skip(
     io_uring_context& context, io_uring_task_queue_state& global_tasks,
     io_uring_context_options options) {
   reset_task_queue_state(global_tasks);
-  context.set_global_state(global_tasks);
+  context.set_global_state(&global_tasks);
   return queue_init_result_or_skip(context, options);
 }
 

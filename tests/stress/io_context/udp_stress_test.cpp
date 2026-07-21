@@ -72,11 +72,7 @@ void run_stress_test() {
   bnio::io_context_options options;
   constexpr unsigned worker_count = 4;
   options.concurrency_hint = worker_count;
-#if defined(BNIO_SYSTEM_LINUX)
-  options.platform.uring.entries = 512;
-#else
-  options.platform.kqueue.entries = 512;
-#endif
+  options.platform.entries = 512;
   bnio::io_context context(options);
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
