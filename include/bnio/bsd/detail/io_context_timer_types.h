@@ -75,7 +75,7 @@ struct timer_slot {
   bool active = false;
 };
 
-struct timer_state_data {
+struct BNIO_EXPORT timer_state_data {
   io_context* owner = nullptr;
 
   void push_heap(timer_slot& timer) noexcept;
