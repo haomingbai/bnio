@@ -92,11 +92,10 @@ bnio
 │   ├── basic_scheduler<Kind>             dispatch/post scheduler handles
 │   └── schedule_sender<Kind>             scheduler sender types
 ├── detail                                Layer 3 internals
-│   ├── native_context_state              primary native context + options
-│   ├── native_worker_state               worker-list counters and cursors
+│   ├── native_context_state              native-context options
+│   ├── native_worker_state               atomic worker-list head
 │   ├── native_worker                     per-thread native context slot
-│   ├── timer_state_data                  timer map, heap, timeout state
-│   ├── timer_*_operation                 reusable timer operations
+│   ├── timer_state_data                  timer heap/list + passive timeout state
 │   └── *_write_all_state                 layer-2 sender compositions
 ├── ip
 │   ├── address (= async_io::ip::address)

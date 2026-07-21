@@ -199,6 +199,9 @@ class BNIO_EXPORT kqueue_context {
   /** Consumes staged local I/O tasks after ready CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;
 
+  /** Moves due passive-timer completions into the local CPU queue. */
+  [[nodiscard]] bool consume_timeout_operations() noexcept;
+
   [[nodiscard]] int prepare_io(kqueue_io_operation_base& operation,
                                prepared_operation& prepared) noexcept;
 

@@ -9,12 +9,14 @@ namespace bnio::detail {
 /** @cond BNIO_DETAIL */
 
 struct native_worker {
-  explicit native_worker(io_context& owner) noexcept : owner(&owner) {}
+  native_worker(
+      io_context& owner,
+      const async_io::linux_native::io_uring_context_options& options) noexcept
+      : owner(&owner), context(options) {}
 
   io_context* owner = nullptr;
-  std::atomic<native_worker*> next{nullptr};
-  std::atomic<async_io::linux_native::io_uring_context*> context{nullptr};
-  std::unique_ptr<async_io::linux_native::io_uring_context> owned_context;
+  native_worker* next = nullptr;
+  async_io::linux_native::io_uring_context context;
 };
 
 /** @endcond */

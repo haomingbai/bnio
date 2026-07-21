@@ -2,11 +2,9 @@
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <mutex>
 #include <utility>
 
-#include "bnio/async_io/linux/io_uring_operations/helpers.h"
 #include "bnio/async_io/time.h"
 #include "bnio/linux/detail/io_context_timer_types.h"
 #include "bnio/linux/detail/steady_timer.h"
@@ -20,66 +18,8 @@ timer_operation_base::timer_operation_base(io_context& context) noexcept
 
 }  // namespace detail
 
-detail::timer_wakeup_operation::timer_wakeup_operation(
-    io_context& context) noexcept
-    : context_(&context) {}
-
-void detail::timer_wakeup_operation::set_timeout(
-    async_io::duration timeout) noexcept {
-  timeout_.reset(timeout);
-}
-
-void detail::timer_wakeup_operation::prepare(
-    base::submission_queue_entry& sqe) noexcept {
-  timeout_.prepare_timeout(sqe, 0, 0);
-}
-
-void detail::timer_wakeup_operation::complete_submit_error(
-    int submit_result) noexcept {
-  result = submit_result;
-}
-
-void detail::timer_wakeup_operation::execute() noexcept {
-  context_->on_timer_wakeup();
-}
-
-detail::timer_update_operation::timer_update_operation(
-    io_context& context) noexcept
-    : context_(&context) {}
-
-void detail::timer_update_operation::set_timeout(
-    async_io::duration timeout) noexcept {
-  timeout_.reset(timeout);
-}
-
-void detail::timer_update_operation::prepare(
-    base::submission_queue_entry& sqe) noexcept {
-  timeout_.prepare_timeout_update(
-      sqe,
-      static_cast<std::uint64_t>(
-          reinterpret_cast<std::uintptr_t>(&context_->timer_wakeup_operation_)),
-      0);
-}
-
-void detail::timer_update_operation::complete_submit_error(
-    int submit_result) noexcept {
-  result = submit_result;
-}
-
-void detail::timer_update_operation::execute() noexcept {
-  context_->on_timer_update();
-}
-
-detail::timer_driver_operation::timer_driver_operation(
-    io_context& context) noexcept
-    : context_(&context) {}
-
-void detail::timer_driver_operation::execute() noexcept {
-  context_->on_timer_driver();
-}
-
 void io_context::register_timer(detail::timer_slot& timer) noexcept {
-  bool schedule_timer_driver = false;
+  bool wake_worker = false;
   {
     std::lock_guard context_lock(timers_.mutex);
     if (timer.context != nullptr) {
@@ -91,21 +31,22 @@ void io_context::register_timer(detail::timer_slot& timer) noexcept {
     timer.previous = nullptr;
     timer.child = nullptr;
     timer.next = nullptr;
+    const time_point previous_deadline = timers_.heap_deadline();
     if (timer.expiry > clock::now()) {
       timers_.push_heap(timer);
-      schedule_timer_driver = true;
+      wake_worker = timers_.heap_deadline() < previous_deadline;
     } else {
       timers_.push_inactive(timer);
     }
   }
 
-  if (schedule_timer_driver) {
-    post_timer_driver();
+  if (wake_worker) {
+    wake_one_if_all_workers_sleeping();
   }
 }
 
 void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
-  detail::timer_operation_queue canceled;
+  bool wake_worker = false;
   {
     std::lock_guard context_lock(timers_.mutex);
     if (timer.context != this) {
@@ -118,40 +59,52 @@ void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
       timers_.erase_inactive(timer);
     }
     timer.context = nullptr;
-    canceled = take_timer_operations_locked(timer);
+    const detail::timer_operation_queue canceled =
+        take_timer_operations_locked(timer);
+    wake_worker = canceled.head != nullptr;
+    enqueue_timer_operations_locked(canceled.head,
+                                    detail::timer_completion_kind::stopped);
   }
 
-  post_timer_operations(canceled.head, detail::timer_completion_kind::stopped);
+  if (wake_worker) {
+    wake_one_if_all_workers_sleeping();
+  }
 }
 
 std::size_t io_context::cancel_timer(detail::timer_slot& timer) noexcept {
-  detail::timer_operation_queue canceled;
   std::size_t count = 0;
+  bool wake_worker = false;
   {
     std::lock_guard context_lock(timers_.mutex);
     if (timer.context != this) {
       return 0;
     }
 
-    canceled = take_timer_operations_locked(timer);
+    const detail::timer_operation_queue canceled =
+        take_timer_operations_locked(timer);
     count = canceled.size;
+    wake_worker = canceled.head != nullptr;
+    enqueue_timer_operations_locked(canceled.head,
+                                    detail::timer_completion_kind::stopped);
   }
 
-  post_timer_operations(canceled.head, detail::timer_completion_kind::stopped);
+  if (wake_worker) {
+    wake_one_if_all_workers_sleeping();
+  }
   return count;
 }
 
 std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
                                          time_point expiry) noexcept {
-  detail::timer_operation_queue canceled;
   std::size_t count = 0;
-  bool schedule_timer_driver = false;
+  bool wake_worker = false;
   {
     std::lock_guard context_lock(timers_.mutex);
     if (timer.context != this) {
       return 0;
     }
 
+    const time_point previous_deadline = timers_.heap_deadline();
     const bool was_active = timer.active;
     if (was_active) {
       timers_.erase_heap(timer);
@@ -160,21 +113,24 @@ std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
     }
 
     timer.expiry = expiry;
-    canceled = take_timer_operations_locked(timer);
+    const detail::timer_operation_queue canceled =
+        take_timer_operations_locked(timer);
     count = canceled.size;
+    const bool has_canceled_operations = canceled.head != nullptr;
+    enqueue_timer_operations_locked(canceled.head,
+                                    detail::timer_completion_kind::stopped);
 
     if (timer.expiry > clock::now()) {
       timers_.push_heap(timer);
-      schedule_timer_driver = true;
     } else {
       timers_.push_inactive(timer);
-      schedule_timer_driver = was_active;
     }
+    wake_worker =
+        has_canceled_operations || timers_.heap_deadline() < previous_deadline;
   }
 
-  post_timer_operations(canceled.head, detail::timer_completion_kind::stopped);
-  if (schedule_timer_driver) {
-    post_timer_driver();
+  if (wake_worker) {
+    wake_one_if_all_workers_sleeping();
   }
   return count;
 }
@@ -187,29 +143,121 @@ io_context::time_point io_context::timer_expiry(
 
 void io_context::start_timer_wait(detail::timer_operation_base& operation,
                                   detail::timer_slot& timer) noexcept {
-  detail::timer_completion_kind completion =
-      detail::timer_completion_kind::value;
+  bool wake_worker = false;
   {
     std::lock_guard context_lock(timers_.mutex);
     if (timer.context != this) {
-      completion = detail::timer_completion_kind::stopped;
-    } else if (!timer.active) {
-      completion = detail::timer_completion_kind::value;
-    } else {
       operation.timer_next_ = nullptr;
-      if (timer.submitted.tail != nullptr) {
-        timer.submitted.tail->timer_next_ = &operation;
-      } else {
-        timer.submitted.head = &operation;
-      }
-      timer.submitted.tail = &operation;
+      enqueue_timer_operations_locked(&operation,
+                                      detail::timer_completion_kind::stopped);
+      wake_worker = true;
+    } else if (!timer.active) {
+      operation.timer_next_ = nullptr;
+      enqueue_timer_operations_locked(&operation,
+                                      detail::timer_completion_kind::value);
+      wake_worker = true;
+    } else {
+      operation.timer_next_ = timer.submitted.head;
+      timer.submitted.head = &operation;
       ++timer.submitted.size;
       return;
     }
   }
 
-  operation.timer_next_ = nullptr;
-  post_timer_operations(&operation, completion);
+  if (wake_worker) {
+    wake_one_if_all_workers_sleeping();
+  }
+}
+
+detail::timer_operation_queue io_context::take_timer_operations_locked(
+    detail::timer_slot& timer) noexcept {
+  const detail::timer_operation_queue operations = timer.submitted;
+  timer.submitted = {};
+  return operations;
+}
+
+void io_context::enqueue_timer_operations_locked(
+    detail::timer_operation_base* operations,
+    detail::timer_completion_kind completion) noexcept {
+  while (operations != nullptr) {
+    detail::timer_operation_base* const operation = operations;
+    operations = operation->timer_next_;
+    operation->timer_completion_ = completion;
+    operation->timer_next_ = timers_.ready;
+    timers_.ready = operation;
+  }
+}
+
+void io_context::queue_timer_completion(
+    detail::timer_operation_base& operation,
+    detail::timer_completion_kind completion) noexcept {
+  {
+    std::lock_guard context_lock(timers_.mutex);
+    operation.timer_next_ = nullptr;
+    enqueue_timer_operations_locked(&operation, completion);
+  }
+  wake_one_if_all_workers_sleeping();
+}
+
+bool io_context::try_fetch_timeout_operations(
+    time_point& deadline,
+    async_io::linux_native::io_uring_operation_base*& operations) noexcept {
+  operations = nullptr;
+  bool expected = false;
+  // Concurrent workers check timers on every loop pass. Serialize only the
+  // non-blocking fetch attempt first, so losing workers do not contend on the
+  // structural mutex.
+  if (!timers_.timeout_fetching.compare_exchange_strong(
+          expected, true, std::memory_order_acq_rel,
+          std::memory_order_acquire)) {
+    return false;
+  }
+
+  std::unique_lock context_lock(timers_.mutex, std::try_to_lock);
+  if (!context_lock.owns_lock()) {
+    timers_.timeout_fetching.store(false, std::memory_order_release);
+    return false;
+  }
+
+  const time_point now = clock::now();
+  while (timers_.heap_deadline() <= now) {
+    detail::timer_slot* const timer = timers_.pop_heap();
+    if (timer == nullptr) {
+      break;
+    }
+
+    const detail::timer_operation_queue ready =
+        take_timer_operations_locked(*timer);
+    timers_.push_inactive(*timer);
+    enqueue_timer_operations_locked(ready.head,
+                                    detail::timer_completion_kind::value);
+  }
+
+  deadline = timers_.heap_deadline();
+  detail::timer_operation_base* ready = timers_.ready;
+  timers_.ready = nullptr;
+  context_lock.unlock();
+  timers_.timeout_fetching.store(false, std::memory_order_release);
+
+  while (ready != nullptr) {
+    detail::timer_operation_base* const operation = ready;
+    ready = operation->timer_next_;
+    operation->timer_next_ = nullptr;
+    operation->next = operations;
+    operations = operation;
+  }
+  return true;
+}
+
+bool io_context::try_fetch_timeout_operations_thunk(
+    void* state, time_point& deadline,
+    async_io::linux_native::io_uring_operation_base*& operations) noexcept {
+  auto* timers = static_cast<detail::timer_state_data*>(state);
+  if (timers == nullptr || timers->owner == nullptr) {
+    operations = nullptr;
+    return false;
+  }
+  return timers->owner->try_fetch_timeout_operations(deadline, operations);
 }
 
 steady_timer::steady_timer(io_context& context) noexcept {

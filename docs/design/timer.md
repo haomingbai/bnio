@@ -7,8 +7,8 @@
 - **inactive**: a registered timer whose expiry has passed. Inactive timers
   live in an intrusive list and complete newly started waits immediately.
 
-This avoids the previous hot path in which a timer driver had to scan every
-registered timer to find newly submitted waits.
+This avoids a scan of every registered timer to discover newly submitted
+waits.
 
 Implementation types live in the matching
 `include/bnio/{linux,bsd}/detail/` directory:
@@ -22,13 +22,15 @@ Implementation types live in the matching
 ## Goals
 
 - Make starting a wait on an active timer O(1) under the timer mutex.
-- Make starting a wait on an expired timer a direct native-context post.
+- Make starting a wait on an expired timer enqueue a local-loop completion
+  without using the shared CPU task queue.
 - Keep each registered timer in exactly one intrusive scheduling container.
 - Eliminate timer-registry scans, per-timer mutexes, generation counters, and
   atomic timer-operation queues.
 - Keep cancellation, expiry replacement, and timer destruction asynchronous:
   receivers are never called while timer state is locked.
-- Reuse the existing driver and native timeout operations.
+- Let native workers consume timer deadlines passively while deciding how long
+  to sleep; no timer owns a native timeout submission.
 
 ## Timer Slot Layout
 
@@ -39,10 +41,13 @@ Each `steady_timer` owns one `detail::timer_slot`.
 | `context` | Owning context while registered; null after unregistration. |
 | `expiry` | Absolute deadline selected by `expires_at()` / `expires_after()`. |
 | `submitted.head` | First pending active-timer wait. |
-| `submitted.tail` | Last pending active-timer wait, enabling O(1) FIFO append. |
 | `submitted.size` | Number of queued waits, used by `cancel()` and expiry replacement without traversing the queue under the mutex. |
 | `previous`, `child`, `next` | Intrusive heap/list topology links. |
 | `active` | `true` only while the slot belongs to the active time heap. |
+
+`timer_state_data::ready` is a separate intrusive list of waits that have
+already selected value or stopped completion. It is drained only by a native
+worker's passive timer check.
 
 The topology metadata is three pointers and one Boolean:
 
@@ -96,12 +101,16 @@ It protects:
 
 - active-heap and inactive-list topology;
 - `timer_slot::context`, `expiry`, and `active`;
-- the complete submitted FIFO queue (`head`, `tail`, and `size`);
-- reusable native timeout state.
+- the submitted head-linked queue (`head` and `size`);
+- the pending timer-completion list consumed by native loop checks.
 
-There is no per-timer mutex and no atomic submitted-operation pointer. The
-only timer-related atomic is `timer_state_data::driver`, which prevents
-duplicate posts of the reusable driver operation.
+There is no per-timer mutex, atomic submitted-operation pointer, reusable
+driver operation, or native timeout state machine.
+
+`timer_state_data::timeout_fetching` is a small atomic admission gate for
+workers that check timers. At most one worker attempts the structural mutex at
+a time; other workers skip that loop check instead of producing avoidable
+`try_lock()` contention.
 
 `steady_timer` remains externally serialized for concurrent mutations of the
 same object, as documented on the public type.
@@ -112,50 +121,46 @@ Starting a timer wait has two paths:
 
 ```text
 lock timer mutex
-  timer inactive -> unlock
-                    post this operation with value completion
+  timer inactive -> add this operation to the timer-ready list
 
-  timer active   -> append operation to submitted FIFO
-                    keep no additional state and do not post the driver
+  timer active   -> insert operation at submitted head
+                    keep no additional state and do not wake a worker
 unlock timer mutex
 ```
 
 An active timer is already in the time heap, so its deadline is already known
-to the backend. Appending a wait therefore does not need to scan timers,
-change heap topology, or enqueue a driver task.
+to the backend. Registering a wait therefore does not need to scan timers,
+change heap topology, or enqueue a task.
 
-The queue is FIFO:
+Wait registration is a head insertion:
 
 ```cpp
-operation.timer_next_ = nullptr;
-if (timer.submitted.tail != nullptr) {
-  timer.submitted.tail->timer_next_ = &operation;
-} else {
-  timer.submitted.head = &operation;
-}
-timer.submitted.tail = &operation;
+operation.timer_next_ = timer.submitted.head;
+timer.submitted.head = &operation;
 ++timer.submitted.size;
 ```
 
-At expiry, the driver can detach this entire queue and concatenate it with the
-current completion batch in O(1), using the stored tails. Receiver execution
-is performed only after releasing the mutex.
+This removes tail maintenance and preserves the timer subsystem's intrusive,
+allocation-free registration path. An expired, stopped, or cancelled operation
+first enters the timer-ready list; a native worker transfers that list to its
+own local CPU queue during its next loop check.
 
 ## Expiry Replacement and Cancellation
 
 `expires_at()` / `expires_after()` first take the timer mutex and:
 
 1. Remove the slot from its current heap/list container.
-2. Detach the one submitted FIFO queue.
+2. Detach the one submitted head-linked queue.
 3. Store the new expiry.
 4. Insert it into the active heap or inactive list according to the new time.
-5. Release the mutex.
-6. Post every detached operation with `set_stopped()`.
+5. Mark the detached operations stopped and link them into the timer-ready
+   list.
+6. Release the mutex.
 
-The return value is the detached queue's stored `size`, so cancellation and
+The return value is the detached list's stored `size`, so cancellation and
 expiry replacement do not walk the task list while holding the mutex.
 
-`cancel()` only detaches and posts the submitted FIFO. It does not change the
+`cancel()` only detaches and queues the submitted head-linked list. It does not change the
 timer's active/inactive state or expiry.
 
 ## Expiry Processing
@@ -163,55 +168,54 @@ timer's active/inactive state or expiry.
 The backend processes due heap roots as follows:
 
 1. Pop the earliest active timer from the pairing heap.
-2. Detach its submitted FIFO queue.
+2. Detach its submitted head-linked queue.
 3. Mark it inactive and link it into the inactive list.
-4. Add the queue to a local completion batch.
-5. After releasing the timer mutex, post that batch with value completion.
+4. Add the queue to the timer-ready list with value completion.
+5. Return that ready list to the native loop, which links it into the current
+   worker's local CPU queue.
 
 This state transition is performed even if the queue is empty. Therefore a
 subsequent wait on an expired timer observes the inactive state and takes the
 direct-post path.
 
-On Linux, `timer_driver_operation_` performs this work after an io_uring
-timeout completion and then arms or updates the next native timeout. On BSD,
-`try_fetch_timeout_operations()` performs the same transition before the
-kqueue worker sleeps.
+Both native backends call `try_fetch_timeout_operations()` on every loop pass
+and again while selecting a blocking timeout. The callback first uses the
+atomic admission gate and then takes the timer mutex without blocking. It
+returns due/completed waits as a native operation list plus the current heap
+deadline. The worker links that list directly into its local CPU queue and
+uses the deadline as its passive sleep timeout: `io_uring_wait_cqe_timeout()`
+on Linux and the `kevent()` timeout argument on BSD.
 
-## Driver and Native Timeout State
+## Passive Deadline Integration
 
-The reusable driver remains protected by this atomic state machine:
-
-```text
-idle -> posted -> idle
-```
-
-Only expiry changes, timer registration of a future deadline, and native
-timeout completion need to post the driver. Starting a wait on an already
-active timer does not.
-
-Linux retains the existing single-timeout state machine:
+No timer completion is injected as a native I/O request. Instead, the backend
+follows this sequence:
 
 ```text
-idle -> armed -> updating -> armed
-                  \-> update_pending -> idle
+worker is about to sleep
+  -> non-blockingly fetch timer-ready operations and next heap deadline
+  -> transfer ready operations to this worker's local CPU queue
+  -> sleep until native I/O, explicit wakeup, or the heap deadline
 ```
 
-The heap root supplies the next deadline. A stale native timeout after timer
-removal is harmless: it causes at most one extra driver pass and never
-completes a user wait incorrectly.
+When a newly registered/rearmed timer becomes the earliest deadline, or a
+mutation adds ready completions, the context wakes one worker only if all
+published workers are sleeping. Starting a wait on an already active timer
+only links the operation; it does not need a wakeup. Removing an earliest
+timer does not require a wakeup: the old passive timeout may fire once and the
+next loop check will select the new deadline.
 
 ## Destruction and Debug Builds
 
-Unregistration removes a timer from its heap/list and posts only actual
-pending waits with stopped completion. It deliberately does not post a timer
-driver merely to recompute a deadline. This is important after `run()` has
-returned: the native context may already be `finished`, and posting a
-no-op driver would violate its Debug `assert_running()` precondition.
+Unregistration removes a timer from its heap/list and places only actual
+pending waits on the timer-ready list with stopped completion. It does not
+submit a native timer operation merely to recompute a deadline, because
+passive deadline selection happens naturally on the next worker loop check.
 
-Once `io_context::stop()` begins closing the context, timer driver and
-completion posts are suppressed as well. There is no runnable context left to
-consume them, and suppressing them prevents a shutdown/destruction path from
-posting into a finished native context.
+Once `io_context::stop()` begins closing the context, timer completion
+dispatch is no longer attempted. There is no runnable context left to consume
+it, and this prevents shutdown/destruction from referencing a finished native
+context.
 
 ## Invariants
 
@@ -220,10 +224,12 @@ posting into a finished native context.
 - `active == true` means the slot is reachable from `timer_state_data::heap`.
 - `active == false` and `context != nullptr` means the slot is reachable from
   `timer_state_data::inactive`.
-- At most one submitted FIFO queue exists per timer.
-- Queue `head`, `tail`, and `size` are either all empty/zero or all describe
-  the same intrusive list.
-- The timer mutex protects every queue and topology mutation.
-- Timer completion is always posted after unlocking; receiver code is never
-  invoked by heap/list maintenance.
+- At most one submitted head-linked queue exists per timer.
+- Queue `head` and `size` are either both empty/zero or describe the same
+  intrusive list.
+- The timer mutex protects every queue and topology mutation, including the
+  timer-ready list.
+- Timer completion is transferred into a local run-loop queue only after the
+  timer mutex is released; receiver code is never invoked by heap/list
+  maintenance.
 - The active-wait path never scans all registered timers.

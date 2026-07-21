@@ -109,7 +109,7 @@ inline auto io_context::async_poll(async_io::descriptor_view descriptor,
 
 inline auto io_context::async_resolve(async_io::dns_query query,
                                       async_io::dns_result_view result) {
-  return select_native_context().async_resolve(std::move(query), result);
+  return detail::resolve_sender(*this, std::move(query), result);
 }
 
 inline auto io_context::async_resolve(std::string_view host,

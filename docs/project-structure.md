@@ -93,7 +93,7 @@ High-level async runtime, stream owners, and buffer types.
 - `linux/detail/io_context_state.h` — grouped `io_context` native-context and
   worker-list state. Shared CPU/I/O queue state lives in the async-io layer.
 - `linux/detail/io_context_state/native_worker.h` — per-run-thread native
-  worker slot.
+  worker that directly owns its native context.
 - `linux/detail/io_context_timer_types.h` — timer operations, timer state, slot,
   and heap types.
 - `linux/detail/steady_timer.h` — `steady_timer` class definition.
@@ -182,13 +182,13 @@ High-level async runtime, stream owners, and buffer types.
   - `kqueue_context_internal.h` — internal local task queue helpers.
   - `kqueue_helper.cpp` — readiness registration builder implementation.
 - `src/linux/` — high-level Linux `io_context` implementations:
-  - `io_context.cpp` — lifecycle, schedulers, native worker slots.
+  - `io_context.cpp` — lifecycle, schedulers, and native workers.
   - `io_context_queue.cpp` — passive I/O publication and worker wakeup.
-  - `io_context_timer.cpp` — timer operation and slot management.
-  - `io_context_timer_driver.cpp` — timer driver and heap.
-  - `io_context_timer_state.cpp` — timeout/wakeup state machine.
+  - `io_context_timer.cpp` — timer slot management, passive timer fetch, and
+    local completion handoff.
+  - `io_context_timer_state.cpp` — intrusive timer heap/list maintenance.
 - `src/bsd/` — the parallel high-level kqueue `io_context` lifecycle, queue,
-  timer driver, timer operations, and timeout state machine implementations.
+  passive timer fetch, timer operations, and intrusive timer-state implementations.
 - `src/tcp.cpp` — TCP socket and acceptor methods.
 - `src/ssl.cpp` — SSL context and stream methods.
 

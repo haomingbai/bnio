@@ -2,6 +2,7 @@
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPERATION_BASE_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPERATION_BASE_H_
 
+#include <bnio/async_io/time.h>
 #include <bnio/export.h>
 
 #include <atomic>
@@ -18,6 +19,9 @@ class io_uring_io_operation_base;
 
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT io_uring_task_queue_state {
+  using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
+                                        io_uring_operation_base*&) noexcept;
+
   void push_cpu(io_uring_operation_base& operation) noexcept;
 
   [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
@@ -30,6 +34,10 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   std::atomic<io_uring_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
   std::atomic_bool closing{false};
+
+  /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */
+  void* timeout_heap = nullptr;
+  try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
 };
 
 /**

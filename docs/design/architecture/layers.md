@@ -53,7 +53,7 @@ are **non-owning references**:
 **Key invariant:** Layer 2 (`bnio::async_io`) vocabulary types are deliberately
 non-owning views or pure value types. The `linux_native::io_uring_context` is
 the exception — it is the platform-level RAII event-loop owner, one per run-loop
-thread. It lives inside `io_context`'s native worker slots.
+thread. It lives directly inside an `io_context` native worker.
 
 ## Layer Dependency Graph
 
@@ -71,18 +71,18 @@ graph LR
 
 The primary implementation is Linux with `io_uring`. The library uses a
 **one-thread-one-uring** model: each thread calling `io_context::run()` owns its
-own `io_uring_context` instance, allocated from a pool sized by
-`concurrency_hint`. Workers share separate CPU and I/O task queues; the worker
-that passively removes I/O owns SQE preparation, submission, and CQ collection
-for its ring.
+own lazily created `io_uring_context` instance. `concurrency_hint` is advisory
+only; workers register at a head-linked list when `run()` begins. Workers share
+separate CPU and I/O task queues; the worker that passively removes I/O owns
+SQE preparation, submission, and CQ collection for its ring.
 
 BSD kqueue base wrappers (`base::kqueue`, `base::event`,
 `base::event_list_view`), the passive `kqueue_context`, and high-level
 `io_context` integration are implemented. Layer-2 kqueue request objects own
 all native nonblocking socket calls and retry them after the corresponding
 filter fires. Positioned regular-file requests run in `start()` and post only
-their completion. The timer heap root is represented by a passive one-shot
-`EVFILT_TIMER` registration.
+their completion. The shared timer heap root becomes the passive blocking
+timeout for whichever worker is about to call `kevent()`.
 
 See [`kqueue-roadmap.md`](../kqueue-roadmap.md) for the macOS/BSD technical route.
 

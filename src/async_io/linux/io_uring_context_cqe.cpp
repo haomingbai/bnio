@@ -6,10 +6,16 @@
 
 namespace bnio::async_io::linux_native {
 
-int io_uring_context::wait_for_cqe_event() noexcept {
+int io_uring_context::wait_for_cqe_event(__kernel_timespec* timeout) noexcept {
   if (!ring_.is_open()) {
     return -EINVAL;
   }
+
+  if (timeout != nullptr) {
+    bnio::base::completion_queue_entry cqe;
+    return ring_.wait_cqe_timeout(cqe, timeout);
+  }
+
   const int ring_fd = ring_.native_fd();
 
   for (;;) {

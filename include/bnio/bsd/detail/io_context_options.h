@@ -28,7 +28,10 @@ using platform_io_context_options = bsd_io_context_options;
  */
 struct io_context_options {
   /**
-   * Number of native run-loop worker slots reserved by the context.
+   * Advisory number of expected concurrent run-loop workers.
+   *
+   * The context does not pre-create native workers; every call to run()
+   * registers its own native context lazily.
    */
   std::uint32_t concurrency_hint = 1;
 

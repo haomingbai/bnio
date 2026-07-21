@@ -18,7 +18,6 @@ if(BNIO_PLATFORM_LINUX)
     PRIVATE linux/io_context.cpp
             linux/io_context_queue.cpp
             linux/io_context_timer.cpp
-            linux/io_context_timer_driver.cpp
             linux/io_context_timer_state.cpp
             ssl.cpp
             tcp.cpp
@@ -39,7 +38,6 @@ if(BNIO_PLATFORM_BSD)
     PRIVATE bsd/io_context.cpp
             bsd/io_context_queue.cpp
             bsd/io_context_timer.cpp
-            bsd/io_context_timer_driver.cpp
             bsd/io_context_timer_state.cpp
             ssl.cpp
             tcp.cpp

@@ -33,6 +33,11 @@ namespace bnio {
 
 enum class ssl_handshake_type;
 
+namespace detail {
+template <class Receiver>
+class resolve_operation;
+}  // namespace detail
+
 /**
  * High-level asynchronous I/O context for Linux.
  *
@@ -144,7 +149,7 @@ class BNIO_EXPORT io_context {
           }
         }
 
-        context_->post(*this);
+        context_->publish_cpu(*this);
       }
 
       /**
@@ -212,14 +217,6 @@ class BNIO_EXPORT io_context {
      * Returns the context that owns this scheduler.
      */
     [[nodiscard]] io_context& context() const noexcept { return *context_; }
-
-    /**
-     * Returns the native io_uring context used by this scheduler.
-     */
-    [[nodiscard]] async_io::linux_native::io_uring_context& native_context()
-        const noexcept {
-      return context_->native_context();
-    }
 
     /**
      * Creates a sender for one socket read operation.
@@ -386,7 +383,8 @@ class BNIO_EXPORT io_context {
   io_context& operator=(io_context&&) = delete;
 
   /**
-   * Returns whether the underlying native context is open.
+   * Returns whether the native backend was available when this context was
+   * created.
    */
   [[nodiscard]] bool is_open() const noexcept;
 
@@ -419,35 +417,12 @@ class BNIO_EXPORT io_context {
  private:
   friend class steady_timer;
   friend class detail::timer_operation_base;
-  friend class detail::timer_wakeup_operation;
-  friend class detail::timer_update_operation;
-  friend class detail::timer_driver_operation;
   template <class Receiver>
   friend class detail::timer_wait_operation;
   template <class Model, class Receiver>
   friend class detail::native_io_operation;
-
-  /**
-   * Returns the underlying Linux native async I/O context.
-   */
-  [[nodiscard]] async_io::linux_native::io_uring_context&
-  native_context() noexcept {
-    return select_native_context();
-  }
-
-  /**
-   * Selects a native context for newly started work.
-   */
-  [[nodiscard]] async_io::linux_native::io_uring_context&
-  select_native_context() noexcept;
-
-  /**
-   * Returns the primary native context used for timers and bootstrap work.
-   */
-  [[nodiscard]] async_io::linux_native::io_uring_context&
-  primary_native_context() noexcept {
-    return native_.context;
-  }
+  template <class Receiver>
+  friend class detail::resolve_operation;
 
   /**
    * Creates a sender that reads bytes from a non-owning stream socket
@@ -546,19 +521,16 @@ class BNIO_EXPORT io_context {
    */
   void publish_io(operation_base& operation) noexcept;
 
-  /**
-   * Posts an operation for execution on the context run loop.
-   */
-  void post(
+  /** Publishes CPU work for execution by one context run-loop worker. */
+  void publish_cpu(
       async_io::linux_native::io_uring_operation_base& operation) noexcept;
-
-  [[nodiscard]] detail::native_worker& select_worker() noexcept;
-
-  [[nodiscard]] detail::native_worker& select_io_worker() noexcept;
 
   [[nodiscard]] detail::native_worker* register_run_worker() noexcept;
 
   void wake_one_worker() noexcept;
+
+  /** Wakes one worker only when every published worker is sleeping. */
+  void wake_one_if_all_workers_sleeping() noexcept;
 
   void register_timer(detail::timer_slot& timer) noexcept;
 
@@ -575,36 +547,31 @@ class BNIO_EXPORT io_context {
   void start_timer_wait(detail::timer_operation_base& operation,
                         detail::timer_slot& timer) noexcept;
 
-  void on_timer_wakeup() noexcept;
-
-  void on_timer_update() noexcept;
-
-  void on_timer_driver() noexcept;
-
-  void post_timer_driver() noexcept;
+  [[nodiscard]] bool try_fetch_timeout_operations(
+      time_point& deadline,
+      async_io::linux_native::io_uring_operation_base*& operations) noexcept;
+  [[nodiscard]] static bool try_fetch_timeout_operations_thunk(
+      void* state, time_point& deadline,
+      async_io::linux_native::io_uring_operation_base*& operations) noexcept;
 
   // Consumes the timer's lock-protected list of active wait operations.
   [[nodiscard]] detail::timer_operation_queue take_timer_operations_locked(
       detail::timer_slot& timer) noexcept;
 
-  void post_timer_operations(detail::timer_operation_base* operations,
-                             detail::timer_completion_kind completion) noexcept;
+  void enqueue_timer_operations_locked(
+      detail::timer_operation_base* operations,
+      detail::timer_completion_kind completion) noexcept;
 
-  void schedule_timer_wakeup_locked() noexcept;
-
-  void queue_timer_wakeup_locked(time_point deadline) noexcept;
-
-  void queue_timer_update_locked(time_point deadline) noexcept;
+  void queue_timer_completion(
+      detail::timer_operation_base& operation,
+      detail::timer_completion_kind completion) noexcept;
 
   async_io::linux_native::io_uring_task_queue_state global_state_;
   detail::native_context_state native_;
-  detail::timer_wakeup_operation timer_wakeup_operation_;
-  detail::timer_update_operation timer_update_operation_;
-  detail::timer_driver_operation timer_driver_operation_;
-
   detail::native_worker_state native_workers_;
 
   detail::timer_state_data timers_;
+  std::atomic_bool native_available_{false};
 
   static thread_local detail::native_worker* current_native_worker_;
 };

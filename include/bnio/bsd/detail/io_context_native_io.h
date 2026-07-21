@@ -12,12 +12,16 @@ namespace bnio {
 
 inline auto io_context::async_read(async_io::stream_socket_view socket,
                                    mutable_buffer buffer, int flags) {
-  return select_native_context().async_receive(socket, buffer.view(), flags);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_receive_request(
+                 socket.native_handle(), buffer.view(), flags));
 }
 
 inline auto io_context::async_read_some(async_io::stream_socket_view socket,
                                         mutable_buffer buffer, int flags) {
-  return select_native_context().async_receive(socket, buffer.view(), flags);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_receive_request(
+                 socket.native_handle(), buffer.view(), flags));
 }
 
 inline auto io_context::async_write(async_io::stream_socket_view socket,
@@ -28,45 +32,55 @@ inline auto io_context::async_write(async_io::stream_socket_view socket,
 
 inline auto io_context::async_write_some(async_io::stream_socket_view socket,
                                          const_buffer buffer, int flags) {
-  return select_native_context().async_send(socket, buffer.data(),
-                                            buffer.size(), flags);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_send_request(
+                 socket.native_handle(), buffer.data(), buffer.size(), flags));
 }
 
 inline auto io_context::async_receive(async_io::datagram_socket_view socket,
                                       mutable_buffer buffer, int flags) {
-  return select_native_context().async_receive(socket, buffer.view(), flags);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_receive_request(
+                 socket.native_handle(), buffer.view(), flags));
 }
 
 inline auto io_context::async_send(async_io::datagram_socket_view socket,
                                    const_buffer buffer, int flags) {
-  return select_native_context().async_send(socket, buffer.data(),
-                                            buffer.size(), flags);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_send_request(
+                 socket.native_handle(), buffer.data(), buffer.size(), flags));
 }
 
 inline auto io_context::async_receive_from(
     async_io::datagram_socket_view socket, mutable_buffer buffer,
     ip::endpoint& endpoint, int flags) {
-  return select_native_context().async_receive_from(socket, buffer.view(),
-                                                    endpoint, flags);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_receive_from_request(
+                 socket, buffer.view(), endpoint, flags));
 }
 
 inline auto io_context::async_send_to(async_io::datagram_socket_view socket,
                                       const_buffer buffer,
                                       const ip::endpoint& endpoint, int flags) {
-  return select_native_context().async_send_to(socket, buffer.data(),
-                                               buffer.size(), endpoint, flags);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_send_to_request(
+                 socket, buffer.data(), buffer.size(), endpoint, flags));
 }
 
 inline auto io_context::async_read(async_io::descriptor_view descriptor,
                                    mutable_buffer buffer,
                                    std::uint64_t offset) {
-  return select_native_context().async_read(descriptor, buffer.view(), offset);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_file_read_request(
+                 descriptor, buffer.view(), offset));
 }
 
 inline auto io_context::async_read_some(async_io::descriptor_view descriptor,
                                         mutable_buffer buffer,
                                         std::uint64_t offset) {
-  return select_native_context().async_read(descriptor, buffer.view(), offset);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_file_read_request(
+                 descriptor, buffer.view(), offset));
 }
 
 inline auto io_context::async_write(async_io::descriptor_view descriptor,
@@ -78,28 +92,31 @@ inline auto io_context::async_write(async_io::descriptor_view descriptor,
 inline auto io_context::async_write_some(async_io::descriptor_view descriptor,
                                          const_buffer buffer,
                                          std::uint64_t offset) {
-  return select_native_context().async_write(descriptor, buffer.data(),
-                                             buffer.size(), offset);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_file_write_request(
+                 descriptor, buffer.data(), buffer.size(), offset));
 }
 
 inline auto io_context::async_accept(async_io::stream_socket_view socket,
                                      int flags) {
-  return select_native_context().async_accept(socket, flags);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_accept_request(socket, flags));
 }
 
 inline auto io_context::async_connect(async_io::stream_socket_view socket,
                                       const ip::endpoint& endpoint) {
-  return select_native_context().async_connect(socket, endpoint);
+  return detail::native_io_sender(
+      *this, async_io::bsd_native::kqueue_connect_request(socket, endpoint));
 }
 
 inline auto io_context::async_poll(async_io::descriptor_view descriptor,
                                    unsigned poll_mask) {
-  return select_native_context().async_poll(descriptor, poll_mask);
+  return detail::native_poll_sender(*this, descriptor, poll_mask);
 }
 
 inline auto io_context::async_resolve(async_io::dns_query query,
                                       async_io::dns_result_view result) {
-  return select_native_context().async_resolve(std::move(query), result);
+  return detail::resolve_sender(*this, std::move(query), result);
 }
 
 inline auto io_context::async_resolve(std::string_view host,

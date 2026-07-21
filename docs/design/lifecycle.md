@@ -20,7 +20,7 @@ graph TB
         O5b["udp::socket → socket fd"]
         O6["ssl_context → SSL_CTX*"]
         O7["ssl_stream → SSL* + BIO* + NextLayer"]
-        O8["io_context → native_worker slots + timer heap"]
+        O8["io_context → native workers + timer heap"]
         O9["linux_native::io_uring_context → base::ring (non-movable)"]
     end
 
@@ -50,7 +50,7 @@ Arrows mean "must outlive":
 
 ```mermaid
 graph TB
-    Ctx["io_context"] -->|"owns"| Workers["native_worker slots"]
+    Ctx["io_context"] -->|"owns"| Workers["native workers"]
     Workers -->|"each owns"| UCtx["io_uring_context"]
     UCtx -->|"owns"| Ring["base::ring"]
 
@@ -279,7 +279,7 @@ they own non-transferable runtime state:
 
 | Type | Reason |
 |------|--------|
-| `io_context` | Owns native worker slots, timer heap, and mutexes. |
+| `io_context` | Owns native workers, timer heap, and mutexes. |
 | `linux_native::io_uring_context` | Owns one ring, normalized options, and single-owner run-loop state. |
 
 ```cpp

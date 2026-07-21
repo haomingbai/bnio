@@ -173,13 +173,4 @@ TEST(TimerStateTest, clear_invalidates_active_and_inactive_slots) {
   EXPECT_EQ(inactive.next, nullptr);
 }
 
-TEST(TimerStateTest, driver_post_guard_is_atomic_and_reusable) {
-  bnio::detail::timer_state_data timers;
-
-  EXPECT_TRUE(timers.queue_driver());
-  EXPECT_FALSE(timers.queue_driver());
-  timers.complete_driver();
-  EXPECT_TRUE(timers.queue_driver());
-}
-
 }  // namespace

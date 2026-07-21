@@ -17,7 +17,7 @@ class kqueue_io_operation_base;
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT kqueue_task_queue_state {
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
-                                        bool&) noexcept;
+                                        kqueue_operation_base*&) noexcept;
   void push_cpu(kqueue_operation_base& operation) noexcept;
 
   [[nodiscard]] kqueue_operation_base* pop_cpu_all() noexcept;

@@ -7,8 +7,8 @@ matching detail headers under the platform directory.
 `io_context` is the event-loop owner and scheduler factory:
 
 1. **Event loop host** — `run()` drives the selected io_uring or kqueue loop.
-   Each thread calling `run()` claims a native worker slot with its own native
-   context.
+   Each thread calling `run()` creates a native worker that directly owns its
+   native context.
 2. **Scheduler factory** — produces dispatch and post schedulers.
 3. **Passive I/O backend** — publishes scheduler I/O to a shared queue that a
    worker drains on its owning native-context thread.
@@ -18,11 +18,11 @@ cohesive `detail` state objects rather than defining all internal data inline:
 
 | State / Detail Type | Header | Responsibility |
 |---------------------|--------|----------------|
-| `detail::native_context_state` | `{linux,bsd}/detail/io_context_state.h` | Primary native context plus platform options. |
-| `detail::native_worker_state` | `{linux,bsd}/detail/io_context_state.h` | Worker linked list, active worker count, and round-robin cursor. |
-| `detail::native_worker` | `{linux,bsd}/detail/io_context_state/native_worker.h` | Per-run-thread native context slot. |
-| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, awake-worker count, and worker-group closing state. |
-| `detail::timer_state_data` | `{linux,bsd}/detail/io_context_timer_types.h` | Timer map, heap, reusable timer-operation states, and timeout state machine. |
+| `detail::native_context_state` | `{linux,bsd}/detail/io_context_state.h` | Platform options used to create native contexts lazily. |
+| `detail::native_worker_state` | `{linux,bsd}/detail/io_context_state.h` | Atomically published head of the native-worker list. |
+| `detail::native_worker` | `{linux,bsd}/detail/io_context_state/native_worker.h` | Per-run-thread owner of one native context. |
+| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake-worker count, and worker-group closing state. |
+| `detail::timer_state_data` | `{linux,bsd}/detail/io_context_timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
 
 Template implementation types are grouped by operation family under the
 platform's `detail/io_context_native_io/`. The aggregate detail header is
@@ -46,16 +46,18 @@ naturally form larger kernel submission batches; idle workloads reach the same
 drain during the pre-sleep recheck. No count, threshold, explicit flush, or
 direct variant is involved.
 
-Layer 3 does not issue native I/O calls. It converts high-level buffers and
-owners to layer-2 views, then returns the platform-native sender. On BSD, each
-layer-2 socket request first attempts its nonblocking call and registers the
-matching kqueue filter only when it would block. The request repeats the call
-after readiness. On Linux, immediate attempts and SQE preparation likewise
-remain platform-native implementation details.
+Layer 3 does not select or post through a specific native context. It wraps
+platform request objects in high-level senders, publishes CPU or I/O work to
+the shared queues, and lets whichever `run()` worker takes the work own the
+native preparation. On BSD, each socket request first attempts its
+nonblocking call and registers the matching kqueue filter only when it would
+block. The request repeats the call after readiness. On Linux, immediate
+attempts and SQE preparation likewise remain platform-native implementation
+details.
 
 BSD regular-file requests use a documented blocking-at-start fallback:
 `start()` performs one positioned `pread()` or `pwrite()`, then posts the
-receiver completion through the selected kqueue context. Thus data transfer is
+receiver completion through the shared CPU queue. Thus data transfer is
 finished when `start()` returns, but no receiver is called inline. This keeps
 the public sender interface aligned with Linux without pretending that kqueue
 provides asynchronous regular-file kernel work.
@@ -73,34 +75,33 @@ struct io_context_options {
 };
 ```
 
-On Linux, `concurrency_hint` reserves native run-loop slots. Each slot holds
-its own `io_uring_context`. When `concurrency_hint > 1` and multiple threads
-call `run()`, each thread claims a distinct slot with its own ring — hence
-**one thread, one uring**. Slot 0 always hosts the construction-time primary
-context, so existing code can start work before `run()`.
+`concurrency_hint` is advisory; it does not reserve workers or create a native
+context. Every call to `run()` constructs one native context, attaches the
+shared group state, and inserts its worker at the head of the worker list.
+This preserves **one thread, one uring/kqueue** without a construction-time
+primary context. Work may be started before `run()` because it first enters the
+shared queues.
 
-The primary ring is initially disabled when single-issuer mode is available.
-The thread that claims slot 0 enables it immediately before entering the native
-run loop and therefore becomes its designated issuer. This preserves
-single-issuer optimization when construction and execution use different
-threads.
+When single-issuer mode is available, each lazily created Linux ring is
+initially disabled. The same thread that calls its `run()` enables the ring
+before preparing or submitting SQEs, becoming that ring's designated issuer.
 
-High-level `post` work is published to the shared CPU queue. Wakeup scans the
-worker slots and writes one waiting worker's eventfd. I/O is published to the
-lower-priority shared I/O queue. The worker that removes an I/O batch owns all
-SQ preparation and submission for that batch, so the high-level queue code does
-not need native ring synchronization. Timer bookkeeping remains on the
-high-level context. Its timeout and timeout-update requests use the same shared
-passive I/O queue as other requests; they do not expose or call an active
-submission API.
+High-level CPU work is published to the shared CPU queue. Wakeup scans the
+head-linked worker list and signals one sleeping worker. I/O is published to
+the lower-priority shared I/O queue. The worker that removes an I/O batch owns
+all SQ preparation and submission for that batch, so high-level queue code
+does not need native ring synchronization. Timer bookkeeping remains on the
+high-level context, but native workers consume its deadline passively while
+choosing their blocking timeout. Timer-ready completions bypass the shared CPU
+queue: the worker that performs the timer check links them directly into its
+local CPU queue. No reusable timer SQE or timer-update request exists.
 
-The shared state is owned by `io_context`, not by any native
-`io_uring_context`. Construction calls `set_global_state()` on the primary
-native context, and each later worker receives the same pointer before it can
-run. `run()` follows `global_state_` to obtain CPU work, I/O work, the
-awake-worker count, and the group closing flag. A standalone native context
-must also receive an externally owned state before `run()`; no hidden
-shared-state fallback is allocated.
+The shared state is owned by `io_context`, not by any native context. Worker
+registration calls `set_global_state()` before publishing the new worker at the
+list head. `run()` uses that state for CPU work, I/O work, the passive timer
+callback, the awake-worker count, and the group closing flag. A standalone
+native context must also receive externally owned state before `run()`; no
+hidden shared-state fallback is allocated.
 
 `io_context::stop()` sets the shared `closing` flag before scanning and waking
 native workers. Worker registration checks the same flag both before and after
@@ -109,11 +110,12 @@ new idle run loop.
 
 Before a worker blocks, it publishes sleeping in two stages: first its local
 waiting flag, then a decrement of the shared awake-worker count. It then
-rechecks CQEs and the CPU queue and takes all published I/O. Finding any work
-reopens the worker and starts another loop pass. Otherwise a producer that
-finds the shared awake count below the worker count writes one waiting worker's
-eventfd. Only a still-empty worker proceeds to eventfd wait. This handshake
-replaces both the former queued-I/O flush timer and queue-length threshold.
+rechecks completions, CPU work, I/O work, and the passive timer heap. The
+timer check is guarded by an atomic admission flag so only one worker attempts
+the timer mutex at a time. Finding any work reopens the worker and starts
+another loop pass. Otherwise it blocks until native I/O, an explicit wakeup,
+or the timer heap's next deadline. This handshake replaces both the former
+queued-I/O flush timer and active timer submission.
 
 ### Sender Factories
 
@@ -173,9 +175,9 @@ operation families separate while preserving a single public class declaration:
 | Header | Contents |
 |--------|----------|
 | `linux/io_context.h` | `io_context`, scheduler handles, operation base, public and private member declarations. |
-| `linux/detail/io_context_state.h` | Non-template grouped runtime state: native context/options and worker-list state. |
+| `linux/detail/io_context_state.h` | Non-template grouped runtime state: native options and worker-list head. |
 | `linux/detail/io_context_state/native_worker.h` | Complete `detail::native_worker` definition; included after `io_context` is complete. |
-| `linux/detail/io_context_timer_types.h` | Timer slots, reusable timer operations, timer heap items, and `timer_state_data`. |
+| `linux/detail/io_context_timer_types.h` | Timer slots, intrusive timer queues, and `timer_state_data`. |
 | `linux/detail/io_context_native_io/common.h` | Error/stop helpers plus generic `native_io_operation` and `native_io_sender` templates. |
 | `linux/detail/io_context_native_io/file.h` | Descriptor read/write operation models. |
 | `linux/detail/io_context_native_io/socket.h` | Stream and datagram read/write/send/receive/accept/connect operation models. |
@@ -185,11 +187,11 @@ operation families separate while preserving a single public class declaration:
 | `linux/detail/io_context_native_io.h` | Aggregates the native-I/O detail headers and defines inline scheduler/context forwarding functions. |
 
 BSD keeps only `common.h`, `timer_wait.h`, and `write_all.h` in the layer-3
-detail directory. Its native file, socket, poll, and DNS requests live under
-`async_io/bsd/kqueue_operations/`; the high-level forwarding functions select
-and compose those layer-2 senders. Detail headers are installable because
-public inline templates reference them. User code should normally include
-`bnio/io_context.h`, not the detail headers directly.
+detail directory. Its file, socket, poll, and DNS request objects live under
+`async_io/bsd/kqueue_operations/`; layer 3 wraps those request objects in
+shared-queue senders rather than selecting a kqueue context. Detail headers
+are installable because public inline templates reference them. User code
+should normally include `bnio/io_context.h`, not the detail headers directly.
 
 ### Read/Write Semantic Split
 

@@ -4,6 +4,8 @@
 #else
 #define BNIO_LINUX_DETAIL_IO_CONTEXT_NATIVE_IO_COMMON_H_
 
+#include <bnio/async_io/dns/resolve.h>
+
 namespace bnio::detail {
 
 [[nodiscard]] inline std::error_code errno_result(int result) noexcept {
@@ -119,7 +121,7 @@ class native_io_operation : public io_context::operation_base {
   void start() noexcept {
     if (stop_requested(receiver_)) {
       completion_ = completion_kind::stopped;
-      context_->post(*this);
+      context_->publish_cpu(*this);
       return;
     }
 
@@ -166,7 +168,7 @@ class native_io_operation : public io_context::operation_base {
       } else {
         completion_ = completion_kind::value;
       }
-      context_->post(*this);
+      context_->publish_cpu(*this);
       return true;
     } else {
       return false;
@@ -210,6 +212,74 @@ class native_io_sender {
  private:
   io_context* context_;
   Model model_;
+};
+
+template <class Receiver>
+class resolve_operation
+    : public async_io::linux_native::io_uring_operation_base {
+ public:
+  resolve_operation(io_context& context, async_io::dns_query query,
+                    async_io::dns_result_view result, Receiver receiver)
+      : context_(&context),
+        query_(std::move(query)),
+        result_(result),
+        receiver_(std::move(receiver)) {}
+
+  void start() noexcept {
+    stopped_ = stop_requested(receiver_);
+    context_->publish_cpu(*this);
+  }
+
+  void execute() noexcept override {
+    if (stopped_) {
+      bexec::set_stopped(std::move(receiver_));
+      return;
+    }
+
+    std::size_t count = 0;
+    const std::error_code error = async_io::resolve_dns(query_, result_, count);
+    if (error) {
+      bexec::set_error(std::move(receiver_), error);
+    } else {
+      bexec::set_value(std::move(receiver_), count);
+    }
+  }
+
+ private:
+  io_context* context_;
+  async_io::dns_query query_;
+  async_io::dns_result_view result_;
+  std::remove_cvref_t<Receiver> receiver_;
+  bool stopped_ = false;
+};
+
+class resolve_sender {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  resolve_sender(io_context& context, async_io::dns_query query,
+                 async_io::dns_result_view result)
+      : context_(&context), query_(std::move(query)), result_(result) {}
+
+  template <class Receiver>
+  auto connect(Receiver receiver) && {
+    return resolve_operation<std::remove_cvref_t<Receiver> >(
+        *context_, std::move(query_), result_, std::move(receiver));
+  }
+
+  template <class Receiver>
+  auto connect(Receiver receiver) const& {
+    return resolve_operation<std::remove_cvref_t<Receiver> >(
+        *context_, query_, result_, std::move(receiver));
+  }
+
+ private:
+  io_context* context_;
+  async_io::dns_query query_;
+  async_io::dns_result_view result_;
 };
 
 }  // namespace bnio::detail

@@ -1,55 +1,9 @@
-#include <atomic>
 #include <utility>
 
 #include "bnio/async_io/time.h"
 #include "bnio/linux/detail/io_context_timer_types.h"
 
 namespace bnio {
-
-bool detail::timer_state_data::queue_driver() noexcept {
-  queued_operation_state expected = queued_operation_state::idle;
-  return driver.compare_exchange_strong(
-      expected, queued_operation_state::posted, std::memory_order_acq_rel,
-      std::memory_order_acquire);
-}
-
-void detail::timer_state_data::complete_driver() noexcept {
-  driver.store(queued_operation_state::idle, std::memory_order_release);
-}
-
-bool detail::timer_state_data::can_queue_wakeup() const noexcept {
-  return timeout == timeout_state::idle;
-}
-
-bool detail::timer_state_data::can_queue_update(
-    async_io::time_point deadline) const noexcept {
-  return timeout == timeout_state::armed && deadline != armed_deadline;
-}
-
-void detail::timer_state_data::complete_wakeup() noexcept {
-  timeout = timeout == timeout_state::updating ? timeout_state::update_pending
-                                               : timeout_state::idle;
-}
-
-void detail::timer_state_data::complete_update() noexcept {
-  if (timeout == timeout_state::updating) {
-    timeout = timeout_state::armed;
-  } else if (timeout == timeout_state::update_pending) {
-    timeout = timeout_state::idle;
-  }
-}
-
-void detail::timer_state_data::mark_wakeup_queued(
-    async_io::time_point deadline) noexcept {
-  timeout = timeout_state::armed;
-  armed_deadline = deadline;
-}
-
-void detail::timer_state_data::mark_update_queued(
-    async_io::time_point deadline) noexcept {
-  timeout = timeout_state::updating;
-  armed_deadline = deadline;
-}
 
 void detail::timer_state_data::push_heap(detail::timer_slot& timer) noexcept {
   if (timer.active) {
@@ -161,9 +115,9 @@ void detail::timer_state_data::clear() noexcept {
     timer->context = nullptr;
     timer->submitted = {};
   }
-  driver.store(queued_operation_state::idle, std::memory_order_release);
-  timeout = timeout_state::idle;
-  armed_deadline = {};
+
+  ready = nullptr;
+  timeout_fetching.store(false, std::memory_order_release);
 }
 
 detail::timer_slot* detail::timer_state_data::meld(

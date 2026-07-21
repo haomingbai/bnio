@@ -57,7 +57,6 @@ class BNIO_EXPORT timer_operation_base
 
 struct timer_operation_queue {
   timer_operation_base* head = nullptr;
-  timer_operation_base* tail = nullptr;
   std::size_t size = 0;
 };
 
@@ -76,28 +75,8 @@ struct timer_slot {
   bool active = false;
 };
 
-class timer_driver_operation
-    : public async_io::bsd_native::kqueue_operation_base {
- public:
-  explicit timer_driver_operation(io_context& context) noexcept;
-
-  void execute() noexcept override;
-
- private:
-  io_context* context_;
-};
-
 struct timer_state_data {
   io_context* owner = nullptr;
-
-  enum class queued_operation_state {
-    idle,
-    posted,
-  };
-
-  [[nodiscard]] bool queue_driver() noexcept;
-
-  void complete_driver() noexcept;
 
   void push_heap(timer_slot& timer) noexcept;
 
@@ -128,7 +107,10 @@ struct timer_state_data {
   mutable std::mutex mutex;
   timer_slot* heap = nullptr;
   timer_slot* inactive = nullptr;
-  std::atomic<queued_operation_state> driver{queued_operation_state::idle};
+  // Completed/cancelled waits awaiting transfer to a worker-local task queue.
+  timer_operation_base* ready = nullptr;
+  // Allows only one worker to attempt the timer mutex from its loop check.
+  std::atomic_bool timeout_fetching{false};
 };
 
 /** @endcond */

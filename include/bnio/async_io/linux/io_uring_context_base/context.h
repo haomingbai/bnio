@@ -233,6 +233,9 @@ class BNIO_EXPORT io_uring_context {
   /** Consumes ring-local control I/O and all shared I/O after CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;
 
+  /** Moves due passive-timer completions into the local CPU queue. */
+  [[nodiscard]] bool consume_timeout_operations() noexcept;
+
   void begin_wait() noexcept;
 
   void end_wait() noexcept;
@@ -295,7 +298,8 @@ class BNIO_EXPORT io_uring_context {
   /**
    * Waits for at least one CQE event on the native ring descriptor.
    */
-  [[nodiscard]] int wait_for_cqe_event() noexcept;
+  [[nodiscard]] int wait_for_cqe_event(
+      __kernel_timespec* timeout = nullptr) noexcept;
 
   /**
    * Collects and dispatches ready CQE-backed tasks.

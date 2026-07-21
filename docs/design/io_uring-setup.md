@@ -37,9 +37,10 @@ When `SINGLE_ISSUER` is requested, `queue_init()` also requests
 `io_uring_enable_rings()` before preparing or submitting any SQE. Under the
 kernel issuer rules, that enabling thread becomes the designated issuer.
 
-This handoff matters for the primary high-level context: `io_context` can be
-constructed on one thread and run on another. Additional worker rings follow
-the same lifecycle, keeping the rule uniform.
+This handoff matters for every lazily registered high-level worker:
+`io_context` can be constructed on one thread and `run()` can later create and
+run a ring on another. Each worker ring follows the same lifecycle, keeping
+the rule uniform without a construction-time primary context.
 
 ### Default Value
 

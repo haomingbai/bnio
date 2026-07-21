@@ -1,21 +1,9 @@
-#include <atomic>
 #include <utility>
 
 #include "bnio/async_io/time.h"
 #include "bnio/bsd/detail/io_context_timer_types.h"
 
 namespace bnio {
-
-bool detail::timer_state_data::queue_driver() noexcept {
-  queued_operation_state expected = queued_operation_state::idle;
-  return driver.compare_exchange_strong(
-      expected, queued_operation_state::posted, std::memory_order_acq_rel,
-      std::memory_order_acquire);
-}
-
-void detail::timer_state_data::complete_driver() noexcept {
-  driver.store(queued_operation_state::idle, std::memory_order_release);
-}
 
 void detail::timer_state_data::push_heap(detail::timer_slot& timer) noexcept {
   if (timer.active) {
@@ -127,7 +115,9 @@ void detail::timer_state_data::clear() noexcept {
     timer->context = nullptr;
     timer->submitted = {};
   }
-  driver.store(queued_operation_state::idle, std::memory_order_release);
+
+  ready = nullptr;
+  timeout_fetching.store(false, std::memory_order_release);
 }
 
 detail::timer_slot* detail::timer_state_data::meld(

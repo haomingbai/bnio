@@ -29,8 +29,10 @@ class socket_write_all_state {
 
   [[nodiscard]] auto make_sender() noexcept {
     const const_buffer current = current_buffer();
-    return context->select_native_context().async_send(socket, current.data(),
-                                                       current.size(), flags);
+    return native_io_sender(
+        *context,
+        async_io::bsd_native::kqueue_send_request(
+            socket.native_handle(), current.data(), current.size(), flags));
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -71,8 +73,10 @@ class descriptor_write_all_state {
 
   [[nodiscard]] auto make_sender() noexcept {
     const const_buffer current = current_buffer();
-    return context->select_native_context().async_write(
-        descriptor, current.data(), current.size(), offset + transferred);
+    return native_io_sender(
+        *context,
+        async_io::bsd_native::kqueue_file_write_request(
+            descriptor, current.data(), current.size(), offset + transferred));
   }
 
   void advance(std::size_t bytes) noexcept {

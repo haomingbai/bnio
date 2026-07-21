@@ -238,15 +238,16 @@ and registers the resulting filters. There is no public `prepare()`,
 `submit()`, or `submit_batch()` interface and no submission mutex.
 
 Before blocking in `kevent()`, a worker publishes its waiting state and repeats
-the event/CPU/I/O checks. A producer only triggers the context's `EVFILT_USER`
-wakeup after observing that waiting state. This closes the lost-wakeup window
-without an active submission timer and lets concurrent publication form
-natural batches.
+the event/CPU/I/O/timer checks. A producer triggers one sleeping worker through
+`EVFILT_USER` after publishing work or changing a timer deadline. This closes
+the lost-wakeup window, lets concurrent publication form natural batches, and
+lets the shared timer heap supply the blocking timeout without a native timer
+registration.
 
 ### Socket Operations
 
 Layer-2 kqueue request objects map readiness filters to nonblocking syscalls;
-layer 3 only selects and composes those senders:
+layer 3 wraps them in shared-queue senders and composes those senders:
 
 | Operation | Readiness | I/O step after event |
 |-----------|-----------|----------------------|
@@ -274,12 +275,12 @@ sensitive thread.
 ### Timers And Wakeups
 
 The high-level timer design stays shared: `io_context` owns the timer heap and
-posts user operations only when expiry or cancellation is known. The BSD
-native backend represents the heap root with one reusable, one-shot
-`EVFILT_TIMER` registration. If the root changes, the passive timeout-update
-operation re-arms that same registration. Both operations enter the owning
-kqueue context through `publish_io()` and are prepared by its run loop; timer
-code never calls `kevent()` directly and never submits work actively to a
+the timer-ready list. On every kqueue loop pass, at most one worker attempts a
+non-blocking timer fetch; due/cancelled waits are transferred directly to that
+worker's local CPU queue and the heap root becomes the next `kevent()` timeout.
+Registering a new earliest timer, or adding ready completions while all workers
+are sleeping, wakes one worker so the timeout is recomputed. Timer code never
+calls `kevent()` directly and never submits a native timer operation to a
 worker thread.
 
 `EVFILT_USER` remains the cross-thread wakeup mechanism for newly published
@@ -346,7 +347,7 @@ attempt, while `async_write` is the composed write-all loop.
 - [x] Wire `bnio::io_context` to the BSD native backend.
 - [x] Reuse the public scheduler/CPO surface, TCP/TLS owners, DNS vocabulary,
   timer heap, and write-all composition.
-- [x] Implement the passive kernel deadline with `EVFILT_TIMER`.
+- [x] Let the shared timer heap supply the passive `kevent()` timeout.
 - [x] Build the existing `io_context`, TCP, SSL, mini_curl, and raw echo
   tests/examples on macOS.
 

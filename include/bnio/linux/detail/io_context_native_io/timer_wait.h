@@ -16,8 +16,8 @@ class timer_wait_operation : public timer_operation_base {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      this->timer_completion_ = timer_completion_kind::stopped;
-      (void)this->timer_context_->native_context().post(*this);
+      this->timer_context_->queue_timer_completion(
+          *this, timer_completion_kind::stopped);
       return;
     }
 

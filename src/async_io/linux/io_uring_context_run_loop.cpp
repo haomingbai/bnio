@@ -1,4 +1,7 @@
+#include <algorithm>
 #include <cassert>
+#include <cerrno>
+#include <chrono>
 
 #include "io_uring_context_internal.h"
 
@@ -84,6 +87,24 @@ bool io_uring_context::is_in_context() const noexcept {
   return current_context_ == this;
 }
 
+bool io_uring_context::consume_timeout_operations() noexcept {
+  if (global_state_ == nullptr || global_state_->timeout_heap == nullptr ||
+      global_state_->try_fetch_timeout_operations == nullptr) {
+    return false;
+  }
+
+  async_io::time_point deadline{};
+  io_uring_operation_base* operations = nullptr;
+  if (!global_state_->try_fetch_timeout_operations(global_state_->timeout_heap,
+                                                   deadline, operations) ||
+      operations == nullptr) {
+    return false;
+  }
+
+  local_tasks_.push(operations);
+  return true;
+}
+
 io_uring_context::run_phase
 io_uring_context::handle_run_ready_tasks() noexcept {
   // Reset the local-queue budget for this pass through the run loop.
@@ -98,6 +119,10 @@ io_uring_context::handle_run_ready_tasks() noexcept {
   }
 
   if (move_cpu_tasks()) {
+    return run_phase::run_ready_tasks;
+  }
+
+  if (consume_timeout_operations()) {
     return run_phase::run_ready_tasks;
   }
 
@@ -124,7 +149,8 @@ io_uring_context::run_phase io_uring_context::handle_finish_drain() noexcept {
 
 io_uring_context::run_phase io_uring_context::spin_for_work() noexcept {
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
-    if (collect_ready_cqes() || move_cpu_tasks()) {
+    if (collect_ready_cqes() || move_cpu_tasks() ||
+        consume_timeout_operations()) {
       return run_phase::run_ready_tasks;
     }
     if (should_finish()) {
@@ -138,11 +164,43 @@ io_uring_context::run_phase io_uring_context::spin_for_work() noexcept {
 io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   begin_wait();
 
-  if (collect_ready_cqes() || move_cpu_tasks() || consume_io_tasks() ||
-      should_finish()) {
+  if (collect_ready_cqes() || move_cpu_tasks() ||
+      consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
+  }
+
+  __kernel_timespec timeout{};
+  __kernel_timespec* timeout_pointer = nullptr;
+  if (global_state_->timeout_heap != nullptr &&
+      global_state_->try_fetch_timeout_operations != nullptr) {
+    async_io::time_point deadline{};
+    io_uring_operation_base* timeout_operations = nullptr;
+    if (global_state_->try_fetch_timeout_operations(
+            global_state_->timeout_heap, deadline, timeout_operations)) {
+      if (timeout_operations != nullptr) {
+        local_tasks_.push(timeout_operations);
+      }
+      if (timeout_operations != nullptr || move_cpu_tasks() ||
+          consume_io_tasks() || should_finish()) {
+        end_wait();
+        return should_finish() ? run_phase::finish_drain
+                               : run_phase::run_ready_tasks;
+      }
+
+      if (deadline != async_io::time_point::max()) {
+        const auto remaining = std::max(deadline - async_io::clock::now(),
+                                        async_io::duration::zero());
+        const auto nanoseconds =
+            std::chrono::ceil<std::chrono::nanoseconds>(remaining);
+        constexpr auto billion = std::chrono::nanoseconds::period::den;
+        timeout.tv_sec =
+            static_cast<__kernel_time64_t>(nanoseconds.count() / billion);
+        timeout.tv_nsec = static_cast<long long>(nanoseconds.count() % billion);
+        timeout_pointer = &timeout;
+      }
+    }
   }
 
   const int poll_result = submit_eventfd_poll();
@@ -151,14 +209,19 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
     state_.store(context_state::finished, std::memory_order_release);
     return run_phase::finished;
   }
-  const int wait_result = wait_for_cqe_event();
+  const int wait_result = wait_for_cqe_event(timeout_pointer);
   end_wait();
 
-  if (wait_result < 0 && !should_finish()) {
+  if (wait_result < 0 && wait_result != -ETIME && !should_finish()) {
     return run_phase::finished;
   }
 
-  if (collect_ready_cqes() || move_cpu_tasks() || consume_io_tasks()) {
+  if (collect_ready_cqes() || move_cpu_tasks() ||
+      consume_timeout_operations() || consume_io_tasks()) {
+    return run_phase::run_ready_tasks;
+  }
+
+  if (timeout_pointer != nullptr) {
     return run_phase::run_ready_tasks;
   }
 

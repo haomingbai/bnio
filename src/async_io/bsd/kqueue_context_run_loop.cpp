@@ -65,6 +65,24 @@ bool kqueue_context::is_in_context() const noexcept {
   return current_context_ == this;
 }
 
+bool kqueue_context::consume_timeout_operations() noexcept {
+  if (global_state_ == nullptr || global_state_->timeout_heap == nullptr ||
+      global_state_->try_fetch_timeout_operations == nullptr) {
+    return false;
+  }
+
+  async_io::time_point deadline{};
+  kqueue_operation_base* operations = nullptr;
+  if (!global_state_->try_fetch_timeout_operations(global_state_->timeout_heap,
+                                                   deadline, operations) ||
+      operations == nullptr) {
+    return false;
+  }
+
+  local_state_.push_cpu(operations);
+  return true;
+}
+
 kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
   local_task_budget_ = options_.local_queue_threshold;
 
@@ -72,6 +90,9 @@ kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
     return run_phase::run_ready_tasks;
   }
   if (consume_global_state()) {
+    return run_phase::run_ready_tasks;
+  }
+  if (consume_timeout_operations()) {
     return run_phase::run_ready_tasks;
   }
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
@@ -101,7 +122,8 @@ kqueue_context::run_phase kqueue_context::handle_finish_drain() noexcept {
 
 kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
-    if (collect_ready_events(false) || consume_global_state()) {
+    if (collect_ready_events(false) || consume_global_state() ||
+        consume_timeout_operations()) {
       return run_phase::run_ready_tasks;
     }
     if (should_finish()) {
@@ -115,7 +137,8 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   begin_wait();
 
   if (collect_ready_events(false) || consume_global_state() ||
-      consume_local_state() || should_finish()) {
+      consume_timeout_operations() || consume_local_state() ||
+      should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
@@ -126,11 +149,13 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   if (global_state_ != nullptr && global_state_->timeout_heap != nullptr &&
       global_state_->try_fetch_timeout_operations != nullptr) {
     async_io::time_point deadline{};
-    bool fetched_timeout_operations = false;
+    kqueue_operation_base* timeout_operations = nullptr;
     if (global_state_->try_fetch_timeout_operations(
-            global_state_->timeout_heap, deadline,
-            fetched_timeout_operations)) {
-      if (fetched_timeout_operations || consume_global_state() ||
+            global_state_->timeout_heap, deadline, timeout_operations)) {
+      if (timeout_operations != nullptr) {
+        local_state_.push_cpu(timeout_operations);
+      }
+      if (timeout_operations != nullptr || consume_global_state() ||
           consume_local_state() || should_finish()) {
         end_wait();
         return should_finish() ? run_phase::finish_drain
@@ -155,7 +180,8 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   // A timeout is only a reason to become running. The normal ready phase
   // performs another complete work/timer decision before this worker sleeps.
   if (collected_events || timeout_pointer != nullptr ||
-      consume_global_state() || consume_local_state()) {
+      consume_global_state() || consume_timeout_operations() ||
+      consume_local_state()) {
     return run_phase::run_ready_tasks;
   }
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;

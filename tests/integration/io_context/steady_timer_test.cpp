@@ -63,15 +63,16 @@ TEST(SteadyTimerTest, steady_timer_completes) {
   EXPECT_EQ(state->signal, signal_kind::value);
 }
 
-TEST(SteadyTimerTest, inactive_timer_wait_posts_completion_directly) {
+TEST(SteadyTimerTest, inactive_timer_wait_completes_on_loop_check) {
   bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
 
   // The default expiry is now, so registration puts this timer on the
-  // inactive list. Starting a wait must post completion directly instead of
-  // routing it through the time heap or timer driver.
+  // inactive list. Starting a wait must enter the timer-ready list and
+  // complete during the next passive loop check, without native timer
+  // submission.
   bnio::steady_timer timer(context);
 
   void_receiver receiver;
@@ -322,8 +323,7 @@ TEST(SteadyTimerTest, steady_timer_pre_stopped_token_stops_wait) {
   EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
-TEST(SteadyTimerTest,
-     timer_update_stays_on_primary_context_with_multiple_workers) {
+TEST(SteadyTimerTest, passive_timer_wakes_workers_for_an_earlier_deadline) {
   constexpr unsigned worker_count = 4;
   bnio::io_context_options options;
   options.concurrency_hint = worker_count;
@@ -337,9 +337,9 @@ TEST(SteadyTimerTest,
   std::atomic<unsigned> first_order{0};
   std::atomic<unsigned> second_order{0};
   bnio::steady_timer first_timer(context);
-  // Use a generous expiry so CI scheduling jitter cannot cause the first
-  // timer to fire before the shorter second timer is even drained into the
-  // timer heap by the primary worker.
+  // This timer is registered before any native worker exists. The passive
+  // timer heap must therefore be observed by the later run() workers without
+  // relying on a construction-time primary context.
   EXPECT_EQ(first_timer.expires_after(std::chrono::milliseconds(500)), 0);
 
   ordered_timer_receiver first_receiver;
@@ -358,9 +358,10 @@ TEST(SteadyTimerTest,
     workers.emplace_back([&context] { context.run(); });
   }
 
-  // Give the primary worker enough time to drain the first timer submission
-  // and settle before scheduling the second, shorter timer. On macOS CI
-  // runners sleep_for can overshoot significantly, so a wide gap is used.
+  // Give the workers time to park on the first deadline, then publish a
+  // shorter one. Registering it must wake a worker so its passive wait timeout
+  // is recomputed. On macOS CI runners sleep_for can overshoot significantly,
+  // so a wide gap is used.
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   bnio::steady_timer second_timer(context);
   EXPECT_EQ(second_timer.expires_after(std::chrono::milliseconds(20)), 0);

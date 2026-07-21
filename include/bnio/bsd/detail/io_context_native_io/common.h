@@ -4,6 +4,15 @@
 #else
 #define BNIO_BSD_DETAIL_IO_CONTEXT_NATIVE_IO_COMMON_H_
 
+#include <bnio/async_io/bsd/kqueue_operations/file.h>
+#include <bnio/async_io/bsd/kqueue_operations/poll.h>
+#include <bnio/async_io/bsd/kqueue_operations/socket.h>
+#include <bnio/async_io/dns/resolve.h>
+
+#include <system_error>
+#include <type_traits>
+#include <utility>
+
 namespace bnio::detail {
 
 template <class Receiver>
@@ -12,6 +21,261 @@ template <class Receiver>
   auto token = bexec::query(environment, bexec::get_stop_token);
   return token.stop_requested();
 }
+
+[[nodiscard]] inline std::error_code errno_result(int result) noexcept {
+  return std::error_code(-result, std::generic_category());
+}
+
+template <class Request, class Receiver>
+class native_io_operation : public io_context::operation_base {
+ public:
+  native_io_operation(io_context& context, Request request, Receiver receiver)
+      : context_(&context),
+        request_(std::move(request)),
+        receiver_(std::move(receiver)) {}
+
+  void prepare(async_io::bsd_native::kqueue_helper& helper) noexcept override {
+    request_.prepare(helper);
+  }
+
+  void complete_submit_error(int result) noexcept override {
+    completion_ = completion_kind::error;
+    error_ = errno_result(result);
+  }
+
+  [[nodiscard]] bool owns_io_step() const noexcept override { return true; }
+
+  [[nodiscard]] int perform_io() noexcept override {
+    return request_.perform_io();
+  }
+
+  void start() noexcept {
+    if (stop_requested(receiver_)) {
+      completion_ = completion_kind::stopped;
+      context_->publish_cpu(*this);
+      return;
+    }
+
+    this->result = request_.start_io();
+    this->flags = 0;
+    completion_ = completion_kind::value;
+    if (async_io::bsd_native::detail::should_wait(request_, this->result)) {
+      context_->publish_io(*this);
+    } else {
+      context_->publish_cpu(*this);
+    }
+  }
+
+  void execute() noexcept override {
+    switch (completion_) {
+      case completion_kind::value:
+        if (this->result < 0) {
+          bexec::set_error(std::move(receiver_), errno_result(this->result));
+        } else {
+          request_.set_value(std::move(receiver_), this->result, this->flags);
+        }
+        break;
+      case completion_kind::error:
+        bexec::set_error(std::move(receiver_), error_);
+        break;
+      case completion_kind::stopped:
+        bexec::set_stopped(std::move(receiver_));
+        break;
+    }
+  }
+
+ private:
+  enum class completion_kind {
+    value,
+    error,
+    stopped,
+  };
+
+  io_context* context_;
+  Request request_;
+  std::remove_cvref_t<Receiver> receiver_;
+  completion_kind completion_ = completion_kind::value;
+  std::error_code error_;
+};
+
+template <class Request>
+class native_io_sender {
+ public:
+  using completion_signatures = typename Request::completion_signatures;
+
+  native_io_sender(io_context& context, Request request) noexcept
+      : context_(&context), request_(std::move(request)) {}
+
+  template <class Receiver>
+  auto connect(Receiver receiver) && {
+    return native_io_operation<Request, std::remove_cvref_t<Receiver> >(
+        *context_, std::move(request_), std::move(receiver));
+  }
+
+  template <class Receiver>
+    requires std::copy_constructible<Request>
+  auto connect(Receiver receiver) const& {
+    return native_io_operation<Request, std::remove_cvref_t<Receiver> >(
+        *context_, request_, std::move(receiver));
+  }
+
+ private:
+  io_context* context_;
+  Request request_;
+};
+
+template <class Receiver>
+class native_poll_operation : public io_context::operation_base {
+ public:
+  native_poll_operation(io_context& context,
+                        async_io::descriptor_view descriptor,
+                        unsigned poll_mask, Receiver receiver)
+      : context_(&context),
+        request_(descriptor, poll_mask),
+        receiver_(std::move(receiver)) {}
+
+  void prepare(async_io::bsd_native::kqueue_helper& helper) noexcept override {
+    request_.prepare(helper);
+  }
+
+  void complete_submit_error(int result) noexcept override {
+    completion_ = completion_kind::error;
+    error_ = errno_result(result);
+  }
+
+  void start() noexcept {
+    if (stop_requested(receiver_)) {
+      completion_ = completion_kind::stopped;
+      context_->publish_cpu(*this);
+      return;
+    }
+
+    completion_ = completion_kind::value;
+    context_->publish_io(*this);
+  }
+
+  void execute() noexcept override {
+    switch (completion_) {
+      case completion_kind::value:
+        if (this->result < 0) {
+          bexec::set_error(std::move(receiver_), errno_result(this->result));
+        } else {
+          bexec::set_value(std::move(receiver_),
+                           static_cast<unsigned>(this->result));
+        }
+        break;
+      case completion_kind::error:
+        bexec::set_error(std::move(receiver_), error_);
+        break;
+      case completion_kind::stopped:
+        bexec::set_stopped(std::move(receiver_));
+        break;
+    }
+  }
+
+ private:
+  enum class completion_kind {
+    value,
+    error,
+    stopped,
+  };
+
+  io_context* context_;
+  async_io::bsd_native::kqueue_poll_request request_;
+  std::remove_cvref_t<Receiver> receiver_;
+  completion_kind completion_ = completion_kind::value;
+  std::error_code error_;
+};
+
+class native_poll_sender {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(unsigned),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  native_poll_sender(io_context& context, async_io::descriptor_view descriptor,
+                     unsigned poll_mask) noexcept
+      : context_(&context), descriptor_(descriptor), poll_mask_(poll_mask) {}
+
+  template <class Receiver>
+  auto connect(Receiver receiver) const {
+    return native_poll_operation<std::remove_cvref_t<Receiver> >(
+        *context_, descriptor_, poll_mask_, std::move(receiver));
+  }
+
+ private:
+  io_context* context_;
+  async_io::descriptor_view descriptor_;
+  unsigned poll_mask_;
+};
+
+template <class Receiver>
+class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
+ public:
+  resolve_operation(io_context& context, async_io::dns_query query,
+                    async_io::dns_result_view result, Receiver receiver)
+      : context_(&context),
+        query_(std::move(query)),
+        result_(result),
+        receiver_(std::move(receiver)) {}
+
+  void start() noexcept {
+    stopped_ = stop_requested(receiver_);
+    context_->publish_cpu(*this);
+  }
+
+  void execute() noexcept override {
+    if (stopped_) {
+      bexec::set_stopped(std::move(receiver_));
+      return;
+    }
+
+    std::size_t count = 0;
+    const std::error_code error = async_io::resolve_dns(query_, result_, count);
+    if (error) {
+      bexec::set_error(std::move(receiver_), error);
+    } else {
+      bexec::set_value(std::move(receiver_), count);
+    }
+  }
+
+ private:
+  io_context* context_;
+  async_io::dns_query query_;
+  async_io::dns_result_view result_;
+  std::remove_cvref_t<Receiver> receiver_;
+  bool stopped_ = false;
+};
+
+class resolve_sender {
+ public:
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::size_t),
+                                   bexec::set_error_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  resolve_sender(io_context& context, async_io::dns_query query,
+                 async_io::dns_result_view result)
+      : context_(&context), query_(std::move(query)), result_(result) {}
+
+  template <class Receiver>
+  auto connect(Receiver receiver) && {
+    return resolve_operation<std::remove_cvref_t<Receiver> >(
+        *context_, std::move(query_), result_, std::move(receiver));
+  }
+
+  template <class Receiver>
+  auto connect(Receiver receiver) const& {
+    return resolve_operation<std::remove_cvref_t<Receiver> >(
+        *context_, query_, result_, std::move(receiver));
+  }
+
+ private:
+  io_context* context_;
+  async_io::dns_query query_;
+  async_io::dns_result_view result_;
+};
 
 }  // namespace bnio::detail
 
