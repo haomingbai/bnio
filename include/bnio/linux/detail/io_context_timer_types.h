@@ -8,10 +8,7 @@
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <mutex>
-#include <unordered_map>
-#include <vector>
 
 namespace bnio {
 
@@ -38,14 +35,6 @@ enum class timer_completion_kind {
   stopped,
 };
 
-struct timer_heap_item {
-  async_io::time_point deadline{};
-  std::uint64_t timer_id = 0;
-  std::uint64_t generation = 0;
-};
-
-struct timer_slot;
-
 class BNIO_EXPORT timer_operation_base
     : public async_io::linux_native::io_uring_operation_base {
  public:
@@ -70,10 +59,25 @@ class BNIO_EXPORT timer_operation_base
   timer_completion_kind timer_completion_ = timer_completion_kind::value;
 };
 
-// Operations consumed from a timer during cancellation.
-struct submitted_timer_operations {
-  timer_operation_base* submitted = nullptr;
-  timer_operation_base* waiting = nullptr;
+struct timer_operation_queue {
+  timer_operation_base* head = nullptr;
+  timer_operation_base* tail = nullptr;
+  std::size_t size = 0;
+};
+
+struct timer_slot {
+  io_context* context = nullptr;
+  async_io::time_point expiry{};
+  timer_operation_queue submitted;
+
+  // While active, previous is the parent for a first child and the previous
+  // sibling otherwise; child and next are the first-child and next-sibling
+  // links of the intrusive pairing heap. While inactive, previous and next
+  // form the intrusive doubly linked inactive list and child is null.
+  timer_slot* previous = nullptr;
+  timer_slot* child = nullptr;
+  timer_slot* next = nullptr;
+  bool active = false;
 };
 
 class timer_wakeup_operation
@@ -153,36 +157,38 @@ struct timer_state_data {
 
   void mark_update_queued(async_io::time_point deadline) noexcept;
 
-  void push_heap(timer_heap_item item) noexcept;
+  void push_heap(timer_slot& timer) noexcept;
 
-  void pop_heap() noexcept;
+  [[nodiscard]] timer_slot* pop_heap() noexcept;
 
-  void swap_heap_items(std::size_t first, std::size_t second) noexcept;
+  void erase_heap(timer_slot& timer) noexcept;
 
-  void sift_heap_up(std::size_t index) noexcept;
+  void push_inactive(timer_slot& timer) noexcept;
 
-  void sift_heap_down(std::size_t index) noexcept;
+  void erase_inactive(timer_slot& timer) noexcept;
 
-  [[nodiscard]] bool heap_item_less(std::size_t first,
-                                    std::size_t second) const noexcept;
+  [[nodiscard]] timer_slot* heap_front() const noexcept;
 
+  [[nodiscard]] async_io::time_point heap_deadline() const noexcept;
+
+  void clear() noexcept;
+
+ private:
+  [[nodiscard]] timer_slot* meld(timer_slot* first,
+                                 timer_slot* second) noexcept;
+
+  [[nodiscard]] timer_slot* merge_pairs(timer_slot* first) noexcept;
+
+  [[nodiscard]] static bool timer_less(const timer_slot& first,
+                                       const timer_slot& second) noexcept;
+
+ public:
   mutable std::mutex mutex;
-  std::unordered_map<std::uint64_t, timer_slot*> timers;
-  std::vector<timer_heap_item> heap;
-  std::uint64_t next_timer_id = 1;
-  queued_operation_state driver = queued_operation_state::idle;
+  timer_slot* heap = nullptr;
+  timer_slot* inactive = nullptr;
+  std::atomic<queued_operation_state> driver{queued_operation_state::idle};
   timeout_state timeout = timeout_state::idle;
   async_io::time_point armed_deadline{};
-};
-
-struct timer_slot {
-  mutable std::mutex mutex;
-  io_context* context = nullptr;
-  std::uint64_t id = 0;
-  async_io::time_point expiry{};
-  std::uint64_t generation = 0;
-  std::atomic<timer_operation_base*> submitted_head{nullptr};
-  timer_operation_base* waiting_head = nullptr;
 };
 
 /** @endcond */

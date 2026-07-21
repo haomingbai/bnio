@@ -12,6 +12,7 @@ bnio_add_basic_io_context_test(buffer buffer_test.cpp)
 bnio_add_basic_io_context_test(io_context_sender_concept
                                io_context_sender_concept_test.cpp)
 bnio_add_basic_io_context_test(ssl_concept ssl_concept_test.cpp)
+bnio_add_basic_io_context_test(timer_state timer_state_test.cpp)
 
 function(bnio_add_basic_io_context_header_test name definition)
   add_executable(bnio_basic_io_context_header_${name}_test

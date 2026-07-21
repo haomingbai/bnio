@@ -13,6 +13,9 @@ namespace bnio {
 
 /**
  * io_context-bound steady-clock timer.
+ *
+ * Concurrent operations that mutate the same timer must be externally
+ * serialized.
  */
 class BNIO_EXPORT steady_timer {
  public:

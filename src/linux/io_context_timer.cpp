@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
-#include <unordered_map>
 #include <utility>
 
 #include "bnio/async_io/linux/io_uring_operations/helpers.h"
@@ -80,104 +79,137 @@ void detail::timer_driver_operation::execute() noexcept {
 }
 
 void io_context::register_timer(detail::timer_slot& timer) noexcept {
-  std::lock_guard context_lock(timers_.mutex);
-  std::lock_guard timer_lock(timer.mutex);
-  if (timer.context != nullptr) {
-    return;
+  bool schedule_timer_driver = false;
+  {
+    std::lock_guard context_lock(timers_.mutex);
+    if (timer.context != nullptr) {
+      return;
+    }
+
+    timer.context = this;
+    timer.submitted = {};
+    timer.previous = nullptr;
+    timer.child = nullptr;
+    timer.next = nullptr;
+    if (timer.expiry > clock::now()) {
+      timers_.push_heap(timer);
+      schedule_timer_driver = true;
+    } else {
+      timers_.push_inactive(timer);
+    }
   }
 
-  timer.id = timers_.next_timer_id++;
-  if (timer.id == 0) {
-    timer.id = timers_.next_timer_id++;
+  if (schedule_timer_driver) {
+    post_timer_driver();
   }
-  timer.context = this;
-  timer.generation = 0;
-  timer.waiting_head = nullptr;
-  timer.submitted_head.store(nullptr, std::memory_order_release);
-  timers_.timers.emplace(timer.id, &timer);
 }
 
 void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
-  detail::submitted_timer_operations canceled;
+  detail::timer_operation_queue canceled;
   {
     std::lock_guard context_lock(timers_.mutex);
-    std::lock_guard timer_lock(timer.mutex);
     if (timer.context != this) {
       return;
     }
 
-    auto iterator = timers_.timers.find(timer.id);
-    if (iterator != timers_.timers.end()) {
-      detail::timer_slot* mapped_timer = iterator->second;
-      if (mapped_timer != nullptr && mapped_timer == &timer) {
-        timers_.timers.erase(iterator);
-      }
+    if (timer.active) {
+      timers_.erase_heap(timer);
+    } else {
+      timers_.erase_inactive(timer);
     }
-
-    ++timer.generation;
     timer.context = nullptr;
-    canceled = take_all_submitted_timer_operations(timer);
+    canceled = take_timer_operations_locked(timer);
   }
 
-  post_submitted_timer_operations(canceled,
-                                  detail::timer_completion_kind::stopped);
+  post_timer_operations(canceled.head, detail::timer_completion_kind::stopped);
 }
 
 std::size_t io_context::cancel_timer(detail::timer_slot& timer) noexcept {
-  detail::submitted_timer_operations canceled;
+  detail::timer_operation_queue canceled;
   std::size_t count = 0;
   {
     std::lock_guard context_lock(timers_.mutex);
-    std::lock_guard timer_lock(timer.mutex);
     if (timer.context != this) {
       return 0;
     }
 
-    ++timer.generation;
-    canceled = take_all_submitted_timer_operations(timer);
+    canceled = take_timer_operations_locked(timer);
+    count = canceled.size;
   }
 
-  count = count_submitted_timer_operations(canceled);
-  post_submitted_timer_operations(canceled,
-                                  detail::timer_completion_kind::stopped);
-  post_timer_driver();
+  post_timer_operations(canceled.head, detail::timer_completion_kind::stopped);
   return count;
 }
 
 std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
                                          time_point expiry) noexcept {
-  detail::submitted_timer_operations canceled;
+  detail::timer_operation_queue canceled;
   std::size_t count = 0;
+  bool schedule_timer_driver = false;
   {
     std::lock_guard context_lock(timers_.mutex);
-    std::lock_guard timer_lock(timer.mutex);
     if (timer.context != this) {
       return 0;
     }
 
+    const bool was_active = timer.active;
+    if (was_active) {
+      timers_.erase_heap(timer);
+    } else {
+      timers_.erase_inactive(timer);
+    }
+
     timer.expiry = expiry;
-    ++timer.generation;
-    canceled = take_all_submitted_timer_operations(timer);
+    canceled = take_timer_operations_locked(timer);
+    count = canceled.size;
+
+    if (timer.expiry > clock::now()) {
+      timers_.push_heap(timer);
+      schedule_timer_driver = true;
+    } else {
+      timers_.push_inactive(timer);
+      schedule_timer_driver = was_active;
+    }
   }
 
-  count = count_submitted_timer_operations(canceled);
-  post_submitted_timer_operations(canceled,
-                                  detail::timer_completion_kind::stopped);
-  post_timer_driver();
+  post_timer_operations(canceled.head, detail::timer_completion_kind::stopped);
+  if (schedule_timer_driver) {
+    post_timer_driver();
+  }
   return count;
 }
 
 io_context::time_point io_context::timer_expiry(
     const detail::timer_slot& timer) const noexcept {
   std::lock_guard context_lock(timers_.mutex);
-  std::lock_guard timer_lock(timer.mutex);
   return timer.expiry;
 }
 
 void io_context::start_timer_wait(detail::timer_operation_base& operation,
                                   detail::timer_slot& timer) noexcept {
-  push_timer_operation(timer.submitted_head, operation);
-  post_timer_driver();
+  detail::timer_completion_kind completion =
+      detail::timer_completion_kind::value;
+  {
+    std::lock_guard context_lock(timers_.mutex);
+    if (timer.context != this) {
+      completion = detail::timer_completion_kind::stopped;
+    } else if (!timer.active) {
+      completion = detail::timer_completion_kind::value;
+    } else {
+      operation.timer_next_ = nullptr;
+      if (timer.submitted.tail != nullptr) {
+        timer.submitted.tail->timer_next_ = &operation;
+      } else {
+        timer.submitted.head = &operation;
+      }
+      timer.submitted.tail = &operation;
+      ++timer.submitted.size;
+      return;
+    }
+  }
+
+  operation.timer_next_ = nullptr;
+  post_timer_operations(&operation, completion);
 }
 
 steady_timer::steady_timer(io_context& context) noexcept {

@@ -4,7 +4,6 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -49,19 +48,10 @@ io_context::io_context(const io_context_options& options) noexcept
 }
 
 io_context::~io_context() noexcept {
-  std::lock_guard context_lock(timers_.mutex);
-  for (auto& entry : timers_.timers) {
-    detail::timer_slot* timer = entry.second;
-    if (timer == nullptr) {
-      continue;
-    }
-    std::lock_guard timer_lock(timer->mutex);
-    timer->context = nullptr;
-    timer->waiting_head = nullptr;
-    timer->submitted_head.store(nullptr, std::memory_order_release);
+  {
+    std::lock_guard context_lock(timers_.mutex);
+    timers_.clear();
   }
-  timers_.timers.clear();
-  timers_.heap.clear();
 
   // Manually delete all workers in the intrusive singly-linked list.
   native_worker* current = native_workers_.head;

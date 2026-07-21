@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -62,6 +63,28 @@ TEST(SteadyTimerTest, steady_timer_completes) {
   EXPECT_EQ(state->signal, signal_kind::value);
 }
 
+TEST(SteadyTimerTest, inactive_timer_wait_posts_completion_directly) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  // The default expiry is now, so registration puts this timer on the
+  // inactive list. Starting a wait must post completion directly instead of
+  // routing it through the time heap or timer driver.
+  bnio::steady_timer timer(context);
+
+  void_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto operation = bexec::connect(timer.async_wait(), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->signal, signal_kind::value);
+}
+
 TEST(SteadyTimerTest, steady_timer_cancel_stops_wait) {
   bnio::io_context context;
   if (!context_available(context)) {
@@ -108,6 +131,44 @@ TEST(SteadyTimerTest, steady_timer_expires_after_stops_old_wait) {
   EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
+TEST(SteadyTimerTest, steady_timer_rearms_after_cancel) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  bnio::steady_timer timer(context);
+  EXPECT_EQ(timer.expires_after(std::chrono::seconds(30)), 0);
+
+  unsigned completions = 0;
+  void_receiver canceled_receiver;
+  canceled_receiver.context = &context;
+  canceled_receiver.completions = &completions;
+  canceled_receiver.target = 2;
+  auto canceled_state = canceled_receiver.state;
+  auto canceled_operation =
+      bexec::connect(timer.async_wait(), std::move(canceled_receiver));
+  bexec::start(canceled_operation);
+
+  EXPECT_EQ(timer.cancel(), 1);
+  EXPECT_EQ(timer.expires_after(std::chrono::milliseconds(1)), 0);
+
+  void_receiver rearmed_receiver;
+  rearmed_receiver.context = &context;
+  rearmed_receiver.completions = &completions;
+  rearmed_receiver.target = 2;
+  auto rearmed_state = rearmed_receiver.state;
+  auto rearmed_operation =
+      bexec::connect(timer.async_wait(), std::move(rearmed_receiver));
+  bexec::start(rearmed_operation);
+
+  context.run();
+
+  EXPECT_EQ(completions, 2);
+  EXPECT_EQ(canceled_state->signal, signal_kind::stopped);
+  EXPECT_EQ(rearmed_state->signal, signal_kind::value);
+}
+
 TEST(SteadyTimerTest, steady_timer_multiple_waits_complete) {
   bnio::io_context context;
   if (!context_available(context)) {
@@ -143,6 +204,59 @@ TEST(SteadyTimerTest, steady_timer_multiple_waits_complete) {
   EXPECT_EQ(completions, 2);
   EXPECT_EQ(first_state->signal, signal_kind::value);
   EXPECT_EQ(second_state->signal, signal_kind::value);
+}
+
+TEST(SteadyTimerTest, steady_timer_cancel_counts_all_queued_waits) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  bnio::steady_timer timer(context);
+  EXPECT_EQ(timer.expires_after(std::chrono::seconds(30)), 0);
+
+  unsigned completions = 0;
+  void_receiver first;
+  first.context = &context;
+  first.completions = &completions;
+  first.target = 2;
+  auto first_state = first.state;
+
+  void_receiver second;
+  second.context = &context;
+  second.completions = &completions;
+  second.target = 2;
+  auto second_state = second.state;
+
+  auto first_operation = bexec::connect(timer.async_wait(), std::move(first));
+  auto second_operation = bexec::connect(timer.async_wait(), std::move(second));
+  bexec::start(first_operation);
+  bexec::start(second_operation);
+
+  EXPECT_EQ(timer.cancel(), 2);
+  context.run();
+
+  EXPECT_EQ(completions, 2);
+  EXPECT_EQ(first_state->signal, signal_kind::stopped);
+  EXPECT_EQ(second_state->signal, signal_kind::stopped);
+}
+
+TEST(SteadyTimerTest, timer_destruction_after_stop_does_not_post) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  std::optional<bnio::steady_timer> timer;
+  timer.emplace(context);
+  EXPECT_EQ(timer->expires_after(std::chrono::seconds(30)), 0);
+
+  void_receiver receiver;
+  auto operation = bexec::connect(timer->async_wait(), std::move(receiver));
+  bexec::start(operation);
+
+  EXPECT_GE(context.stop(), 0);
+  timer.reset();
 }
 
 TEST(SteadyTimerTest, steady_timer_move_stops_old_wait) {
