@@ -15,3 +15,8 @@ coverage/
 .cache/
 
 .agent
+
+# Exelude Copilot files
+.vscode/
+.github/
+!.github/workflows/

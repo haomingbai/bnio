@@ -8,7 +8,6 @@
 
 #include <atomic>
 #include <mutex>
-#include <new>
 
 #include "bnio/detail/io_context/native_worker.h"
 
@@ -46,13 +45,8 @@ io_context::~io_context() noexcept {
     global_state_.try_fetch_timeout_operations = nullptr;
   }
 
-  native_worker* current =
-      native_workers_.head.exchange(nullptr, std::memory_order_acq_rel);
-  while (current != nullptr) {
-    native_worker* next = current->next;
-    delete current;
-    current = next;
-  }
+  // Workers are stack-allocated inside run(); just clear the list head.
+  native_workers_.head.store(nullptr, std::memory_order_release);
 }
 
 bool io_context::is_open() const noexcept {
@@ -60,15 +54,51 @@ bool io_context::is_open() const noexcept {
 }
 
 void io_context::run() noexcept {
-  native_worker* worker = register_run_worker();
-  if (worker == nullptr) {
+  if (global_state_.closing.load(std::memory_order_acquire) ||
+      !native_available_.load(std::memory_order_acquire)) {
+    return;
+  }
+
+  native_worker worker{*this, native_.options};
+  if (!prepare_run_worker(worker)) {
     return;
   }
 
   native_worker* previous_worker = current_native_worker_;
-  current_native_worker_ = worker;
-  worker->context.run();
+  current_native_worker_ = &worker;
+  worker.context.run();
   current_native_worker_ = previous_worker;
+}
+
+bool io_context::prepare_run_worker(
+    detail::native_worker& worker) noexcept {
+  if (!worker.context.is_open()) {
+    return false;
+  }
+  worker.context.set_global_state(&global_state_);
+
+  // A close may have been requested after the initial checks but before
+  // the native context was fully opened.
+  if (global_state_.closing.load(std::memory_order_acquire)) {
+    (void)worker.context.stop();
+    return false;
+  }
+
+  // CAS-insert this worker at the head of the lock-free worker list.
+  native_worker* head = native_workers_.head.load(std::memory_order_relaxed);
+  do {
+    worker.next = head;
+  } while (!native_workers_.head.compare_exchange_weak(
+      head, &worker, std::memory_order_release, std::memory_order_relaxed));
+
+  // A stop that raced with the head insertion may have completed its scan
+  // before seeing this worker.
+  if (global_state_.closing.load(std::memory_order_acquire)) {
+    (void)worker.context.stop();
+    return false;
+  }
+
+  return true;
 }
 
 int io_context::stop() noexcept {
@@ -77,11 +107,12 @@ int io_context::stop() noexcept {
   int first_error = 0;
   native_worker* worker = native_workers_.head.load(std::memory_order_acquire);
   while (worker != nullptr) {
+    native_worker* next = worker->next;
     const int result = worker->context.stop();
     if (result < 0 && first_error == 0) {
       first_error = result;
     }
-    worker = worker->next;
+    worker = next;
   }
   return first_error;
 }
@@ -97,47 +128,6 @@ io_context::dispatch_scheduler io_context::get_dispatch_scheduler() noexcept {
 
 io_context::post_scheduler io_context::get_post_scheduler() noexcept {
   return post_scheduler(*this);
-}
-
-detail::native_worker* io_context::register_run_worker() noexcept {
-  if (global_state_.closing.load(std::memory_order_acquire) ||
-      !native_available_.load(std::memory_order_acquire)) {
-    return nullptr;
-  }
-
-  auto* worker = new (std::nothrow) native_worker(*this, native_.options);
-  if (worker == nullptr || !worker->context.is_open()) {
-    delete worker;
-    return nullptr;
-  }
-  worker->context.set_global_state(&global_state_);
-
-  // A close may have been requested after the initial check above but before
-  // the native context was fully opened. Stop the worker now to avoid leaking
-  // a live context.
-  if (global_state_.closing.load(std::memory_order_acquire)) {
-    (void)worker->context.stop();
-    delete worker;
-    return nullptr;
-  }
-
-  // CAS-insert this worker at the head of the lock-free worker list. The
-  // retry loop handles concurrent insertions from other threads calling
-  // run().
-  native_worker* head = native_workers_.head.load(std::memory_order_relaxed);
-  do {
-    worker->next = head;
-  } while (!native_workers_.head.compare_exchange_weak(
-      head, worker, std::memory_order_release, std::memory_order_relaxed));
-
-  // A stop that raced with the head insertion may have completed its scan
-  // before seeing this worker. Stop the local queue before declining to run.
-  if (global_state_.closing.load(std::memory_order_acquire)) {
-    (void)worker->context.stop();
-    return nullptr;
-  }
-
-  return worker;
 }
 
 }  // namespace bnio

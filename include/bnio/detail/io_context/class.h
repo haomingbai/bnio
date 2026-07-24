@@ -536,7 +536,8 @@ class BNIO_EXPORT io_context {
   /** Publishes CPU work for execution by one context run-loop worker. */
   void publish_cpu(detail::native_operation_base& operation) noexcept;
 
-  [[nodiscard]] detail::native_worker* register_run_worker() noexcept;
+  /** Initialises and registers a stack-allocated worker for the run loop. */
+  [[nodiscard]] bool prepare_run_worker(detail::native_worker& worker) noexcept;
 
   void wake_one_worker() noexcept;
 
