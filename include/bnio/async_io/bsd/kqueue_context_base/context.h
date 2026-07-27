@@ -243,6 +243,8 @@ class BNIO_EXPORT kqueue_context {
   [[nodiscard]] run_phase handle_finish_drain() noexcept;
   [[nodiscard]] run_phase spin_for_work() noexcept;
   [[nodiscard]] run_phase wait_for_io_work() noexcept;
+  [[nodiscard]] bool closing_requested() const noexcept;
+  [[nodiscard]] bool stop_requested() const noexcept;
   [[nodiscard]] bool should_finish() const noexcept;
   void finish() noexcept;
 

@@ -313,6 +313,16 @@ class BNIO_EXPORT io_uring_context {
   [[nodiscard]] run_phase wait_for_io_work() noexcept;
 
   /**
+   * Returns whether the shared state has requested closing.
+   */
+  [[nodiscard]] bool closing_requested() const noexcept;
+
+  /**
+   * Returns whether stop() has been called on this context.
+   */
+  [[nodiscard]] bool stop_requested() const noexcept;
+
+  /**
    * Returns whether the context should leave the running state.
    */
   [[nodiscard]] bool should_finish() const noexcept;
