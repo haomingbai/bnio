@@ -107,6 +107,7 @@ TEST(KqueueRunLoopTest, passive_io_queue_registers_all_published_operations) {
 
 TEST(KqueueRunLoopTest, concurrent_external_io_publication_is_drained) {
   kqueue_task_queue_state global_tasks;
+  EXPECT_GE(global_tasks.wake_channel_.open(), 0);
   kqueue_context context;
   kqueue_context_options options;
   options.wait_spin_count = 1;
@@ -165,6 +166,7 @@ TEST(KqueueRunLoopTest, concurrent_external_io_publication_is_drained) {
 
 TEST(KqueueRunLoopTest, concurrent_external_posts_are_drained) {
   kqueue_task_queue_state global_tasks;
+  EXPECT_GE(global_tasks.wake_channel_.open(), 0);
   kqueue_context context;
   kqueue_context_options options;
   options.wait_spin_count = 1;
