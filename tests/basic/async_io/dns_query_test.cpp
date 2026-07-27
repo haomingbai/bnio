@@ -27,8 +27,7 @@ TEST(DnsTest, query_defaults_and_setters) {
 
   EXPECT_EQ(query.host(), "127.0.0.1");
   EXPECT_EQ(query.service(), "8080");
-  EXPECT_EQ(query.address_version(),
-            bnio::async_io::ip::address::version::v4);
+  EXPECT_EQ(query.address_version(), bnio::async_io::ip::address::version::v4);
   EXPECT_EQ(query.transport(), bnio::async_io::dns_transport::udp);
   EXPECT_EQ(query.flags(), bnio::async_io::dns_query_flags::numeric_host);
 

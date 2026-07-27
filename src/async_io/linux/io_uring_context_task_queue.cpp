@@ -92,9 +92,8 @@ void io_uring_context::drain_eventfd() noexcept {
 }
 
 int io_uring_context::submit_eventfd_poll() noexcept {
-  const int wake_fd = global_state_ != nullptr
-                          ? global_state_->wake_channel_.read_fd()
-                          : -1;
+  const int wake_fd =
+      global_state_ != nullptr ? global_state_->wake_channel_.read_fd() : -1;
   if (!ring_.is_open() || wake_fd < 0) {
     return -EINVAL;
   }

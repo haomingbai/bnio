@@ -4,7 +4,6 @@
  */
 
 #include <bnio/base/linux/wake_channel.h>
-
 #include <sys/eventfd.h>
 #include <unistd.h>
 
@@ -62,8 +61,7 @@ int wake_channel::wake() noexcept {
   const auto* bytes = reinterpret_cast<const char*>(&value);
   std::size_t offset = 0;
   while (offset < sizeof(value)) {
-    const ssize_t result =
-        ::write(fd_, bytes + offset, sizeof(value) - offset);
+    const ssize_t result = ::write(fd_, bytes + offset, sizeof(value) - offset);
     if (result > 0) {
       offset += static_cast<std::size_t>(result);
       continue;

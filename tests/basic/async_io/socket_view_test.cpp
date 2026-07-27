@@ -103,12 +103,10 @@ TEST(SocketViewTest, invalid_socket) {
   bnio::async_io::ip::endpoint stale =
       bnio::async_io::ip::endpoint::loopback_v4(1234);
   check_error(datagram.local_endpoint(stale), EBADF);
-  EXPECT_EQ(stale.version(),
-            bnio::async_io::ip::address::version::unspecified);
+  EXPECT_EQ(stale.version(), bnio::async_io::ip::address::version::unspecified);
   stale = bnio::async_io::ip::endpoint::loopback_v4(1234);
   check_error(datagram.remote_endpoint(stale), EBADF);
-  EXPECT_EQ(stale.version(),
-            bnio::async_io::ip::address::version::unspecified);
+  EXPECT_EQ(stale.version(), bnio::async_io::ip::address::version::unspecified);
 }
 
 TEST(SocketViewTest, datagram_lifecycle) {
@@ -148,7 +146,8 @@ TEST(SocketViewTest, loopback_setup) {
   socklen_t bound_address_size = sizeof(bound_address);
   EXPECT_EQ(::getsockname(listener.native_handle(),
                           reinterpret_cast<sockaddr*>(&bound_address),
-                          &bound_address_size), 0);
+                          &bound_address_size),
+            0);
   EXPECT_EQ(bound_address.sin_family, AF_INET);
   EXPECT_EQ(bound_address_size, sizeof(bound_address));
 

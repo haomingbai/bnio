@@ -314,8 +314,7 @@ TEST(UdpTest, async_send_to_receive_from) {
   EXPECT_EQ(state.received, payload.size());
   EXPECT_EQ(received, payload);
   EXPECT_TRUE(source.address().is_v4());
-  EXPECT_EQ(source.address().to_v4(),
-            bnio::ip::address::loopback_v4().to_v4());
+  EXPECT_EQ(source.address().to_v4(), bnio::ip::address::loopback_v4().to_v4());
   EXPECT_NE(source.port(), 0);
 }
 

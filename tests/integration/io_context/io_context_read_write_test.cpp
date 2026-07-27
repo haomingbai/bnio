@@ -57,15 +57,14 @@ TEST(IoContextReadWriteTest, ready_socket_read_completes_without_queue) {
   auto scheduler = context.get_post_scheduler();
 
   int sockets[2] = {-1, -1};
-  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
-            0);
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
   bnio::tcp_socket receiver_socket(sockets[0]);
   bnio::tcp_socket sender_socket(sockets[1]);
 
   constexpr std::string_view payload = "ready";
   EXPECT_EQ(::send(sender_socket.native_handle(), payload.data(),
-                   payload.size(),
-                   MSG_NOSIGNAL), static_cast<ssize_t>(payload.size()));
+                   payload.size(), MSG_NOSIGNAL),
+            static_cast<ssize_t>(payload.size()));
 
   std::array<char, 16> bytes{};
   byte_receiver receiver;
@@ -90,8 +89,7 @@ TEST(IoContextReadWriteTest, passive_drain_reads_io) {
   auto scheduler = context.get_post_scheduler();
 
   int sockets[2] = {-1, -1};
-  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
-            0);
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
   bnio::tcp_socket receiver_socket(sockets[0]);
   bnio::tcp_socket sender_socket(sockets[1]);
 
@@ -105,8 +103,8 @@ TEST(IoContextReadWriteTest, passive_drain_reads_io) {
   bexec::start(operation);
   constexpr std::string_view payload = "passive";
   EXPECT_EQ(::send(sender_socket.native_handle(), payload.data(),
-                   payload.size(),
-                   MSG_NOSIGNAL), static_cast<ssize_t>(payload.size()));
+                   payload.size(), MSG_NOSIGNAL),
+            static_cast<ssize_t>(payload.size()));
 
   context.run();
 
@@ -123,8 +121,7 @@ TEST(IoContextReadWriteTest, ready_socket_write_completes_without_queue) {
   auto scheduler = context.get_post_scheduler();
 
   int sockets[2] = {-1, -1};
-  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
-            0);
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
   bnio::tcp_socket sender_socket(sockets[0]);
   bnio::tcp_socket receiver_socket(sockets[1]);
 
@@ -143,8 +140,9 @@ TEST(IoContextReadWriteTest, ready_socket_write_completes_without_queue) {
   EXPECT_EQ(state->size, payload.size());
 
   std::array<char, 32> bytes{};
-  EXPECT_EQ(::recv(receiver_socket.native_handle(), bytes.data(),
-                   bytes.size(), 0), static_cast<ssize_t>(payload.size()));
+  EXPECT_EQ(
+      ::recv(receiver_socket.native_handle(), bytes.data(), bytes.size(), 0),
+      static_cast<ssize_t>(payload.size()));
   EXPECT_TRUE(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
 }
 
@@ -156,15 +154,15 @@ TEST(IoContextReadWriteTest, blocked_socket_write_falls_back_to_queue) {
   auto scheduler = context.get_post_scheduler();
 
   int sockets[2] = {-1, -1};
-  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
-            0);
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
   bnio::tcp_socket sender_socket(sockets[0]);
   bnio::tcp_socket receiver_socket(sockets[1]);
 
   const int sender_flags = ::fcntl(sender_socket.native_handle(), F_GETFL, 0);
   EXPECT_TRUE(sender_flags >= 0);
   EXPECT_EQ(::fcntl(sender_socket.native_handle(), F_SETFL,
-                    sender_flags | O_NONBLOCK), 0);
+                    sender_flags | O_NONBLOCK),
+            0);
 
   std::array<char, 4096> filler{};
   while (true) {
@@ -209,8 +207,9 @@ TEST(IoContextReadWriteTest, blocked_socket_write_falls_back_to_queue) {
   EXPECT_EQ(state->signal, signal_kind::value);
   EXPECT_EQ(state->size, payload.size());
   std::array<char, 32> bytes{};
-  EXPECT_EQ(::recv(receiver_socket.native_handle(), bytes.data(),
-                   bytes.size(), 0), static_cast<ssize_t>(payload.size()));
+  EXPECT_EQ(
+      ::recv(receiver_socket.native_handle(), bytes.data(), bytes.size(), 0),
+      static_cast<ssize_t>(payload.size()));
   EXPECT_TRUE(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
 }
 
@@ -222,8 +221,7 @@ TEST(IoContextReadWriteTest, io_idle_drain_reads) {
   auto scheduler = context.get_post_scheduler();
 
   int sockets[2] = {-1, -1};
-  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
-            0);
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
   bnio::tcp_socket receiver_socket(sockets[0]);
   bnio::tcp_socket sender_socket(sockets[1]);
 
@@ -237,8 +235,8 @@ TEST(IoContextReadWriteTest, io_idle_drain_reads) {
   bexec::start(operation);
   constexpr std::string_view payload = "auto";
   EXPECT_EQ(::send(sender_socket.native_handle(), payload.data(),
-                   payload.size(),
-                   MSG_NOSIGNAL), static_cast<ssize_t>(payload.size()));
+                   payload.size(), MSG_NOSIGNAL),
+            static_cast<ssize_t>(payload.size()));
 
   context.run();
 
@@ -255,8 +253,7 @@ TEST(IoContextReadWriteTest, io_idle_drain_read_write_pair) {
   auto scheduler = context.get_post_scheduler();
 
   int sockets[2] = {-1, -1};
-  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets),
-            0);
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
   bnio::tcp_socket receiver_socket(sockets[0]);
   bnio::tcp_socket sender_socket(sockets[1]);
 

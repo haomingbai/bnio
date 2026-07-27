@@ -26,8 +26,7 @@ struct BNIO_EXPORT kqueue_task_queue_state {
                                         kqueue_operation_base*&) noexcept;
 
   /** Drains all ready native completions from the kqueue without blocking. */
-  using drain_ready_native_fn = kqueue_operation_base*
-      (*)(void* ctx) noexcept;
+  using drain_ready_native_fn = kqueue_operation_base* (*)(void* ctx) noexcept;
 
   void push_cpu(kqueue_operation_base& operation) noexcept;
 

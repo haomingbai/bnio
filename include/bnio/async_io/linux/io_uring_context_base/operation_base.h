@@ -29,8 +29,8 @@ struct BNIO_EXPORT io_uring_task_queue_state {
                                         io_uring_operation_base*&) noexcept;
 
   /** Drains all ready native completions from the ring without blocking. */
-  using drain_ready_native_fn = io_uring_operation_base*
-      (*)(void* ctx) noexcept;
+  using drain_ready_native_fn =
+      io_uring_operation_base* (*)(void* ctx) noexcept;
 
   void push_cpu(io_uring_operation_base& operation) noexcept;
 

@@ -99,8 +99,7 @@ TEST(KqueueRunLoopTest, passive_io_queue_registers_all_published_operations) {
   }
   context.run();
 
-  EXPECT_EQ(state->completed.load(std::memory_order_acquire),
-            operation_count);
+  EXPECT_EQ(state->completed.load(std::memory_order_acquire), operation_count);
   EXPECT_EQ(state->stopped.load(std::memory_order_acquire), 0);
   EXPECT_TRUE(state->all_in_context.load(std::memory_order_acquire));
 }
@@ -158,8 +157,7 @@ TEST(KqueueRunLoopTest, concurrent_external_io_publication_is_drained) {
   }
   runner.join();
 
-  EXPECT_EQ(state->completed.load(std::memory_order_acquire),
-            operation_count);
+  EXPECT_EQ(state->completed.load(std::memory_order_acquire), operation_count);
   EXPECT_EQ(state->stopped.load(std::memory_order_acquire), 0);
   EXPECT_TRUE(state->all_in_context.load(std::memory_order_acquire));
 }
@@ -219,8 +217,7 @@ TEST(KqueueRunLoopTest, concurrent_external_posts_are_drained) {
   }
   runner.join();
 
-  EXPECT_EQ(state->completed.load(std::memory_order_acquire),
-            operation_count);
+  EXPECT_EQ(state->completed.load(std::memory_order_acquire), operation_count);
   EXPECT_EQ(state->stopped.load(std::memory_order_acquire), 0);
   EXPECT_TRUE(state->all_in_context.load(std::memory_order_acquire));
 }

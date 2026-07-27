@@ -4,7 +4,6 @@
  */
 
 #include <bnio/base/bsd/wake_channel.h>
-
 #include <fcntl.h>
 #include <unistd.h>
 

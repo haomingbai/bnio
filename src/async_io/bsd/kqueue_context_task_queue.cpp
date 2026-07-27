@@ -110,8 +110,7 @@ int kqueue_context::trigger_wakeup() noexcept {
   // Use the shared wake channel when available (multi-worker mode).
   // Fall back to per-context EVFILT_USER NOTE_TRIGGER for legacy
   // standalone operation (no global state).
-  if (global_state_ != nullptr &&
-      global_state_->wake_channel_.is_open()) {
+  if (global_state_ != nullptr && global_state_->wake_channel_.is_open()) {
     return global_state_->wake_channel_.wake();
   }
 

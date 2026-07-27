@@ -57,11 +57,9 @@ void kqueue_context::run() noexcept {
   // can wake this worker via a write to the shared wake channel. The
   // event carries wakeup_user_data() as its udata so it is filtered out
   // in process_event().
-  if (global_state_ != nullptr &&
-      global_state_->wake_channel_.is_open()) {
+  if (global_state_ != nullptr && global_state_->wake_channel_.is_open()) {
     bnio::base::event wake_fd_event(
-        static_cast<std::uintptr_t>(
-            global_state_->wake_channel_.read_fd()),
+        static_cast<std::uintptr_t>(global_state_->wake_channel_.read_fd()),
         EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, wakeup_user_data());
     (void)queue_.control(&wake_fd_event, 1, nullptr, 0, nullptr);
   }

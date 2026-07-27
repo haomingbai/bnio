@@ -115,7 +115,8 @@ int kqueue_context::prepare_io(kqueue_io_operation_base& operation,
   return 0;
 }
 
-kqueue_context::active_registration* kqueue_context::find_free_registration_slot() noexcept {
+kqueue_context::active_registration*
+kqueue_context::find_free_registration_slot() noexcept {
   for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
     if (active_registrations_[index].operation == nullptr) {
       return &active_registrations_[index];
