@@ -246,6 +246,10 @@ High-level async runtime, stream owners, and buffer types.
 - `usage/index.md` — usage guide (sender/receiver, operations, CPOs, submission
   modes, coroutines).
 - `examples.md` — runnable example walkthrough.
+- `benchmark/index.md` — benchmark overview and entry point.
+- `benchmark/io_uring.md` — io_uring (Linux) benchmark report.
+- `benchmark/kqueue.md` — kqueue (macOS/BSD) benchmark report.
+- `benchmark/charts/` — benchmark charts (io_uring/ and kqueue/ subdirectories).
 
 ## Build and Scripts
 

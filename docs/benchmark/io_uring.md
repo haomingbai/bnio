@@ -109,7 +109,7 @@ Overall average lifecycle throughput ratio (bnio / asio): **1.179×** across all
 
 ### 5.1 Throughput Overview
 
-![Throughput Overview](benchmark_charts/overview_bars.png)
+![Throughput Overview](charts/io_uring/overview_bars.png)
 
 **Reference point: workers=4, connections=256**
 
@@ -122,13 +122,13 @@ Overall average lifecycle throughput ratio (bnio / asio): **1.179×** across all
 
 ### 5.2 Throughput vs Connections
 
-![Throughput vs Connections](benchmark_charts/throughput_vs_connections.png)
+![Throughput vs Connections](charts/io_uring/throughput_vs_connections.png)
 
 *Workers=4, faceted by message size.*
 
 ### 5.3 Throughput vs Worker Threads
 
-![Throughput vs Workers](benchmark_charts/throughput_vs_workers.png)
+![Throughput vs Workers](charts/io_uring/throughput_vs_workers.png)
 
 *Connections=256, faceted by message size.*
 
@@ -153,13 +153,13 @@ Overall average lifecycle throughput ratio (bnio / asio): **1.179×** across all
 
 ### 5.5 bnio / asio Throughput Ratio Heatmap
 
-![Heatmap](benchmark_charts/heatmap_ratio.png)
+![Heatmap](charts/io_uring/heatmap_ratio.png)
 
 *Workers=4. Positive values (blue) = bnio faster; negative (red) = asio faster.*
 
 ### 5.6 Worker-Scaling Ratio Heatmap
 
-![Worker Scaling](benchmark_charts/worker_scaling_heatmap.png)
+![Worker Scaling](charts/io_uring/worker_scaling_heatmap.png)
 
 *Connections=256. Shows how the bnio/asio ratio changes as worker threads increase.*
 
@@ -242,7 +242,7 @@ These observations are based on the benchmark data and the implementation model.
 
 ### 6.1 Lifecycle Throughput Overview
 
-![Timer Lifecycle Overview](benchmark_charts/timer_lifecycle_overview.png)
+![Timer Lifecycle Overview](charts/io_uring/timer_lifecycle_overview.png)
 
 **Reference point: update_rounds=500**
 
@@ -255,7 +255,7 @@ These observations are based on the benchmark data and the implementation model.
 
 ### 6.2 Active Waits Overview
 
-![Timer Waits Overview](benchmark_charts/timer_waits_overview.png)
+![Timer Waits Overview](charts/io_uring/timer_waits_overview.png)
 
 **Reference point: update_rounds=500**
 
@@ -268,19 +268,19 @@ These observations are based on the benchmark data and the implementation model.
 
 ### 6.3 Lifecycle Throughput vs Timer Count
 
-![Timer Lifecycle vs Timers](benchmark_charts/timer_lifecycle_vs_timers.png)
+![Timer Lifecycle vs Timers](charts/io_uring/timer_lifecycle_vs_timers.png)
 
 *Faceted by update rounds. X-axis on log₂ scale.*
 
 ### 6.4 bnio / asio Lifecycle Ratio Heatmap
 
-![Timer Lifecycle Heatmap](benchmark_charts/timer_lifecycle_heatmap.png)
+![Timer Lifecycle Heatmap](charts/io_uring/timer_lifecycle_heatmap.png)
 
 *Values > 1.0 (blue) = bnio faster; < 1.0 (red) = asio faster.*
 
 ### 6.5 bnio / asio Waits Ratio Heatmap
 
-![Timer Waits Heatmap](benchmark_charts/timer_waits_heatmap.png)
+![Timer Waits Heatmap](charts/io_uring/timer_waits_heatmap.png)
 
 *Values > 1.0 (blue) = bnio faster; < 1.0 (red) = asio faster.*
 
@@ -370,4 +370,4 @@ bnio on io_uring demonstrates a measurable throughput advantage over standalone 
 
 ---
 
-*Report generated from 360 benchmark iterations (288 throughput + 72 timer churn). Charts are available in the repository under `docs/benchmark_charts/`. Raw data and benchmark orchestration scripts are in `.artifacts/`.*
+*Report generated from 360 benchmark iterations (288 throughput + 72 timer churn). Charts are available in the repository under `docs/charts/io_uring/`. Raw data and benchmark orchestration scripts are in `.artifacts/`.*

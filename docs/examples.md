@@ -81,6 +81,8 @@ Override defaults with environment variables:
 CONNECTIONS=256 DURATION=30s MSG_SIZE=1024 scripts/benchmark.sh
 ```
 
+Full benchmark reports with charts are in [benchmark/](benchmark/).
+
 ## Standalone Asio Echo Server
 
 The `examples/asio_echo` directory contains an HTTP/1.1 echo server built on

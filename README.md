@@ -228,6 +228,9 @@ cmake --build build-bench --target bnio_throughput_benchmark \
 scripts/benchmark.sh --build-dir build-bench
 ```
 
+See [docs/benchmark/](docs/benchmark/) for full benchmark reports
+(io_uring on Linux, kqueue on macOS/BSD).
+
 ### Standalone Asio echo
 
 `examples/asio_echo/` contains an equivalent HTTP/1.1 echo server written
