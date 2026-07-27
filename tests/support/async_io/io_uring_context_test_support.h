@@ -332,6 +332,15 @@ inline void reset_task_queue_state(
   global_tasks.cpu_head.store(nullptr, std::memory_order_relaxed);
   global_tasks.io_head.store(nullptr, std::memory_order_relaxed);
   global_tasks.awake_workers.store(0, std::memory_order_relaxed);
+
+  // Open the shared wake channel if not already open.  For static
+  // thread_local state the eventfd is opened once and reused across
+  // tests; for stack-allocated state it is opened per test and
+  // cleaned up by ~wake_channel().  This mirrors how production
+  // io_context opens the channel in its constructor.
+  if (!global_tasks.wake_channel_.is_open()) {
+    (void)global_tasks.wake_channel_.open();
+  }
 }
 
 inline bool queue_init_result_or_skip(io_uring_context& context,
