@@ -148,6 +148,10 @@ class BNIO_EXPORT io_uring_io_operation_base : public io_uring_operation_base {
 
   /** Selects the completion delivered when SQE preparation fails. */
   virtual void complete_submit_error(int result) noexcept = 0;
+
+  /** Intrusive links for the inflight doubly-linked list. */
+  io_uring_io_operation_base* io_next = nullptr;
+  io_uring_io_operation_base* io_prev = nullptr;
 };
 
 inline void io_uring_task_queue_state::push_cpu(

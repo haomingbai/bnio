@@ -78,6 +78,14 @@ bool io_uring_context::consume_io_tasks() noexcept {
   if (prepared != nullptr) {
     const int submit_result = submit_ring();
     if (submit_result >= 0) {
+      // Add every prepared operation to the inflight list before
+      // release_prepared clears their next pointers.
+      auto* current = prepared;
+      while (current != nullptr) {
+        auto* next_op = static_cast<io_uring_io_operation_base*>(current->next);
+        add_inflight(*current);
+        current = next_op;
+      }
       release_prepared();
     } else {
       fail_prepared(submit_result);
@@ -128,6 +136,65 @@ void io_uring_context::assert_running() const noexcept {
 #ifndef NDEBUG
   assert(state_.load(std::memory_order_acquire) == context_state::running);
 #endif
+}
+
+void io_uring_context::add_inflight(
+    io_uring_io_operation_base& operation) noexcept {
+  if (operation.io_prev != nullptr || inflight_io_head_ == &operation) {
+    return;
+  }
+  operation.io_prev = nullptr;
+  operation.io_next = inflight_io_head_;
+  if (inflight_io_head_ != nullptr) {
+    inflight_io_head_->io_prev = &operation;
+  }
+  inflight_io_head_ = &operation;
+}
+
+void io_uring_context::remove_inflight(
+    io_uring_io_operation_base& operation) noexcept {
+  if (operation.io_prev == nullptr && inflight_io_head_ != &operation) {
+    return;
+  }
+  if (operation.io_prev != nullptr) {
+    operation.io_prev->io_next = operation.io_next;
+  } else {
+    inflight_io_head_ = operation.io_next;
+  }
+  if (operation.io_next != nullptr) {
+    operation.io_next->io_prev = operation.io_prev;
+  }
+  operation.io_next = nullptr;
+  operation.io_prev = nullptr;
+}
+
+void io_uring_context::abort_inflight_io() noexcept {
+  while (inflight_io_head_ != nullptr) {
+    io_uring_io_operation_base* op = inflight_io_head_;
+    inflight_io_head_ = op->io_next;
+    if (inflight_io_head_ != nullptr) {
+      inflight_io_head_->io_prev = nullptr;
+    }
+    op->io_next = nullptr;
+    op->io_prev = nullptr;
+
+    op->result = -ECANCELED;
+    op->complete_submit_error(-ECANCELED);
+    local_tasks_.push(*op);
+  }
+
+  if (global_state_ != nullptr) {
+    io_uring_io_operation_base* ops = global_state_->pop_io_all();
+    while (ops != nullptr) {
+      io_uring_io_operation_base* next =
+          static_cast<io_uring_io_operation_base*>(ops->next);
+      ops->next = nullptr;
+      ops->result = -ECANCELED;
+      ops->complete_submit_error(-ECANCELED);
+      local_tasks_.push(*ops);
+      ops = next;
+    }
+  }
 }
 
 }  // namespace bnio::async_io::linux_native

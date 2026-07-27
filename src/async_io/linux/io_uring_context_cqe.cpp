@@ -110,6 +110,10 @@ bool io_uring_context::enqueue_cqe_task(const cqe_data& data,
     return false;
   }
 
+  // Cast to I/O base; all CQEs (other than eventfd) originate from I/O ops.
+  auto* io_op = static_cast<io_uring_io_operation_base*>(operation);
+  remove_inflight(*io_op);
+
   operation->result = data.result;
   operation->flags = data.flags;
   tasks.push(*operation);

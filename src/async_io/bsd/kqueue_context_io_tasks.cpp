@@ -76,6 +76,8 @@ bool kqueue_context::consume_io_tasks() noexcept {
         operation->result = register_result;
         operation->complete_submit_error(register_result);
         complete_immediately = true;
+      } else {
+        add_inflight(*operation);
       }
     }
 
@@ -288,6 +290,93 @@ bool kqueue_context::take_registration(
     }
   }
   return false;
+}
+
+void kqueue_context::add_inflight(
+    kqueue_io_operation_base& operation) noexcept {
+  // Guard: already in the inflight list.
+  if (operation.io_prev != nullptr || inflight_io_head_ == &operation) {
+    return;
+  }
+  operation.io_prev = nullptr;
+  operation.io_next = inflight_io_head_;
+  if (inflight_io_head_ != nullptr) {
+    inflight_io_head_->io_prev = &operation;
+  }
+  inflight_io_head_ = &operation;
+}
+
+void kqueue_context::remove_inflight(
+    kqueue_io_operation_base& operation) noexcept {
+  // Guard: not in the inflight list.
+  if (operation.io_prev == nullptr && inflight_io_head_ != &operation) {
+    return;
+  }
+  if (operation.io_prev != nullptr) {
+    operation.io_prev->io_next = operation.io_next;
+  } else {
+    inflight_io_head_ = operation.io_next;
+  }
+  if (operation.io_next != nullptr) {
+    operation.io_next->io_prev = operation.io_prev;
+  }
+  operation.io_next = nullptr;
+  operation.io_prev = nullptr;
+}
+
+void kqueue_context::abort_inflight_io() noexcept {
+  // Cancel every inflight operation: remove from list, EV_DELETE its
+  // kqueue registrations, mark as cancelled, and push to the CPU queue.
+  while (inflight_io_head_ != nullptr) {
+    kqueue_io_operation_base* op = inflight_io_head_;
+    inflight_io_head_ = op->io_next;
+    if (inflight_io_head_ != nullptr) {
+      inflight_io_head_->io_prev = nullptr;
+    }
+    op->io_next = nullptr;
+    op->io_prev = nullptr;
+
+    // EV_DELETE all armed kqueue events for this operation.
+    for (std::size_t i = 0; i < active_registration_capacity_; ++i) {
+      active_registration& reg = active_registrations_[i];
+      if (reg.operation != op) continue;
+      if (reg.armed) {
+        bnio::base::event deletion(reg.event.ident(), reg.event.filter(),
+                                   EV_DELETE, 0, 0, op);
+        (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
+      }
+      reg = {};
+    }
+
+    op->result = -ECANCELED;
+    op->complete_submit_error(-ECANCELED);
+    local_state_.push_cpu(*op);
+  }
+
+  // Drain unregistered I/O from the global queue and the local incoming
+  // buffer so they are completed instead of leaked.
+  if (global_state_ != nullptr) {
+    kqueue_io_operation_base* ops = global_state_->pop_io_all();
+    while (ops != nullptr) {
+      kqueue_io_operation_base* next = ops->io_next;
+      ops->io_next = nullptr;
+      ops->result = -ECANCELED;
+      ops->complete_submit_error(-ECANCELED);
+      local_state_.push_cpu(*ops);
+      ops = next;
+    }
+  }
+
+  kqueue_io_operation_base* unregistered =
+      std::exchange(incoming_io_tasks_, nullptr);
+  while (unregistered != nullptr) {
+    kqueue_io_operation_base* next = unregistered->io_next;
+    unregistered->io_next = nullptr;
+    unregistered->result = -ECANCELED;
+    unregistered->complete_submit_error(-ECANCELED);
+    local_state_.push_cpu(*unregistered);
+    unregistered = next;
+  }
 }
 
 }  // namespace bnio::async_io::bsd_native

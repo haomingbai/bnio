@@ -109,6 +109,9 @@ class BNIO_EXPORT kqueue_io_operation_base : public kqueue_operation_base {
   /** Intrusive link used by local and shared I/O queues. */
   kqueue_io_operation_base* io_next = nullptr;
 
+  /** Reverse link for inflight doubly-linked list during shutdown. */
+  kqueue_io_operation_base* io_prev = nullptr;
+
   /** Describes the native registration after the run loop takes this task. */
   virtual void prepare(kqueue_helper& helper) noexcept = 0;
 

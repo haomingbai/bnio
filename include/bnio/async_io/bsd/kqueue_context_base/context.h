@@ -217,6 +217,15 @@ class BNIO_EXPORT kqueue_context {
   /** Consumes staged local I/O tasks after ready CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;
 
+  /** Adds an I/O operation to the inflight doubly-linked list. */
+  void add_inflight(kqueue_io_operation_base& operation) noexcept;
+
+  /** Removes an I/O operation from the inflight doubly-linked list. */
+  void remove_inflight(kqueue_io_operation_base& operation) noexcept;
+
+  /** Aborts all inflight I/O operations during shutdown. */
+  void abort_inflight_io() noexcept;
+
   /** Moves due passive-timer completions into the local CPU queue. */
   [[nodiscard]] bool consume_timeout_operations() noexcept;
 
@@ -294,6 +303,7 @@ class BNIO_EXPORT kqueue_context {
   kqueue_task_queue_state* global_state_ = nullptr;
   local_task_queue_state local_state_;
   kqueue_io_operation_base* incoming_io_tasks_ = nullptr;
+  kqueue_io_operation_base* inflight_io_head_ = nullptr;
   unsigned local_task_budget_ = 0;
 };
 

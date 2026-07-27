@@ -142,6 +142,7 @@ bool kqueue_context::process_event(const bnio::base::event& event,
   }
 
   unregister_operation(operation);
+  remove_inflight(operation);
   tasks.push(operation);
   return true;
 }

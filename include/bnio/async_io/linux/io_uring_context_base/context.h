@@ -251,6 +251,15 @@ class BNIO_EXPORT io_uring_context {
   /** Consumes ring-local control I/O and all shared I/O after CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;
 
+  /** Adds an I/O operation to the inflight doubly-linked list. */
+  void add_inflight(io_uring_io_operation_base& operation) noexcept;
+
+  /** Removes an I/O operation from the inflight doubly-linked list. */
+  void remove_inflight(io_uring_io_operation_base& operation) noexcept;
+
+  /** Aborts all inflight I/O operations during shutdown. */
+  void abort_inflight_io() noexcept;
+
   /** Moves due passive-timer completions into the local CPU queue. */
   [[nodiscard]] bool consume_timeout_operations() noexcept;
 
@@ -376,6 +385,7 @@ class BNIO_EXPORT io_uring_context {
   operation_queue local_tasks_;
   // Reserved for future ring-local I/O batching.
   operation_queue local_io_tasks_;
+  io_uring_io_operation_base* inflight_io_head_ = nullptr;
   unsigned local_task_budget_ = 0;
 };
 
