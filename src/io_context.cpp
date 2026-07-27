@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <thread>
 
 namespace bnio {
 
@@ -86,12 +87,20 @@ void io_context::run() noexcept {
 int io_context::stop() noexcept {
   global_state_.closing.store(true, std::memory_order_release);
 
-  // Wake workers through the shared wake channel so they detect the
-  // closing flag and finish. Thundering herd is acceptable for stop:
-  // a single write wakes all workers that have read interest registered
-  // on the channel. Waking all workers on stop is the desired
-  // behaviour.
-  (void)global_state_.wake_channel_.wake();
+  // Repeatedly signal the shared wake channel until every *other*
+  // worker has observed the closing flag and exited.  When stop()
+  // is called from within a worker (is_in_context() == true) the
+  // calling worker is still counted in running_workers, so the
+  // loop excludes one count.  The calling worker returns to its run
+  // loop, detects closing in should_finish(), and decrements
+  // running_workers on exit — no hard-coded timeout needed.
+  const bool in_worker_context = is_in_context();
+  const std::size_t self_count = in_worker_context ? 1 : 0;
+  while (global_state_.running_workers.load(std::memory_order_acquire) >
+         self_count) {
+    (void)global_state_.wake_channel_.wake();
+    std::this_thread::yield();
+  }
 
   return 0;
 }

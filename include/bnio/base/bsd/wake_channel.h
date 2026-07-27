@@ -63,11 +63,8 @@ class BNIO_EXPORT wake_channel {
   /**
    * Writes one byte to the pipe to wake workers.
    *
-   * This is a best-effort signal — EAGAIN (pipe buffer full) is
-   * treated as success because workers are already awake in that
-   * case.
-   *
-   * @return 0 on success, or a negative errno (other than EAGAIN).
+   * @return 0 on success, -EAGAIN if the pipe buffer is full and
+   *         no data was written, or another negative errno on failure.
    */
   int wake() noexcept;
 

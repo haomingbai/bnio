@@ -12,13 +12,13 @@ namespace bnio {
 
 void io_context::publish_io(operation_base& operation) noexcept {
   global_state_.push_io(operation);
-  wake_one_worker();
+  wake_one_if_all_workers_sleeping();
 }
 
 void io_context::publish_cpu(
     detail::native_operation_base& operation) noexcept {
   global_state_.push_cpu(operation);
-  wake_one_worker();
+  wake_one_if_all_workers_sleeping();
 }
 
 void io_context::wake_one_worker() noexcept {

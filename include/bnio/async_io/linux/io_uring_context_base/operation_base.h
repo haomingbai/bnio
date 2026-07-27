@@ -43,6 +43,15 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
   std::atomic<io_uring_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
+
+  /** Total workers currently inside run().
+   *
+   *  Incremented on run() entry, decremented on run() exit.  Unlike
+   *  awake_workers, this never decreases when a worker sleeps.
+   *  io_context::stop() polls this counter until it drops to zero.
+   */
+  std::atomic<std::size_t> running_workers{0};
+
   std::atomic_bool closing{false};
 
   /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */

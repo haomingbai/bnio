@@ -91,7 +91,10 @@ int wake_channel::wake() noexcept {
       continue;
     }
     if (result < 0 && errno == EAGAIN) {
-      return 0;
+      // The pipe buffer is full and the write cannot be completed.
+      // Return -EAGAIN so the caller can distinguish a dropped wake
+      // from a successful one.
+      return -EAGAIN;
     }
     return result < 0 ? -errno : -EIO;
   }

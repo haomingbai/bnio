@@ -63,6 +63,7 @@ void io_uring_context::run() noexcept {
   current_context_ = this;
   waiting_.store(false, std::memory_order_release);
   global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
+  global_state_->running_workers.fetch_add(1, std::memory_order_acq_rel);
   const int poll_result = submit_eventfd_poll();
   if (poll_result < 0) {
     state_.store(context_state::finished, std::memory_order_release);
@@ -98,6 +99,7 @@ void io_uring_context::run() noexcept {
 
   current_context_ = previous_context;
   global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
+  global_state_->running_workers.fetch_sub(1, std::memory_order_acq_rel);
   run_active_.store(false, std::memory_order_release);
 }
 
