@@ -170,6 +170,19 @@ class BNIO_EXPORT io_uring_context {
   void set_global_state(io_uring_task_queue_state* state) noexcept;
 
   /**
+   * Collects all ready CQEs into a linked list without blocking or
+   * dispatching. Used by the unified drain callback registered in
+   * native_task_queue_state.
+   */
+  [[nodiscard]] io_uring_operation_base* drain_ready_native() noexcept;
+
+  /**
+   * Static thunk for native_task_queue_state::drain_ready_native.
+   */
+  [[nodiscard]] static io_uring_operation_base* drain_ready_native_thunk(
+      void* ctx) noexcept;
+
+  /**
    * Wakes the run loop through the context eventfd.
    */
   void notify_one_waiter() noexcept;
@@ -356,8 +369,6 @@ class BNIO_EXPORT io_uring_context {
 
   std::atomic_bool run_active_{false};
   std::atomic_bool waiting_{false};
-  int event_fd_ = -1;
-  bool owns_event_fd_ = false;
   bool eventfd_poll_pending_ = false;
 
   static thread_local io_uring_context* current_context_;

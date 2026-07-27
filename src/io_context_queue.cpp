@@ -8,10 +8,7 @@
 #include <atomic>
 #include <cstddef>
 
-#include "bnio/detail/io_context/native_worker.h"
 namespace bnio {
-
-using detail::native_worker;
 
 void io_context::publish_io(operation_base& operation) noexcept {
   global_state_.push_io(operation);
@@ -25,14 +22,12 @@ void io_context::publish_cpu(
 }
 
 void io_context::wake_one_worker() noexcept {
-  native_worker* worker = native_workers_.head.load(std::memory_order_acquire);
-  while (worker != nullptr) {
-    if (worker->context.is_waiting()) {
-      worker->context.notify_one_waiter();
-      return;
-    }
-    worker = worker->next;
-  }
+  // Write to the shared wake channel. A single write wakes all workers
+  // whose native contexts have read interest registered on the channel
+  // (minor thundering herd). Extra workers that wake up only perform
+  // one read→EAGAIN plus one pop_cpu_all() CAS before returning to
+  // sleep — negligible for typical 4–8 worker concurrency.
+  (void)global_state_.wake_channel_.wake();
 }
 
 void io_context::wake_one_if_all_workers_sleeping() noexcept {

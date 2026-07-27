@@ -52,6 +52,19 @@ void kqueue_context::run() noexcept {
     global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   }
 
+  // Register the shared wake fd (EVFILT_READ | EV_CLEAR) so io_context
+  // can wake this worker via a write to the shared wake channel. The
+  // event carries wakeup_user_data() as its udata so it is filtered out
+  // in process_event().
+  if (global_state_ != nullptr &&
+      global_state_->wake_channel_.is_open()) {
+    bnio::base::event wake_fd_event(
+        static_cast<std::uintptr_t>(
+            global_state_->wake_channel_.read_fd()),
+        EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, wakeup_user_data());
+    (void)queue_.control(&wake_fd_event, 1, nullptr, 0, nullptr);
+  }
+
   run_phase phase = run_phase::run_ready_tasks;
   // Run-loop phase machine:
   //   run_ready_tasks -> wait_for_work -> finish_drain -> finished

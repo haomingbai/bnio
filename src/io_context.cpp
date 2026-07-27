@@ -1,7 +1,6 @@
 /**
  * @file io_context.cpp
- * @brief io_context construction, destruction, run loop entry, and worker
- * registration.
+ * @brief io_context construction, destruction, run loop entry.
  */
 
 #include <bnio/io_context.h>
@@ -9,14 +8,9 @@
 #include <atomic>
 #include <mutex>
 
-#include "bnio/detail/io_context/native_worker.h"
-
 namespace bnio {
 
-using detail::native_worker;
-
-thread_local detail::native_worker* io_context::current_native_worker_ =
-    nullptr;
+thread_local io_context* io_context::current_context_ = nullptr;
 
 io_context::io_context() noexcept : io_context(io_context_options{}) {}
 
@@ -29,6 +23,17 @@ io_context::io_context(const io_context_options& options) noexcept
     detail::native_context probe(native_.options);
     native_available_.store(probe.is_open(), std::memory_order_release);
   }
+
+  // Create the shared wake channel owned by io_context. Each worker's
+  // native context registers read interest on the channel before
+  // sleeping. io_context writes to the channel to wake workers.
+  //
+  // @warning A single write wakes ALL workers that have read interest
+  // registered on the channel (minor thundering herd). The per-worker
+  // overhead is one read(2) returning EAGAIN plus one pop_cpu_all()
+  // CAS — negligible for typical 4–8 worker concurrency. During
+  // stop(), waking all workers is the desired behaviour.
+  (void)global_state_.wake_channel_.open();
 
   global_state_.timeout_heap = &timers_;
   global_state_.try_fetch_timeout_operations =
@@ -45,8 +50,8 @@ io_context::~io_context() noexcept {
     global_state_.try_fetch_timeout_operations = nullptr;
   }
 
-  // Workers are stack-allocated inside run(); just clear the list head.
-  native_workers_.head.store(nullptr, std::memory_order_release);
+  // The wake channel is owned by io_context and outlives all workers.
+  global_state_.wake_channel_.close();
 }
 
 bool io_context::is_open() const noexcept {
@@ -59,67 +64,40 @@ void io_context::run() noexcept {
     return;
   }
 
-  native_worker worker{*this, native_.options};
-  if (!prepare_run_worker(worker)) {
+  detail::native_context ctx(native_.options);
+  if (!ctx.is_open()) {
     return;
   }
-
-  native_worker* previous_worker = current_native_worker_;
-  current_native_worker_ = &worker;
-  worker.context.run();
-  current_native_worker_ = previous_worker;
-}
-
-bool io_context::prepare_run_worker(
-    detail::native_worker& worker) noexcept {
-  if (!worker.context.is_open()) {
-    return false;
-  }
-  worker.context.set_global_state(&global_state_);
+  ctx.set_global_state(&global_state_);
 
   // A close may have been requested after the initial checks but before
   // the native context was fully opened.
   if (global_state_.closing.load(std::memory_order_acquire)) {
-    (void)worker.context.stop();
-    return false;
+    (void)ctx.stop();
+    return;
   }
 
-  // CAS-insert this worker at the head of the lock-free worker list.
-  native_worker* head = native_workers_.head.load(std::memory_order_relaxed);
-  do {
-    worker.next = head;
-  } while (!native_workers_.head.compare_exchange_weak(
-      head, &worker, std::memory_order_release, std::memory_order_relaxed));
-
-  // A stop that raced with the head insertion may have completed its scan
-  // before seeing this worker.
-  if (global_state_.closing.load(std::memory_order_acquire)) {
-    (void)worker.context.stop();
-    return false;
-  }
-
-  return true;
+  io_context* previous_context = current_context_;
+  current_context_ = this;
+  ctx.run();
+  current_context_ = previous_context;
 }
 
 int io_context::stop() noexcept {
   global_state_.closing.store(true, std::memory_order_release);
 
-  int first_error = 0;
-  native_worker* worker = native_workers_.head.load(std::memory_order_acquire);
-  while (worker != nullptr) {
-    native_worker* next = worker->next;
-    const int result = worker->context.stop();
-    if (result < 0 && first_error == 0) {
-      first_error = result;
-    }
-    worker = next;
-  }
-  return first_error;
+  // Wake workers through the shared wake channel so they detect the
+  // closing flag and finish. Thundering herd is acceptable for stop:
+  // a single write wakes all workers that have read interest registered
+  // on the channel. Waking all workers on stop is the desired
+  // behaviour.
+  (void)global_state_.wake_channel_.wake();
+
+  return 0;
 }
 
 bool io_context::is_in_context() const noexcept {
-  return current_native_worker_ != nullptr &&
-         current_native_worker_->owner == this;
+  return current_context_ == this;
 }
 
 io_context::dispatch_scheduler io_context::get_dispatch_scheduler() noexcept {

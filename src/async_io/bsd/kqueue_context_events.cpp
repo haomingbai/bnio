@@ -97,6 +97,12 @@ bool kqueue_context::try_rearm_operation(
 bool kqueue_context::process_event(const bnio::base::event& event,
                                    operation_queue& tasks) noexcept {
   if (event.udata() == wakeup_user_data()) {
+    // Drain the shared wake channel so edge-triggered EVFILT_READ can
+    // re-fire on the next write. This handles both the legacy
+    // EVFILT_USER path and the new shared-pipe path uniformly.
+    if (global_state_ != nullptr) {
+      (void)global_state_->wake_channel_.drain();
+    }
     return false;
   }
 

@@ -6,8 +6,6 @@
 #include <bnio/async_io/linux/io_uring_context.h>
 #include <bnio/base/linux/liburing.h>
 #include <bnio/base/linux/params.h>
-#include <sys/eventfd.h>
-#include <unistd.h>
 
 #include <atomic>
 #include <cerrno>
@@ -64,19 +62,6 @@ int io_uring_context::queue_init(
   apply_context_options(options);
   eventfd_poll_pending_ = false;
 
-  if (options_.event_fd >= 0) {
-    event_fd_ = options_.event_fd;
-    owns_event_fd_ = false;
-  } else {
-    event_fd_ = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-    if (event_fd_ < 0) {
-      const int error = -errno;
-      queue_initialized_ = false;
-      return error;
-    }
-    owns_event_fd_ = true;
-  }
-
   bnio::base::params queue_params;
   const unsigned flags = prepare_queue_params(options_, queue_params);
   const int result = init_ring_params(options_.entries, flags, queue_params);
@@ -92,11 +77,6 @@ int io_uring_context::queue_init(
 
   if (result < 0) {
     state_.store(context_state::finished, std::memory_order_release);
-    if (owns_event_fd_ && event_fd_ >= 0) {
-      (void)::close(event_fd_);
-    }
-    event_fd_ = -1;
-    owns_event_fd_ = false;
     return result;
   }
 
@@ -135,18 +115,12 @@ int io_uring_context::init_ring_params(
 
 void io_uring_context::queue_exit() noexcept {
   state_.store(context_state::finished, std::memory_order_release);
-  (void)signal_eventfd();
 
   (void)local_tasks_.pop_all();
   (void)local_io_tasks_.pop_all();
   eventfd_poll_pending_ = false;
   ring_disabled_ = false;
   ring_.queue_exit();
-  if (owns_event_fd_ && event_fd_ >= 0) {
-    (void)::close(event_fd_);
-  }
-  event_fd_ = -1;
-  owns_event_fd_ = false;
   queue_initialized_ = false;
 }
 
@@ -155,6 +129,21 @@ bool io_uring_context::is_open() const noexcept { return ring_.is_open(); }
 void io_uring_context::set_global_state(
     io_uring_task_queue_state* state) noexcept {
   global_state_ = state;
+  if (global_state_ != nullptr) {
+    global_state_->drain_ready_native = &drain_ready_native_thunk;
+    global_state_->drain_native_context = this;
+  }
+}
+
+io_uring_operation_base* io_uring_context::drain_ready_native() noexcept {
+  operation_queue tasks;
+  (void)collect_cqe_tasks(tasks);
+  return tasks.pop_all();
+}
+
+io_uring_operation_base* io_uring_context::drain_ready_native_thunk(
+    void* ctx) noexcept {
+  return static_cast<io_uring_context*>(ctx)->drain_ready_native();
 }
 
 }  // namespace bnio::async_io::linux_native

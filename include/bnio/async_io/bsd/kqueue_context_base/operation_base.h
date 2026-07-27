@@ -8,6 +8,7 @@
 #define BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPERATION_BASE_H_
 
 #include <bnio/async_io/time.h>
+#include <bnio/base/wake_channel.h>
 #include <bnio/export.h>
 
 #include <atomic>
@@ -23,6 +24,11 @@ class kqueue_io_operation_base;
 struct BNIO_EXPORT kqueue_task_queue_state {
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
                                         kqueue_operation_base*&) noexcept;
+
+  /** Drains all ready native completions from the kqueue without blocking. */
+  using drain_ready_native_fn = kqueue_operation_base*
+      (*)(void* ctx) noexcept;
+
   void push_cpu(kqueue_operation_base& operation) noexcept;
 
   [[nodiscard]] kqueue_operation_base* pop_cpu_all() noexcept;
@@ -38,6 +44,28 @@ struct BNIO_EXPORT kqueue_task_queue_state {
   /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */
   void* timeout_heap = nullptr;
   try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
+
+  /** Shared wake channel owned by io_context.
+   *
+   * io_context creates the channel once and writes to it to wake
+   * workers.  Each worker's kqueue_context registers EVFILT_READ |
+   * EV_CLEAR on the read end before sleeping.
+   *
+   * @warning A single write wakes ALL workers whose kqueues have
+   * EVFILT_READ registered on the read end (minor thundering herd).
+   * The per-worker overhead is one ::read → EAGAIN plus one
+   * pop_cpu_all() CAS — negligible for typical 4–8 worker
+   * concurrency.  During stop(), waking all workers is the desired
+   * behaviour.
+   */
+  bnio::base::wake_channel wake_channel_;
+
+  /** Unified drain: collects all ready native completions (kevents)
+   *  into a linked list. Registered by each native_context in
+   *  set_global_state().
+   */
+  drain_ready_native_fn drain_ready_native = nullptr;
+  void* drain_native_context = nullptr;
 };
 
 /**

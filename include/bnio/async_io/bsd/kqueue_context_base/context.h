@@ -131,6 +131,19 @@ class BNIO_EXPORT kqueue_context {
    */
   void set_global_state(kqueue_task_queue_state* state) noexcept;
 
+  /**
+   * Collects all ready kevents into a linked list without blocking or
+   * dispatching. Used by the unified drain callback registered in
+   * native_task_queue_state.
+   */
+  [[nodiscard]] kqueue_operation_base* drain_ready_native() noexcept;
+
+  /**
+   * Static thunk for native_task_queue_state::drain_ready_native.
+   */
+  [[nodiscard]] static kqueue_operation_base* drain_ready_native_thunk(
+      void* ctx) noexcept;
+
   /** Wakes one run-loop waiter. */
   void notify_one_waiter() noexcept;
 

@@ -107,10 +107,18 @@ void kqueue_context::end_wait() noexcept {
 }
 
 int kqueue_context::trigger_wakeup() noexcept {
+  // Use the shared wake channel when available (multi-worker mode).
+  // Fall back to per-context EVFILT_USER NOTE_TRIGGER for legacy
+  // standalone operation (no global state).
+  if (global_state_ != nullptr &&
+      global_state_->wake_channel_.is_open()) {
+    return global_state_->wake_channel_.wake();
+  }
+
+  // Legacy standalone mode: trigger own kqueue's EVFILT_USER.
   if (!queue_.is_open()) {
     return -EINVAL;
   }
-
   bnio::base::event trigger(options_.wakeup_ident, EVFILT_USER, 0, NOTE_TRIGGER,
                             0, wakeup_user_data());
   return queue_.control(&trigger, 1, nullptr, 0, nullptr);

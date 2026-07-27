@@ -24,12 +24,6 @@ struct native_context_state {
   platform_io_context_options options;
 };
 
-struct native_worker;
-
-struct native_worker_state {
-  std::atomic<native_worker*> head{nullptr};
-};
-
 /** @endcond */
 
 }  // namespace bnio::detail

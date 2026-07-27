@@ -536,9 +536,6 @@ class BNIO_EXPORT io_context {
   /** Publishes CPU work for execution by one context run-loop worker. */
   void publish_cpu(detail::native_operation_base& operation) noexcept;
 
-  /** Initialises and registers a stack-allocated worker for the run loop. */
-  [[nodiscard]] bool prepare_run_worker(detail::native_worker& worker) noexcept;
-
   void wake_one_worker() noexcept;
 
   /** Wakes one worker only when every published worker is sleeping. */
@@ -580,17 +577,15 @@ class BNIO_EXPORT io_context {
 
   detail::native_task_queue_state global_state_;
   detail::native_context_state native_;
-  detail::native_worker_state native_workers_;
 
   detail::timer_state_data timers_;
   std::atomic_bool native_available_{false};
 
-  static thread_local detail::native_worker* current_native_worker_;
+  static thread_local io_context* current_context_;
 };
 
 }  // namespace bnio
 
 #include <bnio/detail/io_context/native_io.h>
-#include <bnio/detail/io_context/native_worker.h>
 
 #endif  // BNIO_DETAIL_IO_CONTEXT_CLASS_H_

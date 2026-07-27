@@ -1,11 +1,10 @@
 /**
  * @file io_uring_context_task_queue.cpp
  * @brief Task queue operations: post, publish, CPU push, wait/notify, and
- * eventfd I/O.
+ * wake channel I/O.
  */
 
 #include <poll.h>
-#include <unistd.h>
 
 #include <cassert>
 #include <cerrno>
@@ -82,58 +81,21 @@ void io_uring_context::end_wait() noexcept {
 }
 
 int io_uring_context::signal_eventfd() noexcept {
-  if (event_fd_ < 0) {
-    return -EINVAL;
-  }
-
-  // Retry loop: eventfd writes may be partial (EAGAIN when counter is
-  // saturated) or interrupted (EINTR). Retry only the remaining bytes.
-  const std::uint64_t value = 1;
-  const auto* bytes = reinterpret_cast<const char*>(&value);
-  std::size_t offset = 0;
-  while (offset < sizeof(value)) {
-    const ssize_t result =
-        ::write(event_fd_, bytes + offset, sizeof(value) - offset);
-    if (result > 0) {
-      offset += static_cast<std::size_t>(result);
-      continue;
-    }
-    if (result < 0 && errno == EINTR) {
-      continue;
-    }
-    if (result < 0 && errno == EAGAIN) {
-      return 0;
-    }
-    return result < 0 ? -errno : -EIO;
-  }
-  return 0;
+  return global_state_ != nullptr ? global_state_->wake_channel_.wake()
+                                  : -EINVAL;
 }
 
 void io_uring_context::drain_eventfd() noexcept {
-  if (event_fd_ < 0) {
-    return;
-  }
-
-  // Read loop: drain all available eventfd notifications (counter-based
-  // semaphore) until the fd goes empty (EAGAIN).
-  for (;;) {
-    std::uint64_t value = 0;
-    const ssize_t result = ::read(event_fd_, &value, sizeof(value));
-    if (result == static_cast<ssize_t>(sizeof(value))) {
-      continue;
-    }
-    if (result < 0 && errno == EINTR) {
-      continue;
-    }
-    if (result < 0 && errno == EAGAIN) {
-      return;
-    }
-    return;
+  if (global_state_ != nullptr) {
+    (void)global_state_->wake_channel_.drain();
   }
 }
 
 int io_uring_context::submit_eventfd_poll() noexcept {
-  if (!ring_.is_open() || event_fd_ < 0) {
+  const int wake_fd = global_state_ != nullptr
+                          ? global_state_->wake_channel_.read_fd()
+                          : -1;
+  if (!ring_.is_open() || wake_fd < 0) {
     return -EINVAL;
   }
   if (eventfd_poll_pending_ ||
@@ -153,7 +115,7 @@ int io_uring_context::submit_eventfd_poll() noexcept {
       continue;
     }
 
-    sqe.prep_poll_add(event_fd_, static_cast<unsigned>(POLLIN));
+    sqe.prep_poll_add(wake_fd, static_cast<unsigned>(POLLIN));
     sqe.set_data(eventfd_user_data());
 
     const int submit_result = submit_ring();

@@ -9,8 +9,8 @@ worker ownership, timers, and source implementation live under
 `io_context` is the event-loop owner and scheduler factory:
 
 1. **Event loop host** — `run()` drives the selected io_uring or kqueue loop.
-   Each thread calling `run()` creates a native worker that directly owns its
-   native context.
+   Each thread calling `run()` creates a native context directly (without the
+   intermediate `native_worker` wrapper that was removed in 0.0.4).
 2. **Scheduler factory** — produces dispatch and post schedulers.
 3. **Passive I/O backend** — publishes scheduler I/O to a shared queue that a
    worker drains on its owning native-context thread.

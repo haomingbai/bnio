@@ -1,31 +1,17 @@
 /**
  * @file native_worker.h
- * @brief Worker thread wrapper for native contexts.
+ * @brief (removed — io_context no longer tracks native workers)
+ *
+ * This header was part of the old design where io_context maintained a
+ * lock-free linked list of per-thread native_worker nodes for wakeup
+ * and stop traversal.  That coupling introduced use-after-free risks
+ * and has been replaced by base::wake_channel, a shared wake channel
+ * owned by io_context (see native_task_queue_state::wake_channel_).
+ *
+ * The file is kept as a build-artifact placeholder; it is no longer
+ * included by any io_context header.
  */
 
 #ifndef BNIO_DETAIL_IO_CONTEXT_NATIVE_WORKER_H_
-#ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
-#include <bnio/io_context.h>
-#else
 #define BNIO_DETAIL_IO_CONTEXT_NATIVE_WORKER_H_
-
-namespace bnio::detail {
-
-/** @cond BNIO_DETAIL */
-
-struct native_worker {
-  native_worker(io_context& owner,
-                const native_context_options& options) noexcept
-      : owner(&owner), context(options) {}
-
-  io_context* owner = nullptr;
-  native_worker* next = nullptr;
-  native_context context;
-};
-
-/** @endcond */
-
-}  // namespace bnio::detail
-
-#endif  // BNIO_DETAIL_IO_CONTEXT_CLASS_H_
 #endif  // BNIO_DETAIL_IO_CONTEXT_NATIVE_WORKER_H_

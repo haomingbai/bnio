@@ -4,4 +4,5 @@ target_sources(
           params.cpp
           probe.cpp
           ring.cpp
-          submission_queue_entry.cpp)
+          submission_queue_entry.cpp
+          wake_channel.cpp)

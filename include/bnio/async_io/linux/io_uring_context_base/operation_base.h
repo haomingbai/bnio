@@ -8,6 +8,7 @@
 #define BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPERATION_BASE_H_
 
 #include <bnio/async_io/time.h>
+#include <bnio/base/wake_channel.h>
 #include <bnio/export.h>
 
 #include <atomic>
@@ -27,6 +28,10 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
                                         io_uring_operation_base*&) noexcept;
 
+  /** Drains all ready native completions from the ring without blocking. */
+  using drain_ready_native_fn = io_uring_operation_base*
+      (*)(void* ctx) noexcept;
+
   void push_cpu(io_uring_operation_base& operation) noexcept;
 
   [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
@@ -43,6 +48,28 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */
   void* timeout_heap = nullptr;
   try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
+
+  /** Shared wake channel owned by io_context.
+   *
+   * io_context creates the channel once and writes to it to wake
+   * workers.  Each worker's io_uring_context registers read interest
+   * (IORING_POLL_ADD) before sleeping.
+   *
+   * \warning A single ::write wakes ALL workers whose rings have a
+   * pending IORING_POLL_ADD on this fd (minor thundering herd). The
+   * per-worker overhead is one ::read → EAGAIN plus one
+   * pop_cpu_all() CAS — negligible for typical 4–8 worker
+   * concurrency.  During stop(), waking all workers is the desired
+   * behaviour.
+   */
+  bnio::base::wake_channel wake_channel_;
+
+  /** Unified drain: collects all ready native completions (CQEs /
+   *  kevents) into a linked list. Registered by each native_context
+   *  in set_global_state().
+   */
+  drain_ready_native_fn drain_ready_native = nullptr;
+  void* drain_native_context = nullptr;
 };
 
 /**

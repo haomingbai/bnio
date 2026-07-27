@@ -60,14 +60,10 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
     return open_result;
   }
 
-  bnio::base::event wakeup_event(options_.wakeup_ident, EVFILT_USER,
-                                 EV_ADD | EV_CLEAR, 0, 0, wakeup_user_data());
-  const int wakeup_result =
-      queue_.control(&wakeup_event, 1, nullptr, 0, nullptr);
-  if (wakeup_result < 0) {
-    queue_.close();
-    return wakeup_result;
-  }
+  // The shared wake fd (an EVFILT_READ registration) is set up in run()
+  // after set_global_state() provides the fd. Per-worker EVFILT_USER is
+  // no longer created here — wake is now driven by the shared channel
+  // owned by io_context.
 
   local_state_.clear();
   incoming_io_tasks_ = nullptr;
@@ -84,7 +80,6 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
 
 void kqueue_context::queue_exit() noexcept {
   state_.store(context_state::finished, std::memory_order_release);
-  (void)trigger_wakeup();
 
   local_state_.clear();
   incoming_io_tasks_ = nullptr;
@@ -102,6 +97,21 @@ bool kqueue_context::is_open() const noexcept { return queue_.is_open(); }
 void kqueue_context::set_global_state(kqueue_task_queue_state* state) noexcept {
   assert(!run_active_.load(std::memory_order_acquire));
   global_state_ = state;
+  if (global_state_ != nullptr) {
+    global_state_->drain_ready_native = &drain_ready_native_thunk;
+    global_state_->drain_native_context = this;
+  }
+}
+
+kqueue_operation_base* kqueue_context::drain_ready_native() noexcept {
+  operation_queue tasks;
+  (void)collect_event_tasks(tasks, false, nullptr);
+  return tasks.pop_all();
+}
+
+kqueue_operation_base* kqueue_context::drain_ready_native_thunk(
+    void* ctx) noexcept {
+  return static_cast<kqueue_context*>(ctx)->drain_ready_native();
 }
 
 void kqueue_context::assert_running() const noexcept {
