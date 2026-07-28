@@ -4,6 +4,7 @@
 
 #include <array>
 #include <atomic>
+#include <bexec/detail/manual_lifetime.hpp>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
 #include <cstddef>
@@ -105,51 +106,58 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
   EXPECT_EQ(::close(type_fds[1]), 0);
 
   // Per-context runtime state kept alive until after workers join.
+  // read_op / write_op use manual_lifetime because the operation types
+  // are non-movable (they internally contain manual_lifetime members).
   struct context_runtime {
     std::unique_ptr<bnio::io_context> context;
     int fds[2] = {-1, -1};
-    std::unique_ptr<read_op_type> read_op;
-    std::unique_ptr<write_op_type> write_op;
+    bexec::detail::manual_lifetime<read_op_type> read_op;
+    bexec::detail::manual_lifetime<write_op_type> write_op;
     std::vector<std::thread> workers;
   };
-  std::vector<context_runtime> runtimes;
+  std::vector<std::unique_ptr<context_runtime>> runtimes;
   runtimes.reserve(static_cast<std::size_t>(num_contexts));
 
   // Create contexts, socketpairs, and start all I/O operations.
   for (int i = 0; i < num_contexts; ++i) {
-    context_runtime rt;
-    rt.context = std::make_unique<bnio::io_context>();
-    if (!context_available(*rt.context)) {
+    auto rt = std::unique_ptr<context_runtime>(new context_runtime());
+    rt->context = std::make_unique<bnio::io_context>();
+    if (!context_available(*rt->context)) {
       GTEST_SKIP() << "native I/O context is unavailable at context " << i;
     }
 
-    EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, rt.fds), 0);
+    EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, rt->fds),
+              0);
 
-    bnio::tcp_socket writer(rt.fds[0]);
-    bnio::tcp_socket reader(rt.fds[1]);
+    bnio::tcp_socket writer(rt->fds[0]);
+    bnio::tcp_socket reader(rt->fds[1]);
 
-    auto scheduler = rt.context->get_post_scheduler();
+    auto scheduler = rt->context->get_post_scheduler();
     std::size_t idx = static_cast<std::size_t>(i);
 
-    rt.read_op = std::make_unique<read_op_type>(bexec::connect(
-        reader.async_read(scheduler, bnio::buffer(read_bufs[idx])),
-        rw_stress_receiver{&state, rt.context.get(), target}));
-    bexec::start(*rt.read_op);
+    rt->read_op.emplace_from([&] {
+      return bexec::connect(
+          reader.async_read(scheduler, bnio::buffer(read_bufs[idx])),
+          rw_stress_receiver{&state, rt->context.get(), target});
+    });
+    bexec::start(*rt->read_op);
 
-    rt.write_op = std::make_unique<write_op_type>(bexec::connect(
-        writer.async_write(scheduler, bnio::buffer(payloads[idx]),
-                           MSG_NOSIGNAL),
-        rw_stress_receiver{&state, rt.context.get(), target}));
-    bexec::start(*rt.write_op);
+    rt->write_op.emplace_from([&] {
+      return bexec::connect(
+          writer.async_write(scheduler, bnio::buffer(payloads[idx]),
+                             MSG_NOSIGNAL),
+          rw_stress_receiver{&state, rt->context.get(), target});
+    });
+    bexec::start(*rt->write_op);
 
     // Both tcp_socket objects release their fds; context_runtime owns them.
     (void)writer.release();
     (void)reader.release();
 
     // Start worker threads for this context.
-    rt.workers.reserve(worker_count);
+    rt->workers.reserve(worker_count);
     for (unsigned w = 0; w < worker_count; ++w) {
-      rt.workers.emplace_back([ctx = rt.context.get()] { ctx->run(); });
+      rt->workers.emplace_back([ctx = rt->context.get()] { ctx->run(); });
     }
 
     runtimes.push_back(std::move(rt));
@@ -157,7 +165,7 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
 
   // Join all workers.
   for (auto& rt : runtimes) {
-    for (auto& w : rt.workers) {
+    for (auto& w : rt->workers) {
       w.join();
     }
   }
@@ -172,7 +180,7 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
     EXPECT_EQ(std::memcmp(read_bufs[idx].data(), payloads[idx].data(),
                           payloads[idx].size()),
               0);
-    EXPECT_EQ(::close(runtimes[idx].fds[0]), 0);
-    EXPECT_EQ(::close(runtimes[idx].fds[1]), 0);
+    EXPECT_EQ(::close(runtimes[idx]->fds[0]), 0);
+    EXPECT_EQ(::close(runtimes[idx]->fds[1]), 0);
   }
 }
