@@ -127,15 +127,35 @@ bool kqueue_context::consume_timeout_operations() noexcept {
 kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
   local_task_budget_ = options_.local_queue_threshold;
 
-  if (consume_local_state()) {
+  // 1. Always poll ready kevents first — drain any events that arrived
+  //    since the last drain, matching Linux's collect_ready_cqes().
+  (void)collect_ready_events(false);
+
+  // 2. Process local CPU tasks (completions, posts, etc.).
+  if (kqueue_operation_base* operations =
+          reverse_tasks(local_state_.cpu.pop_all())) {
+    execute_tasks(operations);
     return run_phase::run_ready_tasks;
   }
+
+  // 3. Move global → local CPU tasks.
   if (consume_global_state()) {
     return run_phase::run_ready_tasks;
   }
+
+  // 4. Consume timer expirations.
   if (consume_timeout_operations()) {
     return run_phase::run_ready_tasks;
   }
+
+  // 5. Register pending I/O tasks with kqueue — always a separate step
+  //    so repeat_until chains that generate I/O during CPU processing
+  //    don't starve the kqueue filter set.  Matches Linux's explicit
+  //    consume_io_tasks() call after CPU draing.
+  if (consume_io_tasks()) {
+    return run_phase::run_ready_tasks;
+  }
+
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
 }
 

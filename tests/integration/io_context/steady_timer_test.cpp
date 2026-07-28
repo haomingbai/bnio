@@ -352,17 +352,45 @@ TEST(SteadyTimerTest, passive_timer_wakes_workers_for_an_earlier_deadline) {
       bexec::connect(first_timer.async_wait(), std::move(first_receiver));
   bexec::start(first_operation);
 
+  // Synchronization: post a schedule task that runs once workers enter
+  // the run loop, then spin-wait for it before publishing the second timer.
+  std::atomic<bool> workers_active{false};
+  struct workers_active_receiver {
+    std::atomic<bool>* flag;
+    void set_value() noexcept { flag->store(true, std::memory_order_release); }
+    void set_stopped() noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+  };
+  auto schedule_sender = context.get_post_scheduler().schedule();
+  auto schedule_op = bexec::connect(
+      schedule_sender, workers_active_receiver{&workers_active});
+  bexec::start(schedule_op);
+
   std::vector<std::thread> workers;
   workers.reserve(worker_count);
   for (unsigned index = 0; index < worker_count; ++index) {
     workers.emplace_back([&context] { context.run(); });
   }
 
-  // Give the workers time to park on the first deadline, then publish a
-  // shorter one. Registering it must wake a worker so its passive wait timeout
-  // is recomputed. On macOS CI runners sleep_for can overshoot significantly,
-  // so a wide gap is used.
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  // Spin until at least one worker has executed the schedule task, confirming
+  // workers are active and have likely parked on the passive timer heap.
+  {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!workers_active.load(std::memory_order_acquire)) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        FAIL() << "Timed out waiting for workers to become active";
+      }
+      std::this_thread::yield();
+    }
+    // Brief margin to let workers settle into the passive wait before
+    // publishing the shorter deadline.
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  // Publish a shorter deadline. Registering it must wake a worker so its
+  // passive wait timeout is recomputed.
   bnio::steady_timer second_timer(context);
   EXPECT_EQ(second_timer.expires_after(std::chrono::milliseconds(20)), 0);
 

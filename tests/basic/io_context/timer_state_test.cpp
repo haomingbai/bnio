@@ -3,6 +3,8 @@
 
 #include <array>
 #include <chrono>
+#include <random>
+#include <vector>
 
 namespace {
 
@@ -162,6 +164,170 @@ TEST(TimerStateTest, clear_invalidates_active_and_inactive_slots) {
   EXPECT_EQ(inactive.previous, nullptr);
   EXPECT_EQ(inactive.child, nullptr);
   EXPECT_EQ(inactive.next, nullptr);
+}
+
+TEST(TimerStateTest, empty_heap_pop_returns_null) {
+  bnio::detail::timer_state_data timers;
+  EXPECT_EQ(timers.pop_heap(), nullptr);
+  EXPECT_EQ(timers.heap, nullptr);
+}
+
+TEST(TimerStateTest, single_node_round_trip) {
+  bnio::detail::timer_slot node;
+  bnio::detail::timer_state_data timers;
+
+  node.expiry = bnio::async_io::clock::now() + std::chrono::seconds(1);
+  timers.push_heap(node);
+  EXPECT_TRUE(node.active);
+  EXPECT_EQ(timers.heap_front(), &node);
+  expect_active_heap(timers.heap);
+
+  bnio::detail::timer_slot* const popped = timers.pop_heap();
+  ASSERT_EQ(popped, &node);
+  EXPECT_FALSE(node.active);
+  EXPECT_EQ(node.previous, nullptr);
+  EXPECT_EQ(node.child, nullptr);
+  EXPECT_EQ(node.next, nullptr);
+  EXPECT_EQ(timers.heap, nullptr);
+  EXPECT_EQ(timers.heap_front(), nullptr);
+}
+
+TEST(TimerStateTest, erase_non_active_slot_returns_silently) {
+  bnio::detail::timer_slot node;
+  bnio::detail::timer_state_data timers;
+
+  timers.erase_heap(node);
+  EXPECT_FALSE(node.active);
+  EXPECT_EQ(node.previous, nullptr);
+  EXPECT_EQ(node.child, nullptr);
+  EXPECT_EQ(node.next, nullptr);
+  EXPECT_EQ(timers.heap, nullptr);
+}
+
+TEST(TimerStateTest, push_already_active_slot_returns_silently) {
+  bnio::detail::timer_slot node;
+  bnio::detail::timer_state_data timers;
+
+  node.expiry = bnio::async_io::clock::now() + std::chrono::seconds(1);
+  timers.push_heap(node);
+  EXPECT_TRUE(node.active);
+
+  bnio::detail::timer_slot* const heap_before = timers.heap;
+  timers.push_heap(node);
+  EXPECT_EQ(timers.heap, heap_before);
+  expect_active_heap(timers.heap);
+}
+
+TEST(TimerStateTest, large_scale_random_rekeys) {
+  constexpr std::size_t kTimerCount = 1000;
+  constexpr std::size_t kRekeys = 2000;
+  std::vector<bnio::detail::timer_slot> timer_nodes(kTimerCount);
+  bnio::detail::timer_state_data timers;
+  const auto now = bnio::async_io::clock::now();
+
+  std::mt19937 rng(42);
+  std::uniform_int_distribution<std::size_t> index_dist(0, kTimerCount - 1);
+  std::uniform_int_distribution<int> expiry_dist(0, 10000);
+
+  for (std::size_t i = 0; i < timer_nodes.size(); ++i) {
+    timer_nodes[i].expiry =
+        now + std::chrono::milliseconds(static_cast<int>(i * 3));
+    timers.push_heap(timer_nodes[i]);
+  }
+  expect_active_heap(timers.heap);
+
+  for (std::size_t round = 0; round < kRekeys; ++round) {
+    const std::size_t index = index_dist(rng);
+    timers.erase_heap(timer_nodes[index]);
+    timer_nodes[index].expiry =
+        now + std::chrono::milliseconds(expiry_dist(rng));
+    timers.push_heap(timer_nodes[index]);
+    expect_active_heap(timers.heap);
+  }
+}
+
+TEST(TimerStateTest, erase_deep_child_restores_invariant) {
+  constexpr std::size_t kCount = 20;
+  std::array<bnio::detail::timer_slot, kCount> nodes;
+  bnio::detail::timer_state_data timers;
+  const auto now = bnio::async_io::clock::now();
+
+  for (std::size_t i = 0; i < kCount; ++i) {
+    nodes[i].expiry =
+        now + std::chrono::milliseconds(static_cast<int>(i) * 10);
+    timers.push_heap(nodes[i]);
+  }
+  expect_active_heap(timers.heap);
+
+  timers.erase_heap(nodes[kCount - 1]);
+  EXPECT_FALSE(nodes[kCount - 1].active);
+  EXPECT_EQ(nodes[kCount - 1].previous, nullptr);
+  EXPECT_EQ(nodes[kCount - 1].child, nullptr);
+  EXPECT_EQ(nodes[kCount - 1].next, nullptr);
+  expect_active_heap(timers.heap);
+
+  EXPECT_EQ(timers.heap_front(), &nodes[0]);
+}
+
+TEST(TimerStateTest, erase_inactive_head_and_tail) {
+  bnio::detail::timer_slot first;
+  bnio::detail::timer_slot second;
+  bnio::detail::timer_slot third;
+  bnio::detail::timer_state_data timers;
+
+  timers.push_inactive(first);
+  timers.push_inactive(second);
+  timers.push_inactive(third);
+  ASSERT_EQ(timers.inactive, &third);
+  expect_inactive_list(timers);
+
+  timers.erase_inactive(third);
+  EXPECT_EQ(timers.inactive, &second);
+  EXPECT_EQ(second.previous, nullptr);
+  EXPECT_EQ(second.next, &first);
+  EXPECT_EQ(first.previous, &second);
+  EXPECT_EQ(first.next, nullptr);
+  expect_inactive_list(timers);
+
+  timers.erase_inactive(first);
+  EXPECT_EQ(timers.inactive, &second);
+  EXPECT_EQ(second.previous, nullptr);
+  EXPECT_EQ(second.next, nullptr);
+  expect_inactive_list(timers);
+}
+
+TEST(TimerStateTest, meld_equal_expiry_maintains_structure) {
+  constexpr std::size_t kCount = 10;
+  std::array<bnio::detail::timer_slot, kCount> nodes;
+  bnio::detail::timer_state_data timers;
+  const auto now = bnio::async_io::clock::now();
+
+  for (std::size_t i = 0; i < kCount; ++i) {
+    nodes[i].expiry = now + std::chrono::seconds(1);
+    timers.push_heap(nodes[i]);
+  }
+  expect_active_heap(timers.heap);
+
+  std::size_t popped_count = 0;
+  while (timers.heap_front() != nullptr) {
+    bnio::detail::timer_slot* const popped = timers.pop_heap();
+    ASSERT_NE(popped, nullptr);
+    EXPECT_FALSE(popped->active);
+    ++popped_count;
+    expect_active_heap(timers.heap);
+  }
+  EXPECT_EQ(popped_count, kCount);
+  EXPECT_EQ(timers.heap, nullptr);
+}
+
+TEST(TimerStateTest, heap_front_returns_null_for_empty) {
+  bnio::detail::timer_state_data timers;
+  EXPECT_EQ(timers.heap_front(), nullptr);
+}
+
+TEST(TimerStateTest, heap_deadline_returns_max_for_empty) {
+  bnio::detail::timer_state_data timers;
+  EXPECT_EQ(timers.heap_deadline(), bnio::async_io::time_point::max());
 }
 
 }  // namespace

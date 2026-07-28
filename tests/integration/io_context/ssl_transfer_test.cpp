@@ -56,13 +56,7 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
     EXPECT_EQ(state->stopped, 0);
   }
 
-#if defined(BNIO_HAS_IO_CONTEXT_BSD)
-  // Keep one application write below the conservative AF_UNIX socket buffer
-  // size. The test waits for that write before issuing the next SSL read.
   constexpr std::size_t payload_size = 8 * 1024;
-#else
-  constexpr std::size_t payload_size = 70 * 1024;
-#endif
   std::vector<unsigned char> payload(payload_size);
   for (std::size_t index = 0; index < payload.size(); ++index) {
     payload[index] = static_cast<unsigned char>((index * 17U + 29U) & 0xffU);

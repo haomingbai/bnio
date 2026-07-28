@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -46,6 +47,28 @@ TEST(IoUringCqeDispatchTest, cqe_batch_window_drains_multiple_rounds) {
   EXPECT_TRUE(state->all_in_context);
 }
 
+// Minimal receiver that sets an atomic flag when the context run loop
+// processes a no-op CQE, signalling that the run loop is active.
+struct run_loop_signal_recv {
+  std::atomic<bool>* started = nullptr;
+
+  void set_value() noexcept {
+    if (started) started->store(true, std::memory_order_release);
+  }
+
+  void set_value(int, unsigned) noexcept {
+    if (started) started->store(true, std::memory_order_release);
+  }
+
+  void set_error(std::error_code) noexcept {
+    if (started) started->store(true, std::memory_order_release);
+  }
+
+  void set_stopped() noexcept {
+    if (started) started->store(true, std::memory_order_release);
+  }
+};
+
 TEST(IoUringCqeDispatchTest, concurrent_start_uses_the_single_run_thread) {
   io_uring_task_queue_state global_tasks;
   io_uring_context context;
@@ -63,6 +86,15 @@ TEST(IoUringCqeDispatchTest, concurrent_start_uses_the_single_run_thread) {
   constexpr unsigned k_threads = 4;
   auto state = std::make_shared<concurrent_batch_state>();
 
+  // Post a no-op that sets an atomic flag when the run loop first
+  // processes a CQE, confirming the run loop is active.
+  std::atomic<bool> run_loop_started{false};
+  run_loop_signal_recv sig_recv;
+  sig_recv.started = &run_loop_started;
+  auto signal_op = std::make_unique<io_uring_nop_operation<run_loop_signal_recv>>(
+      context, std::move(sig_recv));
+  bexec::start(*signal_op);
+
   std::barrier ready(static_cast<std::ptrdiff_t>(k_threads + 1));
   std::vector<std::thread> workers;
   workers.reserve(k_threads);
@@ -74,7 +106,15 @@ TEST(IoUringCqeDispatchTest, concurrent_start_uses_the_single_run_thread) {
   }
 
   ready.arrive_and_wait();
-  std::this_thread::sleep_for(std::chrono::milliseconds(25));
+
+  // Spin-wait for the run loop to be confirmed active (5-second timeout).
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!run_loop_started.load(std::memory_order_acquire)) {
+    if (std::chrono::steady_clock::now() > deadline) {
+      break;
+    }
+    std::this_thread::yield();
+  }
 
   std::vector<
       std::unique_ptr<io_uring_nop_operation<concurrent_batch_receiver>>>

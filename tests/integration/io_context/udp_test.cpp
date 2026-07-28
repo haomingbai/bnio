@@ -374,14 +374,14 @@ TEST(UdpTest, async_ipv6_send_to) {
   const std::error_code client_open = client.open(bnio::ip::udp::v6());
   if (server_open == std::errc::address_family_not_supported ||
       client_open == std::errc::address_family_not_supported) {
-    return;
+    GTEST_SKIP() << "IPv6 not supported";
   }
   EXPECT_FALSE(server_open);
   EXPECT_FALSE(client_open);
   const std::error_code bind_error =
       server.bind(bnio::ip::endpoint::loopback_v6(0));
   if (bind_error == std::errc::address_not_available) {
-    return;
+    GTEST_SKIP() << "address not available";
   }
   EXPECT_FALSE(bind_error);
 

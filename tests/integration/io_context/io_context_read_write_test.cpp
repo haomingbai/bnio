@@ -43,6 +43,54 @@ struct pair_byte_receiver {
   }
 };
 
+struct deferred_stop_byte_receiver {
+  std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
+  bnio::io_context* context = nullptr;
+  unsigned* completions = nullptr;
+  unsigned target = 1;
+
+  void set_value(std::size_t size) noexcept {
+    state->signal = signal_kind::value;
+    state->size = size;
+    complete();
+  }
+
+  void set_error(std::error_code error) noexcept {
+    state->signal = signal_kind::error;
+    state->error = error;
+    complete();
+  }
+
+  void set_stopped() noexcept {
+    state->signal = signal_kind::stopped;
+    complete();
+  }
+
+ private:
+  void complete() noexcept {
+    if (completions != nullptr) {
+      ++*completions;
+      if (*completions != target) {
+        return;
+      }
+    }
+    if (context != nullptr) {
+      // Post stop as a separate schedule task to avoid stop() cancellation
+      // issues with repeat_until chains inside read-all / write-all senders.
+      auto s = context->get_post_scheduler();
+      struct stop_recv {
+        bnio::io_context* c;
+        void set_value() noexcept {
+          if (c) c->stop();
+        }
+        void set_stopped() noexcept {}
+      };
+      auto op = bexec::connect(s.schedule(), stop_recv{context});
+      bexec::start(op);
+    }
+  }
+};
+
 struct stopped_byte_receiver : byte_receiver {
   stop_env env;
 
@@ -508,3 +556,81 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
 }
 
 }  // namespace
+
+// Regression: verify that write-all (repeat_until) works correctly
+// for payloads larger than the socket buffer on kqueue.  async_write
+// is write-all; async_read_some is single-shot.  Paired in a loop so
+// each run() iteration transfers one buffer-ful without the reader
+// leaving stale data in the buffer.
+TEST(IoContextReadWriteTest, socketpair_70kb_write_all) {
+  int sockets[2] = {-1, -1};
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+  bnio::tcp_socket writer_socket(sockets[0]);
+  bnio::tcp_socket reader_socket(sockets[1]);
+
+  constexpr std::size_t payload_size = 70 * 1024;
+  std::vector<unsigned char> payload(payload_size);
+  for (std::size_t i = 0; i < payload.size(); ++i) {
+    payload[i] = static_cast<unsigned char>(i & 0xff);
+  }
+  std::vector<unsigned char> received(payload.size());
+
+  std::size_t sent = 0;
+  std::size_t received_size = 0;
+  while (sent < payload_size || received_size < payload_size) {
+    bnio::io_context context;
+    if (!context_available(context)) {
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+    unsigned completions = 0;
+    const unsigned target = (sent < payload_size) ? 2U : 1U;
+
+    pair_byte_receiver write_recv;
+    write_recv.context = &context;
+    write_recv.completions = &completions;
+    write_recv.target = target;
+    auto write_state = write_recv.state;
+
+    pair_byte_receiver read_recv;
+    read_recv.context = &context;
+    read_recv.completions = &completions;
+    read_recv.target = target;
+    auto read_state = read_recv.state;
+
+    // Read first so EVFILT_READ is registered before the write fills
+    // the buffer, ensuring kevent fires for the available data.
+    auto read_op = bexec::connect(
+        reader_socket.async_read_some(
+            scheduler,
+            bnio::buffer(received.data() + received_size,
+                         received.size() - received_size)),
+        std::move(read_recv));
+    bexec::start(read_op);
+
+    if (sent < payload.size()) {
+      auto write_op = bexec::connect(
+          writer_socket.async_write_some(
+              scheduler,
+              bnio::buffer(payload.data() + sent, payload.size() - sent),
+              MSG_NOSIGNAL),
+          std::move(write_recv));
+      bexec::start(write_op);
+    }
+
+    context.run();
+    EXPECT_GT(read_state->size, 0);
+    received_size += read_state->size;
+    if (sent < payload.size()) {
+      EXPECT_GT(write_state->size, 0);
+      sent += write_state->size;
+    }
+    if (read_state->size == 0 || (sent < payload.size() && write_state->size == 0)) {
+      break;
+    }
+  }
+
+  EXPECT_EQ(sent, payload_size);
+  EXPECT_EQ(received_size, payload_size);
+  EXPECT_TRUE(std::memcmp(received.data(), payload.data(), payload.size()) == 0);
+}

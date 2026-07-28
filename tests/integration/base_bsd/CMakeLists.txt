@@ -8,3 +8,4 @@ function(bnio_add_integration_base_bsd_test name source)
 endfunction()
 
 bnio_add_integration_base_bsd_test(kqueue kqueue_test.cpp)
+bnio_add_integration_base_bsd_test(wake_channel wake_channel_test.cpp)

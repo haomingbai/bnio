@@ -50,9 +50,7 @@ TEST(IoContextAcceptConnectTest, accept_connect_loopback) {
   EXPECT_EQ(completions, 2);
   EXPECT_EQ(accept_state->signal, signal_kind::value);
   EXPECT_TRUE(accept_state->fd >= 0);
-#if defined(BNIO_HAS_IO_CONTEXT_BSD)
   EXPECT_TRUE((::fcntl(accept_state->fd, F_GETFL, 0) & O_NONBLOCK) != 0);
-#endif
   EXPECT_EQ(connect_state->signal, signal_kind::value);
   EXPECT_TRUE(client.is_open());
 
