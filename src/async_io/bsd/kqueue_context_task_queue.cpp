@@ -27,6 +27,16 @@ int kqueue_context::post(kqueue_operation_base& operation) noexcept {
 
 void kqueue_context::publish_io(kqueue_io_operation_base& operation) noexcept {
   assert_running();
+
+  // Worker-local fast path: when publish_io is called from the worker
+  // thread that is currently running this context, push directly to the
+  // local IO queue to avoid CAS on the shared MPSC queue and prevent
+  // descriptor/connection migration to another worker's kqueue.
+  if (current_context_ == this) {
+    local_state_.push_io(operation);
+    return;
+  }
+
   if (global_state_ != nullptr) {
     global_state_->push_io(operation);
     notify_one_waiter();

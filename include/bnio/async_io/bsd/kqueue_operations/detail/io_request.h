@@ -39,6 +39,13 @@ template <class Request>
   }
 }
 
+/** Concept that detects whether a request can perform an immediate nonblocking
+ *  I/O call before registering with kqueue for readiness. */
+template <class Request>
+concept has_start_io = requires(Request& req) {
+  { req.start_io() } -> std::convertible_to<int>;
+};
+
 template <class Receiver>
 void complete_error(Receiver&& receiver, int result) noexcept {
   bexec::set_error(std::forward<Receiver>(receiver),
@@ -82,13 +89,11 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
       return;
     }
 
-    result = request_.start_io();
-    flags = 0;
-    if (detail::should_wait(request_, result)) {
-      context_->publish_io(*this);
-    } else {
-      (void)context_->post(*this);
+    if (try_complete_immediate()) {
+      return;
     }
+
+    context_->publish_io(*this);
   }
 
   void execute() noexcept override {
@@ -102,6 +107,28 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
   }
 
  private:
+  /** Attempts nonblocking I/O before registering with kqueue for readiness.
+   *
+   *  If the request supports immediate I/O (satisfies has_start_io), this
+   *  method calls request_.start_io() immediately.  When the call does not
+   *  return EAGAIN/EWOULDBLOCK the operation is completed inline via the CPU
+   *  queue (post) and this function returns true.  Otherwise it returns false
+   *  so that the caller can register the operation with kqueue.
+   */
+  [[nodiscard]] bool try_complete_immediate() noexcept {
+    if constexpr (has_start_io<Request>) {
+      result = request_.start_io();
+      flags = 0;
+      if (detail::should_wait(request_, result)) {
+        return false;
+      }
+      (void)context_->post(*this);
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   kqueue_context* context_;
   Request request_;
   std::remove_cvref_t<Receiver> receiver_;

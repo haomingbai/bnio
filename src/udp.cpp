@@ -34,21 +34,36 @@ namespace {
 }
 
 [[nodiscard]] int open_socket(int family) noexcept {
-#if defined(SOCK_CLOEXEC)
-  return ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+#if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+  return ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_UDP);
+#elif defined(SOCK_CLOEXEC)
+  const int descriptor = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
 #else
   const int descriptor = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);
+#endif
+#if !defined(SOCK_NONBLOCK)
   if (descriptor < 0) {
     return -1;
   }
+#endif
+#if !defined(SOCK_CLOEXEC)
   if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) != 0) {
     const int error = errno;
     (void)::close(descriptor);
     errno = error;
     return -1;
   }
-  return descriptor;
 #endif
+#if !defined(SOCK_NONBLOCK)
+  if (::fcntl(descriptor, F_SETFL,
+              ::fcntl(descriptor, F_GETFL, 0) | O_NONBLOCK) != 0) {
+    const int error = errno;
+    (void)::close(descriptor);
+    errno = error;
+    return -1;
+  }
+#endif
+  return descriptor;
 }
 
 }  // namespace
@@ -109,6 +124,12 @@ void socket::assign(native_handle_type fd) noexcept {
   if (fd_ != fd) {
     (void)close();
     fd_ = fd;
+  }
+  if (fd_ >= 0) {
+    const int flags = ::fcntl(fd_, F_GETFL, 0);
+    if (flags >= 0 && (flags & O_NONBLOCK) == 0) {
+      (void)::fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+    }
   }
 }
 

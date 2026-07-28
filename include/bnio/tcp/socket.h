@@ -11,6 +11,7 @@
 #include <bnio/buffer.h>
 #include <bnio/export.h>
 #include <bnio/ip.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 
 #include <system_error>
@@ -39,8 +40,18 @@ class BNIO_EXPORT socket {
 
   /**
    * Takes ownership of an existing native stream socket descriptor.
+   *
+   * The underlying descriptor is set to non-blocking mode so that the
+   * kqueue backend can skip per-operation fcntl calls.
    */
-  explicit socket(native_handle_type fd) noexcept : fd_(fd) {}
+  explicit socket(native_handle_type fd) noexcept : fd_(fd) {
+    if (fd_ >= 0) {
+      const int flags = ::fcntl(fd_, F_GETFL, 0);
+      if (flags >= 0 && (flags & O_NONBLOCK) == 0) {
+        (void)::fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+      }
+    }
+  }
 
   /**
    * Closes the owned descriptor, if any.

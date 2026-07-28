@@ -20,7 +20,7 @@ struct kqueue_context_options {
   unsigned event_batch_window = 64;
 
   /** Number of non-blocking event collection rounds before parking. */
-  unsigned wait_spin_count = 4;
+  unsigned wait_spin_count = 1;
 
   /** Ready batches up to this size are always kept on the local queue. */
   unsigned event_inline_completion_threshold = 64;

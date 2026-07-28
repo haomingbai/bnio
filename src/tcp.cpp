@@ -47,21 +47,36 @@ namespace {
 }
 
 [[nodiscard]] int open_socket(int family, int type, int protocol) noexcept {
-#if defined(SOCK_CLOEXEC)
-  return ::socket(family, type | SOCK_CLOEXEC, protocol);
+#if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
+  return ::socket(family, type | SOCK_CLOEXEC | SOCK_NONBLOCK, protocol);
+#elif defined(SOCK_CLOEXEC)
+  const int descriptor = ::socket(family, type | SOCK_CLOEXEC, protocol);
 #else
   const int descriptor = ::socket(family, type, protocol);
+#endif
+#if !defined(SOCK_NONBLOCK)
   if (descriptor < 0) {
     return -1;
   }
+#endif
+#if !defined(SOCK_CLOEXEC)
   if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) != 0) {
     const int error = errno;
     (void)::close(descriptor);
     errno = error;
     return -1;
   }
-  return descriptor;
 #endif
+#if !defined(SOCK_NONBLOCK)
+  if (::fcntl(descriptor, F_SETFL,
+              ::fcntl(descriptor, F_GETFL, 0) | O_NONBLOCK) != 0) {
+    const int error = errno;
+    (void)::close(descriptor);
+    errno = error;
+    return -1;
+  }
+#endif
+  return descriptor;
 }
 
 }  // namespace
@@ -111,6 +126,15 @@ void socket::assign(native_handle_type fd) noexcept {
   if (fd_ != fd) {
     (void)close();
     fd_ = fd;
+  }
+  // Establish the nonblocking invariant for every descriptor owned by
+  // this socket.  The kqueue backend relies on O_NONBLOCK being set
+  // exactly once so it can skip per-operation fcntl calls.
+  if (fd_ >= 0) {
+    const int flags = ::fcntl(fd_, F_GETFL, 0);
+    if (flags >= 0 && (flags & O_NONBLOCK) == 0) {
+      (void)::fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+    }
   }
 }
 
@@ -176,6 +200,12 @@ void acceptor::assign(native_handle_type fd) noexcept {
   if (fd_ != fd) {
     (void)close();
     fd_ = fd;
+  }
+  if (fd_ >= 0) {
+    const int flags = ::fcntl(fd_, F_GETFL, 0);
+    if (flags >= 0 && (flags & O_NONBLOCK) == 0) {
+      (void)::fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+    }
   }
 }
 

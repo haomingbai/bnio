@@ -97,21 +97,6 @@ bool kqueue_context::is_open() const noexcept { return queue_.is_open(); }
 void kqueue_context::set_global_state(kqueue_task_queue_state* state) noexcept {
   assert(!run_active_.load(std::memory_order_acquire));
   global_state_ = state;
-  if (global_state_ != nullptr) {
-    global_state_->drain_ready_native = &drain_ready_native_thunk;
-    global_state_->drain_native_context = this;
-  }
-}
-
-kqueue_operation_base* kqueue_context::drain_ready_native() noexcept {
-  operation_queue tasks;
-  (void)collect_event_tasks(tasks, false, nullptr);
-  return tasks.pop_all();
-}
-
-kqueue_operation_base* kqueue_context::drain_ready_native_thunk(
-    void* ctx) noexcept {
-  return static_cast<kqueue_context*>(ctx)->drain_ready_native();
 }
 
 void kqueue_context::assert_running() const noexcept {

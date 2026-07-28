@@ -129,21 +129,6 @@ bool io_uring_context::is_open() const noexcept { return ring_.is_open(); }
 void io_uring_context::set_global_state(
     io_uring_task_queue_state* state) noexcept {
   global_state_ = state;
-  if (global_state_ != nullptr) {
-    global_state_->drain_ready_native = &drain_ready_native_thunk;
-    global_state_->drain_native_context = this;
-  }
-}
-
-io_uring_operation_base* io_uring_context::drain_ready_native() noexcept {
-  operation_queue tasks;
-  (void)collect_cqe_tasks(tasks);
-  return tasks.pop_all();
-}
-
-io_uring_operation_base* io_uring_context::drain_ready_native_thunk(
-    void* ctx) noexcept {
-  return static_cast<io_uring_context*>(ctx)->drain_ready_native();
 }
 
 }  // namespace bnio::async_io::linux_native

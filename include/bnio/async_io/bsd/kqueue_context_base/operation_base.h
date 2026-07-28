@@ -25,9 +25,6 @@ struct BNIO_EXPORT kqueue_task_queue_state {
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
                                         kqueue_operation_base*&) noexcept;
 
-  /** Drains all ready native completions from the kqueue without blocking. */
-  using drain_ready_native_fn = kqueue_operation_base* (*)(void* ctx) noexcept;
-
   void push_cpu(kqueue_operation_base& operation) noexcept;
 
   [[nodiscard]] kqueue_operation_base* pop_cpu_all() noexcept;
@@ -69,13 +66,6 @@ struct BNIO_EXPORT kqueue_task_queue_state {
    * behaviour.
    */
   bnio::base::wake_channel wake_channel_;
-
-  /** Unified drain: collects all ready native completions (kevents)
-   *  into a linked list. Registered by each native_context in
-   *  set_global_state().
-   */
-  drain_ready_native_fn drain_ready_native = nullptr;
-  void* drain_native_context = nullptr;
 };
 
 /**

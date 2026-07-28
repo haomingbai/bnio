@@ -75,10 +75,7 @@ class kqueue_receive_request {
     helper.prep_read(descriptor_);
   }
 
-  [[nodiscard]] int start_io() noexcept {
-    const int nonblocking = detail::set_nonblocking(descriptor_);
-    return nonblocking < 0 ? nonblocking : perform_io();
-  }
+  [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
   [[nodiscard]] int perform_io() noexcept {
     if (buffer_.size > 0 && buffer_.data == nullptr) {
@@ -115,10 +112,7 @@ class kqueue_send_request {
     helper.prep_write(descriptor_);
   }
 
-  [[nodiscard]] int start_io() noexcept {
-    const int nonblocking = detail::set_nonblocking(descriptor_);
-    return nonblocking < 0 ? nonblocking : perform_io();
-  }
+  [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
   [[nodiscard]] int perform_io() noexcept {
     if (size_ > 0 && data_ == nullptr) {
@@ -158,10 +152,7 @@ class kqueue_receive_from_request {
     helper.prep_read(descriptor_);
   }
 
-  [[nodiscard]] int start_io() noexcept {
-    const int nonblocking = detail::set_nonblocking(descriptor_);
-    return nonblocking < 0 ? nonblocking : perform_io();
-  }
+  [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
   [[nodiscard]] int perform_io() noexcept {
     if (buffer_.size > 0 && buffer_.data == nullptr) {
@@ -222,10 +213,7 @@ class kqueue_send_to_request {
     helper.prep_write(descriptor_);
   }
 
-  [[nodiscard]] int start_io() noexcept {
-    const int nonblocking = detail::set_nonblocking(descriptor_);
-    return nonblocking < 0 ? nonblocking : perform_io();
-  }
+  [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
   [[nodiscard]] int perform_io() noexcept {
     if (size_ > 0 && data_ == nullptr) {

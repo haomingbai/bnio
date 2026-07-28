@@ -11,12 +11,25 @@
 namespace bnio {
 
 void io_context::publish_io(operation_base& operation) noexcept {
+  // Worker-local fast path: publish directly to the running native
+  // context's local queue to avoid CAS on the shared MPSC queue and
+  // prevent descriptor/connection migration to another kqueue.
+  if (current_worker_native_ != nullptr) {
+    current_worker_native_->publish_io(operation);
+    return;
+  }
   global_state_.push_io(operation);
   wake_one_if_all_workers_sleeping();
 }
 
 void io_context::publish_cpu(
     detail::native_operation_base& operation) noexcept {
+  // Worker-local fast path: post directly to the running native
+  // context's local queue to avoid CAS on the shared MPSC queue.
+  if (current_worker_native_ != nullptr) {
+    current_worker_native_->post(operation);
+    return;
+  }
   global_state_.push_cpu(operation);
   wake_one_if_all_workers_sleeping();
 }

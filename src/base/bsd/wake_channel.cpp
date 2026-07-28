@@ -49,6 +49,10 @@ int wake_channel::open() noexcept {
     (void)::fcntl(pipe_fds[1], F_SETFL, flags | O_NONBLOCK);
   }
 
+  // Set close-on-exec on both ends.
+  (void)::fcntl(pipe_fds[0], F_SETFD, FD_CLOEXEC);
+  (void)::fcntl(pipe_fds[1], F_SETFD, FD_CLOEXEC);
+
   read_fd_ = pipe_fds[0];
   write_fd_ = pipe_fds[1];
   return 0;
@@ -76,15 +80,11 @@ int wake_channel::wake() noexcept {
     return -EBADF;
   }
 
-  const std::uint64_t value = 1;
-  const auto* bytes = reinterpret_cast<const char*>(&value);
-  std::size_t offset = 0;
-  while (offset < sizeof(value)) {
-    const ssize_t result =
-        ::write(write_fd_, bytes + offset, sizeof(value) - offset);
+  const char value = 1;
+  for (;;) {
+    const ssize_t result = ::write(write_fd_, &value, 1);
     if (result > 0) {
-      offset += static_cast<std::size_t>(result);
-      continue;
+      return 0;
     }
     if (result < 0 && errno == EINTR) {
       continue;
@@ -97,7 +97,6 @@ int wake_channel::wake() noexcept {
     }
     return result < 0 ? -errno : -EIO;
   }
-  return 0;
 }
 
 int wake_channel::drain() noexcept {

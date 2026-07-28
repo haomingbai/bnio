@@ -582,6 +582,7 @@ class BNIO_EXPORT io_context {
   std::atomic_bool native_available_{false};
 
   static thread_local io_context* current_context_;
+  static thread_local detail::native_context* current_worker_native_;
 };
 
 }  // namespace bnio

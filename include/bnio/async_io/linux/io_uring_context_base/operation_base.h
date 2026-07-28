@@ -28,10 +28,6 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
                                         io_uring_operation_base*&) noexcept;
 
-  /** Drains all ready native completions from the ring without blocking. */
-  using drain_ready_native_fn =
-      io_uring_operation_base* (*)(void* ctx) noexcept;
-
   void push_cpu(io_uring_operation_base& operation) noexcept;
 
   [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
@@ -72,13 +68,6 @@ struct BNIO_EXPORT io_uring_task_queue_state {
    * behaviour.
    */
   bnio::base::wake_channel wake_channel_;
-
-  /** Unified drain: collects all ready native completions (CQEs /
-   *  kevents) into a linked list. Registered by each native_context
-   *  in set_global_state().
-   */
-  drain_ready_native_fn drain_ready_native = nullptr;
-  void* drain_native_context = nullptr;
 };
 
 /**
