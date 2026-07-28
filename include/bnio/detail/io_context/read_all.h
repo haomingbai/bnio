@@ -89,9 +89,9 @@ class descriptor_read_all_state {
   }
 
   [[nodiscard]] auto make_sender() noexcept {
-    return native_io_sender(
-        *context, make_file_read_request(descriptor, current_buffer(),
-                                          offset + transferred));
+    return native_io_sender(*context,
+                            make_file_read_request(descriptor, current_buffer(),
+                                                   offset + transferred));
   }
 
   void advance(std::size_t bytes) noexcept {

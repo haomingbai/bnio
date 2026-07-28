@@ -12,7 +12,8 @@
 namespace bnio {
 
 thread_local io_context* io_context::current_context_ = nullptr;
-thread_local detail::native_context* io_context::current_worker_native_ = nullptr;
+thread_local detail::native_context* io_context::current_worker_native_ =
+    nullptr;
 
 io_context::io_context() noexcept : io_context(io_context_options{}) {}
 

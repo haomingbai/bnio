@@ -253,8 +253,7 @@ TEST(TimerStateTest, erase_deep_child_restores_invariant) {
   const auto now = bnio::async_io::clock::now();
 
   for (std::size_t i = 0; i < kCount; ++i) {
-    nodes[i].expiry =
-        now + std::chrono::milliseconds(static_cast<int>(i) * 10);
+    nodes[i].expiry = now + std::chrono::milliseconds(static_cast<int>(i) * 10);
     timers.push_heap(nodes[i]);
   }
   expect_active_heap(timers.heap);

@@ -363,8 +363,8 @@ TEST(SteadyTimerTest, passive_timer_wakes_workers_for_an_earlier_deadline) {
     }
   };
   auto schedule_sender = context.get_post_scheduler().schedule();
-  auto schedule_op = bexec::connect(
-      schedule_sender, workers_active_receiver{&workers_active});
+  auto schedule_op =
+      bexec::connect(schedule_sender, workers_active_receiver{&workers_active});
   bexec::start(schedule_op);
 
   std::vector<std::thread> workers;

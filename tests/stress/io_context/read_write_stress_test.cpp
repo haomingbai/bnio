@@ -60,7 +60,7 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
   std::random_device rd;
   std::mt19937 gen(rd());
   std::uniform_int_distribution<std::size_t> size_dist(min_payload,
-                                                        max_payload);
+                                                       max_payload);
   std::uniform_int_distribution<unsigned char> byte_dist(0, 255);
 
   rw_stress_state state;
@@ -88,8 +88,7 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
   auto type_scheduler = type_factory.get_post_scheduler();
 
   int type_fds[2] = {-1, -1};
-  EXPECT_EQ(
-      ::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, type_fds), 0);
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, type_fds), 0);
   bnio::tcp_socket type_writer(type_fds[0]);
   bnio::tcp_socket type_reader(type_fds[1]);
 
@@ -98,11 +97,9 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
   using write_sender_type = decltype(type_writer.async_write(
       type_scheduler, bnio::buffer(payloads[0]), MSG_NOSIGNAL));
   using read_op_type = decltype(bexec::connect(
-      std::declval<read_sender_type>(),
-      std::declval<rw_stress_receiver>()));
+      std::declval<read_sender_type>(), std::declval<rw_stress_receiver>()));
   using write_op_type = decltype(bexec::connect(
-      std::declval<write_sender_type>(),
-      std::declval<rw_stress_receiver>()));
+      std::declval<write_sender_type>(), std::declval<rw_stress_receiver>()));
 
   EXPECT_EQ(::close(type_fds[0]), 0);
   EXPECT_EQ(::close(type_fds[1]), 0);
@@ -152,8 +149,7 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
     // Start worker threads for this context.
     rt.workers.reserve(worker_count);
     for (unsigned w = 0; w < worker_count; ++w) {
-      rt.workers.emplace_back(
-          [ctx = rt.context.get()] { ctx->run(); });
+      rt.workers.emplace_back([ctx = rt.context.get()] { ctx->run(); });
     }
 
     runtimes.push_back(std::move(rt));
@@ -173,10 +169,9 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
   // Verify data integrity for every payload.
   for (int i = 0; i < num_contexts; ++i) {
     std::size_t idx = static_cast<std::size_t>(i);
-    EXPECT_EQ(
-        std::memcmp(read_bufs[idx].data(), payloads[idx].data(),
-                    payloads[idx].size()),
-        0);
+    EXPECT_EQ(std::memcmp(read_bufs[idx].data(), payloads[idx].data(),
+                          payloads[idx].size()),
+              0);
     EXPECT_EQ(::close(runtimes[idx].fds[0]), 0);
     EXPECT_EQ(::close(runtimes[idx].fds[1]), 0);
   }

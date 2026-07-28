@@ -1,6 +1,6 @@
 #include <bnio/io_context.h>
-#include <bnio/tcp.h>
 #include <bnio/ip.h>
+#include <bnio/tcp.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -80,8 +80,7 @@ TEST(TcpStressTest, many_concurrent_accept_connect) {
   using accept_sender_type =
       decltype(acceptor.async_accept(scheduler, SOCK_CLOEXEC));
   using accept_operation_type = decltype(bexec::connect(
-      std::declval<accept_sender_type>(),
-      std::declval<tcp_stress_receiver>()));
+      std::declval<accept_sender_type>(), std::declval<tcp_stress_receiver>()));
 
   std::vector<std::unique_ptr<accept_operation_type>> accept_ops;
   accept_ops.resize(num_clients);
@@ -98,10 +97,10 @@ TEST(TcpStressTest, many_concurrent_accept_connect) {
 
   using connect_sender_type =
       decltype(std::declval<bnio::tcp_socket&>().async_connect(scheduler,
-                                                                endpoint));
-  using connect_operation_type = decltype(bexec::connect(
-      std::declval<connect_sender_type>(),
-      std::declval<tcp_stress_receiver>()));
+                                                               endpoint));
+  using connect_operation_type =
+      decltype(bexec::connect(std::declval<connect_sender_type>(),
+                              std::declval<tcp_stress_receiver>()));
 
   std::vector<std::unique_ptr<connect_operation_type>> connect_ops;
   connect_ops.resize(num_clients);
@@ -156,17 +155,15 @@ TEST(TcpStressTest, high_concurrency_read_write) {
     write_bufs[static_cast<std::size_t>(i)].fill('A');
   }
 
-  using read_sender_type = decltype(server_socket.async_read(
-      scheduler, bnio::buffer(read_bufs[0])));
+  using read_sender_type =
+      decltype(server_socket.async_read(scheduler, bnio::buffer(read_bufs[0])));
   using write_sender_type = decltype(client_socket.async_write(
       scheduler, bnio::buffer(write_bufs[0])));
 
   using read_op_type = decltype(bexec::connect(
-      std::declval<read_sender_type>(),
-      std::declval<tcp_stress_receiver>()));
+      std::declval<read_sender_type>(), std::declval<tcp_stress_receiver>()));
   using write_op_type = decltype(bexec::connect(
-      std::declval<write_sender_type>(),
-      std::declval<tcp_stress_receiver>()));
+      std::declval<write_sender_type>(), std::declval<tcp_stress_receiver>()));
 
   std::vector<std::unique_ptr<read_op_type>> read_ops;
   read_ops.resize(static_cast<std::size_t>(num_ops));
@@ -201,9 +198,7 @@ TEST(TcpStressTest, high_concurrency_read_write) {
 
   for (int i = 0; i < num_ops; ++i) {
     std::size_t idx = static_cast<std::size_t>(i);
-    EXPECT_EQ(
-        std::memcmp(read_bufs[idx].data(), "AAAAAAAAAA", 10),
-        0);
+    EXPECT_EQ(std::memcmp(read_bufs[idx].data(), "AAAAAAAAAA", 10), 0);
   }
 }
 
@@ -262,18 +257,16 @@ TEST(TcpStressTest, rapid_connect_disconnect) {
     };
 
     using accept_op_type = decltype(bexec::connect(
-        std::declval<accept_sender_type>(),
-        std::declval<pair_recv>()));
+        std::declval<accept_sender_type>(), std::declval<pair_recv>()));
     using connect_op_type = decltype(bexec::connect(
-        std::declval<connect_sender_type>(),
-        std::declval<pair_recv>()));
+        std::declval<connect_sender_type>(), std::declval<pair_recv>()));
 
-    auto accept_op = accept_op_type(bexec::connect(
-        acceptor.async_accept(scheduler, SOCK_CLOEXEC),
-        pair_recv{&completions, &context, &server_socket}));
-    auto connect_op = connect_op_type(bexec::connect(
-        client_socket.async_connect(scheduler, endpoint),
-        pair_recv{&completions, &context, nullptr}));
+    auto accept_op = accept_op_type(
+        bexec::connect(acceptor.async_accept(scheduler, SOCK_CLOEXEC),
+                       pair_recv{&completions, &context, &server_socket}));
+    auto connect_op = connect_op_type(
+        bexec::connect(client_socket.async_connect(scheduler, endpoint),
+                       pair_recv{&completions, &context, nullptr}));
 
     bexec::start(accept_op);
     bexec::start(connect_op);

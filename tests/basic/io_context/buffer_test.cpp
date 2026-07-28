@@ -301,8 +301,7 @@ TEST(BufferTest, dynamic_byte_vector_buffer_multiple_prepare_without_commit) {
 
   auto second = dyn_buf.prepare(16);
   EXPECT_EQ(second.size(), 16);
-  EXPECT_EQ(second.data(),
-            static_cast<void*>(vec.data() + 8));
+  EXPECT_EQ(second.data(), static_cast<void*>(vec.data() + 8));
   EXPECT_EQ(vec.size(), 24);
 
   static_cast<std::byte*>(second.data())[0] = std::byte{99};

@@ -91,8 +91,7 @@ TEST(TimerStressTest, many_short_lived_timers) {
   using wait_sender_type =
       decltype(std::declval<bnio::steady_timer&>().async_wait());
   using wait_op_type = decltype(bexec::connect(
-      std::declval<wait_sender_type>(),
-      std::declval<timer_stress_receiver>()));
+      std::declval<wait_sender_type>(), std::declval<timer_stress_receiver>()));
 
   std::vector<std::unique_ptr<wait_op_type>> ops;
   ops.resize(static_cast<std::size_t>(num_timers));
@@ -163,8 +162,7 @@ TEST(TimerStressTest, concurrent_timer_rekey) {
           state->completions.fetch_add(1, std::memory_order_acq_rel) + 1;
       int next_round = round + 1;
       if (next_round < rekeys_per_timer) {
-        auto& timer =
-            (*timers)[static_cast<std::size_t>(timer_index)];
+        auto& timer = (*timers)[static_cast<std::size_t>(timer_index)];
         (void)timer.expires_after(
             std::chrono::milliseconds(std::rand() % 20 + 1));
 
@@ -173,12 +171,10 @@ TEST(TimerStressTest, concurrent_timer_rekey) {
             std::declval<rekey_receiver>()));
 
         int op_idx = timer_index * rekeys_per_timer + next_round;
-        auto* op = new next_op_type(
-            bexec::connect(timer.async_wait(),
-                           rekey_receiver{state, context, timers,
-                                           rekeys_per_timer, target,
-                                           timer_index, next_round,
-                                           ops_storage}));
+        auto* op = new next_op_type(bexec::connect(
+            timer.async_wait(),
+            rekey_receiver{state, context, timers, rekeys_per_timer, target,
+                           timer_index, next_round, ops_storage}));
         (*ops_storage)[static_cast<std::size_t>(op_idx)] = op;
         bexec::start(*op);
       }
@@ -206,24 +202,22 @@ TEST(TimerStressTest, concurrent_timer_rekey) {
     }
   };
 
-  std::vector<void*> ops_storage(
-      static_cast<std::size_t>(target), nullptr);
+  std::vector<void*> ops_storage(static_cast<std::size_t>(target), nullptr);
 
   for (int i = 0; i < num_timers; ++i) {
     (void)timers[static_cast<std::size_t>(i)].expires_after(
         std::chrono::milliseconds(std::rand() % 20 + 1));
     auto& timer = timers[static_cast<std::size_t>(i)];
 
-    using init_op_type = decltype(bexec::connect(
-        std::declval<decltype(timer.async_wait())>(),
-        std::declval<rekey_receiver>()));
+    using init_op_type =
+        decltype(bexec::connect(std::declval<decltype(timer.async_wait())>(),
+                                std::declval<rekey_receiver>()));
 
     int op_idx = i * rekeys_per_timer;
-    auto* op = new init_op_type(
-        bexec::connect(timer.async_wait(),
-                       rekey_receiver{&state, &context, &timers,
-                                       rekeys_per_timer, target, i, 0,
-                                       &ops_storage}));
+    auto* op = new init_op_type(bexec::connect(
+        timer.async_wait(),
+        rekey_receiver{&state, &context, &timers, rekeys_per_timer, target, i,
+                       0, &ops_storage}));
     ops_storage[static_cast<std::size_t>(op_idx)] = op;
     bexec::start(*op);
   }
@@ -267,8 +261,7 @@ TEST(TimerStressTest, many_concurrent_timers) {
   using wait_sender_type =
       decltype(std::declval<bnio::steady_timer&>().async_wait());
   using wait_op_type = decltype(bexec::connect(
-      std::declval<wait_sender_type>(),
-      std::declval<count_only_receiver>()));
+      std::declval<wait_sender_type>(), std::declval<count_only_receiver>()));
 
   std::vector<std::unique_ptr<wait_op_type>> ops;
   ops.resize(static_cast<std::size_t>(num_timers));
@@ -278,9 +271,8 @@ TEST(TimerStressTest, many_concurrent_timers) {
     timers.emplace_back(context);
     (void)timers.back().expires_after(
         std::chrono::milliseconds(std::rand() % 51));
-    ops[idx].reset(new wait_op_type(
-        bexec::connect(timers.back().async_wait(),
-                       count_only_receiver{&state})));
+    ops[idx].reset(new wait_op_type(bexec::connect(
+        timers.back().async_wait(), count_only_receiver{&state})));
     bexec::start(*ops[idx]);
   }
 
@@ -289,12 +281,12 @@ TEST(TimerStressTest, many_concurrent_timers) {
   (void)safety_timer.expires_after(std::chrono::milliseconds(200));
 
   using safety_sender_type = decltype(safety_timer.async_wait());
-  using safety_op_type = decltype(bexec::connect(
-      std::declval<safety_sender_type>(),
-      std::declval<safety_stop_receiver>()));
+  using safety_op_type =
+      decltype(bexec::connect(std::declval<safety_sender_type>(),
+                              std::declval<safety_stop_receiver>()));
 
-  auto safety_op = std::unique_ptr<safety_op_type>(
-      new safety_op_type(bexec::connect(
+  auto safety_op =
+      std::unique_ptr<safety_op_type>(new safety_op_type(bexec::connect(
           safety_timer.async_wait(), safety_stop_receiver{&context})));
   bexec::start(*safety_op);
 

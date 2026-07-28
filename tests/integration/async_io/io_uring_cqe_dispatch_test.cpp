@@ -91,8 +91,9 @@ TEST(IoUringCqeDispatchTest, concurrent_start_uses_the_single_run_thread) {
   std::atomic<bool> run_loop_started{false};
   run_loop_signal_recv sig_recv;
   sig_recv.started = &run_loop_started;
-  auto signal_op = std::make_unique<io_uring_nop_operation<run_loop_signal_recv>>(
-      context, std::move(sig_recv));
+  auto signal_op =
+      std::make_unique<io_uring_nop_operation<run_loop_signal_recv>>(
+          context, std::move(sig_recv));
   bexec::start(*signal_op);
 
   std::barrier ready(static_cast<std::ptrdiff_t>(k_threads + 1));

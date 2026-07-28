@@ -602,9 +602,8 @@ TEST(IoContextReadWriteTest, socketpair_70kb_write_all) {
     // the buffer, ensuring kevent fires for the available data.
     auto read_op = bexec::connect(
         reader_socket.async_read_some(
-            scheduler,
-            bnio::buffer(received.data() + received_size,
-                         received.size() - received_size)),
+            scheduler, bnio::buffer(received.data() + received_size,
+                                    received.size() - received_size)),
         std::move(read_recv));
     bexec::start(read_op);
 
@@ -625,12 +624,14 @@ TEST(IoContextReadWriteTest, socketpair_70kb_write_all) {
       EXPECT_GT(write_state->size, 0);
       sent += write_state->size;
     }
-    if (read_state->size == 0 || (sent < payload.size() && write_state->size == 0)) {
+    if (read_state->size == 0 ||
+        (sent < payload.size() && write_state->size == 0)) {
       break;
     }
   }
 
   EXPECT_EQ(sent, payload_size);
   EXPECT_EQ(received_size, payload_size);
-  EXPECT_TRUE(std::memcmp(received.data(), payload.data(), payload.size()) == 0);
+  EXPECT_TRUE(std::memcmp(received.data(), payload.data(), payload.size()) ==
+              0);
 }
