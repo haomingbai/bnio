@@ -607,13 +607,13 @@ TEST(IoContextReadWriteTest, socketpair_70kb_write_all) {
         std::move(read_recv));
     bexec::start(read_op);
 
+    auto write_op = bexec::connect(
+        writer_socket.async_write_some(
+            scheduler,
+            bnio::buffer(payload.data() + sent, payload.size() - sent),
+            MSG_NOSIGNAL),
+        std::move(write_recv));
     if (sent < payload.size()) {
-      auto write_op = bexec::connect(
-          writer_socket.async_write_some(
-              scheduler,
-              bnio::buffer(payload.data() + sent, payload.size() - sent),
-              MSG_NOSIGNAL),
-          std::move(write_recv));
       bexec::start(write_op);
     }
 

@@ -62,10 +62,9 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
     std::size_t idx = static_cast<std::size_t>(i);
     payloads[idx].resize(payload_size);
     read_bufs[idx].resize(payload_size);
-    std::generate(payloads[idx].begin(), payloads[idx].end(),
-                  [val = static_cast<unsigned char>(i + 1)]() mutable {
-                    return val;
-                  });
+    std::generate(
+        payloads[idx].begin(), payloads[idx].end(),
+        [val = static_cast<unsigned char>(i + 1)]() mutable { return val; });
   }
 
   // Derive sender and operation types from a representative context + socket.
@@ -110,8 +109,7 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
       GTEST_SKIP() << "native I/O context is unavailable at context " << i;
     }
 
-    EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, rt->fds),
-              0);
+    EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, rt->fds), 0);
 
     bnio::tcp_socket writer(rt->fds[0]);
     bnio::tcp_socket reader(rt->fds[1]);
@@ -156,8 +154,8 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
   while (state.completions.load(std::memory_order_acquire) < target &&
          state.errors.load(std::memory_order_acquire) == 0) {
     if (std::chrono::steady_clock::now() > deadline) {
-      ADD_FAILURE() << "timeout: only " << state.completions.load()
-                    << " of " << target << " completions";
+      ADD_FAILURE() << "timeout: only " << state.completions.load() << " of "
+                    << target << " completions";
       break;
     }
     std::this_thread::yield();
@@ -182,9 +180,9 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
   // Verify data integrity for every payload.
   for (int i = 0; i < num_contexts; ++i) {
     std::size_t idx = static_cast<std::size_t>(i);
-    EXPECT_EQ(std::memcmp(read_bufs[idx].data(), payloads[idx].data(),
-                          payload_size),
-              0);
+    EXPECT_EQ(
+        std::memcmp(read_bufs[idx].data(), payloads[idx].data(), payload_size),
+        0);
     EXPECT_EQ(::close(runtimes[idx]->fds[0]), 0);
     EXPECT_EQ(::close(runtimes[idx]->fds[1]), 0);
   }
