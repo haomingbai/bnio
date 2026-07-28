@@ -114,6 +114,12 @@ int io_uring_context::init_ring_params(
 }
 
 void io_uring_context::queue_exit() noexcept {
+  // Abort any remaining inflight I/O before closing the ring.
+  // Normal shutdown cleans these up in finish(), but forced/abnormal
+  // shutdown (e.g. closing flag, destruction without run) may leave
+  // operations in-flight.
+  abort_inflight_io();
+
   state_.store(context_state::finished, std::memory_order_release);
 
   (void)local_tasks_.pop_all();
