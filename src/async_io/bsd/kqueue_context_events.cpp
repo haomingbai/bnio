@@ -111,6 +111,19 @@ bool kqueue_context::process_event(const bnio::base::event& event,
       registration.operation == nullptr) {
     return false;
   }
+
+  // Explicitly EV_DELETE the filter that delivered this event.  With the
+  // current level-triggered initial registration (plain EV_ADD) the
+  // kernel does not auto-consume the filter, so it must be removed here
+  // to prevent spurious re-delivery before the operation is re-armed
+  // with EV_ONESHOT by try_rearm_operation.
+  {
+    bnio::base::event deletion(registration.event.ident(),
+                               registration.event.filter(), EV_DELETE, 0, 0,
+                               registration.operation);
+    (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
+  }
+
   // Arm the next queued registration on the same descriptor / filter pair.
   arm_next_registration(registration.event.ident(),
                         registration.event.filter());

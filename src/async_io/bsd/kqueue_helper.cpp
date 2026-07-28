@@ -49,8 +49,15 @@ void kqueue_helper::append_filter(std::int16_t filter) noexcept {
     error_ = -E2BIG;
     return;
   }
+  // Use plain EV_ADD (level-triggered) for the initial registration so
+  // that a subsequent non-blocking kevent can immediately collect the
+  // event when data is already present in the kernel buffer.  This
+  // eliminates the macOS / FreeBSD EV_ONESHOT quirk where edge-triggered
+  // filters do not fire for data that arrived before the filter was
+  // registered.  The event is converted to EV_ONESHOT when re-armed in
+  // try_rearm_operation (kqueue_context_events.cpp).
   events_[event_count_++].set(static_cast<std::uintptr_t>(descriptor_), filter,
-                              EV_ADD | EV_ONESHOT, 0, 0, nullptr);
+                              EV_ADD, 0, 0, nullptr);
 }
 
 void kqueue_helper::prep_nop() noexcept { reset(kqueue_task::nop, -1, 0); }
