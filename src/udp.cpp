@@ -36,7 +36,8 @@ namespace {
 [[nodiscard]] int open_socket(int family) noexcept {
 #if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
   return ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, IPPROTO_UDP);
-#elif defined(SOCK_CLOEXEC)
+#else
+#if defined(SOCK_CLOEXEC)
   const int descriptor = ::socket(family, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
 #else
   const int descriptor = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);
@@ -64,6 +65,7 @@ namespace {
   }
 #endif
   return descriptor;
+#endif
 }
 
 }  // namespace

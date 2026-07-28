@@ -49,7 +49,8 @@ namespace {
 [[nodiscard]] int open_socket(int family, int type, int protocol) noexcept {
 #if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
   return ::socket(family, type | SOCK_CLOEXEC | SOCK_NONBLOCK, protocol);
-#elif defined(SOCK_CLOEXEC)
+#else
+#if defined(SOCK_CLOEXEC)
   const int descriptor = ::socket(family, type | SOCK_CLOEXEC, protocol);
 #else
   const int descriptor = ::socket(family, type, protocol);
@@ -77,6 +78,7 @@ namespace {
   }
 #endif
   return descriptor;
+#endif
 }
 
 }  // namespace
