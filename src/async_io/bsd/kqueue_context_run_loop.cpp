@@ -127,9 +127,15 @@ bool kqueue_context::consume_timeout_operations() noexcept {
 kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
   local_task_budget_ = options_.local_queue_threshold;
 
-  // 1. Always poll ready kevents first — drain any events that arrived
-  //    since the last drain, matching Linux's collect_ready_cqes().
-  (void)collect_ready_events(false);
+  // 1. Poll ready kevents only when there is inflight I/O that could have
+  //    produced a completion. Without inflight I/O, kevent() would always
+  //    return 0 events — the syscall is pure overhead (notably on the
+  //    timer-only path). Mirrors io_uring's collect_ready_cqes(), which reads
+  //    a user-space ring and is cheap to call unconditionally; kqueue has no
+  //    such user-space shortcut, so we gate on inflight_io_head_.
+  if (inflight_io_head_ != nullptr) {
+    (void)collect_ready_events(false);
+  }
 
   // 2. Process local CPU tasks (completions, posts, etc.).
   if (kqueue_operation_base* operations =

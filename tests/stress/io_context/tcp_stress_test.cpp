@@ -85,7 +85,7 @@ TEST(TcpStressTest, many_concurrent_accept_connect) {
   std::vector<std::unique_ptr<accept_operation_type>> accept_ops;
   accept_ops.resize(num_clients);
 
-  for (int i = 0; i < num_clients; ++i) {
+  for (size_t i = 0; i < num_clients; ++i) {
     accept_ops[i].reset(new accept_operation_type(
         bexec::connect(acceptor.async_accept(scheduler, SOCK_CLOEXEC),
                        tcp_stress_receiver{&state, &context, target})));
@@ -105,7 +105,7 @@ TEST(TcpStressTest, many_concurrent_accept_connect) {
   std::vector<std::unique_ptr<connect_operation_type>> connect_ops;
   connect_ops.resize(num_clients);
 
-  for (int i = 0; i < num_clients; ++i) {
+  for (size_t i = 0; i < num_clients; ++i) {
     clients.emplace_back();
     EXPECT_FALSE(clients.back().open(bnio::ip::tcp::v4()));
     connect_ops[i].reset(new connect_operation_type(
