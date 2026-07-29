@@ -4,7 +4,7 @@
 
 | Item | Value |
 | --- | --- |
-| Date | 2026-07-28 |
+| Date | 2026-07-29 |
 | Topology | Single-host loopback TCP (127.0.0.1) |
 | OS | macOS 26.5.2 |
 | Kernel | Darwin 25.5.0 |
@@ -94,13 +94,13 @@ The matrix produced **24** result rows.
 
 Both servers completed every configuration with zero client errors. All 96 configurations produced clean, reliable measurements.
 
-Overall average throughput ratio (bnio / asio): **0.901×** across all 96 configurations.
+Overall average throughput ratio (bnio / asio): **0.972×** across all 96 configurations.
 
 ### Part B — Timer Churn
 
 Both backends completed every configuration successfully. All 24 configurations produced clean measurements.
 
-Overall average lifecycle throughput ratio (bnio / asio): **1.056×** across all 24 configurations.
+Overall average lifecycle throughput ratio (bnio / asio): **1.051×** across all 24 configurations.
 
 ---
 
@@ -114,10 +114,10 @@ Overall average lifecycle throughput ratio (bnio / asio): **1.056×** across all
 
 | Message Size | bnio req/s | bnio err | asio req/s | asio err | Ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 64 B | 110,588 | 0 | 102,384 | 0 | 1.08× |
-| 1 KB | 108,570 | 0 | 101,138 | 0 | 1.07× |
-| 4 KB | 107,539 | 0 | 99,483 | 0 | 1.08× |
-| 64 KB | 9,584 | 0 | 13,316 | 0 | 0.72× |
+| 64 B | 132,361 | 0 | 110,273 | 0 | 1.20× |
+| 1 KB | 127,159 | 0 | 110,042 | 0 | 1.16× |
+| 4 KB | 127,947 | 0 | 110,349 | 0 | 1.16× |
+| 64 KB | 9,878 | 0 | 12,520 | 0 | 0.79× |
 
 ### 5.2 Throughput vs Connections
 
@@ -133,22 +133,22 @@ Overall average lifecycle throughput ratio (bnio / asio): **1.056×** across all
 
 | Workers | bnio req/s | bnio err | asio req/s | asio err | Ratio |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 85,283 | 0 | 105,726 | 0 | 0.81× |
-| 2 | 120,781 | 0 | 138,059 | 0 | 0.87× |
-| 4 | 107,539 | 0 | 99,483 | 0 | 1.08× |
-| 8 | 97,451 | 0 | 92,921 | 0 | 1.05× |
+| 1 | 119,502 | 0 | 116,485 | 0 | 1.03× |
+| 2 | 139,679 | 0 | 151,527 | 0 | 0.92× |
+| 4 | 127,947 | 0 | 110,349 | 0 | 1.16× |
+| 8 | 114,880 | 0 | 101,413 | 0 | 1.13× |
 
-**Worker-scaling at 4 KB / 256 connections.** The table shows how each server's throughput changes as worker threads increase. bnio trails at 1–2 workers (0.81–0.87×) but pulls ahead at 4+ workers (1.05–1.08×), indicating the kqueue backend benefits significantly from multi-threaded operation.
+**Worker-scaling at 4 KB / 256 connections.** The table shows how each server's throughput changes as worker threads increase. bnio now leads at 1, 4, and 8 workers (1.03–1.16×) and trails only at 2 workers (0.92×), indicating the kqueue backend benefits significantly from multi-threaded operation and has closed the single-threaded gap present in the previous run.
 
 ### 5.4 Connection Scaling
 
 | Connections | bnio req/s | bnio err | asio req/s | asio err | Ratio |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 64 | 107,099 | 0 | 102,403 | 0 | 1.05× |
-| 256 | 107,539 | 0 | 99,483 | 0 | 1.08× |
-| 1024 | 103,967 | 0 | 97,014 | 0 | 1.07× |
+| 64 | 119,549 | 0 | 110,286 | 0 | 1.08× |
+| 256 | 127,947 | 0 | 110,349 | 0 | 1.16× |
+| 1024 | 123,865 | 0 | 107,532 | 0 | 1.15× |
 
-**Connection-scaling at 4 KB / workers=4.** Shows how each server handles increasing concurrency. bnio leads consistently at all connection counts.
+**Connection-scaling at 4 KB / workers=4.** Shows how each server handles increasing concurrency. bnio leads consistently across all connection counts, with the widest gap at 256 connections.
 
 ### 5.5 bnio / asio Throughput Ratio Heatmap
 
@@ -166,17 +166,17 @@ Overall average lifecycle throughput ratio (bnio / asio): **1.056×** across all
 
 **Best bnio / asio throughput ratio (zero-error):**
 
-- Configuration: workers=8, connections=256, message_size=64 B
-- bnio: 104,554 req/s
-- asio: 95,006 req/s
-- Ratio: 1.10×
+- Configuration: workers=4, connections=1024, message_size=1 KB
+- bnio: 131,062 req/s
+- asio: 107,790 req/s
+- Ratio: 1.22×
 
 **Most challenging bnio / asio throughput ratio (zero-error):**
 
-- Configuration: workers=8, connections=256, message_size=64 KB
-- bnio: 9,176 req/s
-- asio: 16,399 req/s
-- Ratio: 0.56×
+- Configuration: workers=8, connections=1024, message_size=64 KB
+- bnio: 8,848 req/s
+- asio: 15,629 req/s
+- Ratio: 0.57×
 
 ### 5.8 Full Results (workers=4)
 
@@ -184,63 +184,65 @@ Overall average lifecycle throughput ratio (bnio / asio): **1.056×** across all
 
 | Server | Workers | Conns | req/s | MB/s |
 | --- | ---: | ---: | ---: | ---: |
-| asio | 4 | 64 | 103,561 | 6 |
-| asio | 4 | 256 | 102,384 | 6 |
-| asio | 4 | 1024 | 100,850 | 6 |
-| bnio | 4 | 64 | 110,392 | 6 |
-| bnio | 4 | 256 | 110,588 | 6 |
-| bnio | 4 | 1024 | 107,306 | 6 |
+| asio | 4 | 64 | 115,019 | 7 |
+| asio | 4 | 256 | 110,273 | 6 |
+| asio | 4 | 1024 | 107,729 | 6 |
+| bnio | 4 | 64 | 126,648 | 7 |
+| bnio | 4 | 256 | 132,361 | 8 |
+| bnio | 4 | 1024 | 130,617 | 7 |
 
 #### Message size = 1 KB
 
 | Server | Workers | Conns | req/s | MB/s |
 | --- | ---: | ---: | ---: | ---: |
-| asio | 4 | 64 | 103,190 | 100 |
-| asio | 4 | 256 | 101,138 | 98 |
-| asio | 4 | 1024 | 98,097 | 95 |
-| bnio | 4 | 64 | 109,229 | 106 |
-| bnio | 4 | 256 | 108,570 | 106 |
-| bnio | 4 | 1024 | 107,536 | 105 |
+| asio | 4 | 64 | 114,261 | 111 |
+| asio | 4 | 256 | 110,042 | 107 |
+| asio | 4 | 1024 | 107,790 | 105 |
+| bnio | 4 | 64 | 123,259 | 120 |
+| bnio | 4 | 256 | 127,159 | 124 |
+| bnio | 4 | 1024 | 131,062 | 127 |
 
 #### Message size = 4 KB
 
 | Server | Workers | Conns | req/s | MB/s |
 | --- | ---: | ---: | ---: | ---: |
-| asio | 4 | 64 | 102,403 | 400 |
-| asio | 4 | 256 | 99,483 | 388 |
-| asio | 4 | 1024 | 97,014 | 378 |
-| bnio | 4 | 64 | 107,099 | 418 |
-| bnio | 4 | 256 | 107,539 | 420 |
-| bnio | 4 | 1024 | 103,967 | 406 |
+| asio | 4 | 64 | 110,286 | 430 |
+| asio | 4 | 256 | 110,349 | 431 |
+| asio | 4 | 1024 | 107,532 | 420 |
+| bnio | 4 | 64 | 119,549 | 466 |
+| bnio | 4 | 256 | 127,947 | 499 |
+| bnio | 4 | 1024 | 123,865 | 483 |
 
 #### Message size = 64 KB
 
 | Server | Workers | Conns | req/s | MB/s |
 | --- | ---: | ---: | ---: | ---: |
-| asio | 4 | 64 | 13,997 | 874 |
-| asio | 4 | 256 | 13,316 | 832 |
-| asio | 4 | 1024 | 13,064 | 816 |
-| bnio | 4 | 64 | 9,694 | 605 |
-| bnio | 4 | 256 | 9,584 | 599 |
-| bnio | 4 | 1024 | 9,024 | 564 |
+| asio | 4 | 64 | 13,307 | 831 |
+| asio | 4 | 256 | 12,520 | 782 |
+| asio | 4 | 1024 | 13,065 | 816 |
+| bnio | 4 | 64 | 9,360 | 585 |
+| bnio | 4 | 256 | 9,878 | 617 |
+| bnio | 4 | 1024 | 9,279 | 579 |
 
 ### 5.9 Interpretation
 
 These observations are based on the benchmark data and the implementation model. They have not been independently validated with profiling in this run.
 
-1. **bnio now leads throughput on the kqueue backend at higher worker counts.** The overall throughput ratio is 0.901×, a significant improvement from the previous 0.772× (+16.7%). bnio wins 42 of 96 configurations, up from only 6 previously. This improvement is attributable to the "perf: optimize the performance on bsd side" commit.
+1. **bnio now nearly reaches parity with asio on the kqueue backend.** The overall throughput ratio is 0.972×, up from 0.901× in the previous run (+7.9%). bnio wins 50 of 96 configurations, up from 42 previously. This improvement is attributable to the two recent commits `0979ac0` (*perf: modified the check method of kqueue*) and `eeb6805` (*perf: remove the fixed array in kqueue branch*), which streamlined the kqueue event-check path and eliminated per-event fixed-array overhead.
 
-2. **The gap reverses at 4+ workers.** At workers=1, bnio trails at ~0.81×. At workers=2, it improves to ~0.87×. At workers=4 and 8, bnio leads at 1.05–1.08× for small/medium messages. This suggests the recent BSD-side optimizations primarily benefit multi-threaded operation, likely through improved task queue submission and event batching.
+2. **Single-worker throughput improved the most.** At workers=1, the average ratio jumped from 0.873 to 0.993 (+0.12), nearly closing the gap. Small/medium messages at w=1 now range 0.98–1.03× (previously 0.79–0.82×). The check-method optimization particularly benefits the single-threaded event loop, where per-event overhead dominates.
 
-3. **Large messages (64 KB) remain the weakest area.** At 64 KB, bnio trails across all worker counts. The gap narrows at workers=1–2 (0.65–1.06×, mixed) but widens at workers=8 (as low as 0.56×). This suggests the kqueue large-buffer I/O path has additional optimization opportunities distinct from the small/medium message path.
+3. **The multi-worker lead has expanded.** At workers=4 and 8, bnio's lead on small/medium messages widened to 1.07–1.22× (previously 1.02–1.10×). Removing the fixed array likely reduced contention on the multi-threaded submission path and improved cache locality.
 
-4. **Small and medium message performance is now competitive.** At 64 B–4 KB with workers ≥ 4, bnio leads asio by 5–8%. For these workloads, the recent optimizations have brought bnio's per-message overhead below asio's on kqueue.
+4. **Large messages (64 KB) remain the weakest area.** At 64 KB, the average ratio is essentially flat at ~0.74×. Three single-threaded 64 KB configurations regressed: w=1/c=64/m=65536 dropped sharply from 1.04 to 0.84 (−0.20) — bnio's absolute throughput also fell from 10,737 to 9,392 req/s while asio rose from 10,283 to 11,139 req/s, a bidirectional worsening — w=1/c=1024/m=65536 narrowed from 1.085 to 1.021 (−0.06), and w=1/c=256/m=65536 narrowed from 1.063 to 1.024 (−0.04). The w=1/c=64 case is the only severe regression in this run and warrants targeted investigation.
 
-5. **Connection count has minimal impact on the ratio.** The bnio/asio ratio is stable across 64, 256, and 1,024 connections (1.05–1.08× at workers=4), indicating both backends scale similarly with connection count. At workers=8, bnio maintains its lead across all connection counts for small/medium messages.
+5. **The 2-worker case is now the laggard.** At workers=2, the average ratio is 0.851, the only worker count still clearly below parity. This contrasts with w=1, which nearly closed the gap. The 2-thread scaling mechanism appears to benefit asio's reactor model more than bnio's current kqueue path.
 
-6. **No errors across the entire matrix.** All 96 configurations completed cleanly — both server implementations and the client are stable under all tested configurations on kqueue.
+6. **Connection count has minimal impact on the ratio.** The bnio/asio ratio is stable across 64, 256, and 1,024 connections (1.08–1.16× at workers=4), indicating both backends scale similarly with connection count. At workers=8, bnio maintains its lead across all connection counts for small/medium messages.
 
-7. **The kqueue implementation continues to improve.** bnio's kqueue backend has been actively optimized for BSD-side performance. Areas of ongoing improvement include the large-buffer I/O path and further reductions in per-message overhead at low worker counts. See the [kqueue roadmap](../design/kqueue-roadmap.md) for optimization plans.
+7. **No errors across the entire matrix.** All 96 configurations completed cleanly — both server implementations and the client are stable under all tested configurations on kqueue.
+
+8. **The kqueue implementation continues to improve.** The single-threaded and small/medium-message paths are now competitive with asio. Remaining areas: the 64 KB large-buffer I/O path, 2-thread scaling, and the specific w=1/c=64/m=65536 regression. See the [kqueue roadmap](../design/kqueue-roadmap.md) for optimization plans.
 
 ---
 
@@ -254,10 +256,10 @@ These observations are based on the benchmark data and the implementation model.
 
 | Timer Count | bnio lifecycle/s | asio lifecycle/s | Ratio |
 | ---: | ---: | ---: | ---: |
-| 256 | 22,974,300 | 23,979,200 | 0.96× |
-| 1,024 | 39,289,100 | 36,808,500 | 1.07× |
-| 4,096 | 37,660,000 | 38,814,700 | 0.97× |
-| 16,384 | 37,756,200 | 37,081,800 | 1.02× |
+| 256 | 21,333,800 | 23,552,500 | 0.91× |
+| 1,024 | 38,093,200 | 37,503,700 | 1.02× |
+| 4,096 | 38,033,100 | 38,890,800 | 0.98× |
+| 16,384 | 38,226,100 | 37,159,800 | 1.03× |
 
 ### 6.2 Active Waits Overview
 
@@ -267,10 +269,10 @@ These observations are based on the benchmark data and the implementation model.
 
 | Timer Count | bnio waits/s | asio waits/s | Ratio |
 | ---: | ---: | ---: | ---: |
-| 256 | 13,094,600 | 13,667,300 | 0.96× |
-| 1,024 | 22,393,500 | 20,979,600 | 1.07× |
-| 4,096 | 21,464,900 | 22,123,100 | 0.97× |
-| 16,384 | 21,519,700 | 21,135,300 | 1.02× |
+| 256 | 12,159,500 | 13,424,100 | 0.91× |
+| 1,024 | 21,711,800 | 21,375,800 | 1.02× |
+| 4,096 | 21,677,600 | 22,166,400 | 0.98× |
+| 16,384 | 21,787,600 | 21,179,800 | 1.03× |
 
 ### 6.3 Lifecycle Throughput vs Timer Count
 
@@ -294,17 +296,17 @@ These observations are based on the benchmark data and the implementation model.
 
 **Best bnio / asio lifecycle ratio:**
 
-- Configuration: timers=1,024, rounds=100
-- bnio: 38,037,400 lifecycle calls/s
-- asio: 30,999,900 lifecycle calls/s
-- Ratio: 1.23×
+- Configuration: timers=256, rounds=100
+- bnio: 18,876,100 lifecycle calls/s
+- asio: 14,688,200 lifecycle calls/s
+- Ratio: 1.29×
 
 **Most challenging bnio / asio lifecycle ratio:**
 
 - Configuration: timers=256, rounds=500
-- bnio: 22,974,300 lifecycle calls/s
-- asio: 23,979,200 lifecycle calls/s
-- Ratio: 0.96×
+- bnio: 21,333,800 lifecycle calls/s
+- asio: 23,552,500 lifecycle calls/s
+- Ratio: 0.91×
 
 ### 6.7 Full Results
 
@@ -312,61 +314,63 @@ These observations are based on the benchmark data and the implementation model.
 
 | Backend | Timers | Rounds | lifecycle/s | waits/s |
 | --- | ---: | ---: | ---: | ---: |
-| bnio | 256 | 100 | 18,586,400 | 10,487,300 |
-| bnio | 256 | 500 | 22,974,300 | 13,094,600 |
-| bnio | 256 | 1,000 | 31,476,700 | 17,963,600 |
-| asio | 256 | 100 | 15,652,300 | 8,831,730 |
-| asio | 256 | 500 | 23,979,200 | 13,667,300 |
-| asio | 256 | 1,000 | 31,727,400 | 18,106,700 |
+| bnio | 256 | 100 | 18,876,100 | 10,650,700 |
+| bnio | 256 | 500 | 21,333,800 | 12,159,500 |
+| bnio | 256 | 1,000 | 29,951,700 | 17,093,300 |
+| asio | 256 | 100 | 14,688,200 | 8,287,730 |
+| asio | 256 | 500 | 23,552,500 | 13,424,100 |
+| asio | 256 | 1,000 | 29,499,500 | 16,835,200 |
 
 #### Timer count = 1,024
 
 | Backend | Timers | Rounds | lifecycle/s | waits/s |
 | --- | ---: | ---: | ---: | ---: |
-| bnio | 1,024 | 100 | 38,037,400 | 21,462,500 |
-| bnio | 1,024 | 500 | 39,289,100 | 22,393,500 |
-| bnio | 1,024 | 1,000 | 37,840,100 | 21,595,200 |
-| asio | 1,024 | 100 | 30,999,900 | 17,491,600 |
-| asio | 1,024 | 500 | 36,808,500 | 20,979,600 |
-| asio | 1,024 | 1,000 | 37,553,900 | 21,431,800 |
+| bnio | 1,024 | 100 | 36,161,100 | 20,403,700 |
+| bnio | 1,024 | 500 | 38,093,200 | 21,711,800 |
+| bnio | 1,024 | 1,000 | 37,051,700 | 21,145,200 |
+| asio | 1,024 | 100 | 35,849,600 | 20,228,000 |
+| asio | 1,024 | 500 | 37,503,700 | 21,375,800 |
+| asio | 1,024 | 1,000 | 37,068,200 | 21,154,700 |
 
 #### Timer count = 4,096
 
 | Backend | Timers | Rounds | lifecycle/s | waits/s |
 | --- | ---: | ---: | ---: | ---: |
-| bnio | 4,096 | 100 | 39,278,900 | 22,163,000 |
-| bnio | 4,096 | 500 | 37,660,000 | 21,464,900 |
-| bnio | 4,096 | 1,000 | 38,790,300 | 22,137,500 |
-| asio | 4,096 | 100 | 37,845,400 | 21,354,100 |
-| asio | 4,096 | 500 | 38,814,700 | 22,123,100 |
-| asio | 4,096 | 1,000 | 38,017,000 | 21,696,100 |
+| bnio | 4,096 | 100 | 38,616,000 | 21,788,900 |
+| bnio | 4,096 | 500 | 38,033,100 | 21,677,600 |
+| bnio | 4,096 | 1,000 | 39,235,900 | 22,391,700 |
+| asio | 4,096 | 100 | 32,581,600 | 18,384,000 |
+| asio | 4,096 | 500 | 38,890,800 | 22,166,400 |
+| asio | 4,096 | 1,000 | 36,759,100 | 20,978,300 |
 
 #### Timer count = 16,384
 
 | Backend | Timers | Rounds | lifecycle/s | waits/s |
 | --- | ---: | ---: | ---: | ---: |
-| bnio | 16,384 | 100 | 38,795,800 | 21,890,400 |
-| bnio | 16,384 | 500 | 37,756,200 | 21,519,700 |
-| bnio | 16,384 | 1,000 | 37,525,800 | 21,415,800 |
-| asio | 16,384 | 100 | 33,089,200 | 18,670,400 |
-| asio | 16,384 | 500 | 37,081,800 | 21,135,300 |
-| asio | 16,384 | 1,000 | 37,026,200 | 21,130,700 |
+| bnio | 16,384 | 100 | 37,985,400 | 21,433,100 |
+| bnio | 16,384 | 500 | 38,226,100 | 21,787,600 |
+| bnio | 16,384 | 1,000 | 38,220,700 | 21,812,400 |
+| asio | 16,384 | 100 | 33,544,000 | 18,927,100 |
+| asio | 16,384 | 500 | 37,159,800 | 21,179,800 |
+| asio | 16,384 | 1,000 | 38,761,100 | 22,120,800 |
 
 ### 6.8 Interpretation
 
 These observations are based on the benchmark data and the implementation model. They have not been independently validated with profiling in this run.
 
-1. **bnio and asio remain effectively tied on timer churn.** The average lifecycle ratio is 1.056× in bnio's favor (down slightly from 1.064× previously), with bnio winning 18 of 24 configurations. At steady-state configurations (500+ rounds), both backends produce near-identical throughput.
+1. **bnio retains a slight edge on timer churn.** The average lifecycle ratio is 1.051× in bnio's favor (down slightly from 1.056× previously, −0.5%), with bnio winning 16 of 24 configurations (down from 18). At steady-state configurations (500+ rounds), both backends produce near-identical throughput. The recent kqueue commits (`0979ac0`, `eeb6805`) target the I/O event path and do not modify timer code, so timer churn behavior is largely unchanged.
 
 2. **Kqueue timer throughput continues to excel.** Both backends achieve ~37–39 million lifecycle calls/s at peak, consistent with the lightweight nature of kqueue's `EVFILT_TIMER` mechanism.
 
-3. **bnio's advantage at low round counts has strengthened.** At rounds=100, bnio leads across all timer counts with ratios of 1.04–1.23× (previously 1.10–1.37×). The lead is most pronounced at 1,024 timers (1.23×), suggesting continued advantage in timer setup/initialization overhead.
+3. **Low-round results are mixed.** At rounds=100, the 4,096-timer case improved significantly (1.038 → 1.185, +0.147) and the 256-timer case strengthened (1.187 → 1.285, +0.098). However, the 1,024-timer case regressed severely (1.227 → 1.009, −0.218) — the single worst regression in this run.
 
-4. **Setup cost amortization favors asio at some configurations.** At 256 timers with 500+ rounds, asio slightly leads (0.96–0.99×). This configuration represents the case where per-round overhead dominates, and asio's path is marginally faster once warm-up is complete.
+4. **The 1,024-timer count is the primary regression area.** The average ratio at t=1024 fell from 1.101 to 1.008 (−0.093). Two of three round configurations regressed; only t=1024/r=500 retains a slim lead (1.016). This suggests the recent kqueue changes interact poorly with this specific timer scale.
 
-5. **No clear scaling pattern with timer count.** The ratio is relatively flat or slightly decreasing with more timers. Both backends use kqueue's native timer mechanism, so per-timer costs are very similar.
+5. **Setup-cost amortization favors asio at 256 timers / 500 rounds.** At 256/500, asio leads at 0.91×. This configuration represents the case where per-round overhead dominates, and asio's path is marginally faster once warm-up is complete.
 
-6. **Active wait throughput mirrors lifecycle throughput.** The waits/s ratio follows the same pattern (average ~1.05× in bnio's favor), confirming consistency across both metrics.
+6. **No clear scaling pattern with timer count.** The ratio is relatively flat or slightly decreasing with more timers. Both backends use kqueue's native timer mechanism, so per-timer costs are very similar.
+
+7. **Active wait throughput mirrors lifecycle throughput.** The waits/s ratio follows the same pattern (average ~1.051× in bnio's favor), confirming consistency across both metrics.
 
 ---
 
@@ -374,34 +378,34 @@ These observations are based on the benchmark data and the implementation model.
 
 | Benchmark | Avg bnio/asio Ratio | bnio Wins | asio Wins | Total Configs |
 | --- | ---: | ---: | ---: | ---: |
-| TCP Echo Throughput | 0.901× | 42 | 54 | 96 |
-| Timer Churn (lifecycle) | 1.056× | 18 | 6 | 24 |
+| TCP Echo Throughput | 0.972× | 50 | 46 | 96 |
+| Timer Churn (lifecycle) | 1.051× | 16 | 8 | 24 |
 
-On the kqueue (macOS/BSD) backend, the picture has shifted significantly from the previous run:
+On the kqueue (macOS/BSD) backend, the picture has continued to improve from the previous run:
 
-- **Throughput**: bnio now achieves 90% of asio's throughput on average, up from 77% (+16.7%). At 4+ workers, bnio leads asio for small and medium messages (1.05–1.10×). The large-message (64 KB) path remains the weakest area, particularly at higher worker counts.
+- **Throughput**: bnio now achieves 97.2% of asio's throughput on average, up from 90.1% (+7.9%). At 1, 4, and 8 workers, bnio leads asio for small and medium messages (1.03–1.22×). The large-message (64 KB) path remains the weakest area, with two single-threaded 64 KB configurations regressing.
 
-- **Timer churn**: bnio maintains a slight edge (1.056×), essentially unchanged from the previous run (1.064×). Both backends achieve near-identical steady-state throughput.
+- **Timer churn**: bnio maintains a slight edge (1.051×), essentially unchanged from the previous run (1.056×, −0.5%). Both backends achieve near-identical steady-state throughput, with the 1,024-timer scale the only notable regression area.
 
-### Comparison with Previous Run (2026-07-27)
+### Comparison with Previous Run (2026-07-28)
 
-| Benchmark | Previous (0.772× avg) | Current (0.901× avg) | Change |
+| Benchmark | Previous (0.901× avg) | Current (0.972× avg) | Change |
 | --- | ---: | ---: | ---: |
-| TCP Echo Throughput | 0.772× (6 wins) | 0.901× (42 wins) | **+16.7%** |
-| Timer Churn | 1.064× (16 wins) | 1.056× (18 wins) | −0.8% |
+| TCP Echo Throughput | 0.901× (42 wins) | 0.972× (50 wins) | **+7.9%** |
+| Timer Churn | 1.056× (18 wins) | 1.051× (16 wins) | −0.5% |
 
-The throughput improvement is attributable to the "perf: optimize the performance on bsd side" commit (d9d9c12), which improved bnio's kqueue backend performance, particularly in multi-threaded operation.
+The throughput improvement is attributable to the two recent commits `0979ac0` (*perf: modified the check method of kqueue*) and `eeb6805` (*perf: remove the fixed array in kqueue branch*). The check-method change streamlined the per-event verification path in the kqueue reactor, particularly benefiting the single-threaded event loop. Removing the fixed array eliminated per-event array overhead and reduced contention on the multi-threaded submission path. Together these changes lifted the overall ratio by +0.071 and converted 4 net configurations from asio wins to bnio wins, with the largest gains concentrated in single-threaded small/medium-message scenarios (delta +0.17 to +0.22). The only notable regression is two single-threaded 64 KB configurations (worst: w=1/c=64/m=65536 at −0.20), which warrants separate investigation.
 
 ### Platform Comparison: kqueue vs io_uring
 
 | Benchmark | io_uring (Linux) | kqueue (macOS) |
 | --- | ---: | ---: |
-| TCP Echo Throughput | **1.039×** (bnio leads) | **0.901×** (bnio narrows gap) |
-| Timer Churn (lifecycle) | **1.179×** (bnio leads) | **1.056×** (near parity) |
+| TCP Echo Throughput | **1.039×** (bnio leads) | **0.972×** (bnio near parity) |
+| Timer Churn (lifecycle) | **1.179×** (bnio leads) | **1.051×** (near parity) |
 
-The platform comparison reveals that bnio's performance on kqueue has improved significantly but still lags behind its io_uring performance. On io_uring, bnio leverages submission batching and zero-syscall completion polling to outperform standalone Asio. On kqueue, the recent BSD-side optimizations have closed much of the gap, but large-message I/O remains an area for further improvement. The timer churn results are closer across platforms because both backends ultimately rely on the same underlying kqueue timer mechanism.
+The platform comparison reveals that bnio's performance on kqueue continues to close the gap with asio, though it still trails its io_uring performance. On io_uring, bnio leverages submission batching and zero-syscall completion polling to outperform standalone Asio. On kqueue, the recent BSD-side optimizations (`0979ac0`, `eeb6805`) have brought small/medium-message throughput to near-parity or better across most worker counts, but large-message I/O remains an area for further improvement. The timer churn results are closer across platforms because both backends ultimately rely on the same underlying kqueue timer mechanism.
 
-The kqueue backend is actively under development (see [kqueue roadmap](../design/kqueue-roadmap.md)). Areas of ongoing optimization include the large-buffer I/O path, single-worker throughput, and further reductions in synchronization overhead.
+The kqueue backend is actively under development (see [kqueue roadmap](../design/kqueue-roadmap.md)). Areas of ongoing optimization include the large-buffer I/O path, 2-thread scaling, the single-threaded 64 KB regression, and further reductions in synchronization overhead.
 
 ---
 
@@ -413,14 +417,14 @@ A comparison of absolute throughput (not ratio) between platforms:
 
 | Backend | io_uring (Linux) | kqueue (macOS) | Ratio |
 | --- | ---: | ---: | ---: |
-| bnio | 788,413 req/s | 107,539 req/s | 0.14× |
-| asio | 723,093 req/s | 99,483 req/s | 0.14× |
+| bnio | 788,413 req/s | 127,947 req/s | 0.16× |
+| asio | 723,093 req/s | 110,349 req/s | 0.15× |
 
 ### Timer Churn (timers=1,024, rounds=500)
 
 | Backend | io_uring (Linux) | kqueue (macOS) | Ratio |
 | --- | ---: | ---: | ---: |
-| bnio | 20,690,800 lifecycle/s | 39,289,100 lifecycle/s | 1.90× |
-| asio | 17,375,400 lifecycle/s | 36,808,500 lifecycle/s | 2.12× |
+| bnio | 20,690,800 lifecycle/s | 38,093,200 lifecycle/s | 1.84× |
+| asio | 17,375,400 lifecycle/s | 37,503,700 lifecycle/s | 2.16× |
 
 > **Note:** Absolute throughput comparisons across platforms are not apples-to-apples. Different hardware (i9-13900H x86_64 vs M5 Pro arm64), operating systems, and kernel implementations all affect baseline performance. The io_uring run used 60 s measurements over 3 iterations; the kqueue run used 10 s measurements over 1 iteration. System load and thermal conditions may differ between runs. Treat these cross-platform figures as directional only.
