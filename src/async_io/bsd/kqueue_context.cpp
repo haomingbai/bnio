@@ -7,7 +7,6 @@
 
 #include <cassert>
 #include <cerrno>
-#include <limits>
 #include <new>
 
 #include "kqueue_context_internal.h"
@@ -41,17 +40,11 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
   }
 
   apply_context_options(options);
-  const std::size_t entries = static_cast<std::size_t>(options_.entries);
-  if (entries >
-      std::numeric_limits<std::size_t>::max() / static_cast<std::size_t>(2)) {
-    return -ENOMEM;
-  }
-  const std::size_t active_capacity = entries * 2;
-  auto active = std::unique_ptr<active_registration[]>(
-      new (std::nothrow) active_registration[active_capacity]);
+  // The wait queues live inside registration nodes embedded in inflight
+  // operations, so there is no per-registration table to allocate here.
   auto events = std::unique_ptr<bnio::base::event[]>(
       new (std::nothrow) bnio::base::event[options_.event_batch_window]);
-  if (!active || !events) {
+  if (!events) {
     return -ENOMEM;
   }
 
@@ -67,9 +60,7 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
 
   local_state_.clear();
   incoming_io_tasks_ = nullptr;
-  active_registration_capacity_ = active_capacity;
   next_registration_sequence_ = 0;
-  active_registrations_ = std::move(active);
   event_buffer_ = std::move(events);
   run_active_.store(false, std::memory_order_release);
   waiting_.store(false, std::memory_order_release);
@@ -89,8 +80,6 @@ void kqueue_context::queue_exit() noexcept {
 
   local_state_.clear();
   incoming_io_tasks_ = nullptr;
-  active_registrations_.reset();
-  active_registration_capacity_ = 0;
   next_registration_sequence_ = 0;
 
   event_buffer_.reset();

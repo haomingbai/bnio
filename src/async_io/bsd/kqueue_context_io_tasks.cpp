@@ -1,14 +1,17 @@
 /**
  * @file kqueue_context_io_tasks.cpp
- * @brief IO task submission, registration slot management, arm/disarm, and
- * dedup.
+ * @brief IO task submission, registration, arm/disarm, and dedup.
+ *
+ * Registration state lives inside the I/O operations themselves
+ * (kqueue_registration_state nodes). Wait queues are intrusive doubly-linked
+ * lists keyed by (ident, filter); the queue tail is located by a linear scan
+ * of the inflight list, and unlinking a node is O(1). No separate registration
+ * table is allocated.
  */
 
 #include <bnio/async_io/bsd/kqueue_context.h>
 
-#include <array>
 #include <cerrno>
-#include <climits>
 #include <utility>
 
 #include "kqueue_context_internal.h"
@@ -60,8 +63,7 @@ bool kqueue_context::consume_io_tasks() noexcept {
     operation->result = 0;
     operation->flags = 0;
 
-    prepared_operation prepared;
-    const int prepare_result = prepare_io(*operation, prepared);
+    const int prepare_result = prepare_io(*operation);
     if (prepare_result < 0) {
       operation->result = prepare_result;
       operation->complete_submit_error(prepare_result);
@@ -69,9 +71,10 @@ bool kqueue_context::consume_io_tasks() noexcept {
       continue;
     }
 
-    bool complete_immediately = prepared.task == kqueue_task::nop;
+    // nop tasks carry no registration nodes and complete immediately.
+    bool complete_immediately = operation->registration_count == 0;
     if (!complete_immediately) {
-      const int register_result = register_operation(prepared);
+      const int register_result = register_operation(*operation);
       if (register_result < 0) {
         operation->result = register_result;
         operation->complete_submit_error(register_result);
@@ -89,8 +92,7 @@ bool kqueue_context::consume_io_tasks() noexcept {
   return true;
 }
 
-int kqueue_context::prepare_io(kqueue_io_operation_base& operation,
-                               prepared_operation& prepared) noexcept {
+int kqueue_context::prepare_io(kqueue_io_operation_base& operation) noexcept {
   if (!queue_.is_open()) {
     return -EINVAL;
   }
@@ -104,98 +106,87 @@ int kqueue_context::prepare_io(kqueue_io_operation_base& operation,
     return -EINVAL;
   }
 
-  helper.set_udata(&operation);
-  prepared.operation = &operation;
-  prepared.event_count = helper.event_count();
-  prepared.task = helper.task();
-  prepared.poll_mask = helper.poll_mask();
-  for (std::size_t index = 0; index < helper.event_count(); ++index) {
-    prepared.events[index] = helper.event(index);
+  operation.registration_count = 0;
+  // nop completes without a native registration.
+  if (helper.task() == kqueue_task::nop) {
+    return 0;
   }
+
+  const std::uintptr_t ident = static_cast<std::uintptr_t>(helper.descriptor());
+  const std::size_t event_count = helper.event_count();
+  for (std::size_t index = 0; index < event_count; ++index) {
+    kqueue_registration_state& node = operation.registrations[index];
+    node = kqueue_registration_state{};
+    node.operation = &operation;
+    node.ident = ident;
+    node.filter = helper.event(index).filter();
+    node.task = helper.task();
+    node.poll_mask = helper.poll_mask();
+    node.sequence = next_registration_sequence_++;
+  }
+  operation.registration_count = static_cast<std::uint8_t>(event_count);
   return 0;
 }
 
-kqueue_context::active_registration*
-kqueue_context::find_free_registration_slot() noexcept {
-  for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
-    if (active_registrations_[index].operation == nullptr) {
-      return &active_registrations_[index];
+kqueue_registration_state* kqueue_context::find_queue_tail(
+    std::uintptr_t ident, std::int16_t filter) const noexcept {
+  // Linear scan of inflight operations. The tail of the (ident, filter) wait
+  // queue is the registered node whose wait_next is null. The queue head is
+  // always armed; a length-1 queue therefore also reports its (armed) head as
+  // the tail.
+  for (kqueue_io_operation_base* op = inflight_io_head_; op != nullptr;
+       op = op->io_next) {
+    for (std::uint8_t index = 0; index < op->registration_count; ++index) {
+      kqueue_registration_state& node = op->registrations[index];
+      if (node.operation != nullptr && node.ident == ident &&
+          node.filter == filter && node.wait_next == nullptr) {
+        return &node;
+      }
     }
   }
   return nullptr;
 }
 
-bool kqueue_context::is_event_already_armed(
-    std::uintptr_t ident, std::int16_t filter) const noexcept {
-  for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
-    const active_registration& active = active_registrations_[index];
-    if (active.operation != nullptr && active.armed &&
-        active.event.ident() == ident && active.event.filter() == filter) {
-      return true;
+int kqueue_context::append_node(kqueue_registration_state& node) noexcept {
+  kqueue_registration_state* tail = find_queue_tail(node.ident, node.filter);
+  if (tail == nullptr) {
+    // Empty queue: this node becomes the armed head.
+    node.wait_prev = nullptr;
+    node.wait_next = nullptr;
+    const int arm_result = arm_registration(node);
+    if (arm_result < 0) {
+      return arm_result;
     }
+    return 0;
   }
-  return false;
-}
-
-int kqueue_context::register_operation(
-    const prepared_operation& prepared) noexcept {
-  if (prepared.operation == nullptr || prepared.event_count == 0 ||
-      prepared.event_count > prepared.events.size()) {
-    return -EBADF;
-  }
-
-  for (std::size_t index = 0; index < prepared.event_count; ++index) {
-    if (prepared.events[index].ident() > static_cast<std::uintptr_t>(INT_MAX)) {
-      return -EBADF;
-    }
-  }
-  std::size_t free_count = 0;
-  for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
-    if (active_registrations_[index].operation == nullptr) {
-      ++free_count;
-    }
-  }
-  if (free_count < prepared.event_count) {
-    return -EAGAIN;
-  }
-
-  for (std::size_t index = 0; index < prepared.event_count; ++index) {
-    active_registration* slot = find_free_registration_slot();
-    if (slot == nullptr) {
-      unregister_operation(*prepared.operation);
-      return -EAGAIN;
-    }
-    // Allocate a slot for each event in the prepared operation.
-    // Skip arm if an identical (ident, filter) registration is already
-    // armed (dedup), otherwise add with EV_RECEIPT for synchronous
-    // error detection.
-    const bool already_armed = is_event_already_armed(
-        prepared.events[index].ident(), prepared.events[index].filter());
-
-    *slot = active_registration{prepared.operation,
-                                prepared.events[index],
-                                prepared.task,
-                                prepared.poll_mask,
-                                false,
-                                next_registration_sequence_++};
-    if (!already_armed) {
-      const int arm_result = arm_registration(*slot);
-      if (arm_result < 0) {
-        unregister_operation(*prepared.operation);
-        return arm_result;
-      }
-    }
-  }
+  // A waiter is already armed for this (ident, filter); queue behind it.
+  tail->wait_next = &node;
+  node.wait_prev = tail;
+  node.wait_next = nullptr;
+  node.armed = false;
   return 0;
 }
 
+kqueue_registration_state* kqueue_context::unlink_node(
+    kqueue_registration_state& node) noexcept {
+  kqueue_registration_state* next = node.wait_next;
+  if (node.wait_prev != nullptr) {
+    node.wait_prev->wait_next = next;
+  }
+  if (next != nullptr) {
+    next->wait_prev = node.wait_prev;
+  }
+  node.wait_prev = nullptr;
+  node.wait_next = nullptr;
+  return next;
+}
+
 int kqueue_context::arm_registration(
-    active_registration& registration) noexcept {
-  // Use EV_RECEIPT to detect synchronous errors (e.g. invalid descriptor)
-  // immediately, before the event loop would otherwise discover them.
-  bnio::base::event change = registration.event;
-  change.set_flags(change.flags() | EV_RECEIPT);
-  change.set_udata(registration.operation);
+    kqueue_registration_state& node) noexcept {
+  // EV_ADD (level-triggered) so already-ready data fires immediately; EV_RECEIPT
+  // surfaces synchronous errors (e.g. invalid descriptor) at submit time.
+  bnio::base::event change(node.ident, node.filter, EV_ADD | EV_RECEIPT, 0, 0,
+                           node.operation);
   bnio::base::event receipt;
   timespec no_wait{};
   const int result = queue_.control(&change, 1, &receipt, 1, &no_wait);
@@ -208,89 +199,87 @@ int kqueue_context::arm_registration(
   if (receipt.has_error() && receipt.data() != 0) {
     return -static_cast<int>(receipt.data());
   }
-  registration.armed = true;
+  node.armed = true;
   return 0;
 }
 
-void kqueue_context::arm_next_registration(std::uintptr_t descriptor,
-                                           std::int16_t filter) noexcept {
-  for (;;) {
-    active_registration* next = nullptr;
-    // Find the lowest-sequence unarmed registration on this
-    // descriptor/filter pair so events are delivered in submission
-    // order.
-    for (std::size_t index = 0; index < active_registration_capacity_;
-         ++index) {
-      active_registration& active = active_registrations_[index];
-      if (active.operation == nullptr || active.armed ||
-          active.event.ident() != descriptor ||
-          active.event.filter() != filter) {
-        continue;
-      }
-      if (next == nullptr || active.sequence < next->sequence) {
-        next = &active;
-      }
+int kqueue_context::register_operation(
+    kqueue_io_operation_base& operation) noexcept {
+  for (std::uint8_t index = 0; index < operation.registration_count; ++index) {
+    kqueue_registration_state& node = operation.registrations[index];
+    const int append_result = append_node(node);
+    if (append_result < 0) {
+      // Roll back every node of this operation registered so far.
+      unregister_operation(operation);
+      return append_result;
     }
-    if (next == nullptr) {
-      return;
-    }
+  }
+  return 0;
+}
 
-    const int result = arm_registration(*next);
+void kqueue_context::arm_queue_head(
+    kqueue_registration_state* candidate) noexcept {
+  while (candidate != nullptr) {
+    const int result = arm_registration(*candidate);
     if (result >= 0) {
       return;
     }
-
-    kqueue_io_operation_base* operation = next->operation;
-    *next = {};
-    unregister_operation(*operation);
-    operation->result = result;
-    operation->complete_submit_error(result);
-    local_state_.push_cpu(*operation);
+    // Arming failed: capture the successor, then tear the operation down.
+    // fail_operation detaches `candidate` (and the op's other nodes) without
+    // re-arming, so the loop continues with the next candidate. A given op
+    // contributes at most one node per (ident, filter) queue, so the
+    // successor survives the teardown as the new queue head.
+    kqueue_registration_state* after = candidate->wait_next;
+    fail_operation(*candidate->operation, result);
+    candidate = after;
   }
 }
 
 void kqueue_context::unregister_operation(
     kqueue_io_operation_base& operation) noexcept {
-  std::array<std::pair<std::uintptr_t, std::int16_t>, 2> released{};
-  std::size_t released_count = 0;
-  // Clear every armed registration slot owned by this operation.
-  // For each armed slot, issue EV_DELETE to remove the kevent filter,
-  // then re-arm the next queued registration on the same ident/filter.
-  for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
-    active_registration& active = active_registrations_[index];
-    if (active.operation != &operation) {
-      continue;
+  for (std::uint8_t index = 0; index < operation.registration_count; ++index) {
+    kqueue_registration_state& node = operation.registrations[index];
+    if (node.operation == nullptr) {
+      continue;  // already reset
     }
-    if (active.armed) {
-      bnio::base::event deletion(active.event.ident(), active.event.filter(),
-                                 EV_DELETE, 0, 0, &operation);
+    const bool was_armed = node.armed;
+    if (was_armed) {
+      bnio::base::event deletion(node.ident, node.filter, EV_DELETE, 0, 0,
+                                 &operation);
       (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
-      released[released_count++] =
-          std::pair(active.event.ident(), active.event.filter());
     }
-    active = {};
+    kqueue_registration_state* new_head = unlink_node(node);
+    node = kqueue_registration_state{};
+    // If the removed node was the armed head, arm the successor that took over.
+    if (was_armed) {
+      arm_queue_head(new_head);
+    }
   }
-  for (std::size_t index = 0; index < released_count; ++index) {
-    arm_next_registration(released[index].first, released[index].second);
-  }
+  operation.registration_count = 0;
 }
 
-bool kqueue_context::take_registration(
-    const bnio::base::event& event,
-    active_registration& registration) noexcept {
-  // Match the first armed registration by udata (operation pointer) plus
-  // ident and filter. Clear the slot so it can be reused.
-  for (std::size_t index = 0; index < active_registration_capacity_; ++index) {
-    active_registration& active = active_registrations_[index];
-    if (active.operation == event.udata() && active.armed &&
-        active.event.ident() == event.ident() &&
-        active.event.filter() == event.filter()) {
-      registration = active;
-      active = {};
-      return true;
+void kqueue_context::fail_operation(kqueue_io_operation_base& operation,
+                                    int result) noexcept {
+  // Detach all remaining nodes without re-arming (avoids unbounded recursion:
+  // each failure completes exactly one operation).
+  for (std::uint8_t index = 0; index < operation.registration_count; ++index) {
+    kqueue_registration_state& node = operation.registrations[index];
+    if (node.operation == nullptr) {
+      continue;
     }
+    if (node.armed) {
+      bnio::base::event deletion(node.ident, node.filter, EV_DELETE, 0, 0,
+                                 &operation);
+      (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
+    }
+    (void)unlink_node(node);
+    node = kqueue_registration_state{};
   }
-  return false;
+  operation.registration_count = 0;
+  remove_inflight(operation);
+  operation.result = result;
+  operation.complete_submit_error(result);
+  local_state_.push_cpu(operation);
 }
 
 void kqueue_context::add_inflight(
@@ -337,17 +326,18 @@ void kqueue_context::abort_inflight_io() noexcept {
     op->io_next = nullptr;
     op->io_prev = nullptr;
 
-    // EV_DELETE all armed kqueue events for this operation.
-    for (std::size_t i = 0; i < active_registration_capacity_; ++i) {
-      active_registration& reg = active_registrations_[i];
-      if (reg.operation != op) continue;
-      if (reg.armed) {
-        bnio::base::event deletion(reg.event.ident(), reg.event.filter(),
-                                   EV_DELETE, 0, 0, op);
+    for (std::uint8_t index = 0; index < op->registration_count; ++index) {
+      kqueue_registration_state& node = op->registrations[index];
+      if (node.operation == nullptr) {
+        continue;
+      }
+      if (node.armed) {
+        bnio::base::event deletion(node.ident, node.filter, EV_DELETE, 0, 0, op);
         (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
       }
-      reg = {};
+      node = kqueue_registration_state{};
     }
+    op->registration_count = 0;
 
     op->result = -ECANCELED;
     op->complete_submit_error(-ECANCELED);

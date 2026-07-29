@@ -11,14 +11,60 @@
 #include <bnio/base/wake_channel.h>
 #include <bnio/export.h>
 
+#include <array>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 
 namespace bnio::async_io::bsd_native {
 
 class kqueue_helper;
 class kqueue_operation_base;
 class kqueue_io_operation_base;
+
+/** Native action selected for a kqueue operation. */
+enum class kqueue_task : std::uint8_t {
+  none,
+  nop,
+  read,
+  write,
+  poll,
+};
+
+/**
+ * Complete per-(ident, filter) registration state for one kevent.
+ *
+ * An I/O operation owns up to two of these (EVFILT_READ and EVFILT_WRITE
+ * for poll requests). Each node is linked into exactly one wait queue
+ * keyed by (ident, filter), so a single poll operation can wait on both
+ * filters simultaneously.
+ */
+struct kqueue_registration_state {
+  /** Back-pointer to the owning operation; also the kevent udata value. */
+  kqueue_io_operation_base* operation = nullptr;
+
+  /** Descriptor ident shared by every node of the owning operation. */
+  std::uintptr_t ident = 0;
+
+  /** Native filter (EVFILT_READ / EVFILT_WRITE). */
+  std::int16_t filter = 0;
+
+  /** Native action selected by prepare(). */
+  kqueue_task task = kqueue_task::none;
+
+  /** Original poll mask for poll tasks. */
+  unsigned poll_mask = 0;
+
+  /** Whether this node currently owns an armed kevent in the kernel. */
+  bool armed = false;
+
+  /** Monotonic allocation order; mirrors wait-queue insertion order. */
+  std::uint64_t sequence = 0;
+
+  /** Intrusive wait-queue links for the (ident, filter) list. */
+  kqueue_registration_state* wait_next = nullptr;
+  kqueue_registration_state* wait_prev = nullptr;
+};
 
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT kqueue_task_queue_state {
@@ -111,6 +157,16 @@ class BNIO_EXPORT kqueue_io_operation_base : public kqueue_operation_base {
 
   /** Reverse link for inflight doubly-linked list during shutdown. */
   kqueue_io_operation_base* io_prev = nullptr;
+
+  /**
+   * Per-(ident, filter) registration state filled by the run loop.
+   *
+   * A poll request occupies two entries (READ + WRITE); single-filter
+   * operations occupy one. `registration_count` is set by prepare_io()
+   * before the operation is registered with the kqueue.
+   */
+  std::array<kqueue_registration_state, 2> registrations{};
+  std::uint8_t registration_count = 0;
 
   /** Describes the native registration after the run loop takes this task. */
   virtual void prepare(kqueue_helper& helper) noexcept = 0;

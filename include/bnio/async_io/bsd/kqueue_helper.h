@@ -7,6 +7,7 @@
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_HELPER_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_HELPER_H_
 
+#include <bnio/async_io/bsd/kqueue_context_base/operation_base.h>
 #include <bnio/base/bsd/event.h>
 #include <bnio/export.h>
 #include <poll.h>
@@ -18,17 +19,6 @@
 namespace bnio::async_io::bsd_native {
 
 class kqueue_io_operation_base;
-
-/**
- * Native action selected for a kqueue operation.
- */
-enum class kqueue_task : std::uint8_t {
-  none,
-  nop,
-  read,
-  write,
-  poll,
-};
 
 /**
  * Fills the kqueue registrations required by one asynchronous operation.

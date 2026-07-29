@@ -78,20 +78,46 @@ void kqueue_context::dispatch_event_tasks(operation_queue& event_tasks,
 
 bool kqueue_context::try_rearm_operation(
     kqueue_io_operation_base& operation,
-    const active_registration& registration) noexcept {
-  prepared_operation rearm;
-  rearm.operation = &operation;
-  rearm.event_count = 1;
-  rearm.task = registration.task;
-  rearm.poll_mask = registration.poll_mask;
-  rearm.events[0].set(registration.event.ident(), registration.event.filter(),
-                      EV_ADD | EV_ONESHOT, 0, 0, &operation);
-  const int rearm_result = register_operation(rearm);
-  if (rearm_result >= 0) {
+    kqueue_registration_state& node) noexcept {
+  // Re-link the fired node into its (ident, filter) wait queue. If the queue
+  // is empty the node is armed again as the head; otherwise it queues behind
+  // the current armed head and is armed when its turn arrives.
+  const int append_result = append_node(node);
+  if (append_result >= 0) {
     return true;
   }
-  operation.result = rearm_result;
+  operation.result = append_result;
   return false;
+}
+
+bool kqueue_context::dispatch_event_result(
+    kqueue_io_operation_base& operation, kqueue_registration_state& node,
+    const bnio::base::event& event) noexcept {
+  const kqueue_task task = node.task;
+  const unsigned poll_mask = node.poll_mask;
+
+  // Event-type dispatch:
+  //   poll: convert the kevent filter/flags into a POLL mask.
+  //   error (non-zero data): propagate the errno from the kevent.
+  //   write EOF: translate to EPIPE or fflags.
+  //   otherwise: perform the actual I/O step; retry on EAGAIN.
+  if (task == kqueue_task::poll) {
+    operation.result = static_cast<int>(poll_result(poll_mask, event));
+  } else if (event.has_error() && event.data() != 0) {
+    operation.result = -static_cast<int>(event.data());
+  } else if (task == kqueue_task::write && event.has_eof()) {
+    operation.result =
+        event.fflags() == 0 ? -EPIPE : -static_cast<int>(event.fflags());
+  } else {
+    operation.result =
+        operation.owns_io_step() ? operation.perform_io() : -EOPNOTSUPP;
+    if (operation.result == -EAGAIN || operation.result == -EWOULDBLOCK) {
+      if (try_rearm_operation(operation, node)) {
+        return false;  // re-armed; keep inflight
+      }
+    }
+  }
+  return true;
 }
 
 bool kqueue_context::process_event(const bnio::base::event& event,
@@ -106,57 +132,46 @@ bool kqueue_context::process_event(const bnio::base::event& event,
     return false;
   }
 
-  active_registration registration;
-  if (!take_registration(event, registration) ||
-      registration.operation == nullptr) {
+  auto* operation = static_cast<kqueue_io_operation_base*>(event.udata());
+  if (operation == nullptr) {
     return false;
   }
 
-  // Explicitly EV_DELETE the filter that delivered this event.  With the
-  // current level-triggered initial registration (plain EV_ADD) the
-  // kernel does not auto-consume the filter, so it must be removed here
-  // to prevent spurious re-delivery before the operation is re-armed
-  // with EV_ONESHOT by try_rearm_operation.
-  {
-    bnio::base::event deletion(registration.event.ident(),
-                               registration.event.filter(), EV_DELETE, 0, 0,
-                               registration.operation);
-    (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
-  }
-
-  // Arm the next queued registration on the same descriptor / filter pair.
-  arm_next_registration(registration.event.ident(),
-                        registration.event.filter());
-
-  kqueue_io_operation_base& operation = *registration.operation;
-  operation.flags = event.flags();
-
-  // Event-type dispatch:
-  //   poll: convert the kevent filter/flags into a POLL mask.
-  //   error (non-zero data): propagate the errno from the kevent.
-  //   write EOF: translate to EPIPE or fflags.
-  //   otherwise: perform the actual I/O step; retry on EAGAIN.
-  if (registration.task == kqueue_task::poll) {
-    operation.result =
-        static_cast<int>(poll_result(registration.poll_mask, event));
-  } else if (event.has_error() && event.data() != 0) {
-    operation.result = -static_cast<int>(event.data());
-  } else if (registration.task == kqueue_task::write && event.has_eof()) {
-    operation.result =
-        event.fflags() == 0 ? -EPIPE : -static_cast<int>(event.fflags());
-  } else {
-    operation.result =
-        operation.owns_io_step() ? operation.perform_io() : -EOPNOTSUPP;
-    if (operation.result == -EAGAIN || operation.result == -EWOULDBLOCK) {
-      if (try_rearm_operation(operation, registration)) {
-        return false;
-      }
+  // udata is the operation pointer; locate the registration node for this
+  // event's filter (an operation owns at most two nodes: READ + WRITE).
+  kqueue_registration_state* node = nullptr;
+  for (std::uint8_t index = 0; index < operation->registration_count; ++index) {
+    kqueue_registration_state& candidate = operation->registrations[index];
+    if (candidate.operation != nullptr && candidate.filter == event.filter()) {
+      node = &candidate;
+      break;
     }
   }
+  if (node == nullptr) {
+    return false;
+  }
 
-  unregister_operation(operation);
-  remove_inflight(operation);
-  tasks.push(operation);
+  // Explicitly EV_DELETE the level-triggered (EV_ADD) filter that delivered
+  // this event so it does not re-fire before the next waiter is armed.
+  {
+    bnio::base::event deletion(node->ident, node->filter, EV_DELETE, 0, 0,
+                               operation);
+    (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
+  }
+  node->armed = false;
+
+  // Unlink the fired head and arm the successor that takes its place.
+  arm_queue_head(unlink_node(*node));
+
+  operation->flags = event.flags();
+
+  if (!dispatch_event_result(*operation, *node, event)) {
+    return false;  // re-armed after EAGAIN; operation stays inflight
+  }
+
+  unregister_operation(*operation);
+  remove_inflight(*operation);
+  tasks.push(*operation);
   return true;
 }
 

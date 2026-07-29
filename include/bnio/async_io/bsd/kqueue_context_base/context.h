@@ -164,23 +164,6 @@ class BNIO_EXPORT kqueue_context {
     kqueue_io_operation_base* io = nullptr;
   };
 
-  struct prepared_operation {
-    kqueue_io_operation_base* operation = nullptr;
-    std::array<bnio::base::event, 2> events{};
-    std::size_t event_count = 0;
-    kqueue_task task = kqueue_task::none;
-    unsigned poll_mask = 0;
-  };
-
-  struct active_registration {
-    kqueue_io_operation_base* operation = nullptr;
-    bnio::base::event event{};
-    kqueue_task task = kqueue_task::none;
-    unsigned poll_mask = 0;
-    bool armed = false;
-    std::uint64_t sequence = 0;
-  };
-
   enum class context_state {
     running,
     finishing,
@@ -216,8 +199,7 @@ class BNIO_EXPORT kqueue_context {
   /** Moves due passive-timer completions into the local CPU queue. */
   [[nodiscard]] bool consume_timeout_operations() noexcept;
 
-  [[nodiscard]] int prepare_io(kqueue_io_operation_base& operation,
-                               prepared_operation& prepared) noexcept;
+  [[nodiscard]] int prepare_io(kqueue_io_operation_base& operation) noexcept;
 
   void begin_wait() noexcept;
   void end_wait() noexcept;
@@ -244,44 +226,61 @@ class BNIO_EXPORT kqueue_context {
                             unsigned task_count) noexcept;
   [[nodiscard]] bool process_event(const bnio::base::event& event,
                                    operation_queue& tasks) noexcept;
+  /**
+   * Resolves the result of a fired event on `operation`/`node` (poll mask,
+   * kevent errno, write EOF, or the native I/O step with EAGAIN retry).
+   * @return true if the operation should be completed; false if it was
+   *         re-armed after EAGAIN and must stay inflight.
+   */
+  [[nodiscard]] bool dispatch_event_result(
+      kqueue_io_operation_base& operation, kqueue_registration_state& node,
+      const bnio::base::event& event) noexcept;
 
   [[nodiscard]] int register_operation(
-      const prepared_operation& operation) noexcept;
+      kqueue_io_operation_base& operation) noexcept;
   [[nodiscard]] int arm_registration(
-      active_registration& registration) noexcept;
-  void arm_next_registration(std::uintptr_t descriptor,
-                             std::int16_t filter) noexcept;
+      kqueue_registration_state& node) noexcept;
+  /**
+   * Arms the first armable node starting at `candidate`, looping past any
+   * node whose arming fails (each such node's operation is failed and
+   * detached). `candidate` is the successor of a node that just left its
+   * wait queue.
+   */
+  void arm_queue_head(kqueue_registration_state* candidate) noexcept;
   void unregister_operation(kqueue_io_operation_base& operation) noexcept;
-  [[nodiscard]] bool take_registration(
-      const bnio::base::event& event,
-      active_registration& registration) noexcept;
   [[nodiscard]] unsigned poll_result(
       unsigned poll_mask, const bnio::base::event& event) const noexcept;
 
-  /** @brief Finds a free registration slot, or nullptr if all are occupied. */
-  [[nodiscard]] active_registration* find_free_registration_slot() noexcept;
-
-  /** @brief Checks whether an armed registration already exists for
-   * ident+filter. */
-  [[nodiscard]] bool is_event_already_armed(std::uintptr_t ident,
-                                            std::int16_t filter) const noexcept;
-
-  /** @brief Attempts to rearm a registration after EAGAIN/EWOULDBLOCK.
+  /** Attempts to rearm a node after EAGAIN/EWOULDBLOCK.
    *
    * @return true if rearm succeeded (caller should not complete the operation),
    *         false if rearm failed and operation.result has been set.
    */
   [[nodiscard]] bool try_rearm_operation(
       kqueue_io_operation_base& operation,
-      const active_registration& registration) noexcept;
+      kqueue_registration_state& node) noexcept;
+
+  /** @brief Wait-queue helpers backed by the inflight list (no allocation).
+   *
+   * The wait queues live entirely inside the registration nodes embedded in
+   * inflight operations. Finding a queue tail is a linear scan of the
+   * inflight list; unlinking a node is O(1) via the doubly-linked wait
+   * pointers.
+   */
+  [[nodiscard]] kqueue_registration_state* find_queue_tail(
+      std::uintptr_t ident, std::int16_t filter) const noexcept;
+  [[nodiscard]] int append_node(kqueue_registration_state& node) noexcept;
+  kqueue_registration_state* unlink_node(
+      kqueue_registration_state& node) noexcept;
+  /** Tears down an operation whose arming failed: removes all its nodes
+   *  (no re-arm), removes it from inflight, and completes it with `result`. */
+  void fail_operation(kqueue_io_operation_base& operation, int result) noexcept;
 
   bnio::base::kqueue queue_;
   kqueue_context_options options_{};
   std::atomic<context_state> state_{context_state::finished};
   bool queue_initialized_ = false;
 
-  std::unique_ptr<active_registration[]> active_registrations_;
-  std::size_t active_registration_capacity_ = 0;
   std::uint64_t next_registration_sequence_ = 0;
 
   std::unique_ptr<bnio::base::event[]> event_buffer_;
