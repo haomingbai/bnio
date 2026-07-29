@@ -181,10 +181,10 @@ kqueue_registration_state* kqueue_context::unlink_node(
   return next;
 }
 
-int kqueue_context::arm_registration(
-    kqueue_registration_state& node) noexcept {
-  // EV_ADD (level-triggered) so already-ready data fires immediately; EV_RECEIPT
-  // surfaces synchronous errors (e.g. invalid descriptor) at submit time.
+int kqueue_context::arm_registration(kqueue_registration_state& node) noexcept {
+  // EV_ADD (level-triggered) so already-ready data fires immediately;
+  // EV_RECEIPT surfaces synchronous errors (e.g. invalid descriptor) at submit
+  // time.
   bnio::base::event change(node.ident, node.filter, EV_ADD | EV_RECEIPT, 0, 0,
                            node.operation);
   bnio::base::event receipt;
@@ -332,7 +332,8 @@ void kqueue_context::abort_inflight_io() noexcept {
         continue;
       }
       if (node.armed) {
-        bnio::base::event deletion(node.ident, node.filter, EV_DELETE, 0, 0, op);
+        bnio::base::event deletion(node.ident, node.filter, EV_DELETE, 0, 0,
+                                   op);
         (void)queue_.control(&deletion, 1, nullptr, 0, nullptr);
       }
       node = kqueue_registration_state{};

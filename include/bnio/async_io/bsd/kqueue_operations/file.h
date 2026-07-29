@@ -89,7 +89,7 @@ class kqueue_file_read_request {
     if (buffer_.size > 0 && buffer_.data == nullptr) {
       return -EFAULT;
     }
-    struct stat status {};
+    struct stat status{};
     if (::fstat(descriptor_.native_handle(), &status) != 0) {
       return -errno;
     }
@@ -162,7 +162,7 @@ class kqueue_file_write_request {
     if (size_ > 0 && data_ == nullptr) {
       return -EFAULT;
     }
-    struct stat status {};
+    struct stat status{};
     if (::fstat(descriptor_.native_handle(), &status) != 0) {
       return -errno;
     }

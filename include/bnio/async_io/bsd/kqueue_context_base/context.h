@@ -238,8 +238,7 @@ class BNIO_EXPORT kqueue_context {
 
   [[nodiscard]] int register_operation(
       kqueue_io_operation_base& operation) noexcept;
-  [[nodiscard]] int arm_registration(
-      kqueue_registration_state& node) noexcept;
+  [[nodiscard]] int arm_registration(kqueue_registration_state& node) noexcept;
   /**
    * Arms the first armable node starting at `candidate`, looping past any
    * node whose arming fails (each such node's operation is failed and
