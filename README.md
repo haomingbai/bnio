@@ -98,10 +98,10 @@ latest `*.deb` or `*.rpm` and install with your system package manager:
 
 ```sh
 # Debian / Ubuntu
-sudo dpkg -i libbnio0_*.deb libbnio-dev_*.deb
+sudo dpkg -i bnio-*-Linux-runtime.deb bnio-*-Linux-development.deb
 
 # Fedora / RHEL / openSUSE
-sudo rpm -i bnio-*.rpm bnio-devel-*.rpm
+sudo rpm -i bnio-*-Linux-runtime.rpm bnio-*-Linux-development.rpm
 ```
 
 Build options, dependency providers, coverage, and packaging details are in
