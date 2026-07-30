@@ -92,6 +92,18 @@ That gives you a runtime and a development package for each format —
 `libbnio0` / `libbnio-dev` on Debian-style systems, `bnio` / `bnio-devel` on
 RPM-based ones.
 
+Pre-built DEB and RPM packages are available on the
+[GitHub Releases](https://github.com/haomingbai/bnio/releases) page — download the
+latest `*.deb` or `*.rpm` and install with your system package manager:
+
+```sh
+# Debian / Ubuntu
+sudo dpkg -i libbnio0_*.deb libbnio-dev_*.deb
+
+# Fedora / RHEL / openSUSE
+sudo rpm -i bnio-*.rpm bnio-devel-*.rpm
+```
+
 Build options, dependency providers, coverage, and packaging details are in
 [docs/build.md](docs/build.md).
 
