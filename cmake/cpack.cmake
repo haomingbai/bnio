@@ -36,7 +36,7 @@ set(CPACK_DEBIAN_RUNTIME_PACKAGE_SECTION "libs")
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_NAME "libbnio-dev")
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_SECTION "libdevel")
 set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_DEPENDS
-  "libbnio0 (= ${CPACK_PACKAGE_VERSION}), bexec-dev")
+  "libbnio0 (= ${CPACK_PACKAGE_VERSION}), bexec")
 
 # ---- RPM generator ----
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
@@ -51,6 +51,6 @@ set(CPACK_RPM_RUNTIME_PACKAGE_NAME "bnio")
 # RPM: development component -> bnio-devel
 set(CPACK_RPM_DEVELOPMENT_PACKAGE_NAME "bnio-devel")
 set(CPACK_RPM_DEVELOPMENT_PACKAGE_REQUIRES
-  "bnio = ${CPACK_PACKAGE_VERSION}, bexec-devel")
+  "bnio = ${CPACK_PACKAGE_VERSION}, bexec")
 
 include(CPack)
