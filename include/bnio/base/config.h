@@ -18,6 +18,10 @@
 #endif
 
 #if defined(BNIO_HAS_BASE_LINUX) || defined(BNIO_HAS_BASE_BSD)
+#define BNIO_HAS_BASE_POSIX 1
+#endif
+
+#if defined(BNIO_HAS_BASE_POSIX)
 #define BNIO_HAS_BASE 1
 #endif
 

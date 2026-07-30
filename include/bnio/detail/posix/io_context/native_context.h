@@ -4,17 +4,22 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_IO_CONTEXT_NATIVE_CONTEXT_H_
-#define BNIO_DETAIL_IO_CONTEXT_NATIVE_CONTEXT_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_NATIVE_CONTEXT_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_NATIVE_CONTEXT_H_
 
 #include <bnio/io_context/config.h>
 
+#if defined(BNIO_HAS_IO_CONTEXT_POSIX)
 #if defined(BNIO_HAS_IO_CONTEXT_LINUX)
 #include <bnio/async_io/linux/io_uring_context.h>
 #elif defined(BNIO_HAS_IO_CONTEXT_BSD)
 #include <bnio/async_io/bsd/kqueue_context.h>
 #else
-#error "bnio::detail::native_context requires a supported native backend."
+#error \
+    "bnio::detail::native_context: POSIX platform requires Linux or BSD backend."
+#endif
+#else
+#error "bnio::detail::native_context requires a POSIX platform."
 #endif
 
 namespace bnio::detail {
@@ -41,4 +46,4 @@ using native_task_queue_state = async_io::bsd_native::kqueue_task_queue_state;
 
 }  // namespace bnio::detail
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_NATIVE_CONTEXT_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_NATIVE_CONTEXT_H_

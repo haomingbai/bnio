@@ -3,16 +3,16 @@
  * @brief read-all composite async operation.
  */
 
-#ifndef BNIO_DETAIL_IO_CONTEXT_READ_ALL_H_
-#ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_READ_ALL_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>
 #else
-#define BNIO_DETAIL_IO_CONTEXT_READ_ALL_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_READ_ALL_H_
 
 // write_all.h defines the generic operation/sender/factory/predicate
 // templates that are reused verbatim for read-all.  The only difference
 // between read-all and write-all is the state class.
-#include <bnio/detail/io_context/write_all.h>
+#include <bnio/detail/posix/io_context/write_all.h>
 
 namespace bnio::detail {
 
@@ -115,5 +115,5 @@ using read_all_sender = write_all_sender<State>;
 
 }  // namespace bnio::detail
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_CLASS_H_
-#endif  // BNIO_DETAIL_IO_CONTEXT_READ_ALL_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_READ_ALL_H_

@@ -21,6 +21,10 @@
 #endif
 
 #if defined(BNIO_HAS_ASYNC_IO_LINUX) || defined(BNIO_HAS_ASYNC_IO_BSD)
+#define BNIO_HAS_ASYNC_IO_POSIX 1
+#endif
+
+#if defined(BNIO_HAS_ASYNC_IO_POSIX)
 #define BNIO_HAS_ASYNC_IO 1
 #endif
 

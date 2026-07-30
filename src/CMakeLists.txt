@@ -29,15 +29,7 @@ else()
 endif()
 
 if(BNIO_PLATFORM_LINUX OR BNIO_PLATFORM_BSD)
-  target_sources(
-    bnio
-    PRIVATE io_context.cpp
-            io_context_queue.cpp
-            io_context_timer.cpp
-            io_context_timer_state.cpp
-            ssl.cpp
-            tcp.cpp
-            udp.cpp)
+  add_subdirectory(posix)
 endif()
 
 target_include_directories(

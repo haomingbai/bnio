@@ -9,12 +9,10 @@
 
 #include <bnio/io_context/config.h>
 
-#if defined(BNIO_HAS_IO_CONTEXT_LINUX)
-#include <bnio/detail/io_context/class.h>
-#elif defined(BNIO_HAS_IO_CONTEXT_BSD)
-#include <bnio/detail/io_context/class.h>
+#if defined(BNIO_HAS_IO_CONTEXT_POSIX)
+#include <bnio/detail/posix/io_context/class.h>
 #else
-#error "bnio::io_context requires a supported native backend."
+#error "bnio::io_context requires a POSIX native backend."
 #endif
 
 #endif  // BNIO_IO_CONTEXT_H_

@@ -4,7 +4,7 @@
  */
 
 #ifndef BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_COMMON_H_
-#ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>
 #else
 #define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_COMMON_H_
@@ -285,5 +285,5 @@ class resolve_sender {
 
 }  // namespace bnio::detail
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_CLASS_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #endif  // BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_COMMON_H_

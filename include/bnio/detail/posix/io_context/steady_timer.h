@@ -4,11 +4,11 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_IO_CONTEXT_STEADY_TIMER_H_
-#define BNIO_DETAIL_IO_CONTEXT_STEADY_TIMER_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_STEADY_TIMER_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_STEADY_TIMER_H_
 
 #include <bnio/async_io/time.h>
-#include <bnio/detail/io_context/timer_types.h>
+#include <bnio/detail/posix/io_context/timer_types.h>
 #include <bnio/export.h>
 
 #include <chrono>
@@ -137,4 +137,4 @@ class BNIO_EXPORT steady_timer {
 
 }  // namespace bnio
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_STEADY_TIMER_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_STEADY_TIMER_H_

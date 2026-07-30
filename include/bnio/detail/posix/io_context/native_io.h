@@ -3,22 +3,27 @@
  * @brief Native I/O operation sender factories.
  */
 
-#ifndef BNIO_DETAIL_IO_CONTEXT_NATIVE_IO_H_
-#ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_NATIVE_IO_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>
 #else
-#define BNIO_DETAIL_IO_CONTEXT_NATIVE_IO_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_NATIVE_IO_H_
 
+#if defined(BNIO_HAS_IO_CONTEXT_POSIX)
 #if defined(BNIO_HAS_IO_CONTEXT_LINUX)
 #include <bnio/detail/linux/io_context_native_io/factories.h>
 #elif defined(BNIO_HAS_IO_CONTEXT_BSD)
 #include <bnio/detail/bsd/io_context_native_io/factories.h>
 #else
-#error "bnio::detail::native_io requires a supported native backend."
+#error \
+    "bnio::detail::native_io: POSIX platform requires Linux or BSD backend."
+#endif
+#else
+#error "bnio::detail::native_io requires a POSIX platform."
 #endif
 
-#include <bnio/detail/io_context/timer_wait.h>
-#include <bnio/detail/io_context/write_all.h>
+#include <bnio/detail/posix/io_context/timer_wait.h>
+#include <bnio/detail/posix/io_context/write_all.h>
 
 namespace bnio {
 
@@ -247,5 +252,5 @@ auto io_context::basic_scheduler<Kind>::async_resolve(
 
 }  // namespace bnio
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_CLASS_H_
-#endif  // BNIO_DETAIL_IO_CONTEXT_NATIVE_IO_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_NATIVE_IO_H_

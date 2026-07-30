@@ -3,11 +3,11 @@
  * @brief write-all composite async operation.
  */
 
-#ifndef BNIO_DETAIL_IO_CONTEXT_WRITE_ALL_H_
-#ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_WRITE_ALL_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>
 #else
-#define BNIO_DETAIL_IO_CONTEXT_WRITE_ALL_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_WRITE_ALL_H_
 
 #include <bexec/detail/manual_lifetime.hpp>
 #include <bexec/repeat_until.hpp>
@@ -326,5 +326,5 @@ class write_all_sender {
 
 }  // namespace bnio::detail
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_CLASS_H_
-#endif  // BNIO_DETAIL_IO_CONTEXT_WRITE_ALL_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_WRITE_ALL_H_

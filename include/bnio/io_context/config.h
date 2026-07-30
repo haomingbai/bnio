@@ -21,6 +21,10 @@
 #endif
 
 #if defined(BNIO_HAS_IO_CONTEXT_LINUX) || defined(BNIO_HAS_IO_CONTEXT_BSD)
+#define BNIO_HAS_IO_CONTEXT_POSIX 1
+#endif
+
+#if defined(BNIO_HAS_IO_CONTEXT_POSIX)
 #define BNIO_HAS_IO_CONTEXT 1
 #endif
 

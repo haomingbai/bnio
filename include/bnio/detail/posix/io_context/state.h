@@ -4,10 +4,10 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_IO_CONTEXT_STATE_H_
-#define BNIO_DETAIL_IO_CONTEXT_STATE_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_STATE_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_STATE_H_
 
-#include <bnio/detail/io_context/options.h>
+#include <bnio/detail/posix/io_context/options.h>
 
 #include <atomic>
 #include <cstddef>
@@ -28,4 +28,4 @@ struct native_context_state {
 
 }  // namespace bnio::detail
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_STATE_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_STATE_H_

@@ -4,11 +4,11 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_IO_CONTEXT_TIMER_TYPES_H_
-#define BNIO_DETAIL_IO_CONTEXT_TIMER_TYPES_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_TIMER_TYPES_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_TIMER_TYPES_H_
 
 #include <bnio/async_io/time.h>
-#include <bnio/detail/io_context/native_context.h>
+#include <bnio/detail/posix/io_context/native_context.h>
 #include <bnio/export.h>
 
 #include <atomic>
@@ -123,4 +123,4 @@ struct BNIO_EXPORT timer_state_data {
 
 }  // namespace bnio
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_TIMER_TYPES_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_TIMER_TYPES_H_

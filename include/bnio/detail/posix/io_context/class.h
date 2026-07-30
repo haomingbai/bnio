@@ -4,17 +4,17 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_IO_CONTEXT_CLASS_H_
-#define BNIO_DETAIL_IO_CONTEXT_CLASS_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 
 #include <bnio/async_io/socket_view.h>
 #include <bnio/async_io/time.h>
 #include <bnio/buffer.h>
-#include <bnio/detail/io_context/native_context.h>
-#include <bnio/detail/io_context/options.h>
-#include <bnio/detail/io_context/state.h>
-#include <bnio/detail/io_context/steady_timer.h>
-#include <bnio/detail/io_context/timer_types.h>
+#include <bnio/detail/posix/io_context/native_context.h>
+#include <bnio/detail/posix/io_context/options.h>
+#include <bnio/detail/posix/io_context/state.h>
+#include <bnio/detail/posix/io_context/steady_timer.h>
+#include <bnio/detail/posix/io_context/timer_types.h>
 #include <bnio/export.h>
 #include <bnio/io_context_cpo.h>
 #include <bnio/ip.h>
@@ -587,6 +587,6 @@ class BNIO_EXPORT io_context {
 
 }  // namespace bnio
 
-#include <bnio/detail/io_context/native_io.h>
+#include <bnio/detail/posix/io_context/native_io.h>
 
-#endif  // BNIO_DETAIL_IO_CONTEXT_CLASS_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
