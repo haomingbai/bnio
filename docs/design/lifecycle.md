@@ -22,6 +22,7 @@ graph TB
         O7["ssl_stream → SSL* + BIO* + NextLayer"]
         O8["io_context → native workers + timer heap"]
         O9["linux_native::io_uring_context → base::ring (non-movable)"]
+        O10["bsd_native::kqueue_context → base::kqueue (non-movable)"]
     end
 
     subgraph VIEW["Non-Owning Views — destroy = nothing"]
@@ -51,8 +52,10 @@ Arrows mean "must outlive":
 ```mermaid
 graph TB
     Ctx["io_context"] -->|"owns"| Workers["native workers"]
-    Workers -->|"each owns"| UCtx["io_uring_context"]
+    Workers -->|"each owns"| UCtx["io_uring_context (Linux)"]
     UCtx -->|"owns"| Ring["base::ring"]
+    Workers -->|"each owns"| KCtx["kqueue_context (BSD)"]
+    KCtx -->|"owns"| KQ["base::kqueue"]
 
     OpOwner["operation owner<br/>(caller / combinator / coroutine frame / registry)"] -->|"must outlive"| Ops["all pending operations"]
     Ctx -->|"must outlive"| Ops
@@ -198,8 +201,9 @@ bnio::ssl_stream stream(std::move(sock), ctx); // ctx outlives stream
 
 ## Operation Lifecycle
 
-Operations use **intrusive linked lists** and io_uring `user_data` for queuing.
-This imposes hard constraints:
+Operations use **intrusive linked lists** and native completion identifiers
+(io_uring `user_data` on Linux, kqueue `udata` on BSD) for queuing. This
+imposes hard constraints:
 
 - **Non-copyable, non-movable** — `operation_base` and all derived types
   disable copy and move. Moving would break the intrusive list pointers.
@@ -244,20 +248,30 @@ graph TB
 ### `operation_base` Inheritance Chain
 
 ```
-async_io::linux_native::io_uring_operation_base   (intrusive node, result/flags)
-    └── io_context::operation_base                (shared-I/O list link and prepare hooks)
-        ├── detail::native_io_operation<Model,R>  (read/write/accept/connect/poll)
-        └── detail::timer_operation_base          (timer completion posting)
+detail::native_operation_base                (intrusive node: next, result, flags, execute())
+    = async_io::linux_native::io_uring_operation_base   (Linux)
+    = async_io::bsd_native::kqueue_operation_base       (BSD)
+    ├── detail::native_io_operation_base        (io_context::operation_base;
+    │                                             inflight I/O list links + prepare/perform hooks)
+    │     ├── detail::native_io_operation<Request,Receiver>  (read/write/accept/connect)
+    │     └── detail::native_poll_operation<Receiver>        (descriptor polling)
+    ├── detail::timer_operation_base            (timer completion posting)
+    ├── detail::resolve_operation<Receiver>     (DNS resolution; submitted to the CPU queue)
+    └── io_context::operation                   (CPU-queue work, e.g. posted schedulers)
 
 Composite operations are not necessarily derived from `operation_base`
 themselves. For example, the write-all sender owns a
 `repeat_until` operation, and each repeat iteration owns a child
-`native_io_operation` that is submitted to io_uring. SSL
+`native_io_operation` that is submitted to the native backend. SSL
 read/write uses the same shape: it owns SSL state plus a
 `repeat_until` loop whose children are transport read/write operations.
 ```
 
-Both base classes disable copy and move because they are intrusive list nodes.
+Both the Linux and BSD base classes disable copy and move because they are
+intrusive list nodes. The `native_*` aliases in
+`detail/io_context/native_context.h` select the matching backend at build time,
+so the shared `io_context` layer is written against a single platform-neutral
+vocabulary.
 
 ## Move-Only and Non-Movable Types
 
@@ -281,6 +295,7 @@ they own non-transferable runtime state:
 |------|--------|
 | `io_context` | Owns native workers, timer heap, and mutexes. |
 | `linux_native::io_uring_context` | Owns one ring, normalized options, and single-owner run-loop state. |
+| `bsd_native::kqueue_context` | Owns one kqueue fd, normalized options, and single-owner run-loop state. |
 
 ```cpp
 // These are all compile errors:

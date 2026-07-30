@@ -10,13 +10,13 @@
 This avoids a scan of every registered timer to discover newly submitted
 waits.
 
-Implementation types live in the matching
-`include/bnio/{linux,bsd}/detail/` directory:
+Implementation types are platform-independent and live in
+`include/bnio/detail/io_context/` (shared by the Linux and BSD backends; there
+is no platform-specific timer split):
 
-- `io_context_timer_types.h` defines `timer_slot`, timer operation types, and
+- `timer_types.h` defines `timer_slot`, timer operation types, and
   `timer_state_data`.
-- `io_context_native_io/timer_wait.h` defines the user-facing wait sender and
-  operation.
+- `timer_wait.h` defines the user-facing wait sender and operation.
 - `steady_timer.h` owns one `timer_slot`.
 
 ## Goals
@@ -150,11 +150,11 @@ own local CPU queue during its next loop check.
 `expires_at()` / `expires_after()` first take the timer mutex and:
 
 1. Remove the slot from its current heap/list container.
-2. Detach the one submitted head-linked queue.
-3. Store the new expiry.
-4. Insert it into the active heap or inactive list according to the new time.
-5. Mark the detached operations stopped and link them into the timer-ready
+2. Store the new expiry.
+3. Detach the one submitted head-linked queue.
+4. Mark the detached operations stopped and link them into the timer-ready
    list.
+5. Insert it into the active heap or inactive list according to the new time.
 6. Release the mutex.
 
 The return value is the detached list's stored `size`, so cancellation and

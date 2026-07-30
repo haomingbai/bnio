@@ -241,11 +241,12 @@ High-level async runtime, stream owners, and buffer types.
 - `design/lifecycle.md` — lifetime and ownership rules.
 - `design/io_uring-setup.md` — io_uring setup flags and optimization.
 - `design/timer.md` — timer subsystem design.
-- `design/kqueue-roadmap.md` — BSD kqueue portability roadmap.
+- `design/roadmap.md` — next-phase roadmap (POSIX `io_context` consolidation; memory-customization branch).
 - `usage.md` → redirects to `usage/index.md`.
 - `usage/index.md` — usage guide (sender/receiver, operations, CPOs, submission
   modes, coroutines).
 - `examples.md` — runnable example walkthrough.
+- `build.md` — build, install, consumption, packaging (DEB/RPM), and coverage.
 - `benchmark/index.md` — benchmark overview and entry point.
 - `benchmark/io_uring.md` — io_uring (Linux) benchmark report.
 - `benchmark/kqueue.md` — kqueue (macOS/BSD) benchmark report.

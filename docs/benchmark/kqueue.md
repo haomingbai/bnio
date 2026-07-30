@@ -242,7 +242,7 @@ These observations are based on the benchmark data and the implementation model.
 
 7. **No errors across the entire matrix.** All 96 configurations completed cleanly — both server implementations and the client are stable under all tested configurations on kqueue.
 
-8. **The kqueue implementation continues to improve.** The single-threaded and small/medium-message paths are now competitive with asio. Remaining areas: the 64 KB large-buffer I/O path, 2-thread scaling, and the specific w=1/c=64/m=65536 regression. See the [kqueue roadmap](../design/kqueue-roadmap.md) for optimization plans.
+8. **The kqueue implementation continues to improve.** The single-threaded and small/medium-message paths are now competitive with asio. Remaining areas: the 64 KB large-buffer I/O path, 2-thread scaling, and the specific w=1/c=64/m=65536 regression. These remain under continued optimization.
 
 ---
 
@@ -405,7 +405,7 @@ The throughput improvement is attributable to the two recent commits `0979ac0` (
 
 The platform comparison reveals that bnio's performance on kqueue continues to close the gap with asio, though it still trails its io_uring performance. On io_uring, bnio leverages submission batching and zero-syscall completion polling to outperform standalone Asio. On kqueue, the recent BSD-side optimizations (`0979ac0`, `eeb6805`) have brought small/medium-message throughput to near-parity or better across most worker counts, but large-message I/O remains an area for further improvement. The timer churn results are closer across platforms because both backends ultimately rely on the same underlying kqueue timer mechanism.
 
-The kqueue backend is actively under development (see [kqueue roadmap](../design/kqueue-roadmap.md)). Areas of ongoing optimization include the large-buffer I/O path, 2-thread scaling, the single-threaded 64 KB regression, and further reductions in synchronization overhead.
+The kqueue backend remains under active optimization. Areas of ongoing work include the large-buffer I/O path, 2-thread scaling, the single-threaded 64 KB regression, and further reductions in synchronization overhead; the next structural step is the POSIX `io_context` consolidation described in [`design/roadmap.md`](../design/roadmap.md).
 
 ---
 

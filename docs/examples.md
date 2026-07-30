@@ -51,6 +51,97 @@ Read operations return one available chunk. Write operations send the whole
 provided buffer before completing; use `async_write_some(...)` when an example
 or application needs to observe and retry short writes manually.
 
+## mini_curl
+
+`examples/mini_curl/` contains a compact HTTP/HTTPS client that demonstrates the
+full async stack: DNS resolution, TCP connect with fallback, TLS handshake,
+HTTP request/response, and graceful shutdown — all via the scheduler API.
+
+### Usage
+
+```sh
+# HTTP GET
+bnio_mini_curl http://httpbin.org/get
+
+# HTTPS GET (auto-detected from https:// scheme)
+bnio_mini_curl https://httpbin.org/get
+
+# POST JSON data
+bnio_mini_curl -X POST -H "Content-Type: application/json" \
+  -d '{"key":"value"}' https://httpbin.org/post
+
+# Download to file, follow redirects
+bnio_mini_curl -L -o output.html https://example.com
+
+# HEAD request with verbose progress
+bnio_mini_curl -I -v https://httpbin.org/status/200
+
+# IPv4-only resolution, skip TLS verification
+bnio_mini_curl -k --ipv4 https://localhost:8443/test
+```
+
+### Options
+
+| Flag   | Long form            | Description                                    |
+| ------ | -------------------- | ---------------------------------------------- |
+| `-X`   | `--request METHOD`   | HTTP method (default: `GET`)                   |
+| `-I`   | `--head`             | Send a HEAD request                            |
+| `-H`   | `--header HEADER`    | Add a request header (`Name: Value`)           |
+| `-d`   | `--data DATA`        | Send POST data in the request body             |
+| `-L`   | `--location`         | Follow redirects (up to 10)                    |
+| `-o`   | `--output FILE`      | Write response body to file instead of stdout  |
+| `-k`   | `--insecure`         | Skip TLS certificate verification              |
+| `-v`   | `--verbose`          | Print connection progress to stderr            |
+|        | `--host HOST`        | Override the URL host                          |
+|        | `--port PORT`        | Override the URL port/service                  |
+|        | `--path PATH`        | Override the request path                      |
+|        | `--ipv4`             | Resolve only IPv4 addresses                    |
+|        | `--ipv6`             | Resolve only IPv6 addresses                    |
+
+### Design
+
+The client is split into several files under `examples/mini_curl/`:
+
+- [`mini_curl.cpp`](../examples/mini_curl/mini_curl.cpp) — `main()`, argument
+  parsing, and URL parsing.
+- [`request.cpp`](../examples/mini_curl/request.cpp) — HTTP request construction.
+- [`mini_curl/request.hpp`](../examples/mini_curl/mini_curl/request.hpp) — request
+  type definition.
+- [`mini_curl/client.hpp`](../examples/mini_curl/mini_curl/client.hpp) — the
+  async client class with sender/receiver plumbing, DNS→connect→TLS→HTTP
+  pipeline, and redirect following.
+- [`mini_curl/client_connection.hpp`](../examples/mini_curl/mini_curl/client_connection.hpp) —
+  connection establishment with endpoint fallback.
+- [`mini_curl/client_transfer.hpp`](../examples/mini_curl/mini_curl/client_transfer.hpp) —
+  HTTP request/response transfer.
+- [`mini_curl/client_receivers.hpp`](../examples/mini_curl/mini_curl/client_receivers.hpp) —
+  completion receivers.
+- [`mini_curl/client_redirect.hpp`](../examples/mini_curl/mini_curl/client_redirect.hpp) —
+  redirect handling.
+- [`mini_curl/client_output.hpp`](../examples/mini_curl/mini_curl/client_output.hpp) —
+  response body output.
+- [`mini_curl/operation_registry.hpp`](../examples/mini_curl/mini_curl/operation_registry.hpp) —
+  operation lifetime container.
+
+Key patterns demonstrated:
+
+- **Sender/receiver operation lifecycle** — every async step (resolve, connect,
+  handshake, write, read, shutdown) is a sender connected to a receiver,
+  managed by an `operation_registry`.
+- **Endpoint fallback** — resolved endpoints are tried sequentially;
+  connection failures advance to the next endpoint.
+- **TLS handshake integration** — after TCP connect, the socket is moved into
+  an `ssl_stream`; handshake, encrypted read/write, and shutdown all flow
+  through the same scheduler API.
+- **Write-all semantics** — `async_write()` retries short writes until the
+  whole buffer is accepted; `async_write_some()` is available when callers want
+  one native write attempt.
+- **Redirect following** — response headers are buffered until `\r\n\r\n`;
+  3xx responses with a `Location` header trigger a new request (method changed
+  to GET per RFC 7231).
+- **Graceful TLS shutdown** — `SSL_ERROR_ZERO_RETURN` from the server is
+  treated as a clean close; the client sends `close_notify` in response.
+
 ## Base Linux Examples
 
 The `examples/base/linux` directory demonstrates the low-level wrapper around
