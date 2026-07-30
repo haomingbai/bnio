@@ -18,13 +18,13 @@ The next phase has one committed direction and one open branch:
 The high-level runtime is already platform-neutral. `io_context`,
 `basic_scheduler`, `schedule_sender`, the intrusive timer heap, the shared
 MPSC CPU/I/O task queues, the wake channel, and `steady_timer` are written once
-under `detail/io_context/` and shared by both backends
-(`include/bnio/detail/io_context/class.h:56-586`,
-`src/io_context*.cpp`). The platform boundary is confined to three places:
+under `detail/posix/io_context/` and shared by both backends
+(`include/bnio/detail/posix/io_context/class.h:56-586`,
+`src/posix/io_context*.cpp`). The platform boundary is confined to three places:
 
 | # | Boundary | Location |
 |---|----------|----------|
-| 1 | Macro-dispatched type aliases | `detail/io_context/native_context.h:22-40` selects `io_uring_context` or `kqueue_context`, plus the `native_operation_base` / `native_io_operation_base` / `native_task_queue_state` aliases. |
+| 1 | Macro-dispatched type aliases | `detail/posix/io_context/native_context.h:22-40` selects `io_uring_context` or `kqueue_context`, plus the `native_operation_base` / `native_io_operation_base` / `native_task_queue_state` aliases. |
 | 2 | Backend request factories | `detail/{linux,bsd}/io_context_native_io/` — sender/factory headers. BSD has `common.h` + `factories.h`; Linux adds `file.h`, `poll.h`, `socket.h`. |
 | 3 | Two mirrored run-loops + task state | `async_io/bsd/kqueue_context_base/` and `async_io/linux/io_uring_context_base/` — `*_context`, `*_task_queue_state`, `*_operation_base` are field-for-field identical but independently maintained. |
 
@@ -51,6 +51,22 @@ claimed to be a universal abstraction; it is a POSIX-shared one.
 ---
 
 ## 1. POSIX `io_context` consolidation
+
+### Completed
+
+The directory and macro infrastructure needed for the consolidation is in place:
+
+- **`posix` directory layer.** `detail/io_context/` → `detail/posix/io_context/`
+  (12 headers), `src/{io_context,ssl,tcp,udp}*.cpp` → `src/posix/` (7 source
+  files), `src/async_io/{address,tcp_endpoint}.cpp` → `src/async_io/posix/`.
+  Each subdirectory has its own `CMakeLists.txt` with `target_sources`, and
+  parent directories use `add_subdirectory`.
+- **POSIX feature macros.** `BNIO_HAS_BASE_POSIX`, `BNIO_HAS_ASYNC_IO_POSIX`,
+  `BNIO_HAS_IO_CONTEXT_POSIX` are defined at each config layer, derived from
+  the platform-detection chain (`BNIO_SYSTEM_{LINUX,BSD}` → `BNIO_HAS_*_LINUX`
+  / `BNIO_HAS_*_BSD` → `BNIO_HAS_*_POSIX`). `native_context.h`,
+  `native_io.h`, and `io_context.h` guard with `BNIO_HAS_IO_CONTEXT_POSIX`.
+- All existing Linux and BSD integration tests pass.
 
 ### Goal
 
@@ -111,7 +127,7 @@ the same structure is the largest source of drift risk in the codebase.
 
 ### Acceptance
 
-- `detail/io_context/native_context.h` no longer defines separate
+- `detail/posix/io_context/native_context.h` no longer defines separate
   `io_uring_context` / `kqueue_context` aliases for the context type itself —
   both platforms use `posix_context`.
 - The run-loop phase machine exists in one place; BSD- and Linux-specific code

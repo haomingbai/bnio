@@ -4,7 +4,7 @@ Namespace `bnio`. Public umbrella `include/bnio/io_context.h` exposes one
 platform-neutral class definition. `detail::native_context` aliases the
 configured `io_uring_context` or `kqueue_context`; the shared runtime state,
 worker ownership, timers, and source implementation live under
-`detail/io_context/` and `src/io_context*.cpp`.
+`detail/posix/io_context/` and `src/posix/io_context*.cpp`.
 
 `io_context` is the event-loop owner and scheduler factory:
 
@@ -20,14 +20,14 @@ cohesive `detail` state objects rather than defining all internal data inline:
 
 | State / Detail Type | Header | Responsibility |
 |---------------------|--------|----------------|
-| `detail::native_context` and related aliases | `detail/io_context/native_context.h` | Select the native context, options, operation bases, and shared task state. |
-| `detail::native_context_state` | `detail/io_context/state.h` | Native options used to create contexts lazily. |
-| `detail::native_worker_state` | `detail/io_context/state.h` | Atomically published head of the native-worker list. |
-| `detail::native_worker` | `detail/io_context/native_worker.h` | Per-run-thread owner of one native context. |
+| `detail::native_context` and related aliases | `detail/posix/io_context/native_context.h` | Select the native context, options, operation bases, and shared task state. |
+| `detail::native_context_state` | `detail/posix/io_context/state.h` | Native options used to create contexts lazily. |
+| `detail::native_worker_state` | `detail/posix/io_context/state.h` | Atomically published head of the native-worker list. |
+| `detail::native_worker` | `detail/posix/io_context/native_worker.h` | Per-run-thread owner of one native context. |
 | platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake-worker count, and worker-group closing state. |
-| `detail::timer_state_data` | `detail/io_context/timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
+| `detail::timer_state_data` | `detail/posix/io_context/timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
 
-The aggregate `detail/io_context/native_io.h` is included after the complete
+The aggregate `detail/posix/io_context/native_io.h` is included after the complete
 `io_context` declaration, so templates can call private context hooks without
 splitting a class definition across files. It owns the shared forwarding,
 timer-wait, and write-all templates, then selects only the backend request
@@ -180,14 +180,14 @@ implementation:
 | Header | Contents |
 |--------|----------|
 | `io_context.h` | Public `io_context` umbrella. |
-| `detail/io_context/class.h` | `io_context`, schedulers, operation base, and private hooks. |
-| `detail/io_context/native_context.h` | Backend-selected native type aliases. |
-| `detail/io_context/{options,state,native_worker}.h` | Options, shared worker list, and per-thread native owner. |
-| `detail/io_context/{timer_types,steady_timer}.h` | Timer slots, queues, state, and public `steady_timer`. |
-| `detail/io_context/native_io.h` | Shared scheduler/context forwarding functions; selects backend request factories. |
-| `detail/io_context/{timer_wait,write_all}.h` | Shared timer wait and composed full-write sender templates. |
+| `detail/posix/io_context/class.h` | `io_context`, schedulers, operation base, and private hooks. |
+| `detail/posix/io_context/native_context.h` | Backend-selected native type aliases. |
+| `detail/posix/io_context/{options,state,native_worker}.h` | Options, shared worker list, and per-thread native owner. |
+| `detail/posix/io_context/{timer_types,steady_timer}.h` | Timer slots, queues, state, and public `steady_timer`. |
+| `detail/posix/io_context/native_io.h` | Shared scheduler/context forwarding functions; selects backend request factories. |
+| `detail/posix/io_context/{timer_wait,write_all}.h` | Shared timer wait and composed full-write sender templates. |
 | `detail/{linux,bsd}/io_context_native_io/` | Backend-specific request adapters, factories, and (on Linux) SQE models. |
-| `src/io_context{,_queue,_timer,_timer_state}.cpp` | Shared lifecycle, queue, timer, and timer-state implementations. |
+| `src/posix/io_context{,_queue,_timer,_timer_state}.cpp` | Shared lifecycle, queue, timer, and timer-state implementations. |
 
 The request adapters are deliberately not macro-normalized: kqueue owns a
 readiness/retry step while io_uring owns SQE preparation and CQE completion.

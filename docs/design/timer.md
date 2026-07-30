@@ -11,7 +11,7 @@ This avoids a scan of every registered timer to discover newly submitted
 waits.
 
 Implementation types are platform-independent and live in
-`include/bnio/detail/io_context/` (shared by the Linux and BSD backends; there
+`include/bnio/detail/posix/io_context/` (shared by the Linux and BSD backends; there
 is no platform-specific timer split):
 
 - `timer_types.h` defines `timer_slot`, timer operation types, and

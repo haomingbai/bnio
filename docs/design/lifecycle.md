@@ -269,7 +269,7 @@ read/write uses the same shape: it owns SSL state plus a
 
 Both the Linux and BSD base classes disable copy and move because they are
 intrusive list nodes. The `native_*` aliases in
-`detail/io_context/native_context.h` select the matching backend at build time,
+`detail/posix/io_context/native_context.h` select the matching backend at build time,
 so the shared `io_context` layer is written against a single platform-neutral
 vocabulary.
 

@@ -60,8 +60,8 @@ add_subdirectory(bnio)
 target_link_libraries(your_app PRIVATE bnio::bnio)
 ```
 
-Prefer to install it first? bnio ships a standard CMake package and a
-pkg-config file:
+To install as a system-wide package instead, bnio ships a standard CMake package
+and a pkg-config file:
 
 ```sh
 cmake --install build --prefix /usr/local
