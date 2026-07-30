@@ -20,6 +20,16 @@ namespace bnio::base {
 class BNIO_EXPORT event_list_view {
  public:
   /**
+   * Iterator type over the viewed event array.
+   */
+  using iterator = event*;
+
+  /**
+   * Constant iterator type over the viewed event array.
+   */
+  using const_iterator = const event*;
+
+  /**
    * Creates an empty view.
    */
   event_list_view() noexcept;
@@ -58,6 +68,26 @@ class BNIO_EXPORT event_list_view {
    * Returns the event at the requested index.
    */
   [[nodiscard]] const event& operator[](std::size_t index) const noexcept;
+
+  /**
+   * Returns an iterator to the first event in the viewed array.
+   */
+  [[nodiscard]] iterator begin() noexcept;
+
+  /**
+   * Returns a past-the-end iterator for the viewed array.
+   */
+  [[nodiscard]] iterator end() noexcept;
+
+  /**
+   * Returns a constant iterator to the first event in the viewed array.
+   */
+  [[nodiscard]] const_iterator begin() const noexcept;
+
+  /**
+   * Returns a constant past-the-end iterator for the viewed array.
+   */
+  [[nodiscard]] const_iterator end() const noexcept;
 
  private:
   event* events_ = nullptr;

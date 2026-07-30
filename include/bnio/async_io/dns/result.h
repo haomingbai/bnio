@@ -28,6 +28,12 @@ class dns_result_view {
   using endpoint_type = ip::endpoint;
 
   /**
+   * Iterator type. The view is a mutable view, so even const iteration yields
+   * writable endpoints (consistent with data() and operator[]).
+   */
+  using iterator = endpoint_type*;
+
+  /**
    * Creates an empty result view.
    */
   constexpr dns_result_view() noexcept = default;
@@ -76,6 +82,20 @@ class dns_result_view {
   [[nodiscard]] constexpr endpoint_type& operator[](
       std::size_t index) const noexcept {
     return data_[index];
+  }
+
+  /**
+   * Returns an iterator to the first endpoint in the viewed storage.
+   * Iteration covers the full capacity reported by size(); callers that only
+   * want the resolved subset must pair this with a count from set_value().
+   */
+  [[nodiscard]] constexpr iterator begin() const noexcept { return data_; }
+
+  /**
+   * Returns a past-the-end iterator for the viewed storage.
+   */
+  [[nodiscard]] constexpr iterator end() const noexcept {
+    return data_ + size_;
   }
 
  private:

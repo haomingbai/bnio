@@ -3,6 +3,7 @@
 #include <array>
 #include <bexec/bexec.hpp>
 #include <cstdio>
+#include <ranges>
 #include <string>
 #include <system_error>
 
@@ -11,8 +12,7 @@ struct resolve_receiver {
   bnio::dns_result_view results;
 
   void set_value(std::size_t count) noexcept {
-    for (std::size_t i = 0; i < count; ++i) {
-      const auto& ep = results[i];
+    for (const auto& ep : results | std::views::take(count)) {
       const auto& addr = ep.address();
       if (const auto* v4 = addr.v4()) {
         std::printf("%d.%d.%d.%d:%d\n", (*v4)[0], (*v4)[1], (*v4)[2], (*v4)[3],

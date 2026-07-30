@@ -9,6 +9,7 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -165,7 +166,8 @@ int main(int argc, char** argv) {
       }
       bnio::tcp_socket so;
       auto c = std::make_shared<client>(*ctx, std::move(so), std::move(msg));
-      for (std::size_t i = 0; i < n; ++i) c->ep[i] = res[i];
+      std::size_t i = 0;
+      for (const auto& e : res | std::views::take(n)) c->ep[i++] = e;
       c->arm_timeout();
       c->connect(0);
     }

@@ -27,4 +27,12 @@ const event& event_list_view::operator[](std::size_t index) const noexcept {
   return events_[index];
 }
 
+event* event_list_view::begin() noexcept { return events_; }
+
+event* event_list_view::end() noexcept { return events_ + size_; }
+
+const event* event_list_view::begin() const noexcept { return events_; }
+
+const event* event_list_view::end() const noexcept { return events_ + size_; }
+
 }  // namespace bnio::base

@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <cstdint>
 #include <ctime>
+#include <type_traits>
 #include <utility>
 
 namespace {
@@ -52,6 +53,24 @@ TEST(KqueueTest, event_list_view) {
 
   view[0].set(k_user_event_ident, EVFILT_USER, EV_ADD, 0, 0, nullptr);
   EXPECT_EQ(events[0].ident(), k_user_event_ident);
+
+  // Iterator support: begin()/end() alias the viewed array.
+  EXPECT_EQ(view.begin(), events.data());
+  EXPECT_EQ(view.end(), events.data() + events.size());
+
+  std::size_t counted = 0;
+  for (auto& ev : view) {
+    ev.set(k_user_event_ident, EVFILT_USER, EV_ADD, 0, 0, nullptr);
+    ++counted;
+  }
+  EXPECT_EQ(counted, events.size());
+  EXPECT_EQ(events[1].ident(), k_user_event_ident);
+
+  const bnio::base::event_list_view const_view = view;
+  static_assert(std::is_same_v<bnio::base::event_list_view::const_iterator,
+                               const bnio::base::event*>);
+  EXPECT_EQ(const_view.begin(), events.data());
+  EXPECT_EQ(const_view.end(), events.data() + events.size());
 }
 
 TEST(KqueueTest, move_closed_kqueue) {
