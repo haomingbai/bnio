@@ -2,10 +2,10 @@
 // main thread runs context.run(). steady_timer aborts on timeout (10s).
 
 #include <bnio/bnio.h>
-#include <bexec/bexec.hpp>
 
 #include <array>
 #include <atomic>
+#include <bexec/bexec.hpp>
 #include <chrono>
 #include <iostream>
 #include <memory>
@@ -40,17 +40,28 @@ struct client : std::enable_shared_from_this<client> {
     bexec::start(op);
   }
 
-  void cancel_timeout() { if (tm) { (void)tm->cancel(); tm.reset(); } }
+  void cancel_timeout() {
+    if (tm) {
+      (void)tm->cancel();
+      tm.reset();
+    }
+  }
 
   void connect(std::size_t i) {
-    if (i >= kN) { fail("no endpoints"); return; }
+    if (i >= kN) {
+      fail("no endpoints");
+      return;
+    }
     const auto& e = ep[i];
     std::error_code ec;
     if (e.version() == bnio::ip::address::version::v4)
       ec = so.open(bnio::ip::tcp::v4());
     else
       ec = so.open(bnio::ip::tcp::v6());
-    if (ec) { connect(i + 1); return; }
+    if (ec) {
+      connect(i + 1);
+      return;
+    }
 
     struct R {
       std::shared_ptr<client> c;
@@ -132,7 +143,10 @@ int main(int argc, char** argv) {
   std::string msg = (argc > 3) ? std::string(argv[3]) + "\n" : "hello\n";
 
   bnio::io_context ctx;
-  if (!ctx.is_open()) { std::cerr << "context unavailable\n"; return 1; }
+  if (!ctx.is_open()) {
+    std::cerr << "context unavailable\n";
+    return 1;
+  }
 
   bnio::dns_query q(host, port);
   q.set_transport(bnio::dns_transport::tcp);
@@ -144,7 +158,11 @@ int main(int argc, char** argv) {
     bnio::dns_result_view res;
 
     void set_value(std::size_t n) noexcept {
-      if (n == 0) { std::cerr << "no endpoints\n"; ctx->stop(); return; }
+      if (n == 0) {
+        std::cerr << "no endpoints\n";
+        ctx->stop();
+        return;
+      }
       bnio::tcp_socket so;
       auto c = std::make_shared<client>(*ctx, std::move(so), std::move(msg));
       for (std::size_t i = 0; i < n; ++i) c->ep[i] = res[i];
@@ -152,15 +170,16 @@ int main(int argc, char** argv) {
       c->connect(0);
     }
     void set_error(std::error_code e) noexcept {
-      std::cerr << "resolve: " << e.message() << '\n'; ctx->stop();
+      std::cerr << "resolve: " << e.message() << '\n';
+      ctx->stop();
     }
     void set_stopped() noexcept { ctx->stop(); }
   };
 
-  auto s = ctx.get_post_scheduler().async_resolve(
-      std::move(q), bnio::dns_result_view(ep));
-  auto op = bexec::connect(std::move(s),
-                           R{&ctx, msg, bnio::dns_result_view(ep)});
+  auto s = ctx.get_post_scheduler().async_resolve(std::move(q),
+                                                  bnio::dns_result_view(ep));
+  auto op =
+      bexec::connect(std::move(s), R{&ctx, msg, bnio::dns_result_view(ep)});
   bexec::start(op);
   ctx.run();
   return 0;

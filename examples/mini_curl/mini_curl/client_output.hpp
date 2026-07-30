@@ -43,8 +43,7 @@ inline void mini_curl_client::arm_timeout() noexcept {
   timer_ = std::make_unique<bnio::steady_timer>(
       context_, std::chrono::seconds(options_.timeout_seconds));
 
-  registry_.spawn(timer_->async_wait(),
-                  timer_receiver{shared_from_this()});
+  registry_.spawn(timer_->async_wait(), timer_receiver{shared_from_this()});
 }
 
 inline void mini_curl_client::cancel_timeout() noexcept {
@@ -59,8 +58,8 @@ inline void mini_curl_client::on_timeout() noexcept {
     return;  // already handled
   }
   timed_out_ = true;
-  fail("request timed out after " +
-       std::to_string(options_.timeout_seconds) + " seconds");
+  fail("request timed out after " + std::to_string(options_.timeout_seconds) +
+       " seconds");
 }
 
 inline void mini_curl_client::fail(std::string_view message) noexcept {

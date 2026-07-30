@@ -3,10 +3,10 @@
 // Each session uses an operation_registry to keep async ops alive.
 
 #include <bnio/bnio.h>
-#include <bexec/bexec.hpp>
 
 #include <array>
 #include <atomic>
+#include <bexec/bexec.hpp>
 #include <csignal>
 #include <cstdint>
 #include <iostream>
@@ -21,7 +21,9 @@ namespace {
 constexpr std::size_t k_buf = 4096;
 
 // Minimal type-erased operation holder.
-struct op_base { virtual ~op_base() = default; };
+struct op_base {
+  virtual ~op_base() = default;
+};
 class op_registry {
  public:
   template <class Sender, class Receiver>
@@ -34,8 +36,8 @@ class op_registry {
           : op(bexec::connect(std::forward<Sender>(ss),
                               std::forward<Receiver>(rr))) {}
     };
-    auto h = std::make_unique<H>(std::forward<Sender>(s),
-                                 std::forward<Receiver>(r));
+    auto h =
+        std::make_unique<H>(std::forward<Sender>(s), std::forward<Receiver>(r));
     bexec::start(h->op);
     ops_.push_back(std::move(h));
   }
@@ -101,7 +103,9 @@ class echo_server : public std::enable_shared_from_this<echo_server> {
 };
 
 std::weak_ptr<echo_server> g_srv{};
-void on_signal(int) { if (auto s = g_srv.lock()) s->shutdown(); }
+void on_signal(int) {
+  if (auto s = g_srv.lock()) s->shutdown();
+}
 
 // --- echo_session impl ---
 
@@ -115,8 +119,12 @@ void echo_session::do_read() {
   struct R {
     std::shared_ptr<echo_session> se;
     void set_value(std::size_t n) noexcept {
-      if (n == 0) { se->done(); return; }
-      se->nw_ = n; se->do_write();
+      if (n == 0) {
+        se->done();
+        return;
+      }
+      se->nw_ = n;
+      se->do_write();
     }
     void set_error(std::error_code) noexcept { se->done(); }
     void set_stopped() noexcept { se->done(); }
@@ -132,10 +140,10 @@ void echo_session::do_write() {
     void set_error(std::error_code) noexcept { se->done(); }
     void set_stopped() noexcept { se->done(); }
   };
-  reg_.spawn(so_.async_write(ctx_.get_post_scheduler(),
-                              bnio::const_buffer(buf_.data(), nw_),
-                              MSG_NOSIGNAL),
-             R{shared_from_this()});
+  reg_.spawn(
+      so_.async_write(ctx_.get_post_scheduler(),
+                      bnio::const_buffer(buf_.data(), nw_), MSG_NOSIGNAL),
+      R{shared_from_this()});
 }
 
 void echo_session::done() {
@@ -153,7 +161,9 @@ void echo_server::do_accept() {
     std::shared_ptr<echo_server> s;
     void set_value(bnio::tcp_socket so) noexcept {
       auto se = std::make_shared<echo_session>(s->ctx_, std::move(so), s);
-      s->on_begin(); se->start(); s->do_accept();
+      s->on_begin();
+      se->start();
+      s->do_accept();
     }
     void set_error(std::error_code) noexcept {}
     void set_stopped() noexcept {}
@@ -171,15 +181,19 @@ std::uint16_t to_port(const std::string& s) {
 int main(int argc, char** argv) {
   const std::string port = (argc > 1) ? argv[1] : "8080";
   bnio::io_context ctx;
-  if (!ctx.is_open()) { std::cerr << "context unavailable\n"; return 1; }
+  if (!ctx.is_open()) {
+    std::cerr << "context unavailable\n";
+    return 1;
+  }
 
   bnio::tcp_acceptor acp;
   std::error_code ec;
   if ((ec = acp.open(bnio::ip::tcp::v4())) ||
-      (ec = acp.bind(bnio::ip::endpoint(
-           bnio::ip::address::any_v4(), to_port(port)))) ||
+      (ec = acp.bind(
+           bnio::ip::endpoint(bnio::ip::address::any_v4(), to_port(port)))) ||
       (ec = acp.listen(128))) {
-    std::cerr << ec.message() << '\n'; return 1;
+    std::cerr << ec.message() << '\n';
+    return 1;
   }
 
   std::cerr << "listening on 0.0.0.0:" << port << " (ctrl-c to stop)\n";

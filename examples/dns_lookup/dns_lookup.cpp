@@ -1,7 +1,7 @@
 #include <bnio/bnio.h>
-#include <bexec/bexec.hpp>
 
 #include <array>
+#include <bexec/bexec.hpp>
 #include <cstdio>
 #include <string>
 #include <system_error>
@@ -15,8 +15,8 @@ struct resolve_receiver {
       const auto& ep = results[i];
       const auto& addr = ep.address();
       if (const auto* v4 = addr.v4()) {
-        std::printf("%d.%d.%d.%d:%d\n",
-                    (*v4)[0], (*v4)[1], (*v4)[2], (*v4)[3], ep.port());
+        std::printf("%d.%d.%d.%d:%d\n", (*v4)[0], (*v4)[1], (*v4)[2], (*v4)[3],
+                    ep.port());
       } else if (addr.is_v6()) {
         std::printf("[IPv6]:%d\n", ep.port());
       }

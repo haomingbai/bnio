@@ -2,9 +2,9 @@
 // main thread runs context.run().
 
 #include <bnio/bnio.h>
-#include <bexec/bexec.hpp>
 
 #include <array>
+#include <bexec/bexec.hpp>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -28,7 +28,8 @@ struct state : std::enable_shared_from_this<state> {
       std::shared_ptr<state> s;
       void set_value(std::size_t) noexcept { s->recv(); }
       void set_error(std::error_code e) noexcept {
-        std::cerr << e.message() << '\n'; s->done();
+        std::cerr << e.message() << '\n';
+        s->done();
       }
       void set_stopped() noexcept { s->done(); }
     };
@@ -48,18 +49,21 @@ struct state : std::enable_shared_from_this<state> {
         s->done();
       }
       void set_error(std::error_code e) noexcept {
-        std::cerr << e.message() << '\n'; s->done();
+        std::cerr << e.message() << '\n';
+        s->done();
       }
       void set_stopped() noexcept { s->done(); }
     };
-    auto op = bexec::connect(
-        so.async_receive_from(ctx.get_post_scheduler(),
-                              bnio::buffer(buf), peer, 0),
-        R{shared_from_this()});
+    auto op = bexec::connect(so.async_receive_from(ctx.get_post_scheduler(),
+                                                   bnio::buffer(buf), peer, 0),
+                             R{shared_from_this()});
     bexec::start(op);
   }
 
-  void done() { (void)so.close(); ctx.stop(); }
+  void done() {
+    (void)so.close();
+    ctx.stop();
+  }
 };
 
 }  // namespace
@@ -73,11 +77,15 @@ int main(int argc, char** argv) {
   std::string msg = (argc > 3) ? argv[3] : "hello";
 
   bnio::io_context ctx;
-  if (!ctx.is_open()) { std::cerr << "context unavailable\n"; return 1; }
+  if (!ctx.is_open()) {
+    std::cerr << "context unavailable\n";
+    return 1;
+  }
 
   bnio::udp_socket so;
   if (auto ec = so.open(bnio::ip::udp::v4())) {
-    std::cerr << ec.message() << '\n'; return 1;
+    std::cerr << ec.message() << '\n';
+    return 1;
   }
 
   auto s = std::make_shared<state>(ctx, std::move(so));

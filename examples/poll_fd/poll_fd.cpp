@@ -1,7 +1,7 @@
 #include <bnio/bnio.h>
-#include <bexec/bexec.hpp>
 
 #include <array>
+#include <bexec/bexec.hpp>
 #include <iostream>
 #include <system_error>
 
@@ -12,8 +12,7 @@ struct poll_receiver {
     if (events & POLLIN) {
       std::array<char, 1024> buf{};
       std::cin.getline(buf.data(), buf.size());
-      if (std::cin.gcount() > 0)
-        std::cout << "echo: " << buf.data() << '\n';
+      if (std::cin.gcount() > 0) std::cout << "echo: " << buf.data() << '\n';
     }
     ctx->stop();
   }

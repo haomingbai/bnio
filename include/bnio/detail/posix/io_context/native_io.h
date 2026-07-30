@@ -15,8 +15,7 @@
 #elif defined(BNIO_HAS_IO_CONTEXT_BSD)
 #include <bnio/detail/bsd/io_context_native_io/factories.h>
 #else
-#error \
-    "bnio::detail::native_io: POSIX platform requires Linux or BSD backend."
+#error "bnio::detail::native_io: POSIX platform requires Linux or BSD backend."
 #endif
 #else
 #error "bnio::detail::native_io requires a POSIX platform."
