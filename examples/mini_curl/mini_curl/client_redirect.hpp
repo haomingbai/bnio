@@ -42,6 +42,7 @@ inline void mini_curl_client::follow_redirect(std::string location) {
   new_options.follow_redirects = options_.follow_redirects;
   new_options.output_file = options_.output_file;
   new_options.address_version = options_.address_version;
+  new_options.timeout_seconds = options_.timeout_seconds;
 
   options_ = std::move(new_options);
 
@@ -55,7 +56,10 @@ inline void mini_curl_client::follow_redirect(std::string location) {
               << ":" << options_.service << options_.target << '\n';
   }
 
+  // Re-arm timeout for the redirected request
+  cancel_timeout();
   resolve();
+  arm_timeout();
 }
 
 }  // namespace mini_curl

@@ -5,6 +5,7 @@
 #include <bnio/bnio.h>
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <fstream>
 #include <memory>
@@ -52,6 +53,8 @@ class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
   struct send_receiver;
   struct receive_receiver;
   struct shutdown_receiver;
+  struct timer_receiver;
+  struct final_receiver;
 
   // ---- Async flow stages ----
 
@@ -84,6 +87,14 @@ class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
   // Output
   void write_output(std::string_view data);
 
+  // Timeout
+  void arm_timeout() noexcept;
+  void cancel_timeout() noexcept;
+  void on_timeout() noexcept;
+
+  // Structured cleanup
+  void do_stop() noexcept;
+
   // Termination
   void fail(std::string_view message) noexcept;
   void fail(std::string_view message, std::error_code error) noexcept;
@@ -107,6 +118,9 @@ class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
   int exit_code_ = 0;
   int redirect_count_ = 0;
   bool header_complete_ = false;
+  bool timed_out_ = false;
+  bool finished_ = false;
+  std::unique_ptr<bnio::steady_timer> timer_;
 };
 
 }  // namespace mini_curl

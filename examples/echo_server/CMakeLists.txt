@@ -1,0 +1,3 @@
+add_executable(bnio_echo_server echo_server.cpp)
+target_link_libraries(bnio_echo_server PRIVATE bnio::bnio)
+bnio_set_project_warnings(bnio_echo_server)

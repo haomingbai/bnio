@@ -73,6 +73,30 @@ struct mini_curl_client::shutdown_receiver {
   void set_stopped() noexcept { client->on_shutdown_complete(); }
 };
 
+struct mini_curl_client::timer_receiver {
+  std::shared_ptr<mini_curl_client> client;
+
+  void set_value() noexcept {
+    // Timer expired — whole-operation timeout
+    client->on_timeout();
+  }
+  void set_error(std::error_code) noexcept {
+    // Timer error — treat as timeout
+    client->on_timeout();
+  }
+  void set_stopped() noexcept {
+    // Timer was cancelled by a successful completion — do nothing
+  }
+};
+
+struct mini_curl_client::final_receiver {
+  std::shared_ptr<mini_curl_client> client;
+
+  void set_value() noexcept { client->do_stop(); }
+  void set_error(std::error_code) noexcept { client->do_stop(); }
+  void set_stopped() noexcept { client->do_stop(); }
+};
+
 /** @endcond */
 
 }  // namespace mini_curl

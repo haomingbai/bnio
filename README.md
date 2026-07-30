@@ -43,6 +43,9 @@ int main() {
 }
 ```
 
+The public API is exposed solely through `<bnio/bnio.h>`; all other headers are
+implementation details.
+
 Each async factory returns a lazy sender; `bexec::connect` binds it to a
 receiver, `bexec::start` submits it, and `ctx.run()` pumps the loop until it
 finishes. The [usage guide](docs/usage/index.md) covers the sender/receiver

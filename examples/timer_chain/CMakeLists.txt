@@ -1,0 +1,3 @@
+add_executable(bnio_timer_chain timer_chain.cpp)
+target_link_libraries(bnio_timer_chain PRIVATE bnio::bnio)
+bnio_set_project_warnings(bnio_timer_chain)

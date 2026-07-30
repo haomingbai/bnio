@@ -26,6 +26,7 @@ void print_usage(const char* program) {
          "      --path PATH        Override request path\n"
          "      --ipv4             Resolve only IPv4 addresses\n"
          "      --ipv6             Resolve only IPv6 addresses\n"
+         "      --timeout SECONDS  Overall request timeout (default: 30)\n"
          "  -v, --verbose          Print progress to stderr\n";
 }
 
@@ -82,6 +83,19 @@ void print_usage(const char* program) {
     }
     if (arg == "--ipv6") {
       options.address_version = bnio::ip::address::version::v6;
+      continue;
+    }
+    if (arg == "--timeout") {
+      std::string value;
+      if (!take_value(i, argc, argv, value, error, arg)) {
+        std::cerr << error << '\n';
+        return false;
+      }
+      options.timeout_seconds = std::stoi(value);
+      continue;
+    }
+    if (starts_with(arg, "--timeout=")) {
+      options.timeout_seconds = std::stoi(std::string(arg.substr(10)));
       continue;
     }
     if (arg == "-X" || arg == "--request") {

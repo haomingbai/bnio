@@ -53,9 +53,10 @@ or application needs to observe and retry short writes manually.
 
 ## mini_curl
 
-`examples/mini_curl/` contains a compact HTTP/HTTPS client that demonstrates the
-full async stack: DNS resolution, TCP connect with fallback, TLS handshake,
-HTTP request/response, and graceful shutdown — all via the scheduler API.
+`examples/mini_curl/` contains a compact HTTP/HTTPS client that demonstrates
+**structured concurrency** with the sender/receiver pattern: the main thread
+runs `io_context::run()`, and the operation's final receiver calls
+`io_context::stop()` to shut down the context cleanly when the work is done.
 
 ### Usage
 
@@ -70,8 +71,8 @@ bnio_mini_curl https://httpbin.org/get
 bnio_mini_curl -X POST -H "Content-Type: application/json" \
   -d '{"key":"value"}' https://httpbin.org/post
 
-# Download to file, follow redirects
-bnio_mini_curl -L -o output.html https://example.com
+# Download to file, follow redirects, with timeout
+bnio_mini_curl -L -o output.html --timeout 30 https://example.com
 
 # HEAD request with verbose progress
 bnio_mini_curl -I -v https://httpbin.org/status/200
@@ -92,6 +93,7 @@ bnio_mini_curl -k --ipv4 https://localhost:8443/test
 | `-o`   | `--output FILE`      | Write response body to file instead of stdout  |
 | `-k`   | `--insecure`         | Skip TLS certificate verification              |
 | `-v`   | `--verbose`          | Print connection progress to stderr            |
+|        | `--timeout SECONDS`  | Connection and transfer timeout                |
 |        | `--host HOST`        | Override the URL host                          |
 |        | `--port PORT`        | Override the URL port/service                  |
 |        | `--path PATH`        | Override the request path                      |
@@ -100,10 +102,20 @@ bnio_mini_curl -k --ipv4 https://localhost:8443/test
 
 ### Design
 
-The client is split into several files under `examples/mini_curl/`:
+The client uses structured concurrency with the sender/receiver pattern:
+
+- **Structured concurrency** — main thread runs `io_context::run()`, and the
+  operation's `final_receiver` calls `io_context::stop()` when the full
+  request/response cycle (including redirects) completes. The context run loop
+  exits cleanly once all work is drained.
+- **Timeout support** — the `--timeout` option sets an overall deadline;
+  if the operation does not complete within the given seconds, the timer fires
+  and aborts the request.
+
+Key source files under `examples/mini_curl/`:
 
 - [`mini_curl.cpp`](../examples/mini_curl/mini_curl.cpp) — `main()`, argument
-  parsing, and URL parsing.
+  parsing, URL parsing, and the event loop orchestration.
 - [`request.cpp`](../examples/mini_curl/request.cpp) — HTTP request construction.
 - [`mini_curl/request.hpp`](../examples/mini_curl/mini_curl/request.hpp) — request
   type definition.
@@ -115,7 +127,7 @@ The client is split into several files under `examples/mini_curl/`:
 - [`mini_curl/client_transfer.hpp`](../examples/mini_curl/mini_curl/client_transfer.hpp) —
   HTTP request/response transfer.
 - [`mini_curl/client_receivers.hpp`](../examples/mini_curl/mini_curl/client_receivers.hpp) —
-  completion receivers.
+  completion receivers, including the `final_receiver` that stops the context.
 - [`mini_curl/client_redirect.hpp`](../examples/mini_curl/mini_curl/client_redirect.hpp) —
   redirect handling.
 - [`mini_curl/client_output.hpp`](../examples/mini_curl/mini_curl/client_output.hpp) —
@@ -142,11 +154,46 @@ Key patterns demonstrated:
 - **Graceful TLS shutdown** — `SSL_ERROR_ZERO_RETURN` from the server is
   treated as a clean close; the client sends `close_notify` in response.
 
-## Base Linux Examples
+## echo_server
 
-The `examples/base/linux` directory demonstrates the low-level wrapper around
-`liburing`. These examples use raw SQE/CQE handling and are useful when you want
-to understand the layer under `io_context`.
+`examples/echo_server/` — TCP echo server demonstrating structured concurrency.
+The main thread runs `io_context::run()`. The `tcp_acceptor` accepts connections
+via sender/receiver callbacks. Each connection runs read→write→read in an
+`echo_session`. SIGINT triggers graceful shutdown: the acceptor closes, active
+sessions drain, then `context.stop()` returns `run()`.
+
+## dns_lookup
+
+`examples/dns_lookup/` — minimal DNS resolution. Uses
+`scheduler.async_resolve(host, service, dns_result_view)` with a receiver that
+prints each resolved endpoint and calls `context.stop()`.
+
+## tcp_client
+
+`examples/tcp_client/` — TCP client with timeout. Full lifecycle:
+resolve → connect → send → receive. A `steady_timer` watchdog (10 s)
+aborts the request on timeout. Demonstrates sender/receiver chaining
+through shared state.
+
+## timer_chain
+
+`examples/timer_chain/` — three timers in sequence (200ms → 100ms → 50ms).
+Only the first timer is started before `run()`. Each receiver spawns the next
+timer's sender, so the chain unfolds inside the event loop. The last receiver
+calls `context.stop()`.
+
+## udp_echo
+
+`examples/udp_echo/` — UDP send-and-receive. Opens a `udp_socket`, sends a
+datagram with `async_send_to`, then waits for a reply with
+`async_receive_from`. Completion stops the context.
+
+## poll_fd
+
+`examples/poll_fd/` — descriptor polling. Uses
+`scheduler.async_poll(descriptor_view(STDIN_FILENO), POLLIN)` to wait for
+stdin readability. The receiver reads a line and echoes it, then stops
+the context.
 
 ## TCP Throughput Benchmark
 
@@ -173,47 +220,3 @@ CONNECTIONS=256 DURATION=30s MSG_SIZE=1024 scripts/benchmark.sh
 ```
 
 Full benchmark reports with charts are in [benchmark/](benchmark/).
-
-## Standalone Asio Echo Server
-
-The `examples/asio_echo` directory contains an HTTP/1.1 echo server built on
-**standalone Asio** (no Boost, no Beast). It is disabled by default. Enable it
-with:
-
-```sh
-cmake -S . -B build-asio -DCMAKE_BUILD_TYPE=Debug -DBNIO_BUILD_ASIO_EXAMPLES=ON
-cmake --build build-asio --target bnio_asio_echo_server
-```
-
-CMake auto-fetches Asio from GitHub. If you already have Asio installed
-system-wide, the local copy is used instead.
-
-### Graceful shutdown
-
-This example implements **graceful shutdown** (unlike the benchmark server which
-calls `ctx.stop()` directly):
-
-1. SIGINT / SIGTERM → `server::request_shutdown()`
-2. Acceptor is closed — no new connections
-3. Every active session socket is closed — pending async handlers fire with
-   `operation_aborted`
-4. Each handler removes its session from the server's session set
-5. When the last session is gone → `ctx.stop()` → `run()` returns
-
-This mirrors `bnio::io_context`'s shutdown semantics (drain in-flight work
-before stopping), while a raw `asio::io_context::stop()` exits immediately and
-drops pending operations.
-
-### Run
-
-```sh
-./build-asio/examples/asio_echo/bnio_asio_echo_server [port]
-```
-
-Default port is **8082** (8080 = bnio `io_context` server, 8081 = benchmark
-Asio server).
-
-```sh
-curl -v http://127.0.0.1:8082/hello
-curl -v -d 'hello from asio' http://127.0.0.1:8082/echo
-```

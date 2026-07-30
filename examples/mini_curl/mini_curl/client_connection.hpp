@@ -19,7 +19,10 @@ inline mini_curl_client::mini_curl_client(bnio::io_context& context,
   }
 }
 
-inline void mini_curl_client::start() { resolve(); }
+inline void mini_curl_client::start() {
+  arm_timeout();
+  resolve();
+}
 
 inline void mini_curl_client::resolve() {
   if (options_.verbose) {

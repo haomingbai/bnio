@@ -1,5 +1,0 @@
-add_executable(bnio_asio_echo_server asio_echo_server.cpp http_message.cpp)
-target_compile_features(bnio_asio_echo_server PRIVATE cxx_std_20)
-target_compile_definitions(bnio_asio_echo_server PRIVATE ASIO_STANDALONE)
-target_link_libraries(bnio_asio_echo_server PRIVATE asio::asio)
-bnio_set_project_warnings(bnio_asio_echo_server)

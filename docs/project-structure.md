@@ -2,6 +2,11 @@
 
 This repository is a CMake-based C++20 async I/O library.
 
+> **Public API scope**: The public API consists only of the interfaces exposed
+> through the umbrella header `<bnio/bnio.h>`. Subdirectories `async_io/` and
+> `base/` are internal implementation details. Users should only
+> `#include <bnio/bnio.h>`.
+
 ## Public Headers (`include/bnio/`)
 
 ### Umbrella headers
@@ -16,10 +21,11 @@ This repository is a CMake-based C++20 async I/O library.
 - `ssl.h` — SSL context/stream umbrella.
 - `ip.h` — IP address/endpoint convenience re-exports.
 
-### Layer 1 — `bnio::base`
+### Internal Layer 1 — `bnio::base`
 
-Thin system call wrappers. Platform-specific headers under `base/linux/` and
-`base/bsd/`.
+> **This is an internal implementation layer, not part of the public API.**
+> Thin system call wrappers. Platform-specific headers under `base/linux/` and
+> `base/bsd/`.
 
 - `base/config.h` — base-layer compile-time knobs.
 - `base/linux/ring.h` — RAII `io_uring` owner.
@@ -32,9 +38,10 @@ Thin system call wrappers. Platform-specific headers under `base/linux/` and
 - `base/bsd/event.h` — `struct kevent` wrapper.
 - `base/bsd/event_list_view.h` — non-owning view over `kevent` arrays.
 
-### Layer 2 — `bnio::async_io`
+### Internal Layer 2 — `bnio::async_io`
 
-Platform-neutral vocabulary types and the platform-native event-loop context.
+> **This is an internal implementation layer, not part of the public API.**
+> Platform-neutral vocabulary types and the platform-native event-loop context.
 
 - `buffer_view.h` — non-owning byte range.
 - `descriptor_view.h` — non-owning fd wrapper.
@@ -214,14 +221,17 @@ High-level async runtime, stream owners, and buffer types.
 
 ## Examples (`examples/`)
 
-- `examples/base/linux/` — low-level `liburing` wrapper examples (nop, probe,
-  timeout, poll, echo_server).
-- `examples/mini_curl/` — full HTTP/HTTPS client:
+- `examples/dns_lookup/` — DNS resolution example.
+- `examples/echo_server/` — TCP echo server with graceful shutdown.
+- `examples/mini_curl/` — full HTTP/HTTPS client with timeout support:
   - `mini_curl.cpp` — `main()` and argument parsing.
   - `request.cpp` — HTTP request construction.
   - `mini_curl/` subdirectory — client components (client, connection,
     receivers, redirect, transfer, output, operation_registry, request).
-- `examples/asio_echo/` — standalone Asio HTTP echo server (disabled by default).
+- `examples/poll_fd/` — descriptor polling (stdin readability).
+- `examples/tcp_client/` — TCP client with timeout (resolve→connect→send→receive).
+- `examples/timer_chain/` — chained timers (200ms→100ms→50ms).
+- `examples/udp_echo/` — UDP send-and-receive example.
 
 ## Benchmarks (`benchmarks/`)
 

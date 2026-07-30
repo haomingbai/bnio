@@ -54,6 +54,9 @@ struct request_options {
 
   /** Whether verbose progress should be written to stderr. */
   bool verbose = false;
+
+  /** Overall request timeout in seconds (0 = no timeout). */
+  int timeout_seconds = 30;
 };
 
 // ---- URL / header helpers ----

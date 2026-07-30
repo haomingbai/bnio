@@ -5,6 +5,20 @@ sender/receiver operation model, then the available operation families, then
 the scheduler capability concepts used by generic code, followed by submission
 mode choices and coroutine integration.
 
+## Public API
+
+All public types and functions are accessible through a single header:
+
+```cpp
+#include <bnio/bnio.h>
+```
+
+Only interfaces exposed through this header are part of the public API. All
+public types live in the `bnio` namespace (or in sub-namespaces such as
+`bnio::ip`, `bnio::tcp`, and `bnio::udp`). Internal namespaces such as
+`bnio::async_io` and `bnio::base` are implementation details and should not be
+used directly in application code.
+
 For architecture background, see [`../design/architecture.md`](../design/architecture.md).
 For lifetime rules, see [`../design/lifecycle.md`](../design/lifecycle.md).
 For runnable examples, see [`../examples.md`](../examples.md).
@@ -78,9 +92,7 @@ auto dispatch = ctx.get_dispatch_scheduler(); // schedule() may run inline.
 ```
 
 The scheduler is passed to stream factories such as
-`socket.async_read(scheduler, buffer)`, and it also exposes lower-level
-factories for non-owning views such as `descriptor_view` and
-`stream_socket_view`.
+`socket.async_read(scheduler, buffer)`.
 
 ## 2. Operation types
 
@@ -134,17 +146,16 @@ Use `udp::make_resolve_query(host, service, protocol)` to create a
 `dns_query` with the UDP transport and address-family filters already set, then
 pass it to the existing `async_resolve()` API.
 
-For lower-level scheduler/view APIs, the same sender model is used but the
-successful value may be closer to the platform operation. For example,
-`scheduler.async_accept(stream_socket_view, flags)` completes with a native
-file descriptor, while `tcp_acceptor::async_accept(scheduler, flags)` wraps
-that descriptor in a `tcp_socket`.
+The sender model is the same across all operation levels. For example,
+`tcp_acceptor::async_accept(scheduler, flags)` completes with a `tcp_socket`,
+which owns the underlying file descriptor so users do not need to manage raw
+native handles.
 
 ## 3. Express scheduler capability with concepts
 
 Generic code should usually talk about capabilities instead of concrete
-scheduler types. bnio provides CPOs and concepts in `bnio/io_context_cpo.h` for
-that purpose.
+scheduler types. bnio provides CPOs and concepts (available through
+`bnio/bnio.h`) for that purpose.
 
 The CPOs include:
 
@@ -158,8 +169,8 @@ bnio::async_resolve(scheduler, query, result_view);
 ```
 
 For stream objects, the CPO calls the stream customization first, such as
-`stream.async_read(scheduler, buffer)`. For view types, it falls back to the
-scheduler member, such as `scheduler.async_read(descriptor_view, buffer)`.
+`stream.async_read(scheduler, buffer)`. For non-owning platform views, it falls
+back to the scheduler member function.
 
 The matching concepts describe the operations a scheduler can provide:
 
