@@ -24,11 +24,24 @@ A minimal example — a one-shot timer, the same on either backend:
 #include <bnio/bnio.h>
 #include <bexec/bexec.hpp>
 #include <chrono>
+#include <iostream>
+#include <ostream>
 
 struct timer_receiver {
-  void set_value() noexcept { /* timer expired */ }
-  void set_error(std::error_code) noexcept {}
-  void set_stopped() noexcept {}
+  void set_value() noexcept {
+    std::cout << "Timer expired successfully." << std::endl;
+    ioc.stop();
+  }
+  void set_error(std::error_code) noexcept {
+    std::cout << "An error occured." << std::endl;
+    ioc.stop();
+  }
+  void set_stopped() noexcept {
+    std::cout << "Timer was stopped." << std::endl;
+    ioc.stop();
+  }
+
+  bnio::io_context &ioc;
 };
 
 int main() {
@@ -36,7 +49,7 @@ int main() {
   bnio::steady_timer timer(ctx, std::chrono::milliseconds(100));
 
   auto sender = timer.async_wait();
-  auto op = bexec::connect(std::move(sender), timer_receiver{});
+  auto op = bexec::connect(std::move(sender), timer_receiver{ctx});
   bexec::start(op);
 
   ctx.run();  // returns once the timer completes
