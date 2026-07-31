@@ -131,8 +131,13 @@ calling `start()` begins the asynchronous I/O.
 
 #### Stream Level
 
-| Factory | Owner | `set_value` |
-|---------|-------|-------------|
+The `set_value` column lists only the success payload. Every sender's actual
+signature is `set_value(std::error_code, <payload>)` — the leading `ec` is
+empty on success and carries a recoverable error or `operation_canceled`
+otherwise. See the note below the Scheduler Level table for the full contract.
+
+| Factory | Owner | `set_value` (success payload) |
+|---------|-------|-------------------------------|
 | `socket.async_read(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes read by one operation |
 | `socket.async_read_some(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes read by one operation |
 | `socket.async_write(scheduler, buffer, flags)` | `tcp_socket` | `size_t` total bytes written |
@@ -152,8 +157,11 @@ calling `start()` begins the asynchronous I/O.
 
 #### Scheduler Level
 
-| Factory | Lowest-Layer Parameter | `set_value` |
-|---------|------------------------|-------------|
+The `set_value` column lists only the success payload. The actual signature is
+`set_value(std::error_code, <payload>)`.
+
+| Factory | Lowest-Layer Parameter | `set_value` (success payload) |
+|---------|------------------------|-------------------------------|
 | `scheduler.async_read(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes read by one operation |
 | `scheduler.async_read_some(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes read by one operation |
 | `scheduler.async_write(view, buffer, flags)` | `stream_socket_view` | `size_t` total bytes written |
@@ -170,7 +178,13 @@ calling `start()` begins the asynchronous I/O.
 | `scheduler.async_write_some(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes written by one operation |
 | `scheduler.async_poll(descriptor, mask)` | `descriptor_view` | `unsigned` ready-event mask |
 
-All senders also complete with `set_error(std::error_code)` or `set_stopped()`.
+All senders complete with `set_value(std::error_code, ...)` as the universal
+observable exit: the leading `ec` distinguishes success (`ec == {}`),
+recoverable failure (`ec == <errno-derived>`), and user stop-token
+cancellation (`ec == operation_canceled`). `set_stopped()` is emitted
+exclusively by `io_context::stop()` aborting an inflight operation.
+`set_error` is declared on every `completion_signatures` for unrecoverable
+exceptions but is not produced by bnio's native operations.
 
 ### Internal Header Layout
 
@@ -225,14 +239,14 @@ stateDiagram-v2
     [*] --> Start
     Start --> Done: buffer.size == 0
     Start --> SubmitSome: remaining > 0
-    SubmitSome --> Advance: async_write_some set_value(n > 0)
+    SubmitSome --> Advance: set_value(empty ec, n > 0)
     Advance --> Done: transferred == buffer.size
     Advance --> SubmitSome: transferred < buffer.size
-    SubmitSome --> Error: set_error(ec)
-    SubmitSome --> Stopped: set_stopped()
-    SubmitSome --> Error: set_value(0)
-    Done --> [*]: set_value(total)
-    Error --> [*]: set_error(ec)
+    SubmitSome --> ValueError: set_value(ec, bytes) — recoverable failure or cancel
+    SubmitSome --> Stopped: set_stopped() — io_context::stop() only
+    SubmitSome --> ValueError: set_value(ec, 0) — EOF / invariant violation
+    Done --> [*]: set_value(empty ec, total)
+    ValueError --> [*]: set_value(ec, transferred)
     Stopped --> [*]: set_stopped()
 ```
 
@@ -304,7 +318,7 @@ sequenceDiagram
     K-->>Ring: CQE ready
     UCtx->>Ring: collect_ready_cqes()
     UCtx->>Op: (result = res), execute()
-    Op-->>User: set_value(receiver, bytes)
+    Op-->>User: set_value(receiver, ec, bytes)
 ```
 
 ### Sender/Receiver Model & CPOs

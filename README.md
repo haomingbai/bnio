@@ -26,18 +26,33 @@ A minimal example — a one-shot timer, the same on either backend:
 #include <chrono>
 #include <iostream>
 #include <ostream>
+#include <system_error>
 
 struct timer_receiver {
-  void set_value() noexcept {
-    std::cout << "Timer expired successfully." << std::endl;
+  // set_value carries the result, including a leading std::error_code:
+  //   ec == {}       → success
+  //   ec == canceled → user stop-token was requested before completion
+  //   ec == <other>  → recoverable failure (reported through ec, not set_error)
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      std::cout << "Timer wait failed: " << ec.message() << std::endl;
+    } else {
+      std::cout << "Timer expired successfully." << std::endl;
+    }
     ioc.stop();
   }
+  // set_error is reserved for unrecoverable exceptions (e.g. a user callback
+  // throwing). bnio's native operations are noexcept and never emit it.
   void set_error(std::error_code) noexcept {
-    std::cout << "An error occured." << std::endl;
+    std::cout << "Unrecoverable error." << std::endl;
     ioc.stop();
   }
+  // set_stopped is emitted ONLY by io_context::stop() aborting an inflight
+  // operation — never for user stop-token cancellation (that goes through
+  // set_value(operation_canceled)). Here ioc.stop() runs inside set_value,
+  // so this branch is not reached.
   void set_stopped() noexcept {
-    std::cout << "Timer was stopped." << std::endl;
+    std::cout << "Context stopped while timer was inflight." << std::endl;
     ioc.stop();
   }
 
