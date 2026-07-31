@@ -5,7 +5,9 @@
 
 #include <array>
 #include <bexec/operation_state.hpp>
+#include <bexec/query.hpp>
 #include <bexec/sender.hpp>
+#include <bexec/stop_token.hpp>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -166,6 +168,21 @@ struct transfer_receiver {
       }
     }
   }
+};
+
+struct stop_env {
+  bexec::inplace_stop_token token;
+
+  [[nodiscard]] bexec::inplace_stop_token query(
+      bexec::get_stop_token_t) const noexcept {
+    return token;
+  }
+};
+
+struct ssl_stopped_transfer_receiver : transfer_receiver {
+  stop_env env;
+
+  [[nodiscard]] stop_env get_env() const noexcept { return env; }
 };
 
 struct test_certificate_files {
