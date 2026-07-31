@@ -811,3 +811,110 @@ TEST(IoContextReadWriteTest, zero_size_buffer_write_reports_success) {
   EXPECT_EQ(state->signal, signal_kind::value);
   EXPECT_EQ(state->size, 0u);
 }
+
+// Covers write_all_operation::repeat_receiver::set_stopped (write_all.h:245-246)
+// and complete_canceled (write_all.h:293-310): when the user stop-token is
+// requested mid-loop and io_context::stop() interrupts the inflight write_some,
+// the repeat_receiver sees stop_requested == true and calls complete_canceled,
+// which reports set_value(operation_canceled, transferred) to the downstream
+// receiver instead of set_stopped.
+//
+// Setup: fill the sender's send buffer so write_some parks on EVFILT_WRITE.
+// The receiver exposes an inplace_stop_token from a source that is NOT yet
+// requested. After the worker is confirmed active and the write is parked,
+// request stop on the source, then call context.stop() to interrupt the
+// inflight I/O. The stop_requested check in repeat_receiver::set_stopped
+// sees true -> complete_canceled -> set_value(operation_canceled, bytes).
+TEST(IoContextReadWriteTest, write_all_stop_token_mid_loop_canceled) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+  bnio::tcp_socket sender_socket(sockets[0]);
+  bnio::tcp_socket receiver_socket(sockets[1]);  // peer never reads
+
+  // Set sender non-blocking and fill the send buffer so write_some parks.
+  const int sender_flags = ::fcntl(sender_socket.native_handle(), F_GETFL, 0);
+  EXPECT_TRUE(sender_flags >= 0);
+  EXPECT_EQ(::fcntl(sender_socket.native_handle(), F_SETFL,
+                    sender_flags | O_NONBLOCK),
+            0);
+
+  std::array<char, 4096> filler{};
+  while (true) {
+    const ssize_t result = ::send(sender_socket.native_handle(), filler.data(),
+                                  filler.size(), MSG_DONTWAIT | MSG_NOSIGNAL);
+    if (result > 0) {
+      continue;
+    }
+    EXPECT_LT(result, 0);
+    if (errno == EINTR) {
+      continue;
+    }
+    EXPECT_TRUE(errno == EAGAIN || errno == EWOULDBLOCK);
+    break;
+  }
+
+  // Create stop source but do NOT request stop yet.
+  bexec::inplace_stop_source source;
+
+  // Receiver with stop_env; context=nullptr so it does NOT self-stop.
+  constexpr std::size_t payload_size = 1 * 1024 * 1024;
+  std::vector<char> payload(payload_size, 'x');
+
+  stopped_byte_receiver receiver;
+  receiver.context = nullptr;
+  receiver.env = stop_env{source.get_token()};
+  auto state = receiver.state;
+
+  auto sender = sender_socket.async_write(scheduler, bnio::buffer(payload),
+                                          MSG_NOSIGNAL);
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+
+  // Schedule a task to confirm the worker is active before requesting stop.
+  std::atomic<bool> worker_active{false};
+  struct active_receiver {
+    std::atomic<bool>* flag;
+    void set_value(std::error_code) noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+    void set_stopped() noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+  };
+  auto schedule_sender = context.get_post_scheduler().schedule();
+  auto schedule_op =
+      bexec::connect(schedule_sender, active_receiver{&worker_active});
+  bexec::start(schedule_op);
+
+  std::thread worker([&context] { context.run(); });
+
+  {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!worker_active.load(std::memory_order_acquire)) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        (void)context.stop();
+        worker.join();
+        FAIL() << "Timed out waiting for worker to become active";
+      }
+      std::this_thread::yield();
+    }
+    // Margin: let write_some fill the send buffer and park on EVFILT_WRITE.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+
+  // Request stop on the source first, then interrupt the inflight I/O.
+  source.request_stop();
+  EXPECT_GE(context.stop(), 0);
+  worker.join();
+
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_TRUE(state->error ==
+              std::make_error_code(std::errc::operation_canceled));
+}
