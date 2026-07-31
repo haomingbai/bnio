@@ -169,11 +169,6 @@ class write_all_step_operation {
     bexec::set_value(std::move(receiver_), ec, bytes_written);
   }
 
-  void complete_error(std::error_code error) noexcept {
-    // 不可恢复内部异常：通过 set_value(ec, bytes) 透传
-    bexec::set_value(std::move(receiver_), error, state_->transferred);
-  }
-
   void complete_stopped() noexcept { bexec::set_stopped(std::move(receiver_)); }
 
   State* state_;
