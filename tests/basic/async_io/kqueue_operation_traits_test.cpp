@@ -17,6 +17,7 @@ struct queue_test_operation : kqueue_operation_base {
 struct io_queue_test_operation : kqueue_io_operation_base {
   void prepare(bnio::async_io::bsd_native::kqueue_helper&) noexcept override {}
   void complete_submit_error(int) noexcept override {}
+  void complete_submit_stopped() noexcept override {}
   void execute() noexcept override {}
 };
 

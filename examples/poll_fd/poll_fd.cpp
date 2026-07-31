@@ -1,4 +1,5 @@
 #include <bnio/bnio.h>
+#include <poll.h>
 
 #include <array>
 #include <bexec/bexec.hpp>
@@ -8,17 +9,17 @@
 struct poll_receiver {
   bnio::io_context* ctx = nullptr;
 
-  void set_value(unsigned events) noexcept {
+  void set_value(std::error_code ec, unsigned events) noexcept {
+    if (ec) {
+      std::cerr << "poll failed: " << ec.message() << '\n';
+      ctx->stop();
+      return;
+    }
     if (events & POLLIN) {
       std::array<char, 1024> buf{};
       std::cin.getline(buf.data(), buf.size());
       if (std::cin.gcount() > 0) std::cout << "echo: " << buf.data() << '\n';
     }
-    ctx->stop();
-  }
-
-  void set_error(std::error_code ec) noexcept {
-    std::cerr << "poll failed: " << ec.message() << '\n';
     ctx->stop();
   }
 

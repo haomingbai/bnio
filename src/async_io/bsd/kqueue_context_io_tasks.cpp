@@ -341,7 +341,7 @@ void kqueue_context::abort_inflight_io() noexcept {
     op->registration_count = 0;
 
     op->result = -ECANCELED;
-    op->complete_submit_error(-ECANCELED);
+    op->complete_submit_stopped();
     local_state_.push_cpu(*op);
   }
 
@@ -353,7 +353,7 @@ void kqueue_context::abort_inflight_io() noexcept {
       kqueue_io_operation_base* next = ops->io_next;
       ops->io_next = nullptr;
       ops->result = -ECANCELED;
-      ops->complete_submit_error(-ECANCELED);
+      ops->complete_submit_stopped();
       local_state_.push_cpu(*ops);
       ops = next;
     }
@@ -365,7 +365,7 @@ void kqueue_context::abort_inflight_io() noexcept {
     kqueue_io_operation_base* next = unregistered->io_next;
     unregistered->io_next = nullptr;
     unregistered->result = -ECANCELED;
-    unregistered->complete_submit_error(-ECANCELED);
+    unregistered->complete_submit_stopped();
     local_state_.push_cpu(*unregistered);
     unregistered = next;
   }

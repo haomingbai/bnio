@@ -15,17 +15,16 @@ struct ordered_timer_receiver {
   std::atomic<unsigned>* observed_order = nullptr;
   std::atomic<unsigned>* completions = nullptr;
 
-  void set_value() noexcept {
-    state->signal = signal_kind::value;
-    observed_order->store(
-        next_order->fetch_add(1, std::memory_order_acq_rel) + 1,
-        std::memory_order_release);
-    complete();
-  }
-
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      observed_order->store(
+          next_order->fetch_add(1, std::memory_order_acq_rel) + 1,
+          std::memory_order_release);
+    }
     complete();
   }
 
@@ -106,7 +105,8 @@ TEST(SteadyTimerTest, steady_timer_cancel_stops_wait) {
   EXPECT_EQ(timer.cancel(), 1);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
 }
 
 TEST(SteadyTimerTest, steady_timer_expires_after_stops_old_wait) {
@@ -129,7 +129,8 @@ TEST(SteadyTimerTest, steady_timer_expires_after_stops_old_wait) {
   EXPECT_EQ(timer.expires_after(std::chrono::milliseconds(1)), 1);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
 }
 
 TEST(SteadyTimerTest, steady_timer_rearms_after_cancel) {
@@ -166,7 +167,9 @@ TEST(SteadyTimerTest, steady_timer_rearms_after_cancel) {
   context.run();
 
   EXPECT_EQ(completions, 2);
-  EXPECT_EQ(canceled_state->signal, signal_kind::stopped);
+  EXPECT_EQ(canceled_state->signal, signal_kind::error);
+  EXPECT_EQ(canceled_state->error,
+            std::make_error_code(std::errc::operation_canceled));
   EXPECT_EQ(rearmed_state->signal, signal_kind::value);
 }
 
@@ -238,8 +241,8 @@ TEST(SteadyTimerTest, steady_timer_cancel_counts_all_queued_waits) {
   context.run();
 
   EXPECT_EQ(completions, 2);
-  EXPECT_EQ(first_state->signal, signal_kind::stopped);
-  EXPECT_EQ(second_state->signal, signal_kind::stopped);
+  EXPECT_EQ(first_state->signal, signal_kind::error);
+  EXPECT_EQ(second_state->signal, signal_kind::error);
 }
 
 TEST(SteadyTimerTest, timer_destruction_after_stop_does_not_post) {
@@ -295,7 +298,8 @@ TEST(SteadyTimerTest, steady_timer_move_stops_old_wait) {
   context.run();
 
   EXPECT_EQ(completions, 2);
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
   EXPECT_EQ(moved_state->signal, signal_kind::value);
 }
 
@@ -320,7 +324,8 @@ TEST(SteadyTimerTest, steady_timer_pre_stopped_token_stops_wait) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
 }
 
 TEST(SteadyTimerTest, passive_timer_wakes_workers_for_an_earlier_deadline) {
@@ -357,7 +362,9 @@ TEST(SteadyTimerTest, passive_timer_wakes_workers_for_an_earlier_deadline) {
   std::atomic<bool> workers_active{false};
   struct workers_active_receiver {
     std::atomic<bool>* flag;
-    void set_value() noexcept { flag->store(true, std::memory_order_release); }
+    void set_value(std::error_code) noexcept {
+      flag->store(true, std::memory_order_release);
+    }
     void set_stopped() noexcept {
       flag->store(true, std::memory_order_release);
     }

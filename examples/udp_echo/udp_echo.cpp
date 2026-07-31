@@ -26,10 +26,13 @@ struct state : std::enable_shared_from_this<state> {
   void send(bnio::ip::endpoint to, std::string msg) {
     struct R {
       std::shared_ptr<state> s;
-      void set_value(std::size_t) noexcept { s->recv(); }
-      void set_error(std::error_code e) noexcept {
-        std::cerr << e.message() << '\n';
-        s->done();
+      void set_value(std::error_code ec, std::size_t) noexcept {
+        if (ec) {
+          std::cerr << ec.message() << '\n';
+          s->done();
+          return;
+        }
+        s->recv();
       }
       void set_stopped() noexcept { s->done(); }
     };
@@ -43,13 +46,14 @@ struct state : std::enable_shared_from_this<state> {
   void recv() {
     struct R {
       std::shared_ptr<state> s;
-      void set_value(std::size_t n) noexcept {
+      void set_value(std::error_code ec, std::size_t n) noexcept {
+        if (ec) {
+          std::cerr << ec.message() << '\n';
+          s->done();
+          return;
+        }
         std::cout.write(s->buf.data(), static_cast<std::streamsize>(n));
         std::cout << std::flush;
-        s->done();
-      }
-      void set_error(std::error_code e) noexcept {
-        std::cerr << e.message() << '\n';
         s->done();
       }
       void set_stopped() noexcept { s->done(); }

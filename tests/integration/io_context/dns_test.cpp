@@ -27,20 +27,15 @@ struct resolve_receiver {
   resolve_state* state = nullptr;
   bnio::io_context* context = nullptr;
 
-  void set_value(std::size_t count) noexcept {
+  void set_value(std::error_code ec, std::size_t count) noexcept {
     if (state != nullptr) {
-      state->signal = signal_kind::value;
-      state->endpoint_count = count;
-    }
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
-
-  void set_error(std::error_code error) noexcept {
-    if (state != nullptr) {
-      state->signal = signal_kind::error;
-      state->error = error;
+      if (ec) {
+        state->signal = signal_kind::error;
+        state->error = ec;
+      } else {
+        state->signal = signal_kind::value;
+        state->endpoint_count = count;
+      }
     }
     if (context != nullptr) {
       (void)context->stop();

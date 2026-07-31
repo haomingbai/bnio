@@ -9,14 +9,15 @@
 #else
 #define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_SOCKET_H_
 
+#include <algorithm>
+#include <system_error>
+
 namespace bnio::detail {
 
 class socket_read_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   socket_read_model(async_io::stream_socket_view socket, mutable_buffer buffer,
                     int flags) noexcept
@@ -38,18 +39,11 @@ class socket_read_model {
     return immediate_socket_result(result);
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -60,10 +54,8 @@ class socket_read_model {
 
 class socket_write_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   socket_write_model(async_io::stream_socket_view socket, const_buffer buffer,
                      int flags) noexcept
@@ -84,18 +76,11 @@ class socket_write_model {
     return immediate_socket_result(result);
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -106,10 +91,8 @@ class socket_write_model {
 
 class datagram_receive_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   datagram_receive_model(async_io::datagram_socket_view socket,
                          mutable_buffer buffer, int flags) noexcept
@@ -130,18 +113,11 @@ class datagram_receive_model {
     return immediate_socket_result(result);
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -152,10 +128,8 @@ class datagram_receive_model {
 
 class datagram_send_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   datagram_send_model(async_io::datagram_socket_view socket,
                       const_buffer buffer, int flags) noexcept
@@ -176,18 +150,11 @@ class datagram_send_model {
     return immediate_socket_result(result);
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -198,10 +165,8 @@ class datagram_send_model {
 
 class datagram_receive_from_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   datagram_receive_from_model(async_io::datagram_socket_view socket,
                               mutable_buffer buffer, ip::endpoint& endpoint,
@@ -236,29 +201,27 @@ class datagram_receive_from_model {
     return immediate_socket_result(result);
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    const auto endpoint = async_io::linux_native::make_endpoint(
-        reinterpret_cast<const sockaddr*>(&remote_address_),
-        message_.msg_namelen);
-    if (!endpoint.has_value()) {
-      endpoint_->reset();
-      bexec::set_error(
-          std::forward<Receiver>(receiver),
-          std::make_error_code(std::errc::address_family_not_supported));
-      return;
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    if (result >= 0 && !ec) {
+      const auto endpoint = async_io::linux_native::make_endpoint(
+          reinterpret_cast<const sockaddr*>(&remote_address_),
+          message_.msg_namelen);
+      if (!endpoint.has_value()) {
+        // endpoint decode failure: override ec with
+        // address_family_not_supported
+        endpoint_->reset();
+        bexec::set_value(
+            std::forward<Receiver>(receiver),
+            std::make_error_code(std::errc::address_family_not_supported),
+            std::size_t{0});
+        return;
+      }
+      *endpoint_ = *endpoint;
     }
-    *endpoint_ = *endpoint;
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -273,10 +236,8 @@ class datagram_receive_from_model {
 
 class datagram_send_to_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   datagram_send_to_model(async_io::datagram_socket_view socket,
                          const_buffer buffer, const ip::endpoint& endpoint,
@@ -307,18 +268,11 @@ class datagram_send_to_model {
     return immediate_socket_result(result);
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -333,8 +287,7 @@ class datagram_send_to_model {
 class accept_model {
  public:
   using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(int),
-                                   bexec::set_error_t(std::error_code),
+      bexec::completion_signatures<bexec::set_value_t(std::error_code, int),
                                    bexec::set_stopped_t()>;
 
   accept_model(async_io::stream_socket_view socket, int flags) noexcept
@@ -344,17 +297,10 @@ class accept_model {
     sqe.prep_accept(socket_.native_handle(), nullptr, nullptr, flags_);
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver), result);
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec, result);
   }
 
  private:
@@ -365,8 +311,7 @@ class accept_model {
 class connect_model {
  public:
   using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(),
-                                   bexec::set_error_t(std::error_code),
+      bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
   connect_model(async_io::stream_socket_view socket,
@@ -377,17 +322,10 @@ class connect_model {
     sqe.prep_connect(socket_.native_handle(), address_.data(), address_.size());
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver));
+  void set_value(Receiver&& receiver, std::error_code ec, int,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec);
   }
 
  private:

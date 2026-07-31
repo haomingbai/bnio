@@ -26,11 +26,12 @@ struct rw_stress_state {
 struct rw_stress_receiver {
   rw_stress_state* state;
 
-  void set_value(std::size_t) noexcept {
-    state->completions.fetch_add(1, std::memory_order_acq_rel);
-  }
-  void set_error(std::error_code) noexcept {
-    state->errors.fetch_add(1, std::memory_order_relaxed);
+  void set_value(std::error_code ec, std::size_t) noexcept {
+    if (ec) {
+      state->errors.fetch_add(1, std::memory_order_relaxed);
+    } else {
+      state->completions.fetch_add(1, std::memory_order_acq_rel);
+    }
   }
   void set_stopped() noexcept {
     state->stopped.fetch_add(1, std::memory_order_relaxed);

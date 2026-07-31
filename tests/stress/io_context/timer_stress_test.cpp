@@ -26,9 +26,10 @@ struct timer_stress_receiver {
   bnio::io_context* context;
   unsigned target_completions = 0;
 
-  void set_value() noexcept { complete(); }
-  void set_error(std::error_code) noexcept {
-    state->errors.fetch_add(1, std::memory_order_relaxed);
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      state->errors.fetch_add(1, std::memory_order_relaxed);
+    }
     complete();
   }
   void set_stopped() noexcept {
@@ -49,11 +50,10 @@ struct timer_stress_receiver {
 struct count_only_receiver {
   timer_stress_state* state;
 
-  void set_value() noexcept {
-    state->completions.fetch_add(1, std::memory_order_acq_rel);
-  }
-  void set_error(std::error_code) noexcept {
-    state->errors.fetch_add(1, std::memory_order_relaxed);
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      state->errors.fetch_add(1, std::memory_order_relaxed);
+    }
     state->completions.fetch_add(1, std::memory_order_acq_rel);
   }
   void set_stopped() noexcept {
@@ -65,8 +65,7 @@ struct count_only_receiver {
 struct safety_stop_receiver {
   bnio::io_context* context;
 
-  void set_value() noexcept { (void)context->stop(); }
-  void set_error(std::error_code) noexcept { (void)context->stop(); }
+  void set_value(std::error_code) noexcept { (void)context->stop(); }
   void set_stopped() noexcept { (void)context->stop(); }
 };
 
@@ -157,36 +156,31 @@ TEST(TimerStressTest, concurrent_timer_rekey) {
     int round;
     std::vector<void*>* ops_storage;
 
-    void set_value() noexcept {
+    void set_value(std::error_code ec) noexcept {
       unsigned total =
           state->completions.fetch_add(1, std::memory_order_acq_rel) + 1;
-      int next_round = round + 1;
-      if (next_round < rekeys_per_timer) {
-        auto& timer = (*timers)[static_cast<std::size_t>(timer_index)];
-        (void)timer.expires_after(
-            std::chrono::milliseconds(std::rand() % 20 + 1));
+      if (ec) {
+        state->errors.fetch_add(1, std::memory_order_relaxed);
+      } else {
+        int next_round = round + 1;
+        if (next_round < rekeys_per_timer) {
+          auto& timer = (*timers)[static_cast<std::size_t>(timer_index)];
+          (void)timer.expires_after(
+              std::chrono::milliseconds(std::rand() % 20 + 1));
 
-        using next_op_type = decltype(bexec::connect(
-            std::declval<decltype(timer.async_wait())>(),
-            std::declval<rekey_receiver>()));
+          using next_op_type = decltype(bexec::connect(
+              std::declval<decltype(timer.async_wait())>(),
+              std::declval<rekey_receiver>()));
 
-        int op_idx = timer_index * rekeys_per_timer + next_round;
-        auto* op = new next_op_type(bexec::connect(
-            timer.async_wait(),
-            rekey_receiver{state, context, timers, rekeys_per_timer, target,
-                           timer_index, next_round, ops_storage}));
-        (*ops_storage)[static_cast<std::size_t>(op_idx)] = op;
-        bexec::start(*op);
+          int op_idx = timer_index * rekeys_per_timer + next_round;
+          auto* op = new next_op_type(bexec::connect(
+              timer.async_wait(),
+              rekey_receiver{state, context, timers, rekeys_per_timer, target,
+                             timer_index, next_round, ops_storage}));
+          (*ops_storage)[static_cast<std::size_t>(op_idx)] = op;
+          bexec::start(*op);
+        }
       }
-      if (total >= target && context != nullptr) {
-        (void)context->stop();
-      }
-    }
-
-    void set_error(std::error_code) noexcept {
-      state->errors.fetch_add(1, std::memory_order_relaxed);
-      unsigned total =
-          state->completions.fetch_add(1, std::memory_order_acq_rel) + 1;
       if (total >= target && context != nullptr) {
         (void)context->stop();
       }

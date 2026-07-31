@@ -46,13 +46,16 @@ concept has_start_io = requires(Request& req) {
   { req.start_io() } -> std::convertible_to<int>;
 };
 
-template <class Receiver>
-void complete_error(Receiver&& receiver, int result) noexcept {
-  bexec::set_error(std::forward<Receiver>(receiver),
-                   std::error_code(-result, std::generic_category()));
-}
-
-/** Operation for a request whose native call is attempted before readiness. */
+/** Operation for a request whose native call is attempted before readiness.
+ *
+ *  Per completion-semantics contract:
+ *  - `stopped_` is set ONLY by complete_submit_stopped(), i.e. when
+ *    io_context::stop() aborts this inflight operation → set_stopped.
+ *  - `canceled_` is set when the user's stop_token is already requested
+ *    at start() time → set_value(operation_canceled, ...).
+ *  - A negative `result` from perform_io() / kevent reports a recoverable
+ *    errno through set_value(ec, ...).
+ */
 template <class Request, class Receiver>
 class kqueue_ready_io_operation : public kqueue_io_operation_base {
  public:
@@ -76,6 +79,8 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
     result = result_code;
   }
 
+  void complete_submit_stopped() noexcept override { stopped_ = true; }
+
   [[nodiscard]] bool owns_io_step() const noexcept override { return true; }
 
   [[nodiscard]] int perform_io() noexcept override {
@@ -84,7 +89,7 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
 
   void start() noexcept {
     if (detail::stop_requested(receiver_)) {
-      stopped_ = true;
+      canceled_ = true;
       (void)context_->post(*this);
       return;
     }
@@ -96,14 +101,26 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
     context_->publish_io(*this);
   }
 
+  /**
+   * Delivers the completion.
+   *
+   * `stopped_` (io_context::stop() abort) → set_stopped. Otherwise the
+   * universal exit is set_value(ec, result, flags): ec is empty on
+   * success, operation_canceled when the user stop_token fired before
+   * start, or the errno encoded by a negative `result`.
+   */
   void execute() noexcept override {
     if (stopped_) {
       bexec::set_stopped(std::move(receiver_));
-    } else if (result < 0) {
-      complete_error(std::move(receiver_), result);
-    } else {
-      request_.set_value(std::move(receiver_), result, flags);
+      return;
     }
+    std::error_code ec;
+    if (canceled_) {
+      ec = std::make_error_code(std::errc::operation_canceled);
+    } else if (result < 0) {
+      ec = std::error_code(-result, std::generic_category());
+    }
+    request_.set_value(std::move(receiver_), ec, result, flags);
   }
 
  private:
@@ -133,6 +150,7 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
   Request request_;
   std::remove_cvref_t<Receiver> receiver_;
   bool stopped_ = false;
+  bool canceled_ = false;
 };
 
 /** Sender for a readiness-backed nonblocking request. */

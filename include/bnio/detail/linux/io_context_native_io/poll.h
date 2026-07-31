@@ -9,14 +9,15 @@
 #else
 #define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_POLL_H_
 
+#include <algorithm>
+#include <system_error>
+
 namespace bnio::detail {
 
 class poll_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(unsigned),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, unsigned), bexec::set_stopped_t()>;
 
   poll_model(async_io::descriptor_view descriptor, unsigned poll_mask) noexcept
       : request_(descriptor, poll_mask) {}
@@ -25,18 +26,11 @@ class poll_model {
     request_.prepare(sqe);
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<unsigned>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<unsigned>(std::max(0, result)));
   }
 
  private:

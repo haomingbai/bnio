@@ -9,6 +9,8 @@
 #else
 #define BNIO_DETAIL_POSIX_IO_CONTEXT_TIMER_WAIT_H_
 
+#include <system_error>
+
 namespace bnio::detail {
 
 template <class Receiver>
@@ -22,7 +24,7 @@ class timer_wait_operation : public timer_operation_base {
   void start() noexcept {
     if (stop_requested(receiver_)) {
       this->timer_context_->queue_timer_completion(
-          *this, timer_completion_kind::stopped);
+          *this, timer_completion_kind::canceled);
       return;
     }
 
@@ -34,7 +36,11 @@ class timer_wait_operation : public timer_operation_base {
     if (completion == timer_completion_kind::stopped) {
       bexec::set_stopped(std::move(receiver_));
     } else {
-      bexec::set_value(std::move(receiver_));
+      std::error_code ec;
+      if (completion == timer_completion_kind::canceled) {
+        ec = std::make_error_code(std::errc::operation_canceled);
+      }
+      bexec::set_value(std::move(receiver_), ec);
     }
   }
 
@@ -46,8 +52,7 @@ class timer_wait_operation : public timer_operation_base {
 class timer_wait_sender {
  public:
   using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(),
-                                   bexec::set_error_t(std::error_code),
+      bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
   explicit timer_wait_sender(steady_timer& timer) noexcept : timer_(&timer) {}

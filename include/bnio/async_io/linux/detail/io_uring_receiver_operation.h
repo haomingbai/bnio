@@ -11,6 +11,7 @@
 
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
+#include <cerrno>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -21,20 +22,26 @@ namespace detail {
 
 /**
  * Completion channel selected for receiver delivery.
+ *
+ * Per completion-semantics contract: set_value(ec, ...) is the universal
+ * observable exit (success, cancel, recoverable failure); set_stopped is
+ * reserved exclusively for io_context::stop() aborting inflight I/O.
  */
 enum class io_uring_receiver_completion {
   /**
-   * Complete the receiver with set_value.
+   * Complete the receiver with set_value(empty ec, result, flags).
    */
   value,
 
   /**
-   * Complete the receiver with set_error.
+   * Complete the receiver with set_value(ec, result, flags) where ec
+   * carries a recoverable error (cancel or SQE preparation failure).
    */
-  error,
+  value_with_ec,
 
   /**
-   * Complete the receiver with set_stopped.
+   * Complete the receiver with set_stopped. Selected ONLY by
+   * complete_submit_stopped() when io_context::stop() aborts this op.
    */
   stopped,
 };
@@ -74,14 +81,28 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
 
   /**
    * Delivers the selected completion signal to the receiver.
+   *
+   * Both `value` and `value_with_ec` exit through set_value; only the
+   * leading std::error_code differs (empty for success). `stopped`
+   * exits through set_stopped and is reachable only when
+   * io_context::stop() aborted this inflight operation.
    */
   void execute() noexcept override {
     switch (completion_) {
       case io_uring_receiver_completion::value:
-        bexec::set_value(std::move(receiver_), result, flags);
+        // §9.2 guard: CQE 处理器只更新 result/flags,不重分类 completion_。
+        // 当 result < 0 时(-errno)必须从 result 重新派生 ec,否则错误被掩盖。
+        if (result < 0) {
+          bexec::set_value(std::move(receiver_),
+                           std::error_code(-result, std::generic_category()),
+                           result, flags);
+        } else {
+          bexec::set_value(std::move(receiver_), std::error_code{}, result,
+                           flags);
+        }
         break;
-      case io_uring_receiver_completion::error:
-        bexec::set_error(std::move(receiver_), error_);
+      case io_uring_receiver_completion::value_with_ec:
+        bexec::set_value(std::move(receiver_), error_, result, flags);
         break;
       case io_uring_receiver_completion::stopped:
         bexec::set_stopped(std::move(receiver_));
@@ -90,8 +111,10 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
   }
 
   void complete_submit_error(int result_code) noexcept override {
-    complete_with_error(result_code);
+    complete_with_ec(result_code);
   }
+
+  void complete_submit_stopped() noexcept override { complete_with_stopped(); }
 
  protected:
   /**
@@ -110,22 +133,27 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
   }
 
   /**
-   * Selects set_value completion for this operation.
+   * Selects set_value(empty ec, ...) completion for this operation.
    */
   void complete_with_value() noexcept {
     completion_ = io_uring_receiver_completion::value;
   }
 
   /**
-   * Selects set_error completion for this operation.
+   * Selects set_value(ec, ...) completion where ec carries a recoverable
+   * error (user cancel via stop_token, or SQE preparation failure reported
+   * through complete_submit_error).
    */
-  void complete_with_error(int result_code) noexcept {
-    completion_ = io_uring_receiver_completion::error;
+  void complete_with_ec(int result_code) noexcept {
+    completion_ = io_uring_receiver_completion::value_with_ec;
     error_ = std::error_code(-result_code, std::generic_category());
   }
 
   /**
    * Selects set_stopped completion for this operation.
+   *
+   * Reached only via complete_submit_stopped(), i.e. when
+   * io_context::stop() aborts this inflight I/O operation.
    */
   void complete_with_stopped() noexcept {
     completion_ = io_uring_receiver_completion::stopped;
@@ -133,11 +161,15 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
 
   /**
    * Starts an io_uring operation or posts an immediate completion.
+   *
+   * A user-requested cancel (stop_token) now completes through
+   * set_value(operation_canceled, ...) rather than set_stopped; the
+   * latter is reserved for io_context::stop().
    */
   template <class Operation>
   void start_io(Operation& operation) noexcept {
     if (stop_requested()) {
-      complete_with_stopped();
+      complete_with_ec(-ECANCELED);
       (void)context_->post(operation);
       return;
     }
@@ -163,7 +195,8 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
       io_uring_receiver_completion::value;
 
   /**
-   * Error delivered when completion_ is error.
+   * Error delivered as the leading argument of set_value when
+   * completion_ is value_with_ec. Empty for the value channel.
    */
   std::error_code error_;
 };

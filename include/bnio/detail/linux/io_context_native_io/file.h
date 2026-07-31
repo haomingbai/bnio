@@ -9,14 +9,15 @@
 #else
 #define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_FILE_H_
 
+#include <algorithm>
+#include <system_error>
+
 namespace bnio::detail {
 
 class read_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   read_model(async_io::descriptor_view descriptor, mutable_buffer buffer,
              std::uint64_t offset) noexcept
@@ -46,18 +47,11 @@ class read_model {
     return -error;
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -68,10 +62,8 @@ class read_model {
 
 class write_model {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   write_model(async_io::descriptor_view descriptor, const_buffer buffer,
               std::uint64_t offset) noexcept
@@ -101,18 +93,11 @@ class write_model {
     return -error;
   }
 
-  [[nodiscard]] bool is_error_result(int result) const noexcept {
-    return result < 0;
-  }
-
-  [[nodiscard]] std::error_code make_error(int result) const noexcept {
-    return errno_result(result);
-  }
-
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:

@@ -72,7 +72,7 @@ void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
         take_timer_operations_locked(timer);
     wake_worker = canceled.head != nullptr;
     enqueue_timer_operations_locked(canceled.head,
-                                    detail::timer_completion_kind::stopped);
+                                    detail::timer_completion_kind::canceled);
   }
 
   if (wake_worker) {
@@ -94,7 +94,7 @@ std::size_t io_context::cancel_timer(detail::timer_slot& timer) noexcept {
     count = canceled.size;
     wake_worker = canceled.head != nullptr;
     enqueue_timer_operations_locked(canceled.head,
-                                    detail::timer_completion_kind::stopped);
+                                    detail::timer_completion_kind::canceled);
   }
 
   if (wake_worker) {
@@ -127,7 +127,7 @@ std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
     count = canceled.size;
     const bool has_canceled_operations = canceled.head != nullptr;
     enqueue_timer_operations_locked(canceled.head,
-                                    detail::timer_completion_kind::stopped);
+                                    detail::timer_completion_kind::canceled);
 
     if (timer.expiry > clock::now()) {
       timers_.push_heap(timer);
@@ -158,7 +158,7 @@ void io_context::start_timer_wait(detail::timer_operation_base& operation,
     if (timer.context != this) {
       operation.timer_next_ = nullptr;
       enqueue_timer_operations_locked(&operation,
-                                      detail::timer_completion_kind::stopped);
+                                      detail::timer_completion_kind::canceled);
       wake_worker = true;
     } else if (!timer.active) {
       operation.timer_next_ = nullptr;
@@ -330,6 +330,28 @@ std::size_t steady_timer::expires_at(time_point expiry) noexcept {
 
 std::size_t steady_timer::cancel() noexcept {
   return timer_.context->cancel_timer(timer_);
+}
+
+void io_context::abort_pending_timer_waits() noexcept {
+  std::lock_guard context_lock(timers_.mutex);
+  // Drain all active timers from the heap.
+  while (auto* slot = timers_.pop_heap()) {
+    const detail::timer_operation_queue canceled =
+        take_timer_operations_locked(*slot);
+    slot->context = nullptr;
+    enqueue_timer_operations_locked(canceled.head,
+                                    detail::timer_completion_kind::stopped);
+  }
+  // Drain inactive (already-expired) timers.
+  while (timers_.inactive != nullptr) {
+    detail::timer_slot* slot = timers_.inactive;
+    timers_.erase_inactive(*slot);
+    slot->context = nullptr;
+    const detail::timer_operation_queue canceled =
+        take_timer_operations_locked(*slot);
+    enqueue_timer_operations_locked(canceled.head,
+                                    detail::timer_completion_kind::stopped);
+  }
 }
 
 }  // namespace bnio

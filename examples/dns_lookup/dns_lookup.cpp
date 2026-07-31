@@ -11,7 +11,12 @@ struct resolve_receiver {
   bnio::io_context* context;
   bnio::dns_result_view results;
 
-  void set_value(std::size_t count) noexcept {
+  void set_value(std::error_code ec, std::size_t count) noexcept {
+    if (ec) {
+      std::fprintf(stderr, "%s\n", ec.message().c_str());
+      context->stop();
+      return;
+    }
     for (const auto& ep : results | std::views::take(count)) {
       const auto& addr = ep.address();
       if (const auto* v4 = addr.v4()) {
@@ -21,11 +26,6 @@ struct resolve_receiver {
         std::printf("[IPv6]:%d\n", ep.port());
       }
     }
-    context->stop();
-  }
-
-  void set_error(std::error_code ec) noexcept {
-    std::fprintf(stderr, "%s\n", ec.message().c_str());
     context->stop();
   }
 

@@ -12,15 +12,14 @@ struct pair_byte_receiver {
   unsigned* completions = nullptr;
   unsigned target = 1;
 
-  void set_value(std::size_t size) noexcept {
-    state->signal = signal_kind::value;
-    state->size = size;
-    complete();
-  }
-
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
+  void set_value(std::error_code ec, std::size_t size) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      state->size = size;
+    }
     complete();
   }
 
@@ -49,15 +48,14 @@ struct deferred_stop_byte_receiver {
   unsigned* completions = nullptr;
   unsigned target = 1;
 
-  void set_value(std::size_t size) noexcept {
-    state->signal = signal_kind::value;
-    state->size = size;
-    complete();
-  }
-
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
+  void set_value(std::error_code ec, std::size_t size) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      state->size = size;
+    }
     complete();
   }
 
@@ -80,7 +78,7 @@ struct deferred_stop_byte_receiver {
       auto s = context->get_post_scheduler();
       struct stop_recv {
         bnio::io_context* c;
-        void set_value() noexcept {
+        void set_value(std::error_code) noexcept {
           if (c) c->stop();
         }
         void set_stopped() noexcept {}
@@ -435,7 +433,7 @@ TEST(IoContextReadWriteTest,
   EXPECT_EQ(state->error, std::error_code(EBADF, std::generic_category()));
 }
 
-TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_reports_stopped) {
+TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_reports_canceled) {
   bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
@@ -457,10 +455,11 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_reports_stopped) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
 }
 
-TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_reports_stopped) {
+TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_reports_canceled) {
   bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
@@ -480,8 +479,10 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_reports_stopped) {
                                       bnio::buffer(payload));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
+  context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
 }
 
 TEST(IoContextReadWriteTest, file_write_and_read) {

@@ -33,14 +33,12 @@ namespace {
 }
 
 struct void_receiver {
-  void set_value() noexcept {}
-  void set_error(std::error_code) noexcept {}
+  void set_value(std::error_code) noexcept {}
   void set_stopped() noexcept {}
 };
 
 struct byte_receiver {
-  void set_value(std::size_t) noexcept {}
-  void set_error(std::error_code) noexcept {}
+  void set_value(std::error_code, std::size_t) noexcept {}
   void set_stopped() noexcept {}
 };
 
@@ -106,17 +104,17 @@ struct handshake_receiver {
   std::shared_ptr<handshake_state> state;
   bnio::io_context* context = nullptr;
 
-  void set_value() noexcept {
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      ++state->errors;
+      state->error = ec;
+      if (context != nullptr) {
+        (void)context->stop();
+      }
+      return;
+    }
     ++state->values;
     if (state->values == 2 && context != nullptr) {
-      (void)context->stop();
-    }
-  }
-
-  void set_error(std::error_code error) noexcept {
-    ++state->errors;
-    state->error = error;
-    if (context != nullptr) {
       (void)context->stop();
     }
   }
@@ -143,15 +141,14 @@ struct transfer_receiver {
   unsigned* completions = nullptr;
   unsigned target = 0;
 
-  void set_value(std::size_t bytes) noexcept {
-    ++state->values;
-    state->bytes = bytes;
-    complete();
-  }
-
-  void set_error(std::error_code error) noexcept {
-    ++state->errors;
-    state->error = error;
+  void set_value(std::error_code ec, std::size_t bytes) noexcept {
+    if (ec) {
+      ++state->errors;
+      state->error = ec;
+    } else {
+      ++state->values;
+      state->bytes = bytes;
+    }
     complete();
   }
 

@@ -33,6 +33,7 @@ class native_io_operation;
 
 enum class timer_completion_kind {
   value,
+  canceled,
   stopped,
 };
 

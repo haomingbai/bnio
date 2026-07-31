@@ -26,8 +26,7 @@ template <class Scheduler, class NextLayer>
 class ssl_handshake_sender {
  public:
   using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(),
-                                   bexec::set_error_t(std::error_code),
+      bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
   ssl_handshake_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
@@ -50,10 +49,8 @@ class ssl_handshake_sender {
 template <class Scheduler, class NextLayer, class Holder>
 class ssl_read_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   ssl_read_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
                   Holder buffer)
@@ -78,10 +75,8 @@ class ssl_read_sender {
 template <class Scheduler, class NextLayer, class Holder, bool CompleteBuffer>
 class ssl_write_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   ssl_write_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
                    Holder buffer)
@@ -108,8 +103,7 @@ template <class Scheduler, class NextLayer>
 class ssl_shutdown_sender {
  public:
   using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(),
-                                   bexec::set_error_t(std::error_code),
+      bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
   ssl_shutdown_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream)

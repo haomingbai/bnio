@@ -43,16 +43,29 @@ class ssl_io_operation {
       return bexec::get_env(operation_->receiver_);
     }
 
-    void set_value(std::size_t bytes) noexcept {
-      operation_->complete_value(bytes);
+    void set_value(std::error_code ec, std::size_t bytes) noexcept {
+      operation_->complete_value(ec, bytes);
     }
 
     template <class Error>
     void set_error(Error&& error) noexcept {
+      // bexec::repeat_until 内部异常路径：透传给 complete_error（走
+      // set_value(ec, bytes)）
       operation_->complete_error(std::forward<Error>(error));
     }
 
-    void set_stopped() noexcept { operation_->complete_stopped(); }
+    void set_stopped() noexcept {
+      // 区分 stop-token 取消 vs io_context::stop()
+      // repeat_until::drain() 在每轮开始前检查 stop_token，若为 true 发
+      // set_stopped — 这是 stop-token 取消 step::child_receiver::set_stopped()
+      // 来自 transport 层的 io_context::stop() 中断 — 这是 set_stopped
+      // 应保留的场景
+      if (ssl_stop_requested(operation_->receiver_)) {
+        operation_->complete_canceled();
+      } else {
+        operation_->complete_stopped();
+      }
+    }
 
    private:
     ssl_io_operation* operation_;
@@ -80,11 +93,11 @@ class ssl_io_operation {
 
   void start() noexcept {
     if (ssl_stop_requested(receiver_)) {
-      complete_stopped();
+      complete_value(std::make_error_code(std::errc::operation_canceled), 0);
       return;
     }
     if (empty_buffer()) {
-      complete_value(0);
+      complete_value(std::error_code{}, 0);
       return;
     }
 
@@ -100,23 +113,35 @@ class ssl_io_operation {
     }
   }
 
-  void complete_value(std::size_t bytes) noexcept {
+  void complete_value(std::error_code ec, std::size_t bytes) noexcept {
     if constexpr (Application == ssl_application_io::read) {
-      state_.buffer.commit(bytes);
-      bexec::set_value(std::move(receiver_), bytes);
+      if (!ec) {
+        state_.buffer.commit(bytes);
+      }
+      bexec::set_value(std::move(receiver_), ec, bytes);
     } else {
-      bexec::set_value(std::move(receiver_), state_.bytes);
+      bexec::set_value(std::move(receiver_), ec, state_.bytes);
     }
   }
 
+  void complete_canceled() noexcept {
+    // stop-token 取消：上报 ec=operation_canceled 与已传输累计
+    bexec::set_value(std::move(receiver_),
+                     std::make_error_code(std::errc::operation_canceled),
+                     state_.bytes);
+  }
+
   void complete_error(std::error_code error) noexcept {
-    bexec::set_error(std::move(receiver_), error);
+    // 不可恢复内部异常：通过 set_value(ec, bytes) 透传给 receiver
+    bexec::set_value(std::move(receiver_), error, state_.bytes);
   }
 
   template <class Error>
   void complete_error(Error&&) noexcept {
-    bexec::set_error(std::move(receiver_),
-                     std::make_error_code(std::errc::protocol_error));
+    // 不可恢复内部异常（未知错误类型）
+    bexec::set_value(std::move(receiver_),
+                     std::make_error_code(std::errc::protocol_error),
+                     state_.bytes);
   }
 
   void complete_stopped() noexcept { bexec::set_stopped(std::move(receiver_)); }

@@ -108,12 +108,8 @@ class write_all_step_operation {
       return bexec::get_env(operation_->receiver_);
     }
 
-    void set_value(std::size_t bytes) noexcept {
-      operation_->handle_value(bytes);
-    }
-
-    void set_error(std::error_code error) noexcept {
-      operation_->complete_error(error);
+    void set_value(std::error_code ec, std::size_t bytes) noexcept {
+      operation_->handle_value(ec, bytes);
     }
 
     void set_stopped() noexcept { operation_->complete_stopped(); }
@@ -131,7 +127,7 @@ class write_all_step_operation {
 
   void start() noexcept {
     if (state_->remaining() == 0) {
-      complete_value(0);
+      complete_value(std::error_code{}, state_->transferred);
       return;
     }
 
@@ -142,26 +138,40 @@ class write_all_step_operation {
   }
 
  private:
-  void handle_value(std::size_t bytes) noexcept {
+  void handle_value(std::error_code ec, std::size_t bytes) noexcept {
+    if (ec) {
+      // 失败/取消：终结。必须设 done=true 让 repeat_until 的 predicate
+      // 退出循环，否则会无限重试同一个失败操作。
+      state_->done = true;
+      complete_value(ec, state_->transferred);
+      return;
+    }
     if (bytes == 0) {
-      complete_error(std::make_error_code(std::errc::broken_pipe));
+      // EOF（对端关闭）：终结。
+      state_->done = true;
+      complete_value(std::make_error_code(std::errc::broken_pipe),
+                     state_->transferred);
       return;
     }
     if (bytes > state_->remaining()) {
-      complete_error(std::make_error_code(std::errc::protocol_error));
+      // 不变量违规：终结。
+      state_->done = true;
+      complete_value(std::make_error_code(std::errc::protocol_error),
+                     state_->transferred);
       return;
     }
 
     state_->advance(bytes);
-    complete_value(bytes);
+    complete_value(std::error_code{}, state_->transferred);
   }
 
-  void complete_value(std::size_t bytes) noexcept {
-    bexec::set_value(std::move(receiver_), bytes);
+  void complete_value(std::error_code ec, std::size_t bytes_written) noexcept {
+    bexec::set_value(std::move(receiver_), ec, bytes_written);
   }
 
   void complete_error(std::error_code error) noexcept {
-    bexec::set_error(std::move(receiver_), error);
+    // 不可恢复内部异常：通过 set_value(ec, bytes) 透传
+    bexec::set_value(std::move(receiver_), error, state_->transferred);
   }
 
   void complete_stopped() noexcept { bexec::set_stopped(std::move(receiver_)); }
@@ -174,10 +184,8 @@ class write_all_step_operation {
 template <class State>
 class write_all_step_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   explicit write_all_step_sender(State* state) noexcept : state_(state) {}
 
@@ -233,14 +241,29 @@ class write_all_operation {
       return bexec::get_env(operation_->receiver_);
     }
 
-    void set_value(std::size_t) noexcept { operation_->complete_value(); }
+    void set_value(std::error_code ec, std::size_t bytes_written) noexcept {
+      operation_->complete_value(ec, bytes_written);
+    }
 
     template <class Error>
     void set_error(Error&& error) noexcept {
+      // bexec::repeat_until 内部异常路径：透传给 complete_error（走
+      // set_value(ec, bytes)）
       operation_->complete_error(std::forward<Error>(error));
     }
 
-    void set_stopped() noexcept { operation_->complete_stopped(); }
+    void set_stopped() noexcept {
+      // 区分 stop-token 取消 vs io_context::stop()
+      // repeat_until::drain() 在每轮开始前检查 stop_token，若为 true 发
+      // set_stopped — 这是 stop-token 取消 step::child_receiver::set_stopped()
+      // 来自 transport 层的 io_context::stop() 中断 — 这是 set_stopped
+      // 应保留的场景
+      if (detail::stop_requested(operation_->receiver_)) {
+        operation_->complete_canceled();
+      } else {
+        operation_->complete_stopped();
+      }
+    }
 
    private:
     write_all_operation* operation_;
@@ -265,11 +288,14 @@ class write_all_operation {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      complete_stopped();
+      // stop token 在启动前已请求：取消，带上已写字节数（=0）
+      complete_value(std::make_error_code(std::errc::operation_canceled),
+                     state_.transferred);
       return;
     }
     if (state_.empty()) {
-      complete_value();
+      // 空缓冲：成功，0 字节
+      complete_value(std::error_code{}, state_.transferred);
       return;
     }
 
@@ -277,18 +303,28 @@ class write_all_operation {
   }
 
  private:
-  void complete_value() noexcept {
-    bexec::set_value(std::move(receiver_), state_.transferred);
+  void complete_value(std::error_code ec, std::size_t bytes_written) noexcept {
+    bexec::set_value(std::move(receiver_), ec, bytes_written);
+  }
+
+  void complete_canceled() noexcept {
+    // stop-token 取消：上报 ec=operation_canceled 与已写累计
+    bexec::set_value(std::move(receiver_),
+                     std::make_error_code(std::errc::operation_canceled),
+                     state_.transferred);
   }
 
   void complete_error(std::error_code error) noexcept {
-    bexec::set_error(std::move(receiver_), error);
+    // 不可恢复内部异常：通过 set_value(ec, bytes_written) 透传给 receiver
+    bexec::set_value(std::move(receiver_), error, state_.transferred);
   }
 
   template <class Error>
   void complete_error(Error&&) noexcept {
-    bexec::set_error(std::move(receiver_),
-                     std::make_error_code(std::errc::protocol_error));
+    // 不可恢复内部异常（未知错误类型）
+    bexec::set_value(std::move(receiver_),
+                     std::make_error_code(std::errc::protocol_error),
+                     state_.transferred);
   }
 
   void complete_stopped() noexcept { bexec::set_stopped(std::move(receiver_)); }
@@ -301,10 +337,8 @@ class write_all_operation {
 template <class State>
 class write_all_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   explicit write_all_sender(State state) noexcept : state_(std::move(state)) {}
 

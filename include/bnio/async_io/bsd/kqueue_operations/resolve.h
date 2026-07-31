@@ -66,10 +66,14 @@ class kqueue_resolve_operation : public kqueue_operation_base {
 
   /**
    * Posts this operation to the context run loop.
+   *
+   * A stop-token cancel routes through set_value(operation_canceled, 0);
+   * set_stopped is not produced here because resolve runs on the CPU
+   * queue, which io_context::stop() does not abort.
    */
   void start() noexcept {
     if (stop_requested()) {
-      completion_ = completion_kind::stopped;
+      completion_ = completion_kind::canceled;
       (void)context_->post(*this);
       return;
     }
@@ -86,8 +90,10 @@ class kqueue_resolve_operation : public kqueue_operation_base {
       case completion_kind::value:
         complete_resolve();
         break;
-      case completion_kind::stopped:
-        bexec::set_stopped(std::move(receiver_));
+      case completion_kind::canceled:
+        bexec::set_value(std::move(receiver_),
+                         std::make_error_code(std::errc::operation_canceled),
+                         std::size_t{0});
         break;
     }
   }
@@ -95,7 +101,7 @@ class kqueue_resolve_operation : public kqueue_operation_base {
  private:
   enum class completion_kind {
     value,
-    stopped,
+    canceled,
   };
 
   /**
@@ -108,17 +114,14 @@ class kqueue_resolve_operation : public kqueue_operation_base {
   }
 
   /**
-   * Runs the async_io platform resolver helper.
+   * Runs the async_io platform resolver helper. Both success and failure
+   * exit through set_value(ec, count).
    */
   void complete_resolve() noexcept {
     std::size_t count = 0;
-    const std::error_code error =
+    const std::error_code ec =
         bnio::async_io::resolve_dns(query_, result_, count);
-    if (error) {
-      bexec::set_error(std::move(receiver_), error);
-    } else {
-      bexec::set_value(std::move(receiver_), count);
-    }
+    bexec::set_value(std::move(receiver_), ec, count);
   }
 
   kqueue_context* context_;
@@ -135,11 +138,13 @@ class kqueue_resolve_sender {
  public:
   /**
    * Completion signatures produced by a DNS resolution sender.
+   *
+   * set_value(ec, count) is the universal exit (success, resolver failure,
+   * stop-token cancel); set_stopped is not produced because resolve runs on
+   * the CPU queue, which io_context::stop() does not abort.
    */
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<bexec::set_value_t(
+      std::error_code, std::size_t)>;
 
   /**
    * Creates a DNS sender for a context and query.

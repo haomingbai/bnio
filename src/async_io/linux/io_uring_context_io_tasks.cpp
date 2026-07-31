@@ -179,7 +179,7 @@ void io_uring_context::abort_inflight_io() noexcept {
     op->io_prev = nullptr;
 
     op->result = -ECANCELED;
-    op->complete_submit_error(-ECANCELED);
+    op->complete_submit_stopped();
     local_tasks_.push(*op);
   }
 
@@ -190,7 +190,7 @@ void io_uring_context::abort_inflight_io() noexcept {
           static_cast<io_uring_io_operation_base*>(ops->next);
       ops->next = nullptr;
       ops->result = -ECANCELED;
-      ops->complete_submit_error(-ECANCELED);
+      ops->complete_submit_stopped();
       local_tasks_.push(*ops);
       ops = next;
     }

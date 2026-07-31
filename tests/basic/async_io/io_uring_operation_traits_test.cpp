@@ -19,6 +19,7 @@ struct io_queue_test_operation
     : bnio::async_io::linux_native::io_uring_io_operation_base {
   void prepare(bnio::base::submission_queue_entry&) noexcept override {}
   void complete_submit_error(int) noexcept override {}
+  void complete_submit_stopped() noexcept override {}
   void execute() noexcept override {}
 };
 

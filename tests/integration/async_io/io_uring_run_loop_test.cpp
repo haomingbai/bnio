@@ -26,7 +26,7 @@ struct concurrent_post_receiver {
   io_uring_context* context = nullptr;
   unsigned target = 0;
 
-  void set_value() noexcept {
+  void set_value(std::error_code) noexcept {
     if (context == nullptr || !context->is_in_context()) {
       state->all_in_context.store(false, std::memory_order_release);
     }

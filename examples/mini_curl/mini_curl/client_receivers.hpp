@@ -16,9 +16,12 @@ namespace mini_curl {
 struct mini_curl_client::resolve_receiver {
   std::shared_ptr<mini_curl_client> client;
 
-  void set_value(std::size_t count) noexcept { client->on_resolved(count); }
-  void set_error(std::error_code error) noexcept {
-    client->fail("resolve failed", error);
+  void set_value(std::error_code ec, std::size_t count) noexcept {
+    if (ec) {
+      client->fail("resolve failed", ec);
+    } else {
+      client->on_resolved(count);
+    }
   }
   void set_stopped() noexcept { client->fail("resolve stopped"); }
 };
@@ -26,9 +29,12 @@ struct mini_curl_client::resolve_receiver {
 struct mini_curl_client::connect_receiver {
   std::shared_ptr<mini_curl_client> client;
 
-  void set_value() noexcept { client->on_connected(); }
-  void set_error(std::error_code error) noexcept {
-    client->on_connect_error(error);
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      client->on_connect_error(ec);
+    } else {
+      client->on_connected();
+    }
   }
   void set_stopped() noexcept { client->fail("connect stopped"); }
 };
@@ -36,9 +42,12 @@ struct mini_curl_client::connect_receiver {
 struct mini_curl_client::handshake_receiver {
   std::shared_ptr<mini_curl_client> client;
 
-  void set_value() noexcept { client->on_handshake_complete(); }
-  void set_error(std::error_code error) noexcept {
-    client->fail("TLS handshake failed", error);
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      client->fail("TLS handshake failed", ec);
+    } else {
+      client->on_handshake_complete();
+    }
   }
   void set_stopped() noexcept { client->fail("handshake stopped"); }
 };
@@ -46,11 +55,12 @@ struct mini_curl_client::handshake_receiver {
 struct mini_curl_client::send_receiver {
   std::shared_ptr<mini_curl_client> client;
 
-  void set_value(std::size_t bytes_sent) noexcept {
-    client->on_request_sent(bytes_sent);
-  }
-  void set_error(std::error_code error) noexcept {
-    client->fail("send failed", error);
+  void set_value(std::error_code ec, std::size_t bytes_sent) noexcept {
+    if (ec) {
+      client->fail("send failed", ec);
+    } else {
+      client->on_request_sent(bytes_sent);
+    }
   }
   void set_stopped() noexcept { client->fail("send stopped"); }
 };
@@ -58,9 +68,12 @@ struct mini_curl_client::send_receiver {
 struct mini_curl_client::receive_receiver {
   std::shared_ptr<mini_curl_client> client;
 
-  void set_value(std::size_t count) noexcept { client->on_received(count); }
-  void set_error(std::error_code error) noexcept {
-    client->on_receive_error(error);
+  void set_value(std::error_code ec, std::size_t count) noexcept {
+    if (ec) {
+      client->on_receive_error(ec);
+    } else {
+      client->on_received(count);
+    }
   }
   void set_stopped() noexcept { client->fail("receive stopped"); }
 };
@@ -68,32 +81,27 @@ struct mini_curl_client::receive_receiver {
 struct mini_curl_client::shutdown_receiver {
   std::shared_ptr<mini_curl_client> client;
 
-  void set_value() noexcept { client->on_shutdown_complete(); }
-  void set_error(std::error_code) noexcept { client->on_shutdown_complete(); }
+  void set_value(std::error_code) noexcept { client->on_shutdown_complete(); }
   void set_stopped() noexcept { client->on_shutdown_complete(); }
 };
 
 struct mini_curl_client::timer_receiver {
   std::shared_ptr<mini_curl_client> client;
 
-  void set_value() noexcept {
-    // Timer expired — whole-operation timeout
-    client->on_timeout();
-  }
-  void set_error(std::error_code) noexcept {
-    // Timer error — treat as timeout
-    client->on_timeout();
+  void set_value(std::error_code ec) noexcept {
+    // timer 新语义：成功 ec={}，被取消 ec=operation_canceled
+    // 成功到期 → on_timeout；被成功完成取消 → do nothing
+    if (!ec) client->on_timeout();
   }
   void set_stopped() noexcept {
-    // Timer was cancelled by a successful completion — do nothing
+    // io_context::stop() — do nothing
   }
 };
 
 struct mini_curl_client::final_receiver {
   std::shared_ptr<mini_curl_client> client;
 
-  void set_value() noexcept { client->do_stop(); }
-  void set_error(std::error_code) noexcept { client->do_stop(); }
+  void set_value(std::error_code) noexcept { client->do_stop(); }
   void set_stopped() noexcept { client->do_stop(); }
 };
 

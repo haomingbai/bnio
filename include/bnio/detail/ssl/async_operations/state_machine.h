@@ -61,7 +61,7 @@ class ssl_async_operation_base {
 
   void start() noexcept {
     if (ssl_stop_requested(receiver_)) {
-      post_complete_stopped();
+      post_complete_value(std::make_error_code(std::errc::operation_canceled));
       return;
     }
 
@@ -78,13 +78,11 @@ class ssl_async_operation_base {
       return bexec::get_env(operation_->receiver_);
     }
 
-    void set_value(std::size_t bytes) noexcept {
-      operation_->handle_transport_complete(bytes);
+    void set_value(std::error_code ec, std::size_t bytes) noexcept {
+      operation_->handle_transport_complete(ec, bytes);
     }
 
-    void set_error(std::error_code error) noexcept {
-      operation_->post_complete_error(error);
-    }
+    // 已删除：transport 层不再发 set_error，ec 通过 set_value(ec, bytes) 传递
 
     void set_stopped() noexcept { operation_->post_complete_stopped(); }
 
@@ -101,7 +99,13 @@ class ssl_async_operation_base {
       return bexec::get_env(operation_->receiver_);
     }
 
-    void set_value() noexcept { operation_->deliver_terminal(); }
+    void set_value(std::error_code ec) noexcept {
+      if (ec) {
+        // schedule 被 stop_token 取消：终结操作，ec 透传给 receiver
+        operation_->complete_value(ec);
+      }
+      operation_->deliver_terminal();
+    }
 
     void set_stopped() noexcept { operation_->deliver_terminal(); }
 
@@ -127,13 +131,14 @@ class ssl_async_operation_base {
       bexec::detail::operation_storage<bexec::type_list<
           read_operation_type, write_operation_type, post_operation_type>>;
 
-  void complete_value() noexcept {
+  void complete_value(std::error_code ec) noexcept {
+    ec_ = ec;
     completion_ = ssl_completion_kind::value;
     child_ = ssl_child_io::none;
   }
 
   void complete_error(std::error_code error) noexcept {
-    error_ = error;
+    ec_ = error;
     completion_ = ssl_completion_kind::error;
     child_ = ssl_child_io::none;
   }
@@ -143,8 +148,8 @@ class ssl_async_operation_base {
     child_ = ssl_child_io::none;
   }
 
-  void post_complete_value() noexcept {
-    complete_value();
+  void post_complete_value(std::error_code ec) noexcept {
+    complete_value(ec);
     submit_post();
   }
 
@@ -183,10 +188,10 @@ class ssl_async_operation_base {
         flush_then(action);
         return;
       case SSL_ERROR_ZERO_RETURN:
-        post_complete_error(std::make_error_code(std::errc::connection_reset));
+        post_complete_value(std::make_error_code(std::errc::connection_reset));
         return;
       default:
-        post_complete_error(last_ssl_error());
+        post_complete_value(last_ssl_error());
         return;
     }
   }
@@ -210,7 +215,7 @@ class ssl_async_operation_base {
     }
 
     if (available < -1) {
-      post_complete_error(last_ssl_error());
+      post_complete_value(last_ssl_error());
       return ssl_output_chunk_state::error;
     }
 
@@ -223,7 +228,7 @@ class ssl_async_operation_base {
     char* data = nullptr;
     const int available = BIO_nwrite0(read_bio(*stream_), &data);
     if (available <= 0) {
-      post_complete_error(last_ssl_error());
+      post_complete_value(last_ssl_error());
       return;
     }
 
@@ -257,7 +262,20 @@ class ssl_async_operation_base {
     child_operation_.start();
   }
 
-  void handle_transport_complete(std::size_t result) noexcept {
+  void handle_transport_complete(std::error_code ec,
+                                 std::size_t result) noexcept {
+    if (ec) {
+      post_complete_value(ec);
+      return;
+    }
+    if (result == 0) {
+      // EOF（对端关闭）：transport read/write 返回 0 字节且 ec 为空。
+      // 视为 connection_reset（可恢复，经 set_value(ec) 透传），否则
+      // state machine 会把 0 字节当成"继续循环"导致无限挂起。
+      post_complete_value(std::make_error_code(std::errc::connection_reset));
+      return;
+    }
+
     const ssl_child_io completed_child = child_;
     child_ = ssl_child_io::none;
 
@@ -275,16 +293,15 @@ class ssl_async_operation_base {
   }
 
   void handle_read_complete(std::size_t result) noexcept {
-    if (result <= 0) {
-      post_complete_error(std::make_error_code(std::errc::connection_reset));
-      return;
-    }
+    // result <= 0 不再可能：ec 已在 handle_transport_complete 中过滤
 
     char* data = nullptr;
     const int committed =
         BIO_nwrite(read_bio(*stream_), &data, bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
-      post_complete_error(last_ssl_error());
+      post_complete_error(
+          last_ssl_error());  // 不变量违规：经 deliver_terminal ->
+                              // deliver_value -> set_value(ec)
       return;
     }
 
@@ -292,16 +309,15 @@ class ssl_async_operation_base {
   }
 
   void handle_write_complete(std::size_t result) noexcept {
-    if (result <= 0) {
-      post_complete_error(std::make_error_code(std::errc::connection_reset));
-      return;
-    }
+    // result <= 0 不再可能：ec 已在 handle_transport_complete 中过滤
 
     char* data = nullptr;
     const int consumed =
         BIO_nread(write_bio(*stream_), &data, bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {
-      post_complete_error(last_ssl_error());
+      post_complete_error(
+          last_ssl_error());  // 不变量违规：经 deliver_terminal ->
+                              // deliver_value -> set_value(ec)
       return;
     }
 
@@ -333,10 +349,8 @@ class ssl_async_operation_base {
   void deliver_terminal() noexcept {
     switch (completion_) {
       case ssl_completion_kind::value:
-        static_cast<Derived*>(this)->deliver_value();
-        break;
       case ssl_completion_kind::error:
-        bexec::set_error(std::move(receiver_), error_);
+        static_cast<Derived*>(this)->deliver_value(ec_);
         break;
       case ssl_completion_kind::stopped:
         bexec::set_stopped(std::move(receiver_));
@@ -345,7 +359,7 @@ class ssl_async_operation_base {
   }
 
   child_operations_type child_operation_;
-  std::error_code error_;
+  std::error_code ec_;
   char* transport_data_ = nullptr;
   std::size_t transport_size_ = 0;
   ssl_child_io child_ = ssl_child_io::none;

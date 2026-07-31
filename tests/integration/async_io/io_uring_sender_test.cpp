@@ -149,7 +149,8 @@ TEST(IoUringSenderTest, stop_token_completes_stopped_before_submit) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
   EXPECT_TRUE(state->in_context);
 }
 

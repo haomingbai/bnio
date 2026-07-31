@@ -63,7 +63,7 @@ class io_uring_post_operation : public io_uring_operation_base {
     if (stopped_) {
       bexec::set_stopped(std::move(receiver_));
     } else {
-      bexec::set_value(std::move(receiver_));
+      bexec::set_value(std::move(receiver_), std::error_code{});
     }
   }
 

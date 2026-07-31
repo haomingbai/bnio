@@ -54,8 +54,13 @@ struct chain : std::enable_shared_from_this<chain> {
   void step2() {
     struct R {
       std::shared_ptr<chain> c;
-      void set_value() noexcept { c->step3(); }
-      void set_error(std::error_code) noexcept { c->ctx.stop(); }
+      void set_value(std::error_code ec) noexcept {
+        if (ec) {
+          c->ctx.stop();
+          return;
+        }
+        c->step3();
+      }
       void set_stopped() noexcept { c->ctx.stop(); }
     };
     reg.spawn(t2.async_wait(), R{shared_from_this()});
@@ -64,11 +69,10 @@ struct chain : std::enable_shared_from_this<chain> {
   void step3() {
     struct R {
       std::shared_ptr<chain> c;
-      void set_value() noexcept {
-        std::cout << "chain complete\n";
+      void set_value(std::error_code ec) noexcept {
+        if (!ec) std::cout << "chain complete\n";
         c->ctx.stop();
       }
-      void set_error(std::error_code) noexcept { c->ctx.stop(); }
       void set_stopped() noexcept { c->ctx.stop(); }
     };
     reg.spawn(t3.async_wait(), R{shared_from_this()});
@@ -88,8 +92,13 @@ int main() {
 
   struct R {
     std::shared_ptr<chain> c;
-    void set_value() noexcept { c->step2(); }
-    void set_error(std::error_code) noexcept { c->ctx.stop(); }
+    void set_value(std::error_code ec) noexcept {
+      if (ec) {
+        c->ctx.stop();
+        return;
+      }
+      c->step2();
+    }
     void set_stopped() noexcept { c->ctx.stop(); }
   };
   c->reg.spawn(c->t1.async_wait(), R{c});

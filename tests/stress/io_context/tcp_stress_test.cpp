@@ -30,20 +30,23 @@ struct tcp_stress_receiver {
   bnio::io_context* context;
   unsigned target_completions = 0;
 
-  void set_value(std::size_t) noexcept { complete(); }
-  void set_value() noexcept { complete(); }
-  void set_value(int) noexcept { complete(); }
-  void set_value(bnio::tcp_socket) noexcept { complete(); }
-  void set_error(std::error_code) noexcept {
-    state->errors.fetch_add(1, std::memory_order_relaxed);
-    complete();
-  }
+  void set_value(std::error_code ec, std::size_t) noexcept { handle(ec); }
+  void set_value(std::error_code ec) noexcept { handle(ec); }
+  void set_value(std::error_code ec, int) noexcept { handle(ec); }
+  void set_value(std::error_code ec, bnio::tcp_socket) noexcept { handle(ec); }
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发
     state->stopped.fetch_add(1, std::memory_order_relaxed);
     complete();
   }
 
  private:
+  void handle(std::error_code ec) noexcept {
+    if (ec) {
+      state->errors.fetch_add(1, std::memory_order_relaxed);
+    }
+    complete();
+  }
   void complete() noexcept {
     unsigned completed =
         state->completions.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -236,14 +239,22 @@ TEST(TcpStressTest, rapid_connect_disconnect) {
       bnio::io_context* context;
       bnio::tcp_socket* server_storage;
 
-      void set_value(bnio::tcp_socket socket) noexcept {
+      void set_value(std::error_code ec, bnio::tcp_socket socket) noexcept {
+        if (ec) {
+          ++(*completions);
+          (void)context->stop();
+          return;
+        }
         *server_storage = std::move(socket);
         check_done();
       }
-      void set_value() noexcept { check_done(); }
-      void set_error(std::error_code) noexcept {
-        ++(*completions);
-        (void)context->stop();
+      void set_value(std::error_code ec) noexcept {
+        if (ec) {
+          ++(*completions);
+          (void)context->stop();
+          return;
+        }
+        check_done();
       }
       void set_stopped() noexcept { (void)context->stop(); }
 

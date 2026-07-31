@@ -79,12 +79,12 @@ struct send_receiver {
   pair_state* state;
   bnio::io_context* context;
 
-  void set_value(std::size_t size) noexcept {
-    state->sent = size;
-    complete();
-  }
-  void set_error(std::error_code error) noexcept {
-    state->error = error;
+  void set_value(std::error_code ec, std::size_t size) noexcept {
+    if (ec) {
+      state->error = ec;
+    } else {
+      state->sent = size;
+    }
     complete();
   }
   void set_stopped() noexcept { complete(); }
@@ -101,12 +101,12 @@ struct receive_receiver {
   pair_state* state;
   bnio::io_context* context;
 
-  void set_value(std::size_t size) noexcept {
-    state->received = size;
-    complete();
-  }
-  void set_error(std::error_code error) noexcept {
-    state->error = error;
+  void set_value(std::error_code ec, std::size_t size) noexcept {
+    if (ec) {
+      state->error = ec;
+    } else {
+      state->received = size;
+    }
     complete();
   }
   void set_stopped() noexcept { complete(); }

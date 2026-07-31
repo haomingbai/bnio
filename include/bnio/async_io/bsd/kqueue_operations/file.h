@@ -72,10 +72,8 @@ namespace detail {
 /** A descriptor read that selects file or readiness behavior in start(). */
 class kqueue_file_read_request {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   kqueue_file_read_request(descriptor_view descriptor, buffer_view buffer,
                            std::uint64_t offset) noexcept
@@ -116,9 +114,10 @@ class kqueue_file_read_request {
   }
 
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -145,10 +144,8 @@ class kqueue_file_read_request {
 /** A descriptor write that selects file or readiness behavior in start(). */
 class kqueue_file_write_request {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   kqueue_file_write_request(descriptor_view descriptor, const void* data,
                             std::size_t size, std::uint64_t offset) noexcept
@@ -189,9 +186,10 @@ class kqueue_file_write_request {
   }
 
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -243,9 +241,15 @@ class kqueue_raw_read_request : public kqueue_file_read_request {
  public:
   using kqueue_file_read_request::kqueue_file_read_request;
 
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::error_code, int,
+                                                      unsigned),
+                                   bexec::set_stopped_t()>;
+
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned flags) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver), result, flags);
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned flags) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec, result, flags);
   }
 };
 
@@ -254,9 +258,15 @@ class kqueue_raw_write_request : public kqueue_file_write_request {
   kqueue_raw_write_request(descriptor_view descriptor, buffer_view buffer)
       : kqueue_file_write_request(descriptor, buffer.data, buffer.size, 0) {}
 
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::error_code, int,
+                                                      unsigned),
+                                   bexec::set_stopped_t()>;
+
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned flags) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver), result, flags);
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned flags) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec, result, flags);
   }
 };
 

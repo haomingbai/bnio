@@ -35,14 +35,14 @@ class ssl_shutdown_operation
 
   void resume(ssl_resume_action action) noexcept {
     if (action == ssl_resume_action::finish) {
-      this->post_complete_value();
+      this->post_complete_value(std::error_code{});
       return;
     }
     run_shutdown();
   }
 
-  void deliver_value() noexcept {
-    bexec::set_value(std::move(this->receiver_));
+  void deliver_value(std::error_code ec) noexcept {
+    bexec::set_value(std::move(this->receiver_), ec);
   }
 
  private:

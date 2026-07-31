@@ -33,16 +33,17 @@ struct transfer_receiver {
   io_uring_context* context;
   bool receive;
 
-  void set_value(int result, unsigned) noexcept {
+  void set_value(std::error_code ec, int result, unsigned) noexcept {
+    if (ec) {
+      state->error = ec;
+      complete();
+      return;
+    }
     if (receive) {
       state->received = result;
     } else {
       state->sent = result;
     }
-    complete();
-  }
-  void set_error(std::error_code error) noexcept {
-    state->error = error;
     complete();
   }
   void set_stopped() noexcept { complete(); }

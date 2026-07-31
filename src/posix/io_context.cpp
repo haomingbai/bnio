@@ -89,6 +89,11 @@ void io_context::run() noexcept {
 }
 
 int io_context::stop() noexcept {
+  // Abort all pending timer waits BEFORE setting closing so their ops
+  // land in timers_.ready before any worker enters finish().  This keeps
+  // set_stopped as the sole signal for io_context::stop().
+  abort_pending_timer_waits();
+
   global_state_.closing.store(true, std::memory_order_release);
 
   // Repeatedly signal the shared wake channel until every *other*

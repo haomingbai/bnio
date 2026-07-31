@@ -189,6 +189,17 @@ template <class List>
 struct sender_value_type;
 
 template <class T>
+struct sender_value_type<bexec::type_list<std::tuple<std::error_code, T>>> {
+  using type = T;
+};
+
+template <>
+struct sender_value_type<bexec::type_list<std::tuple<std::error_code>>> {
+  using type = void;
+};
+
+// 保留旧特化以防其他 sender 仍用旧签名
+template <class T>
 struct sender_value_type<bexec::type_list<std::tuple<T>>> {
   using type = T;
 };
@@ -215,25 +226,30 @@ class sender_awaiter {
 
     [[nodiscard]] bexec::empty_env get_env() const noexcept { return {}; }
 
-    void set_value() noexcept
+    void set_value(std::error_code ec) noexcept
       requires std::is_void_v<value_type>
     {
-      awaiter_->result_ = result_type::value();
+      if (ec) {
+        awaiter_->result_ = result_type::error(ec);
+      } else {
+        awaiter_->result_ = result_type::value();
+      }
       awaiter_->resume();
     }
 
     template <class Value>
       requires(!std::is_void_v<value_type> &&
                std::constructible_from<value_type, Value>)
-    void set_value(Value&& value) noexcept {
-      awaiter_->result_ = result_type::value(std::forward<Value>(value));
+    void set_value(std::error_code ec, Value&& value) noexcept {
+      if (ec) {
+        awaiter_->result_ = result_type::error(ec);
+      } else {
+        awaiter_->result_ = result_type::value(std::forward<Value>(value));
+      }
       awaiter_->resume();
     }
 
-    void set_error(std::error_code error) noexcept {
-      awaiter_->result_ = result_type::error(error);
-      awaiter_->resume();
-    }
+    // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
     void set_stopped() noexcept {
       awaiter_->result_ = result_type::stopped();

@@ -174,6 +174,10 @@ class BNIO_EXPORT kqueue_io_operation_base : public kqueue_operation_base {
   /** Selects error completion when preparation or registration fails. */
   virtual void complete_submit_error(int result) noexcept = 0;
 
+  /** Selects set_stopped completion when io_context::stop() aborts inflight
+   * I/O. */
+  virtual void complete_submit_stopped() noexcept = 0;
+
   /**
    * Returns whether this operation owns the syscall performed after a
    * readiness notification.

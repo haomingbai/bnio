@@ -23,8 +23,7 @@ struct wait_receiver {
   timer_churn_benchmark* benchmark = nullptr;
   bool barrier = false;
 
-  void set_value() noexcept;
-  [[maybe_unused]] void set_error(std::error_code) noexcept;
+  void set_value(std::error_code ec) noexcept;
   void set_stopped() noexcept;
 };
 
@@ -73,8 +72,6 @@ class timer_churn_benchmark {
     barrier_reached_ = true;
     advance_after_barrier();
   }
-
-  void on_error() noexcept { fail(); }
 
   void on_stopped(bool barrier) noexcept {
     if (barrier) {
@@ -255,10 +252,13 @@ class timer_churn_benchmark {
   bool failed_ = false;
 };
 
-void wait_receiver::set_value() noexcept { benchmark->on_value(barrier); }
-
-void wait_receiver::set_error(std::error_code) noexcept {
-  benchmark->on_error();
+void wait_receiver::set_value(std::error_code ec) noexcept {
+  if (ec == std::make_error_code(std::errc::operation_canceled)) {
+    // timer.cancel() 产生 set_value(operation_canceled)，按停止语义处理
+    benchmark->on_stopped(barrier);
+  } else {
+    benchmark->on_value(barrier);
+  }
 }
 
 void wait_receiver::set_stopped() noexcept { benchmark->on_stopped(barrier); }

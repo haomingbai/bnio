@@ -45,25 +45,32 @@ struct receiver {
   kqueue_context* context = nullptr;
   bool stop_on_completion = false;
 
-  void set_value() noexcept {
-    state->signal = signal_kind::value;
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+    }
     complete();
   }
 
-  void set_value(int result, unsigned flags) noexcept {
-    state->signal = signal_kind::value;
-    state->result = result;
-    state->flags = flags;
+  void set_value(std::error_code ec, int result, unsigned flags) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      state->result = result;
+      state->flags = flags;
+    }
     complete();
   }
 
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    complete();
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发
     state->signal = signal_kind::stopped;
     complete();
   }
@@ -81,19 +88,21 @@ struct poll_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
   kqueue_context* context = nullptr;
 
-  void set_value(unsigned events) noexcept {
-    state->signal = signal_kind::value;
-    state->result = static_cast<int>(events);
+  void set_value(std::error_code ec, unsigned events) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      state->result = static_cast<int>(events);
+    }
     complete();
   }
 
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    complete();
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发
     state->signal = signal_kind::stopped;
     complete();
   }

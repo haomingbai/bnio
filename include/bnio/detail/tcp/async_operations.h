@@ -50,13 +50,9 @@ class tcp_read_operation {
       return bexec::get_env(operation_->receiver_);
     }
 
-    void set_value(std::size_t size) noexcept {
-      operation_->holder_.commit(size);
-      bexec::set_value(std::move(operation_->receiver_), size);
-    }
-
-    void set_error(std::error_code error) noexcept {
-      bexec::set_error(std::move(operation_->receiver_), error);
+    void set_value(std::error_code ec, std::size_t size) noexcept {
+      if (!ec) operation_->holder_.commit(size);
+      bexec::set_value(std::move(operation_->receiver_), ec, size);
     }
 
     void set_stopped() noexcept {
@@ -108,10 +104,8 @@ class tcp_read_operation {
 template <class Scheduler, class Holder, bool Some>
 class tcp_read_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   tcp_read_sender(Scheduler scheduler, async_io::stream_socket_view socket,
                   Holder holder, int flags)
@@ -160,12 +154,8 @@ class tcp_write_operation {
       return bexec::get_env(operation_->receiver_);
     }
 
-    void set_value(std::size_t size) noexcept {
-      bexec::set_value(std::move(operation_->receiver_), size);
-    }
-
-    void set_error(std::error_code error) noexcept {
-      bexec::set_error(std::move(operation_->receiver_), error);
+    void set_value(std::error_code ec, std::size_t size) noexcept {
+      bexec::set_value(std::move(operation_->receiver_), ec, size);
     }
 
     void set_stopped() noexcept {
@@ -221,10 +211,8 @@ class tcp_write_operation {
 template <class Scheduler, class Holder, bool Some>
 class tcp_write_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   tcp_write_sender(Scheduler scheduler, async_io::stream_socket_view socket,
                    Holder holder, int flags)
@@ -269,11 +257,7 @@ class tcp_accept_operation {
       return bexec::get_env(operation_->receiver_);
     }
 
-    void set_value(int fd) noexcept;
-
-    void set_error(std::error_code error) noexcept {
-      bexec::set_error(std::move(operation_->receiver_), error);
-    }
+    void set_value(std::error_code ec, int fd) noexcept;
 
     void set_stopped() noexcept {
       bexec::set_stopped(std::move(operation_->receiver_));
@@ -320,10 +304,8 @@ class tcp_accept_operation {
 template <class Scheduler>
 class tcp_accept_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(tcp_socket),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, tcp_socket), bexec::set_stopped_t()>;
 
   tcp_accept_sender(Scheduler scheduler, async_io::stream_socket_view socket,
                     int flags)

@@ -33,8 +33,10 @@ struct client : std::enable_shared_from_this<client> {
     tm = std::make_unique<bnio::steady_timer>(ctx, std::chrono::seconds(10));
     struct R {
       std::shared_ptr<client> c;
-      void set_value() noexcept { c->fail("timeout"); }
-      void set_error(std::error_code) noexcept {}
+      void set_value(std::error_code ec) noexcept {
+        if (ec) return;
+        c->fail("timeout");
+      }
       void set_stopped() noexcept {}
     };
     auto op = bexec::connect(tm->async_wait(), R{shared_from_this()});
@@ -66,8 +68,13 @@ struct client : std::enable_shared_from_this<client> {
 
     struct R {
       std::shared_ptr<client> c;
-      void set_value() noexcept { c->send(); }
-      void set_error(std::error_code) noexcept { c->fail("connect failed"); }
+      void set_value(std::error_code ec) noexcept {
+        if (ec) {
+          c->fail("connect failed");
+          return;
+        }
+        c->send();
+      }
       void set_stopped() noexcept { c->done(); }
     };
     auto op = bexec::connect(so.async_connect(ctx.get_post_scheduler(), e),
@@ -78,8 +85,13 @@ struct client : std::enable_shared_from_this<client> {
   void send() {
     struct R {
       std::shared_ptr<client> c;
-      void set_value(std::size_t) noexcept { c->recv(); }
-      void set_error(std::error_code e) noexcept { c->fail("send", e); }
+      void set_value(std::error_code ec, std::size_t) noexcept {
+        if (ec) {
+          c->fail("send", ec);
+          return;
+        }
+        c->recv();
+      }
       void set_stopped() noexcept { c->done(); }
     };
     auto op = bexec::connect(
@@ -93,19 +105,20 @@ struct client : std::enable_shared_from_this<client> {
   void recv() {
     struct R {
       std::shared_ptr<client> c;
-      void set_value(std::size_t n) noexcept {
+      void set_value(std::error_code ec, std::size_t n) noexcept {
+        if (ec) {
+          if (ec == std::make_error_code(std::errc::connection_reset))
+            c->done();
+          else
+            c->fail("read", ec);
+          return;
+        }
         if (n > 0) {
           std::cout.write(c->buf.data(), static_cast<std::streamsize>(n));
           c->recv();
         } else {
           c->done();
         }
-      }
-      void set_error(std::error_code e) noexcept {
-        if (e == std::make_error_code(std::errc::connection_reset))
-          c->done();
-        else
-          c->fail("read", e);
       }
       void set_stopped() noexcept { c->done(); }
     };
@@ -158,7 +171,12 @@ int main(int argc, char** argv) {
     std::string msg;
     bnio::dns_result_view res;
 
-    void set_value(std::size_t n) noexcept {
+    void set_value(std::error_code ec, std::size_t n) noexcept {
+      if (ec) {
+        std::cerr << "resolve: " << ec.message() << '\n';
+        ctx->stop();
+        return;
+      }
       if (n == 0) {
         std::cerr << "no endpoints\n";
         ctx->stop();
@@ -170,10 +188,6 @@ int main(int argc, char** argv) {
       for (const auto& e : res | std::views::take(n)) c->ep[i++] = e;
       c->arm_timeout();
       c->connect(0);
-    }
-    void set_error(std::error_code e) noexcept {
-      std::cerr << "resolve: " << e.message() << '\n';
-      ctx->stop();
     }
     void set_stopped() noexcept { ctx->stop(); }
   };

@@ -39,17 +39,16 @@ struct stress_receiver {
   std::size_t index;
   bool receive;
 
-  void set_value(std::size_t size) noexcept {
-    if (receive) {
-      state->receive_sizes[index] = size;
+  void set_value(std::error_code ec, std::size_t size) noexcept {
+    if (ec) {
+      state->errors.fetch_add(1, std::memory_order_relaxed);
     } else {
-      state->send_sizes[index] = size;
+      if (receive) {
+        state->receive_sizes[index] = size;
+      } else {
+        state->send_sizes[index] = size;
+      }
     }
-    complete();
-  }
-
-  void set_error(std::error_code) noexcept {
-    state->errors.fetch_add(1, std::memory_order_relaxed);
     complete();
   }
 

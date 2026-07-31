@@ -23,8 +23,8 @@ namespace detail {
 
 template <class Scheduler, class Receiver>
 void tcp_accept_operation<Scheduler, Receiver>::child_receiver::set_value(
-    int fd) noexcept {
-  bexec::set_value(std::move(operation_->receiver_), tcp::socket(fd));
+    std::error_code ec, int fd) noexcept {
+  bexec::set_value(std::move(operation_->receiver_), ec, tcp::socket(fd));
 }
 
 }  // namespace detail

@@ -52,15 +52,11 @@ TEST(IoUringCqeDispatchTest, cqe_batch_window_drains_multiple_rounds) {
 struct run_loop_signal_recv {
   std::atomic<bool>* started = nullptr;
 
-  void set_value() noexcept {
+  void set_value(std::error_code) noexcept {
     if (started) started->store(true, std::memory_order_release);
   }
 
-  void set_value(int, unsigned) noexcept {
-    if (started) started->store(true, std::memory_order_release);
-  }
-
-  void set_error(std::error_code) noexcept {
+  void set_value(std::error_code, int, unsigned) noexcept {
     if (started) started->store(true, std::memory_order_release);
   }
 

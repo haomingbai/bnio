@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 
@@ -103,7 +104,7 @@ class BNIO_EXPORT io_context {
      * Completion signatures produced by the scheduler sender.
      */
     using completion_signatures =
-        bexec::completion_signatures<bexec::set_value_t(),
+        bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                      bexec::set_stopped_t()>;
 
     /**
@@ -167,12 +168,18 @@ class BNIO_EXPORT io_context {
 
      private:
       void complete() noexcept {
+        // io_context::stop() is the sole source of set_stopped().
+        if (context_->is_stopped()) {
+          bexec::set_stopped(std::move(receiver_));
+          return;
+        }
         auto env = bexec::get_env(receiver_);
         auto token = bexec::query(env, bexec::get_stop_token);
         if (token.stop_requested()) {
-          bexec::set_stopped(std::move(receiver_));
+          bexec::set_value(std::move(receiver_),
+                           std::make_error_code(std::errc::operation_canceled));
         } else {
-          bexec::set_value(std::move(receiver_));
+          bexec::set_value(std::move(receiver_), std::error_code{});
         }
       }
 
@@ -412,6 +419,16 @@ class BNIO_EXPORT io_context {
   [[nodiscard]] bool is_in_context() const noexcept;
 
   /**
+   * Returns whether stop() has been requested for this context.
+   *
+   * schedule_sender uses this to decide between set_stopped() (sole exit
+   * for set_stopped) and set_value(ec) / set_value({}).
+   */
+  [[nodiscard]] bool is_stopped() const noexcept {
+    return global_state_.closing.load(std::memory_order_acquire);
+  }
+
+  /**
    * Returns a scheduler whose schedule() may complete inline on the context
    * thread.
    */
@@ -562,6 +579,15 @@ class BNIO_EXPORT io_context {
   [[nodiscard]] static bool try_fetch_timeout_operations_thunk(
       void* state, time_point& deadline,
       detail::native_operation_base*& operations) noexcept;
+
+  /** Aborts all pending timer waits with set_stopped (io_context::stop only).
+   *
+   *  Drains every active and inactive timer slot's submitted queue, sets
+   *  each operation's completion to timer_completion_kind::stopped, and
+   *  pushes them to timers_.ready.  Worker finish() picks them up via
+   *  consume_timeout_operations().
+   */
+  void abort_pending_timer_waits() noexcept;
 
   // Consumes the timer's lock-protected list of active wait operations.
   [[nodiscard]] detail::timer_operation_queue take_timer_operations_locked(

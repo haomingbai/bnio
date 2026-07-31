@@ -304,7 +304,8 @@ TEST(KqueueSenderTest, stop_token_completes_before_native_registration) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
   EXPECT_TRUE(state->in_context);
 }
 

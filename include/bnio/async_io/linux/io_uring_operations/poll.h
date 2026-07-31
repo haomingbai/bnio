@@ -14,6 +14,7 @@
 #include <bexec/completion_signatures.hpp>
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
+#include <cerrno>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -111,11 +112,16 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
   }
 
   /**
-   * Starts the poll or posts an immediate stopped/error completion.
+   * Starts the poll or posts an immediate canceled/stopped completion.
+   *
+   * A user-requested cancel (stop_token) completes through
+   * set_value(operation_canceled, ...) rather than set_stopped; the
+   * latter is reserved for io_context::stop().
    */
   void start() noexcept {
     if (stop_requested()) {
-      completion_ = completion_kind::stopped;
+      completion_ = completion_kind::value_with_ec;
+      error_ = std::error_code(ECANCELED, std::generic_category());
       (void)context_->post(*this);
       return;
     }
@@ -125,25 +131,37 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
   }
 
   void complete_submit_error(int result) noexcept override {
-    completion_ = completion_kind::error;
+    completion_ = completion_kind::value_with_ec;
     error_ = std::error_code(-result, std::generic_category());
+  }
+
+  void complete_submit_stopped() noexcept override {
+    completion_ = completion_kind::stopped;
   }
 
   /**
    * Delivers the typed poll completion.
+   *
+   * The `value` branch preserves the `result < 0` guard: a poll CQE may
+   * report a negative errno (e.g. EBADF) while completion_ is still
+   * `value`; that errno must surface through set_value(ec, ...) rather
+   * than being lost.
    */
   void execute() noexcept override {
     switch (completion_) {
       case completion_kind::value:
         if (result < 0) {
-          bexec::set_error(std::move(receiver_),
-                           std::error_code(-result, std::generic_category()));
+          bexec::set_value(std::move(receiver_),
+                           std::error_code(-result, std::generic_category()),
+                           static_cast<unsigned>(result));
         } else {
-          bexec::set_value(std::move(receiver_), static_cast<unsigned>(result));
+          bexec::set_value(std::move(receiver_), std::error_code{},
+                           static_cast<unsigned>(result));
         }
         break;
-      case completion_kind::error:
-        bexec::set_error(std::move(receiver_), error_);
+      case completion_kind::value_with_ec:
+        bexec::set_value(std::move(receiver_), error_,
+                         static_cast<unsigned>(result));
         break;
       case completion_kind::stopped:
         bexec::set_stopped(std::move(receiver_));
@@ -154,7 +172,7 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
  private:
   enum class completion_kind {
     value,
-    error,
+    value_with_ec,
     stopped,
   };
 
@@ -178,11 +196,13 @@ class io_uring_poll_sender {
  public:
   /**
    * Completion signatures produced by a poll sender.
+   *
+   * set_value(ec, unsigned) is the universal observable exit (success,
+   * cancel, recoverable failure); set_stopped is reserved for
+   * io_context::stop().
    */
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(unsigned),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, unsigned), bexec::set_stopped_t()>;
 
   /**
    * Creates a poll sender for a context, descriptor, and event mask.

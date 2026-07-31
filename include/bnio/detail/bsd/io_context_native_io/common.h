@@ -14,6 +14,8 @@
 #include <bnio/async_io/bsd/kqueue_operations/socket.h>
 #include <bnio/async_io/dns/resolve.h>
 
+#include <algorithm>
+#include <cerrno>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -44,8 +46,16 @@ class native_io_operation : public io_context::operation_base {
   }
 
   void complete_submit_error(int result) noexcept override {
-    completion_ = completion_kind::error;
+    // kevent register failure: route through set_value(ec, ...).
+    completion_ = completion_kind::value_with_ec;
     error_ = errno_result(result);
+    this->result = result;
+    this->flags = 0;
+  }
+
+  void complete_submit_stopped() noexcept override {
+    // io_context::stop() -> abort_inflight_io: the only set_stopped entry.
+    completion_ = completion_kind::stopped;
   }
 
   [[nodiscard]] bool owns_io_step() const noexcept override { return true; }
@@ -56,17 +66,33 @@ class native_io_operation : public io_context::operation_base {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      completion_ = completion_kind::stopped;
+      // stop-token cancel: route through set_value(operation_canceled, ...).
+      completion_ = completion_kind::value_with_ec;
+      error_ = std::make_error_code(std::errc::operation_canceled);
+      this->result = 0;
+      this->flags = 0;
       context_->publish_cpu(*this);
       return;
     }
 
     this->result = request_.start_io();
     this->flags = 0;
-    completion_ = completion_kind::value;
     if (async_io::bsd_native::detail::should_wait(request_, this->result)) {
+      // EAGAIN/EWOULDBLOCK: register with kqueue for readiness. Leave
+      // completion_ as `value`; the kevent path will update this->result via
+      // perform_io(), and execute()'s value branch re-derives ec from result
+      // (§9.2 guard). Eagerly setting value_with_ec here would leak a stale
+      // EAGAIN ec when the eventual perform_io() succeeds.
+      completion_ = completion_kind::value;
       context_->publish_io(*this);
     } else {
+      // Immediate completion (success or non-EAGAIN errno).
+      if (this->result < 0) {
+        completion_ = completion_kind::value_with_ec;
+        error_ = errno_result(this->result);
+      } else {
+        completion_ = completion_kind::value;
+      }
       context_->publish_cpu(*this);
     }
   }
@@ -74,16 +100,25 @@ class native_io_operation : public io_context::operation_base {
   void execute() noexcept override {
     switch (completion_) {
       case completion_kind::value:
+        // Success, or a kevent-reported I/O step whose perform_io() returned
+        // a negative errno (spurious wakeup / rearm failure). Re-derive ec
+        // from result so the errno surfaces via set_value(ec, ...) rather
+        // than being lost (§9.2 guard).
         if (this->result < 0) {
-          bexec::set_error(std::move(receiver_), errno_result(this->result));
+          request_.set_value(std::move(receiver_), errno_result(this->result),
+                             this->result, this->flags);
         } else {
-          request_.set_value(std::move(receiver_), this->result, this->flags);
+          request_.set_value(std::move(receiver_), std::error_code{},
+                             this->result, this->flags);
         }
         break;
-      case completion_kind::error:
-        bexec::set_error(std::move(receiver_), error_);
+      case completion_kind::value_with_ec:
+        // errno / register failure / stop-token cancel: error_ carries ec.
+        request_.set_value(std::move(receiver_), error_, this->result,
+                           this->flags);
         break;
       case completion_kind::stopped:
+        // Sole source: io_context::stop() -> abort_inflight_io.
         bexec::set_stopped(std::move(receiver_));
         break;
     }
@@ -91,9 +126,9 @@ class native_io_operation : public io_context::operation_base {
 
  private:
   enum class completion_kind {
-    value,
-    error,
-    stopped,
+    value,          // success, ec={}
+    value_with_ec,  // errno / cancel / register failure -> set_value(ec, ...)
+    stopped,        // only io_context::stop()
   };
 
   io_context* context_;
@@ -144,13 +179,20 @@ class native_poll_operation : public io_context::operation_base {
   }
 
   void complete_submit_error(int result) noexcept override {
-    completion_ = completion_kind::error;
+    completion_ = completion_kind::value_with_ec;
     error_ = errno_result(result);
+  }
+
+  void complete_submit_stopped() noexcept override {
+    // io_context::stop() -> abort_inflight_io: the only set_stopped entry.
+    completion_ = completion_kind::stopped;
   }
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      completion_ = completion_kind::stopped;
+      // stop-token cancel: set_value(operation_canceled, ...).
+      completion_ = completion_kind::value_with_ec;
+      error_ = std::make_error_code(std::errc::operation_canceled);
       context_->publish_cpu(*this);
       return;
     }
@@ -163,14 +205,16 @@ class native_poll_operation : public io_context::operation_base {
     switch (completion_) {
       case completion_kind::value:
         if (this->result < 0) {
-          bexec::set_error(std::move(receiver_), errno_result(this->result));
+          bexec::set_value(std::move(receiver_), errno_result(this->result),
+                           static_cast<unsigned>(this->result));
         } else {
-          bexec::set_value(std::move(receiver_),
+          bexec::set_value(std::move(receiver_), std::error_code{},
                            static_cast<unsigned>(this->result));
         }
         break;
-      case completion_kind::error:
-        bexec::set_error(std::move(receiver_), error_);
+      case completion_kind::value_with_ec:
+        bexec::set_value(std::move(receiver_), error_,
+                         static_cast<unsigned>(this->result));
         break;
       case completion_kind::stopped:
         bexec::set_stopped(std::move(receiver_));
@@ -180,9 +224,9 @@ class native_poll_operation : public io_context::operation_base {
 
  private:
   enum class completion_kind {
-    value,
-    error,
-    stopped,
+    value,          // success, ec={}
+    value_with_ec,  // errno / cancel / register failure -> set_value(ec, ...)
+    stopped,        // only io_context::stop()
   };
 
   io_context* context_;
@@ -194,10 +238,8 @@ class native_poll_operation : public io_context::operation_base {
 
 class native_poll_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(unsigned),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, unsigned), bexec::set_stopped_t()>;
 
   native_poll_sender(io_context& context, async_io::descriptor_view descriptor,
                      unsigned poll_mask) noexcept
@@ -226,23 +268,25 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
         receiver_(std::move(receiver)) {}
 
   void start() noexcept {
-    stopped_ = stop_requested(receiver_);
+    canceled_ = stop_requested(receiver_);
     context_->publish_cpu(*this);
   }
 
   void execute() noexcept override {
-    if (stopped_) {
-      bexec::set_stopped(std::move(receiver_));
+    if (canceled_) {
+      // stop-token cancel: set_value(operation_canceled, 0).
+      bexec::set_value(std::move(receiver_),
+                       std::make_error_code(std::errc::operation_canceled),
+                       std::size_t{0});
       return;
     }
 
     std::size_t count = 0;
-    const std::error_code error = async_io::resolve_dns(query_, result_, count);
-    if (error) {
-      bexec::set_error(std::move(receiver_), error);
-    } else {
-      bexec::set_value(std::move(receiver_), count);
-    }
+    const std::error_code ec = async_io::resolve_dns(query_, result_, count);
+    // Success ec={}; failure ec carries the resolver error. Both exit through
+    // set_value(ec, count). resolve runs on the CPU queue, so io_context::stop
+    // never reaches it and set_stopped is not produced here.
+    bexec::set_value(std::move(receiver_), ec, count);
   }
 
  private:
@@ -250,15 +294,13 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
   async_io::dns_query query_;
   async_io::dns_result_view result_;
   std::remove_cvref_t<Receiver> receiver_;
-  bool stopped_ = false;
+  bool canceled_ = false;
 };
 
 class resolve_sender {
  public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                   bexec::set_error_t(std::error_code),
-                                   bexec::set_stopped_t()>;
+  using completion_signatures = bexec::completion_signatures<bexec::set_value_t(
+      std::error_code, std::size_t)>;
 
   resolve_sender(io_context& context, async_io::dns_query query,
                  async_io::dns_result_view result)

@@ -56,10 +56,8 @@ namespace detail {
   return -error;
 }
 
-using size_completion_signatures =
-    bexec::completion_signatures<bexec::set_value_t(std::size_t),
-                                 bexec::set_error_t(std::error_code),
-                                 bexec::set_stopped_t()>;
+using size_completion_signatures = bexec::completion_signatures<
+    bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
 }  // namespace detail
 
@@ -87,9 +85,10 @@ class kqueue_receive_request {
   }
 
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -124,9 +123,10 @@ class kqueue_send_request {
   }
 
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -171,19 +171,25 @@ class kqueue_receive_from_request {
   }
 
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    const auto endpoint = make_endpoint(
-        reinterpret_cast<const sockaddr*>(&remote_address_), remote_size_);
-    if (!endpoint.has_value()) {
-      endpoint_->reset();
-      bexec::set_error(
-          std::forward<Receiver>(receiver),
-          std::make_error_code(std::errc::address_family_not_supported));
-      return;
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    if (result >= 0 && !ec) {
+      const auto endpoint = make_endpoint(
+          reinterpret_cast<const sockaddr*>(&remote_address_), remote_size_);
+      if (!endpoint.has_value()) {
+        // endpoint decode failure: override ec with
+        // address_family_not_supported
+        endpoint_->reset();
+        bexec::set_value(
+            std::forward<Receiver>(receiver),
+            std::make_error_code(std::errc::address_family_not_supported),
+            std::size_t{0});
+        return;
+      }
+      *endpoint_ = *endpoint;
     }
-    *endpoint_ = *endpoint;
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -225,9 +231,10 @@ class kqueue_send_to_request {
   }
 
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver),
-                     static_cast<std::size_t>(result));
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
   }
 
  private:
@@ -242,8 +249,7 @@ class kqueue_send_to_request {
 class kqueue_accept_request {
  public:
   using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(int),
-                                   bexec::set_error_t(std::error_code),
+      bexec::completion_signatures<bexec::set_value_t(std::error_code, int),
                                    bexec::set_stopped_t()>;
 
   kqueue_accept_request(stream_socket_view socket, int flags) noexcept
@@ -291,8 +297,9 @@ class kqueue_accept_request {
   }
 
   template <class Receiver>
-  void set_value(Receiver&& receiver, int result, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver), result);
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec, result);
   }
 
  private:
@@ -304,8 +311,7 @@ class kqueue_accept_request {
 class kqueue_connect_request {
  public:
   using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(),
-                                   bexec::set_error_t(std::error_code),
+      bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
   kqueue_connect_request(stream_socket_view socket,
@@ -341,8 +347,9 @@ class kqueue_connect_request {
   }
 
   template <class Receiver>
-  void set_value(Receiver&& receiver, int, unsigned) noexcept {
-    bexec::set_value(std::forward<Receiver>(receiver));
+  void set_value(Receiver&& receiver, std::error_code ec, int,
+                 unsigned) noexcept {
+    bexec::set_value(std::forward<Receiver>(receiver), ec);
   }
 
  private:

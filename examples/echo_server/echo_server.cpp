@@ -118,15 +118,14 @@ void echo_session::start() { do_read(); }
 void echo_session::do_read() {
   struct R {
     std::shared_ptr<echo_session> se;
-    void set_value(std::size_t n) noexcept {
-      if (n == 0) {
+    void set_value(std::error_code ec, std::size_t n) noexcept {
+      if (ec || n == 0) {
         se->done();
         return;
       }
       se->nw_ = n;
       se->do_write();
     }
-    void set_error(std::error_code) noexcept { se->done(); }
     void set_stopped() noexcept { se->done(); }
   };
   reg_.spawn(so_.async_read(ctx_.get_post_scheduler(), bnio::buffer(buf_)),
@@ -136,8 +135,13 @@ void echo_session::do_read() {
 void echo_session::do_write() {
   struct R {
     std::shared_ptr<echo_session> se;
-    void set_value(std::size_t) noexcept { se->do_read(); }
-    void set_error(std::error_code) noexcept { se->done(); }
+    void set_value(std::error_code ec, std::size_t) noexcept {
+      if (ec) {
+        se->done();
+        return;
+      }
+      se->do_read();
+    }
     void set_stopped() noexcept { se->done(); }
   };
   reg_.spawn(
@@ -159,13 +163,13 @@ void echo_server::do_accept() {
   if (stopping_) return;
   struct R {
     std::shared_ptr<echo_server> s;
-    void set_value(bnio::tcp_socket so) noexcept {
+    void set_value(std::error_code ec, bnio::tcp_socket so) noexcept {
+      if (ec) return;
       auto se = std::make_shared<echo_session>(s->ctx_, std::move(so), s);
       s->on_begin();
       se->start();
       s->do_accept();
     }
-    void set_error(std::error_code) noexcept {}
     void set_stopped() noexcept {}
   };
   reg_.spawn(acp_.async_accept(ctx_.get_post_scheduler(), 0),

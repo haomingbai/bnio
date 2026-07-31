@@ -80,34 +80,38 @@ struct receiver {
   io_uring_context* context = nullptr;
   bool stop_on_completion = false;
 
-  void set_value() noexcept {
-    state->signal = signal_kind::value;
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+    }
     state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
       (void)context->stop();
     }
   }
 
-  void set_value(int result, unsigned flags) noexcept {
-    state->signal = signal_kind::value;
-    state->result = result;
-    state->flags = flags;
+  void set_value(std::error_code ec, int result, unsigned flags) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      state->result = result;
+      state->flags = flags;
+    }
     state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
       (void)context->stop();
     }
   }
 
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    state->in_context = (context != nullptr && context->is_in_context());
-    if (stop_on_completion && context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发
     state->signal = signal_kind::stopped;
     state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
@@ -120,25 +124,24 @@ struct poll_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
   io_uring_context* context = nullptr;
 
-  void set_value(unsigned events) noexcept {
-    state->signal = signal_kind::value;
-    state->result = static_cast<int>(events);
+  void set_value(std::error_code ec, unsigned events) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      state->result = static_cast<int>(events);
+    }
     state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
       (void)context->stop();
     }
   }
 
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    state->in_context = (context != nullptr && context->is_in_context());
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发
     state->signal = signal_kind::stopped;
     state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
@@ -158,10 +161,15 @@ struct resolve_receiver {
   resolve_state* state = nullptr;
   io_uring_context* context = nullptr;
 
-  void set_value(std::size_t count) noexcept {
+  void set_value(std::error_code ec, std::size_t count) noexcept {
     if (state != nullptr) {
-      state->signal = signal_kind::value;
-      state->endpoint_count = count;
+      if (ec) {
+        state->signal = signal_kind::error;
+        state->error = ec;
+      } else {
+        state->signal = signal_kind::value;
+        state->endpoint_count = count;
+      }
       state->in_context = (context != nullptr && context->is_in_context());
     }
     if (context != nullptr) {
@@ -169,18 +177,10 @@ struct resolve_receiver {
     }
   }
 
-  void set_error(std::error_code error) noexcept {
-    if (state != nullptr) {
-      state->signal = signal_kind::error;
-      state->error = error;
-      state->in_context = (context != nullptr && context->is_in_context());
-    }
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发
     if (state != nullptr) {
       state->signal = signal_kind::stopped;
       state->in_context = (context != nullptr && context->is_in_context());
@@ -220,24 +220,23 @@ struct batch_receiver {
   io_uring_context* context = nullptr;
   unsigned target = 0;
 
-  void set_value(int result, unsigned /*flags*/) noexcept {
-    EXPECT_TRUE(result == 0);
-    ++state->completed;
+  void set_value(std::error_code ec, int result, unsigned /*flags*/) noexcept {
+    if (ec) {
+      ++state->errors;
+    } else {
+      EXPECT_TRUE(result == 0);
+      ++state->completed;
+    }
     state->all_in_context = state->all_in_context &&
                             (context != nullptr && context->is_in_context());
-    if (state->completed == target && context != nullptr) {
+    // 成功时等 completed==target 再 stop；错误时立即 stop（与原 set_error
+    // 一致）
+    if ((ec || state->completed == target) && context != nullptr) {
       (void)context->stop();
     }
   }
 
-  void set_error(std::error_code /*error*/) noexcept {
-    ++state->errors;
-    state->all_in_context = state->all_in_context &&
-                            (context != nullptr && context->is_in_context());
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
     ++state->stopped;
@@ -255,25 +254,24 @@ struct post_batch_receiver {
   unsigned target = 0;
   unsigned index = 0;
 
-  void set_value() noexcept {
-    state->in_order = state->in_order && index == state->next_index;
-    ++state->next_index;
-    ++state->completed;
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      ++state->errors;
+    } else {
+      state->in_order = state->in_order && index == state->next_index;
+      ++state->next_index;
+      ++state->completed;
+    }
     state->all_in_context = state->all_in_context &&
                             (context != nullptr && context->is_in_context());
-    if (state->completed == target && context != nullptr) {
+    // 成功时等 completed==target 再 stop；错误时立即 stop（与原 set_error
+    // 一致）
+    if ((ec || state->completed == target) && context != nullptr) {
       (void)context->stop();
     }
   }
 
-  void set_error(std::error_code /*error*/) noexcept {
-    ++state->errors;
-    state->all_in_context = state->all_in_context &&
-                            (context != nullptr && context->is_in_context());
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
     ++state->stopped;
@@ -297,21 +295,23 @@ struct concurrent_batch_receiver {
   io_uring_context* context = nullptr;
   unsigned target = 0;
 
-  void set_value(int result, unsigned /*flags*/) noexcept {
-    EXPECT_TRUE(result == 0);
-    const unsigned completed =
-        state->completed.fetch_add(1, std::memory_order_acq_rel) + 1;
-    if (completed == target && context != nullptr) {
-      (void)context->stop();
+  void set_value(std::error_code ec, int result, unsigned /*flags*/) noexcept {
+    if (ec) {
+      state->errors.fetch_add(1, std::memory_order_acq_rel);
+      if (context != nullptr) {
+        (void)context->stop();
+      }
+    } else {
+      EXPECT_TRUE(result == 0);
+      const unsigned completed =
+          state->completed.fetch_add(1, std::memory_order_acq_rel) + 1;
+      if (completed == target && context != nullptr) {
+        (void)context->stop();
+      }
     }
   }
 
-  void set_error(std::error_code /*error*/) noexcept {
-    state->errors.fetch_add(1, std::memory_order_acq_rel);
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
     state->stopped.fetch_add(1, std::memory_order_acq_rel);

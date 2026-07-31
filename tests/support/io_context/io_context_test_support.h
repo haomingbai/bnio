@@ -51,23 +51,23 @@ struct byte_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
   bnio::io_context* context = nullptr;
 
-  void set_value(std::size_t size) noexcept {
-    state->signal = signal_kind::value;
-    state->size = size;
+  void set_value(std::error_code ec, std::size_t size) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      state->size = size;
+    }
     if (context != nullptr) {
       (void)context->stop();
     }
   }
 
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发
     state->signal = signal_kind::stopped;
     if (context != nullptr) {
       (void)context->stop();
@@ -81,7 +81,21 @@ struct socket_receiver {
   unsigned* completions = nullptr;
   unsigned target = 1;
 
-  void set_value(bnio::tcp_socket socket) noexcept {
+  void set_value(std::error_code ec, bnio::tcp_socket socket) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+      if (completions != nullptr) {
+        ++*completions;
+        if (*completions != target) {
+          return;
+        }
+      }
+      if (context != nullptr) {
+        (void)context->stop();
+      }
+      return;
+    }
     state->signal = signal_kind::value;
     state->fd = socket.release();
     if (completions != nullptr) {
@@ -95,13 +109,7 @@ struct socket_receiver {
     }
   }
 
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
@@ -123,7 +131,21 @@ struct void_receiver {
   unsigned* completions = nullptr;
   unsigned target = 1;
 
-  void set_value() noexcept {
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+      if (completions != nullptr) {
+        ++*completions;
+        if (*completions != target) {
+          return;
+        }
+      }
+      if (context != nullptr) {
+        (void)context->stop();
+      }
+      return;
+    }
     state->signal = signal_kind::value;
     if (completions != nullptr) {
       ++*completions;
@@ -136,13 +158,7 @@ struct void_receiver {
     }
   }
 
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
@@ -162,23 +178,23 @@ struct poll_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
   bnio::io_context* context = nullptr;
 
-  void set_value(unsigned events) noexcept {
-    state->signal = signal_kind::value;
-    state->size = events;
+  void set_value(std::error_code ec, unsigned events) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      state->error = ec;
+    } else {
+      state->signal = signal_kind::value;
+      state->size = events;
+    }
     if (context != nullptr) {
       (void)context->stop();
     }
   }
 
-  void set_error(std::error_code error) noexcept {
-    state->signal = signal_kind::error;
-    state->error = error;
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发
     state->signal = signal_kind::stopped;
     if (context != nullptr) {
       (void)context->stop();
@@ -207,7 +223,14 @@ struct schedule_receiver {
   int value = 0;
   unsigned target = 1;
 
-  void set_value() noexcept {
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      if (context != nullptr) {
+        (void)context->stop();
+      }
+      return;
+    }
     state->signal = signal_kind::value;
     state->order.push_back(value);
     ++state->completions;
@@ -216,15 +239,11 @@ struct schedule_receiver {
     }
   }
 
-  void set_error(std::error_code error) noexcept {
-    (void)error;
-    state->signal = signal_kind::error;
-    if (context != nullptr) {
-      (void)context->stop();
-    }
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
+    // 仅 io_context::stop() 触发；原 stop_token 取消现在走
+    // set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     ++state->completions;
     if (context != nullptr && state->completions == target) {
@@ -243,7 +262,12 @@ struct dispatch_inline_outer_receiver {
   std::shared_ptr<schedule_state> state;
   bnio::io_context* context = nullptr;
 
-  void set_value() noexcept {
+  void set_value(std::error_code ec) noexcept {
+    if (ec) {
+      state->signal = signal_kind::error;
+      (void)context->stop();
+      return;
+    }
     schedule_receiver inner;
     inner.state = state;
     inner.value = 42;
@@ -256,11 +280,7 @@ struct dispatch_inline_outer_receiver {
     (void)context->stop();
   }
 
-  void set_error(std::error_code error) noexcept {
-    (void)error;
-    state->signal = signal_kind::error;
-    (void)context->stop();
-  }
+  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;

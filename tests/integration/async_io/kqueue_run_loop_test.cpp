@@ -25,7 +25,8 @@ struct concurrent_receiver {
   kqueue_context* context = nullptr;
   unsigned target = 0;
 
-  void set_value() noexcept {
+  void set_value(std::error_code ec) noexcept {
+    EXPECT_FALSE(ec);
     if (context == nullptr || !context->is_in_context()) {
       state->all_in_context.store(false, std::memory_order_release);
     }
@@ -49,7 +50,8 @@ struct batch_receiver {
   kqueue_context* context = nullptr;
   unsigned target = 0;
 
-  void set_value(int result, unsigned /*flags*/) noexcept {
+  void set_value(std::error_code ec, int result, unsigned /*flags*/) noexcept {
+    EXPECT_FALSE(ec);
     EXPECT_EQ(result, 0);
     if (context == nullptr || !context->is_in_context()) {
       state->all_in_context.store(false, std::memory_order_release);
@@ -57,13 +59,6 @@ struct batch_receiver {
     const unsigned completed =
         state->completed.fetch_add(1, std::memory_order_acq_rel) + 1;
     if (completed == target && context != nullptr) {
-      (void)context->stop();
-    }
-  }
-
-  void set_error(std::error_code /*error*/) noexcept {
-    state->stopped.fetch_add(1, std::memory_order_acq_rel);
-    if (context != nullptr) {
       (void)context->stop();
     }
   }
