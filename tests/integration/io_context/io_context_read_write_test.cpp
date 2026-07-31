@@ -781,3 +781,33 @@ TEST(IoContextReadWriteTest, inflight_write_all_aborted_by_io_context_stop) {
 
   EXPECT_EQ(state->signal, signal_kind::stopped);
 }
+
+// Covers write_all_operation::start() empty-buffer path (write_all.h:291-294):
+// a zero-size buffer must complete synchronously with ec={} and bytes=0
+// without entering the repeat_until loop.
+TEST(IoContextReadWriteTest, zero_size_buffer_write_reports_success) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+  bnio::tcp_socket sender_socket(sockets[0]);
+  bnio::tcp_socket receiver_socket(sockets[1]);
+
+  constexpr std::string_view payload = "never written";
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = sender_socket.async_write(
+      scheduler, bnio::buffer(payload.data(), 0), MSG_NOSIGNAL);
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->signal, signal_kind::value);
+  EXPECT_EQ(state->size, 0u);
+}
