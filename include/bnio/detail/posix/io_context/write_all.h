@@ -126,11 +126,6 @@ class write_all_step_operation {
       : state_(state), receiver_(std::move(receiver)) {}
 
   void start() noexcept {
-    if (state_->remaining() == 0) {
-      complete_value(std::error_code{}, state_->transferred);
-      return;
-    }
-
     child_operation_.emplace_from([this] {
       return bexec::connect(state_->make_sender(), child_receiver(*this));
     });
@@ -150,13 +145,6 @@ class write_all_step_operation {
       // EOF（对端关闭）：终结。
       state_->done = true;
       complete_value(std::make_error_code(std::errc::broken_pipe),
-                     state_->transferred);
-      return;
-    }
-    if (bytes > state_->remaining()) {
-      // 不变量违规：终结。
-      state_->done = true;
-      complete_value(std::make_error_code(std::errc::protocol_error),
                      state_->transferred);
       return;
     }
