@@ -422,4 +422,68 @@ TEST(SteadyTimerTest, passive_timer_wakes_workers_for_an_earlier_deadline) {
   EXPECT_EQ(first_order.load(std::memory_order_acquire), 2);
 }
 
+// Positive coverage for set_stopped: io_context::stop() interrupting an
+// inflight timer wait must produce set_stopped on the receiver.  All other
+// tests in this file only assert stopped==0 or rely on cancel()/expires_after
+// which produce ec=operation_canceled via set_value.  This test exercises the
+// pure io_context::stop() path.
+TEST(SteadyTimerTest, inflight_timer_wait_aborted_by_io_context_stop) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  bnio::steady_timer timer(context);
+  EXPECT_EQ(timer.expires_after(std::chrono::seconds(30)), 0);
+
+  void_receiver receiver;
+  // context=nullptr: receiver does NOT self-stop; the main thread calls
+  // context.stop() to interrupt the inflight wait.
+  receiver.context = nullptr;
+  auto state = receiver.state;
+
+  auto sender = timer.async_wait();
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+
+  // Synchronization: post a schedule task that runs once the worker enters
+  // the run loop, confirming the worker is active and parked on the timer
+  // before we call stop().
+  std::atomic<bool> worker_active{false};
+  struct active_receiver {
+    std::atomic<bool>* flag;
+    void set_value(std::error_code) noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+    void set_stopped() noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+  };
+  auto schedule_sender = context.get_post_scheduler().schedule();
+  auto schedule_op =
+      bexec::connect(schedule_sender, active_receiver{&worker_active});
+  bexec::start(schedule_op);
+
+  std::thread worker([&context] { context.run(); });
+
+  {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!worker_active.load(std::memory_order_acquire)) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        (void)context.stop();
+        worker.join();
+        FAIL() << "Timed out waiting for worker to become active";
+      }
+      std::this_thread::yield();
+    }
+  }
+
+  // Worker is parked on the 30s timer. Interrupt via io_context::stop().
+  EXPECT_GE(context.stop(), 0);
+  worker.join();
+
+  EXPECT_EQ(state->signal, signal_kind::stopped);
+}
+
 }  // namespace

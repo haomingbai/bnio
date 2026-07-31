@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cerrno>
+#include <thread>
 
 #include "../../support/io_context/io_context_runtime_test_support.h"
 
@@ -635,4 +637,147 @@ TEST(IoContextReadWriteTest, socketpair_70kb_write_all) {
   EXPECT_EQ(received_size, payload_size);
   EXPECT_TRUE(std::memcmp(received.data(), payload.data(), payload.size()) ==
               0);
+}
+
+// Positive coverage for set_stopped: io_context::stop() interrupting an
+// inflight blocking socket read must produce set_stopped on the receiver.
+// All other tests in this file complete reads via data arrival or cancel
+// paths (ec=operation_canceled via set_value); this test exercises the pure
+// io_context::stop() interruption path.
+TEST(IoContextReadWriteTest, inflight_socket_read_aborted_by_io_context_stop) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+  bnio::tcp_socket receiver_socket(sockets[0]);
+  bnio::tcp_socket sender_socket(sockets[1]);
+
+  // Peer never writes: read blocks forever until interrupted.
+  std::array<char, 16> bytes{};
+
+  pair_byte_receiver receiver;
+  // context=nullptr, completions=nullptr: receiver does NOT self-stop;
+  // the main thread calls context.stop() to interrupt inflight read.
+  receiver.context = nullptr;
+  receiver.completions = nullptr;
+  auto state = receiver.state;
+
+  auto sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+
+  // Synchronization: post a schedule task that runs once the worker enters
+  // the run loop, confirming the worker is active and parked on the read
+  // before we call stop().
+  std::atomic<bool> worker_active{false};
+  struct active_receiver {
+    std::atomic<bool>* flag;
+    void set_value(std::error_code) noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+    void set_stopped() noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+  };
+  auto schedule_sender = context.get_post_scheduler().schedule();
+  auto schedule_op =
+      bexec::connect(schedule_sender, active_receiver{&worker_active});
+  bexec::start(schedule_op);
+
+  std::thread worker([&context] { context.run(); });
+
+  {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!worker_active.load(std::memory_order_acquire)) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        (void)context.stop();
+        worker.join();
+        FAIL() << "Timed out waiting for worker to become active";
+      }
+      std::this_thread::yield();
+    }
+  }
+
+  // Worker is parked on the blocking read. Interrupt via io_context::stop().
+  EXPECT_GE(context.stop(), 0);
+  worker.join();
+
+  EXPECT_EQ(state->signal, signal_kind::stopped);
+}
+
+// Verifies the set_stopped contract propagates through the write_all
+// composite operation: io_context::stop() aborts an inflight write-all loop
+// and the outer receiver observes set_stopped (not set_value(ec)).
+// The peer never reads, so after the kernel send buffer fills the write_some
+// child parks on EVFILT_WRITE; stop() drains inflight I/O via
+// complete_submit_stopped, repeat_receiver::set_stopped fires, and the
+// write_all_operation forwards set_stopped to its downstream receiver.
+TEST(IoContextReadWriteTest, inflight_write_all_aborted_by_io_context_stop) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
+  bnio::tcp_socket sender_socket(sockets[0]);
+  bnio::tcp_socket receiver_socket(sockets[1]);  // peer never reads
+
+  // Payload larger than the default Unix socket buffer so write_some parks.
+  constexpr std::size_t payload_size = 1 * 1024 * 1024;
+  std::vector<char> payload(payload_size, 'x');
+
+  pair_byte_receiver receiver;
+  receiver.context = nullptr;
+  receiver.completions = nullptr;
+  auto state = receiver.state;
+
+  auto sender = sender_socket.async_write(scheduler, bnio::buffer(payload),
+                                          MSG_NOSIGNAL);
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+
+  std::atomic<bool> worker_active{false};
+  struct active_receiver {
+    std::atomic<bool>* flag;
+    void set_value(std::error_code) noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+    void set_stopped() noexcept {
+      flag->store(true, std::memory_order_release);
+    }
+  };
+  auto schedule_sender = context.get_post_scheduler().schedule();
+  auto schedule_op =
+      bexec::connect(schedule_sender, active_receiver{&worker_active});
+  bexec::start(schedule_op);
+
+  std::thread worker([&context] { context.run(); });
+
+  {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!worker_active.load(std::memory_order_acquire)) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        (void)context.stop();
+        worker.join();
+        FAIL() << "Timed out waiting for worker to become active";
+      }
+      std::this_thread::yield();
+    }
+    // Margin: let the write_some child fill the send buffer and park on
+    // EVFILT_WRITE before stop() interrupts.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+
+  EXPECT_GE(context.stop(), 0);
+  worker.join();
+
+  EXPECT_EQ(state->signal, signal_kind::stopped);
 }
