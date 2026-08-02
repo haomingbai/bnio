@@ -40,7 +40,7 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   std::atomic<io_uring_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
 
-  std::atomic_bool closing{false};
+  std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
 
   /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */
   void* timeout_heap = nullptr;

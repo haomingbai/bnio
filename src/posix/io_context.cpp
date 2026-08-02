@@ -71,7 +71,7 @@ void io_context::run() noexcept {
   // and the increment where stop() saw 0 workers.
   running_workers_.fetch_add(1, std::memory_order_acq_rel);
 
-  if (global_state_.closing.load(std::memory_order_acquire) ||
+  if (global_state_.life_state.load(std::memory_order_acquire) != 0 ||
       !native_available_.load(std::memory_order_acquire)) {
     running_workers_.fetch_sub(1, std::memory_order_acq_rel);
     return;
@@ -86,7 +86,7 @@ void io_context::run() noexcept {
 
   // A close may have been requested after the initial checks but before
   // the native context was fully opened.
-  if (global_state_.closing.load(std::memory_order_acquire)) {
+  if (global_state_.life_state.load(std::memory_order_acquire)) {
     (void)ctx.stop();
     ctx.set_global_state(nullptr);
     running_workers_.fetch_sub(1, std::memory_order_acq_rel);
@@ -107,20 +107,32 @@ void io_context::run() noexcept {
 }
 
 int io_context::stop() noexcept {
-  // Abort all pending timer waits BEFORE setting closing so their ops
-  // land in timers_.ready before any worker enters finish().  This keeps
-  // set_stopped as the sole signal for io_context::stop().
+  // Try to become the stopping thread.
+  int expected = 0;  // running
+  if (!global_state_.life_state.compare_exchange_strong(
+          expected, 1,  // 1 = stopping
+          std::memory_order_acq_rel, std::memory_order_acquire)) {
+    // Already stopping or stopped — spin until fully stopped.
+    while (!stopped_.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+    return 0;
+  }
+
+  // We own the stop. Perform the actual stop work and signal completion.
+  stop_internal();
+  stopped_.store(true, std::memory_order_release);
+  return 0;
+}
+
+int io_context::stop_internal() noexcept {
+  // Abort all pending timer waits BEFORE workers observe the stopping
+  // state (already set by caller).  This keeps set_stopped as the sole
+  // signal for timer operations during shutdown.
   abort_pending_timer_waits();
 
-  global_state_.closing.store(true, std::memory_order_release);
-
   // Repeatedly signal the shared wake channel until every *other*
-  // worker has observed the closing flag and exited.  When stop()
-  // is called from within a worker (is_in_context() == true) the
-  // calling worker is still counted in running_workers, so the
-  // loop excludes one count.  The calling worker returns to its run
-  // loop, detects closing in should_finish(), and decrements
-  // running_workers on exit — no hard-coded timeout needed.
+  // worker has observed the stopping flag and exited.
   const bool in_worker_context = is_in_context();
   const std::size_t self_count = in_worker_context ? 1 : 0;
   while (running_workers_.load(std::memory_order_acquire) >
@@ -130,6 +142,10 @@ int io_context::stop() noexcept {
   }
 
   return 0;
+}
+
+io_context::join_sender io_context::join() noexcept {
+  return join_sender(*this);
 }
 
 bool io_context::is_in_context() const noexcept {

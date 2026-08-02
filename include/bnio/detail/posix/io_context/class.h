@@ -29,6 +29,7 @@
 #include <system_error>
 #include <type_traits>
 #include <utility>
+#include <thread>
 
 #include "bnio/async_io/dns/query.h"
 
@@ -351,6 +352,61 @@ class BNIO_EXPORT io_context {
   };
 
   /**
+   * Sender returned by io_context::join().
+   */
+  class join_sender {
+   public:
+    using completion_signatures =
+        bexec::completion_signatures<bexec::set_value_t()>;
+
+    explicit join_sender(io_context& context) noexcept
+        : context_(&context) {}
+
+    template <class Receiver>
+    class operation {
+     public:
+      operation(io_context& context, Receiver receiver)
+          : context_(&context), receiver_(std::move(receiver)) {}
+
+      operation(const operation&) = delete;
+      operation& operator=(const operation&) = delete;
+      operation(operation&&) = delete;
+      operation& operator=(operation&&) = delete;
+
+      void start() noexcept {
+        int expected = 0;  // running
+        if (context_->global_state_.life_state.compare_exchange_strong(
+                expected, 1,  // 1 = stopping
+                std::memory_order_acq_rel, std::memory_order_acquire)) {
+          // This thread is responsible for stopping.
+          context_->stop_internal();
+          context_->stopped_.store(true, std::memory_order_release);
+          bexec::set_value(std::move(receiver_));
+        } else {
+          // Another thread is already stopping or the context is stopped.
+          while (!context_->stopped_.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+          }
+          bexec::set_value(std::move(receiver_));
+        }
+      }
+
+     private:
+      io_context* context_;
+      Receiver receiver_;
+    };
+
+    template <class Receiver>
+    [[nodiscard]] auto connect(Receiver receiver) const {
+      return operation<std::remove_cvref_t<Receiver>>(*context_,
+                                                      std::move(receiver));
+    }
+
+   private:
+    io_context* context_;
+  };
+
+  /**
    * Scheduler with Asio dispatch-like schedule() semantics.
    */
   using dispatch_scheduler = basic_scheduler<schedule_kind::dispatch>;
@@ -414,6 +470,15 @@ class BNIO_EXPORT io_context {
   int stop() noexcept;
 
   /**
+   * Returns a sender that stops the context (if not already done) and waits
+   * for it to fully finish.  If multiple threads call join(), exactly one
+   * performs the actual stop and the rest spin-wait.
+   *
+   * The sender completes with set_value() when all workers have exited.
+   */
+  [[nodiscard]] join_sender join() noexcept;
+
+  /**
    * Returns whether the current thread is running this context.
    */
   [[nodiscard]] bool is_in_context() const noexcept;
@@ -425,7 +490,8 @@ class BNIO_EXPORT io_context {
    * for set_stopped) and set_value(ec) / set_value({}).
    */
   [[nodiscard]] bool is_stopped() const noexcept {
-    return global_state_.closing.load(std::memory_order_acquire);
+    return global_state_.life_state.load(std::memory_order_acquire) != 0 ||
+           stopped_.load(std::memory_order_acquire);
   }
 
   /**
@@ -452,6 +518,7 @@ class BNIO_EXPORT io_context {
   friend class detail::native_poll_operation;
   template <class Receiver>
   friend class detail::resolve_operation;
+  friend class join_sender;
 
   /**
    * Creates a sender that reads bytes from a non-owning stream socket
@@ -589,6 +656,13 @@ class BNIO_EXPORT io_context {
    */
   void abort_pending_timer_waits() noexcept;
 
+  /**
+   * Performs the actual stop work (abort timers, wake and wait for
+   * workers).  Assumes the caller already owns the stopping CAS,
+   * i.e. life_state == stopping.
+   */
+  int stop_internal() noexcept;
+
   // Consumes the timer's lock-protected list of active wait operations.
   [[nodiscard]] detail::timer_operation_queue take_timer_operations_locked(
       detail::timer_slot& timer) noexcept;
@@ -607,6 +681,10 @@ class BNIO_EXPORT io_context {
   /** Worker lifecycle counter. Incremented at the top of run(), decremented
    *  on every return path. io_context::stop() polls this until zero. */
   std::atomic<std::size_t> running_workers_{0};
+
+  /** Signalled when the context has fully stopped. Join() waiters spin
+   *  on this flag. Independent from life_state to avoid torn reads. */
+  std::atomic_bool stopped_{false};
 
   detail::timer_state_data timers_;
   std::atomic_bool native_available_{false};
