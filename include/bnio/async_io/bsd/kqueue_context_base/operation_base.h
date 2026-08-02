@@ -83,16 +83,6 @@ struct BNIO_EXPORT kqueue_task_queue_state {
   std::atomic<kqueue_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
 
-  /** Total workers currently inside run().
-   *
-   *  Incremented on run() entry, decremented on run() exit.  Unlike
-   *  awake_workers, this never decreases when a worker temporarily
-   *  sleeps.  io_context::stop() polls this counter in a loop
-   *  until it drops to zero, ensuring every worker has observed the
-   *  closing flag and returned.
-   */
-  std::atomic<std::size_t> running_workers{0};
-
   std::atomic_bool closing{false};
   /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */
   void* timeout_heap = nullptr;

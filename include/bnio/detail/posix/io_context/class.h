@@ -604,6 +604,10 @@ class BNIO_EXPORT io_context {
   detail::native_task_queue_state global_state_;
   detail::native_context_state native_;
 
+  /** Worker lifecycle counter. Incremented at the top of run(), decremented
+   *  on every return path. io_context::stop() polls this until zero. */
+  std::atomic<std::size_t> running_workers_{0};
+
   detail::timer_state_data timers_;
   std::atomic_bool native_available_{false};
 

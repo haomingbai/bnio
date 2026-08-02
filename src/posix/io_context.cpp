@@ -62,13 +62,24 @@ bool io_context::is_open() const noexcept {
 }
 
 void io_context::run() noexcept {
+  // Increment running_workers BEFORE any check so stop() always observes
+  // this worker regardless of how far run() has progressed.  This closes
+  // the use-after-free window: if stop() destroys the io_context while a
+  // worker is inside run(), the worker would access freed memory.
+  // Previously each native backend performed this increment deep inside
+  // its own run() loop, which left a window between set_global_state()
+  // and the increment where stop() saw 0 workers.
+  running_workers_.fetch_add(1, std::memory_order_acq_rel);
+
   if (global_state_.closing.load(std::memory_order_acquire) ||
       !native_available_.load(std::memory_order_acquire)) {
+    running_workers_.fetch_sub(1, std::memory_order_acq_rel);
     return;
   }
 
   detail::native_context ctx(native_.options);
   if (!ctx.is_open()) {
+    running_workers_.fetch_sub(1, std::memory_order_acq_rel);
     return;
   }
   ctx.set_global_state(&global_state_);
@@ -77,6 +88,8 @@ void io_context::run() noexcept {
   // the native context was fully opened.
   if (global_state_.closing.load(std::memory_order_acquire)) {
     (void)ctx.stop();
+    ctx.set_global_state(nullptr);
+    running_workers_.fetch_sub(1, std::memory_order_acq_rel);
     return;
   }
 
@@ -84,6 +97,11 @@ void io_context::run() noexcept {
   current_context_ = this;
   current_worker_native_ = &ctx;
   ctx.run();
+  // Clear the pointer so the native context destructor does not
+  // access global_state_ after stop() returns and the caller
+  // destroys the io_context.
+  ctx.set_global_state(nullptr);
+  running_workers_.fetch_sub(1, std::memory_order_acq_rel);
   current_worker_native_ = nullptr;
   current_context_ = previous_context;
 }
@@ -105,7 +123,7 @@ int io_context::stop() noexcept {
   // running_workers on exit — no hard-coded timeout needed.
   const bool in_worker_context = is_in_context();
   const std::size_t self_count = in_worker_context ? 1 : 0;
-  while (global_state_.running_workers.load(std::memory_order_acquire) >
+  while (running_workers_.load(std::memory_order_acquire) >
          self_count) {
     (void)global_state_.wake_channel_.wake();
     std::this_thread::yield();

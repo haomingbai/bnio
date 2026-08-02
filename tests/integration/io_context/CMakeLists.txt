@@ -25,3 +25,14 @@ bnio_add_integration_io_context_test(steady_timer steady_timer_test.cpp
                                      PROPERTIES TIMEOUT 10)
 bnio_add_integration_io_context_test(tcp tcp_test.cpp)
 bnio_add_integration_io_context_test(udp udp_test.cpp)
+bnio_add_integration_io_context_test(
+  lifecycle_stop_run_uaf
+  lifecycle/stop_run_uaf_test.cpp
+  PROPERTIES TIMEOUT 120)
+bnio_add_integration_io_context_test(
+  lifecycle_finish_phase3_operation_leak
+  lifecycle/finish_phase3_operation_leak_test.cpp)
+bnio_add_integration_io_context_test(
+  lifecycle_stop_operation_completion
+  lifecycle/stop_operation_completion_test.cpp
+  PROPERTIES TIMEOUT 10)
