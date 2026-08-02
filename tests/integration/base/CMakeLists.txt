@@ -7,3 +7,4 @@ function(bnio_add_integration_base_test name source)
 endfunction()
 
 bnio_add_integration_base_test(ring ring_test.cpp PROPERTIES TIMEOUT 10)
+bnio_add_integration_base_test(wake_channel wake_channel_test.cpp)
