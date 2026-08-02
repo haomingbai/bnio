@@ -57,9 +57,6 @@ class BNIO_EXPORT wake_channel {
   /** Returns the fd workers should register read interest on. */
   [[nodiscard]] int read_fd() const noexcept;
 
-  /** Returns the fd to write to for waking workers. */
-  [[nodiscard]] int write_fd() const noexcept;
-
   /**
    * Writes one unit to the eventfd counter to wake workers.
    *

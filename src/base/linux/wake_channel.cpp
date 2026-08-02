@@ -50,8 +50,6 @@ bool wake_channel::is_open() const noexcept { return fd_ >= 0; }
 
 int wake_channel::read_fd() const noexcept { return fd_; }
 
-int wake_channel::write_fd() const noexcept { return fd_; }
-
 int wake_channel::wake() noexcept {
   if (fd_ < 0) {
     return -EBADF;
