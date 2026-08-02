@@ -6,7 +6,6 @@
 #include <bnio/io_context.h>
 
 #include <atomic>
-#include <cstddef>
 
 namespace bnio {
 

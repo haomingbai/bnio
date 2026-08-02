@@ -9,7 +9,6 @@
 #include <atomic>
 #include <cstddef>
 #include <mutex>
-#include <utility>
 
 #include "bnio/async_io/time.h"
 #include "bnio/detail/posix/io_context/steady_timer.h"
