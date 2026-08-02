@@ -180,6 +180,19 @@ class BNIO_EXPORT kqueue_context {
   void apply_context_options(const kqueue_context_options& options) noexcept;
   void assert_running() const noexcept;
 
+  /**
+   * Initialises run-loop state and returns whether the worker may proceed.
+   *
+   * On failure the caller must exit early after restoring current_context_.
+   */
+  [[nodiscard]] bool enter_run() noexcept;
+
+  /**
+   * Repeatedly drains timer expirations and local CPU tasks until the
+   * CPU queue is empty. Used by finish() to drain abort-generated tasks.
+   */
+  void drain_local_cpu_tasks() noexcept;
+
   void push_cpu_tasks(operation_queue& operations) noexcept;
   [[nodiscard]] bool consume_global_state() noexcept;
   [[nodiscard]] bool consume_local_state() noexcept;

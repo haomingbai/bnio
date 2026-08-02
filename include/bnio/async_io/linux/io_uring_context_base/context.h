@@ -357,6 +357,19 @@ class BNIO_EXPORT io_uring_context {
                        bnio::base::params& queue_params) noexcept;
 
   /**
+   * Initialises run-loop state and returns whether the worker may proceed.
+   *
+   * On failure the caller must exit early after restoring current_context_.
+   */
+  [[nodiscard]] bool enter_run() noexcept;
+
+  /**
+   * Repeatedly drains CPU tasks, timer expirations, and optionally CQEs
+   * until the local task queue is empty.
+   */
+  void drain_local_tasks(bool include_cqe) noexcept;
+
+  /**
    * Applies configuration from options to context member variables.
    */
   void apply_context_options(const io_uring_context_options& options) noexcept;
