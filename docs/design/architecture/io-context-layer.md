@@ -24,7 +24,7 @@ cohesive `detail` state objects rather than defining all internal data inline:
 | `detail::native_context_state` | `detail/posix/io_context/state.h` | Native options used to create contexts lazily. |
 | `detail::native_worker_state` | `detail/posix/io_context/state.h` | Atomically published head of the native-worker list. |
 | `detail::native_worker` | `detail/posix/io_context/native_worker.h` | Per-run-thread owner of one native context. |
-| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake-worker count, and worker-group closing state. |
+| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake-worker count, and worker-group stopping state (`life_state`). |
 | `detail::timer_state_data` | `detail/posix/io_context/timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
 
 The aggregate `detail/posix/io_context/native_io.h` is included after the complete
@@ -104,14 +104,16 @@ local CPU queue. No reusable timer SQE or timer-update request exists.
 The shared state is owned by `io_context`, not by any native context. Worker
 registration calls `set_global_state()` before publishing the new worker at the
 list head. `run()` uses that state for CPU work, I/O work, the passive timer
-callback, the awake-worker count, and the group closing flag. A standalone
+callback, the awake-worker count, and the group `life_state` flag (0=running, 1=stopping). A standalone
 native context must also receive externally owned state before `run()`; no
 hidden shared-state fallback is allocated.
 
-`io_context::stop()` sets the shared `closing` flag before scanning and waking
-native workers. Worker registration checks the same flag both before and after
-publishing a new slot, so a worker that races with the stop scan cannot enter a
-new idle run loop.
+`io_context::stop()` atomically transitions the shared `life_state` from 0
+(running) to 1 (stopping) via CAS before calling `stop_internal()`, which
+aborts pending timer waits and wakes every native worker via the shared
+wake channel. Worker registration and the `run()` path both check
+`life_state` before and after publishing a new slot, so a worker that races
+with the stop transition cannot enter a new idle run loop.
 
 Before a worker blocks, it publishes sleeping in two stages: first its local
 waiting flag, then a decrement of the shared awake-worker count. It then

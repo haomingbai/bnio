@@ -85,7 +85,7 @@ bnio
 │   │   ├── io_uring_context              platform event-loop owner (non-movable)
 │   │   ├── io_uring_context_options      context configuration
 │   │   ├── io_uring_operation_base       intrusive operation node
-│   │   ├── io_uring_task_queue_state     shared queues + wake/closing state
+│   │   ├── io_uring_task_queue_state     shared queues + wake/stopping state
 │   │   └── io_uring_*_operation          concrete I/O operations
 │   └── bsd_native                        BSD-specific event loop
 │       ├── socket_address                BSD-native sockaddr storage
@@ -93,7 +93,7 @@ bnio
 │       ├── kqueue_context_options        context configuration
 │       ├── kqueue_operation_base         intrusive CPU operation node
 │       ├── kqueue_io_operation_base      readiness operation node
-│       └── kqueue_task_queue_state       shared queues + wake/closing state
+│       └── kqueue_task_queue_state       shared queues + wake/stopping state
 ├── io_context                            Layer 3: high-level async context
 │   ├── operation_base                    intrusive shared-I/O node
 │   ├── basic_scheduler<Kind>             dispatch/post scheduler handles

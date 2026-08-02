@@ -56,8 +56,8 @@ and provides a single-threaded event loop. Under the **one-thread-one-uring**
 model, each run-loop thread owns its own `io_uring_context` (allocated from
 `io_context`'s native worker pool). All workers in one high-level context share
 an `io_uring_task_queue_state`. That state contains separate MPSC CPU and I/O
-queues, the number of workers currently published as awake, and the closing
-state of the whole worker group. It deliberately has no I/O count, batch
+queues, the number of workers currently published as awake, and the stopping
+state (`life_state`) of the whole worker group. It deliberately has no I/O count, batch
 threshold, explicit-drain flag, timer, or lock. A standalone
 `io_uring_context` must likewise be given an externally owned task queue state
 before `run()`.
@@ -170,19 +170,24 @@ class io_uring_io_operation_base : public io_uring_operation_base {
 public:
     virtual void prepare(base::submission_queue_entry& sqe) noexcept = 0;
     virtual void complete_submit_error(int result) noexcept = 0;
+    virtual void complete_submit_stopped() noexcept = 0;
 };
 
 struct io_uring_task_queue_state {
     std::atomic<io_uring_operation_base*> cpu_head;
     std::atomic<io_uring_io_operation_base*> io_head;
     std::atomic<std::size_t> awake_workers;
-    std::atomic_bool closing;
+    std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
+    void* timeout_heap = nullptr;
+    try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
+    bnio::base::wake_channel wake_channel_;
 };
 ```
 
-`closing` belongs to the worker group. Once `io_context::stop()` sets it, every
-worker treats the run loop as finishing, including a worker racing with late
-registration.
+`life_state` belongs to the worker group. Once `io_context::stop()` sets it
+to 1 (stopping) via CAS, every worker treats the run loop as finishing,
+including a worker racing with late registration. Workers check
+`closing_requested()` (life_state != 0) in `should_finish()`.
 
 Ready CQEs are collected at the beginning of every ready-task pass. The run
 loop then drains its local CPU list and the shared CPU queue before atomically
@@ -199,7 +204,7 @@ without a timer.
 
 The BSD backend uses the same CPU/I/O publication split. A
 `kqueue_task_queue_state` owns separate MPSC heads, `awake_workers`, and the
-worker-group `closing` flag. With no shared state selected, a standalone
+worker-group `life_state` flag (std::atomic<int>, 0=running, 1=stopping). With no shared state selected, a standalone
 `kqueue_context` keeps non-atomic local CPU and I/O queues.
 
 ```cpp

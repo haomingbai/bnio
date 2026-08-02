@@ -78,7 +78,7 @@ into one `posix_context` that embeds either `base::kqueue` or `base::ring`.
 ### Why now
 
 `kqueue_task_queue_state` and `io_uring_task_queue_state` are field-for-field
-identical (`cpu_head`, `io_head`, `awake_workers`, `running_workers`, `closing`,
+identical (`cpu_head`, `io_head`, `awake_workers`, `life_state`,
 `timeout_heap`, `try_fetch_timeout_operations`, `wake_channel_`); only the
 element type name differs. The `*_operation_base` classes are equally isomorphic
 (`next`, `result`, `flags`, virtual `execute()`). The run-loop phase machines

@@ -212,10 +212,21 @@ pending waits on the timer-ready list with stopped completion. It does not
 submit a native timer operation merely to recompute a deadline, because
 passive deadline selection happens naturally on the next worker loop check.
 
-Once `io_context::stop()` begins closing the context, timer completion
-dispatch is no longer attempted. There is no runnable context left to consume
-it, and this prevents shutdown/destruction from referencing a finished native
-context.
+When `io_context::stop()` is called, `abort_pending_timer_waits()` - called
+by `stop_internal()` before waking workers - iterates every active and
+inactive timer slot. Each slot's pending submitted waits are detached,
+marked `timer_completion_kind::stopped`, and enqueued into
+`timers_.ready`. Every native worker that enters its `finish()` path then
+drains these stopped completions via `consume_timeout_operations()` during
+its regular Phase 1 drain loop, so every receiver waiting on a timer
+receives `set_stopped()`.
+
+`abort_pending_timer_waits()` is called before workers are woken to
+observe the stopped state (`life_state`) (the CAS has already published
+stopping, but the worker wake loop runs only afterward). This ordering
+ensures that stopped timer completions are enqueued while workers are
+still executing, preventing the receiver-hanging problem where timer ops
+were silently freed by the destructor without any completion signal.
 
 ## Invariants
 
