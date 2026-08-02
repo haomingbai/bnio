@@ -134,7 +134,8 @@ int io_uring_context::enable_ring() noexcept {
 
 void io_uring_context::assert_running() const noexcept {
 #ifndef NDEBUG
-  assert(state_.load(std::memory_order_acquire) == context_state::running);
+  const context_state s = state_.load(std::memory_order_acquire);
+  assert(s == context_state::running || s == context_state::finishing);
 #endif
 }
 
