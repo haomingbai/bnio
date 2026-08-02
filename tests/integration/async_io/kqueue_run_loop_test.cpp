@@ -223,7 +223,7 @@ TEST(KqueueRunLoopTest, shared_closing_state_finishes_the_worker) {
   context.set_global_state(&global_state);
   EXPECT_EQ(context.queue_init(), 0);
 
-  global_state.closing.store(true, std::memory_order_release);
+  global_state.life_state.store(true, std::memory_order_release);
   context.run();
 
   EXPECT_EQ(global_state.awake_workers.load(std::memory_order_acquire), 0);

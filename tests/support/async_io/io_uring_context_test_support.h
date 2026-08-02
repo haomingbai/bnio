@@ -328,7 +328,7 @@ inline bool is_unsupported_ring_error(int result) {
 // Not thread-safe: callers only use this before publishing the state.
 inline void reset_task_queue_state(
     io_uring_task_queue_state& global_tasks) noexcept {
-  global_tasks.closing.store(false, std::memory_order_relaxed);
+  global_tasks.life_state.store(0, std::memory_order_relaxed);
   global_tasks.cpu_head.store(nullptr, std::memory_order_relaxed);
   global_tasks.io_head.store(nullptr, std::memory_order_relaxed);
   global_tasks.awake_workers.store(0, std::memory_order_relaxed);

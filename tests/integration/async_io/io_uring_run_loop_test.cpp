@@ -152,7 +152,7 @@ TEST(IoUringRunLoopTest, shared_closing_state_finishes_the_worker) {
     GTEST_SKIP() << "io_uring is unavailable";
   }
 
-  global_state.closing.store(true, std::memory_order_release);
+  global_state.life_state.store(true, std::memory_order_release);
   context.run();
 
   EXPECT_EQ(global_state.awake_workers.load(std::memory_order_acquire), 0);
