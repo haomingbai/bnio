@@ -28,6 +28,17 @@ TEST(AddressTest, behavior) {
   EXPECT_NE(loopback_v4.v4(), nullptr);
   EXPECT_EQ(*loopback_v4.v4(), k_loopback_v4);
 
+  // Cover address::v4(uint32_t) and host_order_to_v4_bytes/set_v4(uint32_t).
+  auto uint_v4 = bnio::async_io::ip::address::v4(0x7f000001U);
+  EXPECT_TRUE(uint_v4.is_v4());
+  EXPECT_EQ(uint_v4.to_v4(), 0x7f000001U);
+
+  constexpr address::v4_bytes k_google_dns{8, 8, 8, 8};
+  auto google_v4 = bnio::async_io::ip::address::v4(k_google_dns);
+  EXPECT_TRUE(google_v4.is_v4());
+  EXPECT_EQ(google_v4.to_v4(), 0x08080808U);
+  EXPECT_EQ(*google_v4.v4(), k_google_dns);
+
   auto loopback_v6 = bnio::async_io::ip::address::loopback_v6();
   EXPECT_TRUE(loopback_v6.is_v6());
   EXPECT_EQ(loopback_v6.v4(), nullptr);
