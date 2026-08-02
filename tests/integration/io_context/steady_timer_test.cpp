@@ -510,4 +510,56 @@ TEST(SteadyTimerTest, inflight_timer_wait_aborted_by_io_context_stop) {
   EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
+TEST(SteadyTimerTest, steady_timer_move_assignment) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  bnio::steady_timer timer(context);
+  EXPECT_EQ(timer.expires_after(std::chrono::seconds(30)), 0);
+
+  bnio::steady_timer other(context);
+  EXPECT_EQ(other.expires_after(std::chrono::milliseconds(1)), 0);
+
+  // Move-assign: should cancel timer's wait and take over other's state.
+  timer = std::move(other);
+
+  void_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = timer.async_wait();
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->signal, signal_kind::value);
+}
+
+// Cover self-assignment guard in move assignment operator.
+TEST(SteadyTimerTest, steady_timer_self_move_assignment) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  bnio::steady_timer timer(context);
+  EXPECT_EQ(timer.expires_after(std::chrono::milliseconds(1)), 0);
+
+  // Self-move-assignment should be a no-op.
+  timer = std::move(timer);
+
+  void_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = timer.async_wait();
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->signal, signal_kind::value);
+}
+
 }  // namespace
