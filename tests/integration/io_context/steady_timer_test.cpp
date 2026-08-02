@@ -62,6 +62,30 @@ TEST(SteadyTimerTest, steady_timer_completes) {
   EXPECT_EQ(state->signal, signal_kind::value);
 }
 
+TEST(SteadyTimerTest, steady_timer_with_explicit_expiry) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  using clock = bnio::steady_timer::clock;
+  auto soon = clock::now() + std::chrono::milliseconds(1);
+  bnio::steady_timer timer(context, soon);
+
+  EXPECT_EQ(timer.expiry(), soon);
+
+  void_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto sender = timer.async_wait();
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->signal, signal_kind::value);
+}
+
 TEST(SteadyTimerTest, inactive_timer_wait_completes_on_loop_check) {
   bnio::io_context context;
   if (!context_available(context)) {
