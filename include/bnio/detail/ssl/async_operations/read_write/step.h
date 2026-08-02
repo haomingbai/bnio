@@ -249,9 +249,7 @@ class ssl_io_step_operation {
         state_->phase = ssl_io_phase::application;
         complete_value(std::error_code{}, 0);
         return;
-      case ssl_resume_action::handshake:
-      case ssl_resume_action::shutdown:
-        complete_error(std::make_error_code(std::errc::protocol_error));
+      default:
         return;
     }
   }
