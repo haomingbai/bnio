@@ -32,7 +32,7 @@ class ssl_io_step_sender {
   explicit ssl_io_step_sender(State* state) noexcept : state_(state) {}
 
   template <class Receiver>
-  auto connect(Receiver receiver) const {
+  auto connect(Receiver receiver) const noexcept {
     return ssl_io_step_operation<State, std::remove_cvref_t<Receiver>>(
         state_, std::move(receiver));
   }

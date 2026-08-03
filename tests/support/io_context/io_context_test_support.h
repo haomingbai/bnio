@@ -64,8 +64,6 @@ struct byte_receiver {
     }
   }
 
-  // set_error has been folded into the ec branch of set_value(ec, ...)
-
   void set_stopped() noexcept {
     // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
@@ -108,8 +106,6 @@ struct socket_receiver {
       (void)context->stop();
     }
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
@@ -158,8 +154,6 @@ struct void_receiver {
     }
   }
 
-  // set_error has been folded into the ec branch of set_value(ec, ...)
-
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
     if (completions != nullptr) {
@@ -190,8 +184,6 @@ struct poll_receiver {
       (void)context->stop();
     }
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     // Triggered only by io_context::stop()
@@ -239,8 +231,6 @@ struct schedule_receiver {
     }
   }
 
-  // set_error has been folded into the ec branch of set_value(ec, ...)
-
   void set_stopped() noexcept {
     // Triggered only by io_context::stop(); former stop_token cancellation now
     // goes through set_value(operation_canceled)
@@ -279,8 +269,6 @@ struct dispatch_inline_outer_receiver {
     state->completed_during_start = state->signal == signal_kind::value;
     (void)context->stop();
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;

@@ -184,10 +184,10 @@ All senders complete with `set_value(std::error_code, ...)` as the universal
 observable exit: the leading `ec` distinguishes success (`ec == {}`),
 recoverable failure (`ec == <errno-derived>`), and user stop-token
 cancellation (`ec == operation_canceled`). `set_stopped()` is emitted
-exclusively by `io_context::stop()` aborting an inflight operation. bnio's
-native operations never emit `set_error` — none of their `completion_signatures`
-include it — so receivers connected to bnio senders only implement
-`set_value` and `set_stopped`.
+exclusively by `io_context::stop()` aborting an inflight operation. The bnio
+sender/receiver contract uses only these two completion channels; `set_error`
+is not part of it — no bnio `completion_signatures` include it, and no bnio
+receiver implements it.
 
 ### Internal Header Layout
 

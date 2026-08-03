@@ -218,7 +218,7 @@ imposes hard constraints:
 auto sender = socket.async_read(scheduler, buffer, 0);
 auto op = std::move(sender).connect(my_receiver);
 op.start();
-// op must remain alive until the receiver gets set_value/set_error/set_stopped.
+// op must remain alive until the receiver gets set_value/set_stopped.
 ```
 
 Composite senders such as write-all operations own additional nested state:

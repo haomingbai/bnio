@@ -174,7 +174,7 @@ class write_all_step_sender {
   explicit write_all_step_sender(State* state) noexcept : state_(state) {}
 
   template <class Receiver>
-  auto connect(Receiver receiver) const {
+  auto connect(Receiver receiver) const noexcept {
     return write_all_step_operation<State, std::remove_cvref_t<Receiver> >(
         state_, std::move(receiver));
   }
@@ -227,17 +227,6 @@ class write_all_operation {
 
     void set_value(std::error_code ec, std::size_t bytes_written) noexcept {
       operation_->complete_value(ec, bytes_written);
-    }
-
-    template <class Error>
-    void set_error(Error&& error) noexcept {
-      // bexec::repeat_until's completion_signatures unconditionally include
-      // set_error_t(std::exception_ptr), so this member is required for
-      // compilation. The exception path is never reached at runtime (child
-      // steps only send set_value/set_stopped, and neither predicate nor
-      // factory throws). Absorb the error by forwarding it through the value
-      // channel as set_value(ec, bytes).
-      operation_->complete_error(std::forward<Error>(error));
     }
 
     void set_stopped() noexcept {
@@ -302,20 +291,6 @@ class write_all_operation {
     // written so far
     bexec::set_value(std::move(receiver_),
                      std::make_error_code(std::errc::operation_canceled),
-                     state_.transferred);
-  }
-
-  void complete_error(std::error_code error) noexcept {
-    // Unrecoverable internal exception: pass through to the receiver via
-    // set_value(ec, bytes_written)
-    bexec::set_value(std::move(receiver_), error, state_.transferred);
-  }
-
-  template <class Error>
-  void complete_error(Error&&) noexcept {
-    // Unrecoverable internal exception (unknown error type)
-    bexec::set_value(std::move(receiver_),
-                     std::make_error_code(std::errc::protocol_error),
                      state_.transferred);
   }
 

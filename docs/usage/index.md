@@ -88,9 +88,10 @@ int main() {
 `set_value(ec, ...)` is the universal observable exit: success, recoverable
 failure, and user stop-token cancellation all flow through it with the
 leading `std::error_code` distinguishing the case. bnio's native operations
-are `noexcept` and never emit `set_error`; none of their `completion_signatures`
-include it, so a receiver connected to a bnio sender only needs `set_value`
-and `set_stopped`. `set_stopped()` is emitted exclusively by
+are `noexcept`, and the sender/receiver contract uses only two completion
+channels: `set_value(ec, ...)` and `set_stopped()`. `set_error` is not part
+of the contract — no bnio `completion_signatures` include it, and no bnio
+receiver implements it. `set_stopped()` is emitted exclusively by
 `io_context::stop()` aborting an inflight operation. Receivers may also
 expose `get_env()` when they need to provide stop tokens or other receiver
 environment queries.
@@ -130,10 +131,10 @@ what work they start and what value they send on success.
 All of these senders complete with `set_value(std::error_code, ...)` as the
 universal exit (the leading `ec` distinguishes success, recoverable failure,
 and user stop-token cancellation). `set_stopped()` is emitted exclusively by
-`io_context::stop()` aborting an inflight operation. bnio's native operations
-never emit `set_error` — none of their `completion_signatures` include it —
-so a receiver connected to a bnio sender only needs `set_value` and
-`set_stopped`.
+`io_context::stop()` aborting an inflight operation. The bnio sender/receiver
+contract uses only these two completion channels; `set_error` is not part of
+it — no bnio `completion_signatures` include it, and no bnio receiver
+implements it.
 
 Read and write names are intentionally precise:
 
@@ -311,9 +312,8 @@ class sender_awaiter {
 The important properties are the same as for manual sender/receiver usage:
 
 - The underlying operation is still lazy until `bexec::start()` is called.
-- The receiver still receives `set_value` or `set_stopped` — bnio senders
-  never emit `set_error`, so the adapter does not need it for bnio's own
-  senders.
+- The receiver still receives `set_value` or `set_stopped` — the adapter only
+  handles these two completion channels.
 - The operation state is stored inside the awaiter and must remain alive until
   completion.
 - Any compatible bnio sender can be adapted this way with an awaiter that

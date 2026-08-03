@@ -108,8 +108,6 @@ struct receiver {
     }
   }
 
-  // set_error has been folded into the ec branch of set_value(ec, ...)
-
   void set_stopped() noexcept {
     // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
@@ -137,8 +135,6 @@ struct poll_receiver {
       (void)context->stop();
     }
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     // Triggered only by io_context::stop()
@@ -176,8 +172,6 @@ struct resolve_receiver {
       (void)context->stop();
     }
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     // Triggered only by io_context::stop()
@@ -230,13 +224,10 @@ struct batch_receiver {
     state->all_in_context = state->all_in_context &&
                             (context != nullptr && context->is_in_context());
     // Stop only when completed==target on success; stop immediately on error
-    // (matching the old set_error behavior)
     if ((ec || state->completed == target) && context != nullptr) {
       (void)context->stop();
     }
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     ++state->stopped;
@@ -265,13 +256,10 @@ struct post_batch_receiver {
     state->all_in_context = state->all_in_context &&
                             (context != nullptr && context->is_in_context());
     // Stop only when completed==target on success; stop immediately on error
-    // (matching the old set_error behavior)
     if ((ec || state->completed == target) && context != nullptr) {
       (void)context->stop();
     }
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     ++state->stopped;
@@ -310,8 +298,6 @@ struct concurrent_batch_receiver {
       }
     }
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     state->stopped.fetch_add(1, std::memory_order_acq_rel);

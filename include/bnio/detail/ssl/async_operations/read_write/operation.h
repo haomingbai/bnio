@@ -47,16 +47,6 @@ class ssl_io_operation {
       operation_->complete_value(ec, bytes);
     }
 
-    template <class Error>
-    void set_error(Error&& error) noexcept {
-      // bexec::repeat_until's completion_signatures unconditionally include
-      // set_error_t(std::exception_ptr); this member is required for
-      // compilation and is never reached at runtime (child steps only send
-      // set_value/set_stopped, and neither predicate nor factory throws).
-      // Defensively forward to complete_error (via set_value(ec, bytes)).
-      operation_->complete_error(std::forward<Error>(error));
-    }
-
     void set_stopped() noexcept {
       // Distinguish stop-token cancellation from io_context::stop().
       // repeat_until::drain() checks the stop_token before each round and
@@ -133,20 +123,6 @@ class ssl_io_operation {
     // transferred so far
     bexec::set_value(std::move(receiver_),
                      std::make_error_code(std::errc::operation_canceled),
-                     state_.bytes);
-  }
-
-  void complete_error(std::error_code error) noexcept {
-    // Unrecoverable internal exception: pass through to the receiver via
-    // set_value(ec, bytes)
-    bexec::set_value(std::move(receiver_), error, state_.bytes);
-  }
-
-  template <class Error>
-  void complete_error(Error&&) noexcept {
-    // Unrecoverable internal exception (unknown error type)
-    bexec::set_value(std::move(receiver_),
-                     std::make_error_code(std::errc::protocol_error),
                      state_.bytes);
   }
 

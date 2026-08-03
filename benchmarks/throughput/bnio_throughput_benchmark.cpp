@@ -249,8 +249,6 @@ class sender_awaiter {
       awaiter_->resume();
     }
 
-    // set_error has been folded into the ec branch of set_value(ec, ...)
-
     void set_stopped() noexcept {
       awaiter_->result_ = result_type::stopped();
       awaiter_->resume();

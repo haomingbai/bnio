@@ -82,9 +82,6 @@ class ssl_async_operation_base {
       operation_->handle_transport_complete(ec, bytes);
     }
 
-    // Removed: transport no longer sends set_error; ec is passed via
-    // set_value(ec, bytes)
-
     void set_stopped() noexcept { operation_->post_complete_stopped(); }
 
    private:

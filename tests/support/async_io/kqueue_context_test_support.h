@@ -67,8 +67,6 @@ struct receiver {
     complete();
   }
 
-  // set_error has been folded into the ec branch of set_value(ec, ...)
-
   void set_stopped() noexcept {
     // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
@@ -98,8 +96,6 @@ struct poll_receiver {
     }
     complete();
   }
-
-  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     // Triggered only by io_context::stop()

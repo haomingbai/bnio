@@ -188,7 +188,7 @@ class native_io_operation : public io_context::operation_base {
       this->result = result;
       this->flags = 0;
       if (result < 0) {
-        // errno routes through set_value(ec, ...), not set_error.
+        // errno routes through the value channel via set_value(ec, ...).
         completion_ = completion_kind::value_with_ec;
         error_ = errno_result(result);
       } else {
