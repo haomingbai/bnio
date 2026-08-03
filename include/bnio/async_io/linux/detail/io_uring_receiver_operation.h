@@ -90,8 +90,9 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
   void execute() noexcept override {
     switch (completion_) {
       case io_uring_receiver_completion::value:
-        // §9.2 guard: CQE 处理器只更新 result/flags,不重分类 completion_。
-        // 当 result < 0 时(-errno)必须从 result 重新派生 ec,否则错误被掩盖。
+        // §9.2 guard: CQE handler only updates result/flags; it does not
+        // reclassify completion_. When result < 0 (-errno), ec must be
+        // re-derived from result, otherwise the error would be masked.
         if (result < 0) {
           bexec::set_value(std::move(receiver_),
                            std::error_code(-result, std::generic_category()),

@@ -31,9 +31,6 @@ struct counting_recv {
   void set_stopped() noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
   }
-  void set_error(std::error_code) noexcept {
-    if (counter) counter->fetch_add(1, std::memory_order_relaxed);
-  }
 };
 
 struct timer_recv {
@@ -42,9 +39,6 @@ struct timer_recv {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
   }
   void set_stopped() noexcept {
-    if (counter) counter->fetch_add(1, std::memory_order_relaxed);
-  }
-  void set_error(std::error_code) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
   }
 };

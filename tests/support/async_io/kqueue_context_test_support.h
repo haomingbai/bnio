@@ -67,10 +67,10 @@ struct receiver {
     complete();
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
-    // 仅 io_context::stop() 触发
+    // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
     complete();
   }
@@ -99,10 +99,10 @@ struct poll_receiver {
     complete();
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
-    // 仅 io_context::stop() 触发
+    // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
     complete();
   }

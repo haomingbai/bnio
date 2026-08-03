@@ -135,14 +135,15 @@ class write_all_step_operation {
  private:
   void handle_value(std::error_code ec, std::size_t bytes) noexcept {
     if (ec) {
-      // 失败/取消：终结。必须设 done=true 让 repeat_until 的 predicate
-      // 退出循环，否则会无限重试同一个失败操作。
+      // Failure/cancellation: terminate. Must set done=true so repeat_until's
+      // predicate exits the loop; otherwise the same failed operation would be
+      // retried forever.
       state_->done = true;
       complete_value(ec, state_->transferred);
       return;
     }
     if (bytes == 0) {
-      // EOF（对端关闭）：终结。
+      // EOF (peer closed): terminate.
       state_->done = true;
       complete_value(std::make_error_code(std::errc::broken_pipe),
                      state_->transferred);
@@ -230,17 +231,22 @@ class write_all_operation {
 
     template <class Error>
     void set_error(Error&& error) noexcept {
-      // bexec::repeat_until 内部异常路径：透传给 complete_error（走
-      // set_value(ec, bytes)）
+      // bexec::repeat_until's completion_signatures unconditionally include
+      // set_error_t(std::exception_ptr), so this member is required for
+      // compilation. The exception path is never reached at runtime (child
+      // steps only send set_value/set_stopped, and neither predicate nor
+      // factory throws). Absorb the error by forwarding it through the value
+      // channel as set_value(ec, bytes).
       operation_->complete_error(std::forward<Error>(error));
     }
 
     void set_stopped() noexcept {
-      // 区分 stop-token 取消 vs io_context::stop()
-      // repeat_until::drain() 在每轮开始前检查 stop_token，若为 true 发
-      // set_stopped — 这是 stop-token 取消 step::child_receiver::set_stopped()
-      // 来自 transport 层的 io_context::stop() 中断 — 这是 set_stopped
-      // 应保留的场景
+      // Distinguish stop-token cancellation from io_context::stop().
+      // repeat_until::drain() checks the stop_token before each round and
+      // sends set_stopped if true — that is stop-token cancellation reaching
+      // step::child_receiver::set_stopped(). An io_context::stop() interruption
+      // from the transport layer is the case where set_stopped should be
+      // preserved.
       if (detail::stop_requested(operation_->receiver_)) {
         operation_->complete_canceled();
       } else {
@@ -271,13 +277,14 @@ class write_all_operation {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      // stop token 在启动前已请求：取消，带上已写字节数（=0）
+      // Stop token already requested before start: cancel, reporting bytes
+      // written (=0)
       complete_value(std::make_error_code(std::errc::operation_canceled),
                      state_.transferred);
       return;
     }
     if (state_.empty()) {
-      // 空缓冲：成功，0 字节
+      // Empty buffer: succeed with 0 bytes
       complete_value(std::error_code{}, state_.transferred);
       return;
     }
@@ -291,20 +298,22 @@ class write_all_operation {
   }
 
   void complete_canceled() noexcept {
-    // stop-token 取消：上报 ec=operation_canceled 与已写累计
+    // stop-token cancellation: report ec=operation_canceled with the bytes
+    // written so far
     bexec::set_value(std::move(receiver_),
                      std::make_error_code(std::errc::operation_canceled),
                      state_.transferred);
   }
 
   void complete_error(std::error_code error) noexcept {
-    // 不可恢复内部异常：通过 set_value(ec, bytes_written) 透传给 receiver
+    // Unrecoverable internal exception: pass through to the receiver via
+    // set_value(ec, bytes_written)
     bexec::set_value(std::move(receiver_), error, state_.transferred);
   }
 
   template <class Error>
   void complete_error(Error&&) noexcept {
-    // 不可恢复内部异常（未知错误类型）
+    // Unrecoverable internal exception (unknown error type)
     bexec::set_value(std::move(receiver_),
                      std::make_error_code(std::errc::protocol_error),
                      state_.transferred);

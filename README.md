@@ -32,19 +32,13 @@ struct timer_receiver {
   // set_value carries the result, including a leading std::error_code:
   //   ec == {}       → success
   //   ec == canceled → user stop-token was requested before completion
-  //   ec == <other>  → recoverable failure (reported through ec, not set_error)
+  //   ec == <other>  → recoverable failure (errno-derived)
   void set_value(std::error_code ec) noexcept {
     if (ec) {
       std::cout << "Timer wait failed: " << ec.message() << std::endl;
     } else {
       std::cout << "Timer expired successfully." << std::endl;
     }
-    ioc.stop();
-  }
-  // set_error is reserved for unrecoverable exceptions (e.g. a user callback
-  // throwing). bnio's native operations are noexcept and never emit it.
-  void set_error(std::error_code) noexcept {
-    std::cout << "Unrecoverable error." << std::endl;
     ioc.stop();
   }
   // set_stopped is emitted ONLY by io_context::stop() aborting an inflight

@@ -108,10 +108,10 @@ struct receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
-    // 仅 io_context::stop() 触发
+    // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
     state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
@@ -138,10 +138,10 @@ struct poll_receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
-    // 仅 io_context::stop() 触发
+    // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
     state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
@@ -177,10 +177,10 @@ struct resolve_receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
-    // 仅 io_context::stop() 触发
+    // Triggered only by io_context::stop()
     if (state != nullptr) {
       state->signal = signal_kind::stopped;
       state->in_context = (context != nullptr && context->is_in_context());
@@ -229,14 +229,14 @@ struct batch_receiver {
     }
     state->all_in_context = state->all_in_context &&
                             (context != nullptr && context->is_in_context());
-    // 成功时等 completed==target 再 stop；错误时立即 stop（与原 set_error
-    // 一致）
+    // Stop only when completed==target on success; stop immediately on error
+    // (matching the old set_error behavior)
     if ((ec || state->completed == target) && context != nullptr) {
       (void)context->stop();
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     ++state->stopped;
@@ -264,14 +264,14 @@ struct post_batch_receiver {
     }
     state->all_in_context = state->all_in_context &&
                             (context != nullptr && context->is_in_context());
-    // 成功时等 completed==target 再 stop；错误时立即 stop（与原 set_error
-    // 一致）
+    // Stop only when completed==target on success; stop immediately on error
+    // (matching the old set_error behavior)
     if ((ec || state->completed == target) && context != nullptr) {
       (void)context->stop();
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     ++state->stopped;
@@ -311,7 +311,7 @@ struct concurrent_batch_receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     state->stopped.fetch_add(1, std::memory_order_acq_rel);

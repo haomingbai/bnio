@@ -112,8 +112,9 @@ class ssl_io_step_operation {
 
   void start() noexcept {
     if (ssl_stop_requested(receiver_)) {
-      // stop-token 取消：通过 set_value(operation_canceled, bytes) 传递，
-      // 与 state_machine.h/operation.h/native_io 一致，不走 set_stopped 通道。
+      // stop-token cancellation: delivered via set_value(operation_canceled,
+      // bytes), consistent with state_machine.h/operation.h/native_io; does
+      // not use the set_stopped channel.
       complete_value(std::make_error_code(std::errc::operation_canceled),
                      state_->bytes);
       return;
@@ -292,9 +293,10 @@ class ssl_io_step_operation {
       return;
     }
     if (bytes == 0) {
-      // EOF（对端关闭）：transport 返回 0 字节且 ec 为空。终结为
-      // connection_reset 并设 done=true 让 repeat_until 退出，否则
-      // 会无限循环（SSL_read 不断得到 WANT_READ，transport 不断返回 0）。
+      // EOF (peer closed): transport returns 0 bytes with an empty ec.
+      // Terminate with connection_reset and set done=true so repeat_until
+      // exits; otherwise it would loop forever (SSL_read keeps returning
+      // WANT_READ, transport keeps returning 0).
       state_->done = true;
       complete_value(std::make_error_code(std::errc::connection_reset),
                      state_->bytes);
@@ -316,14 +318,16 @@ class ssl_io_step_operation {
   }
 
   void handle_transport_read_complete(std::size_t result) noexcept {
-    // result <= 0 不再可能：ec 已在 handle_transport_complete 过滤
+    // result <= 0 is no longer possible: ec is already filtered in
+    // handle_transport_complete
 
     char* data = nullptr;
     const int committed = BIO_nwrite(read_bio(*state_->stream), &data,
                                      ssl_bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
       complete_error(
-          last_ssl_error());  // 不变量违规：经 set_value(ec, bytes) 透传
+          last_ssl_error());  // Invariant violation: passed through
+                              // set_value(ec, bytes)
       return;
     }
 
@@ -332,14 +336,16 @@ class ssl_io_step_operation {
   }
 
   void handle_transport_write_complete(std::size_t result) noexcept {
-    // result <= 0 不再可能：ec 已在 handle_transport_complete 过滤
+    // result <= 0 is no longer possible: ec is already filtered in
+    // handle_transport_complete
 
     char* data = nullptr;
     const int consumed = BIO_nread(write_bio(*state_->stream), &data,
                                    ssl_bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {
       complete_error(
-          last_ssl_error());  // 不变量违规：经 set_value(ec, bytes) 透传
+          last_ssl_error());  // Invariant violation: passed through
+                              // set_value(ec, bytes)
       return;
     }
 
@@ -352,9 +358,10 @@ class ssl_io_step_operation {
   }
 
   void complete_error(std::error_code error) noexcept {
-    // 不可恢复内部异常：通过 set_value(ec, bytes) 透传，让 repeat_receiver 走
-    // complete_value 路径。 设 done=true 确保 repeat_until
-    // 退出，否则不变量违规路径会无限循环。
+    // Unrecoverable internal exception: passed through set_value(ec, bytes) so
+    // repeat_receiver takes the complete_value path. Set done=true to ensure
+    // repeat_until exits; otherwise the invariant-violation path would loop
+    // forever.
     state_->done = true;
     bexec::set_value(std::move(receiver_), error, state_->bytes);
   }

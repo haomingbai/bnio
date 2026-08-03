@@ -64,10 +64,10 @@ struct byte_receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
-    // 仅 io_context::stop() 触发
+    // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
     if (context != nullptr) {
       (void)context->stop();
@@ -109,7 +109,7 @@ struct socket_receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
@@ -158,7 +158,7 @@ struct void_receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;
@@ -191,10 +191,10 @@ struct poll_receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
-    // 仅 io_context::stop() 触发
+    // Triggered only by io_context::stop()
     state->signal = signal_kind::stopped;
     if (context != nullptr) {
       (void)context->stop();
@@ -239,11 +239,11 @@ struct schedule_receiver {
     }
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
-    // 仅 io_context::stop() 触发；原 stop_token 取消现在走
-    // set_value(operation_canceled)
+    // Triggered only by io_context::stop(); former stop_token cancellation now
+    // goes through set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     ++state->completions;
     if (context != nullptr && state->completions == target) {
@@ -280,7 +280,7 @@ struct dispatch_inline_outer_receiver {
     (void)context->stop();
   }
 
-  // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+  // set_error has been folded into the ec branch of set_value(ec, ...)
 
   void set_stopped() noexcept {
     state->signal = signal_kind::stopped;

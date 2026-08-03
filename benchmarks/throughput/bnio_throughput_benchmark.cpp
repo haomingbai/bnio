@@ -198,7 +198,7 @@ struct sender_value_type<bexec::type_list<std::tuple<std::error_code>>> {
   using type = void;
 };
 
-// 保留旧特化以防其他 sender 仍用旧签名
+// Keep the old specialization in case other senders still use the old signature
 template <class T>
 struct sender_value_type<bexec::type_list<std::tuple<T>>> {
   using type = T;
@@ -249,7 +249,7 @@ class sender_awaiter {
       awaiter_->resume();
     }
 
-    // set_error 已合并到 set_value(ec, ...) 的 ec 分支
+    // set_error has been folded into the ec branch of set_value(ec, ...)
 
     void set_stopped() noexcept {
       awaiter_->result_ = result_type::stopped();

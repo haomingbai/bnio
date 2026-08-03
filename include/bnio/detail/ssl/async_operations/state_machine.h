@@ -82,7 +82,8 @@ class ssl_async_operation_base {
       operation_->handle_transport_complete(ec, bytes);
     }
 
-    // 已删除：transport 层不再发 set_error，ec 通过 set_value(ec, bytes) 传递
+    // Removed: transport no longer sends set_error; ec is passed via
+    // set_value(ec, bytes)
 
     void set_stopped() noexcept { operation_->post_complete_stopped(); }
 
@@ -101,7 +102,8 @@ class ssl_async_operation_base {
 
     void set_value(std::error_code ec) noexcept {
       if (ec) {
-        // schedule 被 stop_token 取消：终结操作，ec 透传给 receiver
+        // schedule canceled by stop_token: terminate the operation, pass ec
+        // through to the receiver
         operation_->complete_value(ec);
       }
       operation_->deliver_terminal();
@@ -269,9 +271,10 @@ class ssl_async_operation_base {
       return;
     }
     if (result == 0) {
-      // EOF（对端关闭）：transport read/write 返回 0 字节且 ec 为空。
-      // 视为 connection_reset（可恢复，经 set_value(ec) 透传），否则
-      // state machine 会把 0 字节当成"继续循环"导致无限挂起。
+      // EOF (peer closed): transport read/write returns 0 bytes with an empty
+      // ec. Treat as connection_reset (recoverable, passed through via
+      // set_value(ec)); otherwise the state machine would treat 0 bytes as
+      // "keep looping" and hang forever.
       post_complete_value(std::make_error_code(std::errc::connection_reset));
       return;
     }
@@ -293,15 +296,17 @@ class ssl_async_operation_base {
   }
 
   void handle_read_complete(std::size_t result) noexcept {
-    // result <= 0 不再可能：ec 已在 handle_transport_complete 中过滤
+    // result <= 0 is no longer possible: ec is already filtered in
+    // handle_transport_complete
 
     char* data = nullptr;
     const int committed =
         BIO_nwrite(read_bio(*stream_), &data, bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
       post_complete_error(
-          last_ssl_error());  // 不变量违规：经 deliver_terminal ->
-                              // deliver_value -> set_value(ec)
+          last_ssl_error());  // Invariant violation: goes through
+                              // deliver_terminal -> deliver_value ->
+                              // set_value(ec)
       return;
     }
 
@@ -309,15 +314,17 @@ class ssl_async_operation_base {
   }
 
   void handle_write_complete(std::size_t result) noexcept {
-    // result <= 0 不再可能：ec 已在 handle_transport_complete 中过滤
+    // result <= 0 is no longer possible: ec is already filtered in
+    // handle_transport_complete
 
     char* data = nullptr;
     const int consumed =
         BIO_nread(write_bio(*stream_), &data, bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {
       post_complete_error(
-          last_ssl_error());  // 不变量违规：经 deliver_terminal ->
-                              // deliver_value -> set_value(ec)
+          last_ssl_error());  // Invariant violation: goes through
+                              // deliver_terminal -> deliver_value ->
+                              // set_value(ec)
       return;
     }
 

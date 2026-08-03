@@ -254,7 +254,7 @@ class timer_churn_benchmark {
 
 void wait_receiver::set_value(std::error_code ec) noexcept {
   if (ec == std::make_error_code(std::errc::operation_canceled)) {
-    // timer.cancel() 产生 set_value(operation_canceled)，按停止语义处理
+    // timer.cancel() produces set_value(operation_canceled); treat it as a stop
     benchmark->on_stopped(barrier);
   } else {
     benchmark->on_value(barrier);

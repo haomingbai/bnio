@@ -49,17 +49,21 @@ class ssl_io_operation {
 
     template <class Error>
     void set_error(Error&& error) noexcept {
-      // bexec::repeat_until 内部异常路径：透传给 complete_error（走
-      // set_value(ec, bytes)）
+      // bexec::repeat_until's completion_signatures unconditionally include
+      // set_error_t(std::exception_ptr); this member is required for
+      // compilation and is never reached at runtime (child steps only send
+      // set_value/set_stopped, and neither predicate nor factory throws).
+      // Defensively forward to complete_error (via set_value(ec, bytes)).
       operation_->complete_error(std::forward<Error>(error));
     }
 
     void set_stopped() noexcept {
-      // 区分 stop-token 取消 vs io_context::stop()
-      // repeat_until::drain() 在每轮开始前检查 stop_token，若为 true 发
-      // set_stopped — 这是 stop-token 取消 step::child_receiver::set_stopped()
-      // 来自 transport 层的 io_context::stop() 中断 — 这是 set_stopped
-      // 应保留的场景
+      // Distinguish stop-token cancellation from io_context::stop().
+      // repeat_until::drain() checks the stop_token before each round and
+      // sends set_stopped if true — that is stop-token cancellation reaching
+      // step::child_receiver::set_stopped(). An io_context::stop() interruption
+      // from the transport layer is the case where set_stopped should be
+      // preserved.
       if (ssl_stop_requested(operation_->receiver_)) {
         operation_->complete_canceled();
       } else {
@@ -125,20 +129,22 @@ class ssl_io_operation {
   }
 
   void complete_canceled() noexcept {
-    // stop-token 取消：上报 ec=operation_canceled 与已传输累计
+    // stop-token cancellation: report ec=operation_canceled with the bytes
+    // transferred so far
     bexec::set_value(std::move(receiver_),
                      std::make_error_code(std::errc::operation_canceled),
                      state_.bytes);
   }
 
   void complete_error(std::error_code error) noexcept {
-    // 不可恢复内部异常：通过 set_value(ec, bytes) 透传给 receiver
+    // Unrecoverable internal exception: pass through to the receiver via
+    // set_value(ec, bytes)
     bexec::set_value(std::move(receiver_), error, state_.bytes);
   }
 
   template <class Error>
   void complete_error(Error&&) noexcept {
-    // 不可恢复内部异常（未知错误类型）
+    // Unrecoverable internal exception (unknown error type)
     bexec::set_value(std::move(receiver_),
                      std::make_error_code(std::errc::protocol_error),
                      state_.bytes);

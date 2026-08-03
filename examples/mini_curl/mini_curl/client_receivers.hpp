@@ -89,8 +89,8 @@ struct mini_curl_client::timer_receiver {
   std::shared_ptr<mini_curl_client> client;
 
   void set_value(std::error_code ec) noexcept {
-    // timer 新语义：成功 ec={}，被取消 ec=operation_canceled
-    // 成功到期 → on_timeout；被成功完成取消 → do nothing
+    // New timer semantics: success ec={}, cancellation ec=operation_canceled
+    // Successful expiry -> on_timeout; canceled by successful completion -> do nothing
     if (!ec) client->on_timeout();
   }
   void set_stopped() noexcept {

@@ -33,7 +33,7 @@ factory call -> sender -> bexec::connect(receiver) -> operation
 operation -> bexec::start(operation) -> ctx.run() -> receiver completion
 ```
 
-A minimal receiver handles the three completion channels:
+A minimal receiver handles the two completion channels bnio senders emit:
 
 ```cpp
 struct read_receiver {
@@ -48,14 +48,6 @@ struct read_receiver {
     } else {
       // n bytes were transferred.
     }
-  }
-
-  // set_error is reserved for unrecoverable exceptions (e.g. a user
-  // callback throwing inside a composed operation). bnio's native
-  // operations are noexcept and never emit set_error; it is declared on
-  // every sender's completion_signatures for completeness.
-  void set_error(std::error_code ec) noexcept {
-    // Unrecoverable failure.
   }
 
   // set_stopped is emitted ONLY by io_context::stop() aborting an inflight
@@ -95,11 +87,13 @@ int main() {
 
 `set_value(ec, ...)` is the universal observable exit: success, recoverable
 failure, and user stop-token cancellation all flow through it with the
-leading `std::error_code` distinguishing the case. `set_error` is reserved
-for unrecoverable exceptions and is not produced by bnio's native
-operations. `set_stopped()` is emitted exclusively by `io_context::stop()`
-aborting an inflight operation. Receivers may also expose `get_env()` when
-they need to provide stop tokens or other receiver environment queries.
+leading `std::error_code` distinguishing the case. bnio's native operations
+are `noexcept` and never emit `set_error`; none of their `completion_signatures`
+include it, so a receiver connected to a bnio sender only needs `set_value`
+and `set_stopped`. `set_stopped()` is emitted exclusively by
+`io_context::stop()` aborting an inflight operation. Receivers may also
+expose `get_env()` when they need to provide stop tokens or other receiver
+environment queries.
 
 Schedulers are lightweight handles produced by `io_context`:
 
@@ -136,9 +130,10 @@ what work they start and what value they send on success.
 All of these senders complete with `set_value(std::error_code, ...)` as the
 universal exit (the leading `ec` distinguishes success, recoverable failure,
 and user stop-token cancellation). `set_stopped()` is emitted exclusively by
-`io_context::stop()` aborting an inflight operation. `set_error` is declared
-on every `completion_signatures` for unrecoverable exceptions but is not
-produced by bnio's native operations.
+`io_context::stop()` aborting an inflight operation. bnio's native operations
+never emit `set_error` — none of their `completion_signatures` include it —
+so a receiver connected to a bnio sender only needs `set_value` and
+`set_stopped`.
 
 Read and write names are intentionally precise:
 
@@ -277,11 +272,6 @@ class sender_awaiter {
       awaiter_->resume();
     }
 
-    void set_error(std::error_code ec) noexcept {
-      awaiter_->store_error(ec);
-      awaiter_->resume();
-    }
-
     void set_stopped() noexcept {
       awaiter_->store_stopped();
       awaiter_->resume();
@@ -321,7 +311,9 @@ class sender_awaiter {
 The important properties are the same as for manual sender/receiver usage:
 
 - The underlying operation is still lazy until `bexec::start()` is called.
-- The receiver still receives `set_value`, `set_error`, or `set_stopped`.
+- The receiver still receives `set_value` or `set_stopped` — bnio senders
+  never emit `set_error`, so the adapter does not need it for bnio's own
+  senders.
 - The operation state is stored inside the awaiter and must remain alive until
   completion.
 - Any compatible bnio sender can be adapted this way with an awaiter that
