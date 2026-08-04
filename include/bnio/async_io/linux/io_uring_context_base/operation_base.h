@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <mutex>
 
 namespace bnio::base {
 class submission_queue_entry;
@@ -60,6 +61,16 @@ struct BNIO_EXPORT io_uring_task_queue_state {
    * behaviour.
    */
   bnio::base::wake_channel wake_channel_;
+
+  /** Submit-path lock shared by publish_cpu() and begin_stop().
+   *
+   * Both the "check state + enqueue + wake" submission critical section and
+   * the stop-path state transition run inside this lock, so an operation
+   * that observed the context as running is guaranteed to be drained by the
+   * last worker's finish(), and an operation that observes the stopping
+   * state never enqueues into a queue that may no longer be drained.
+   */
+  std::mutex submit_lock;
 };
 
 /**

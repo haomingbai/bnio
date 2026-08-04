@@ -71,7 +71,10 @@ class native_io_operation : public io_context::operation_base {
       error_ = std::make_error_code(std::errc::operation_canceled);
       this->result = 0;
       this->flags = 0;
-      context_->publish_cpu(*this);
+      if (!context_->publish_cpu(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
       return;
     }
 
@@ -84,7 +87,13 @@ class native_io_operation : public io_context::operation_base {
       // (§9.2 guard). Eagerly setting value_with_ec here would leak a stale
       // EAGAIN ec when the eventual perform_io() succeeds.
       completion_ = completion_kind::value;
-      context_->publish_io(*this);
+      if (!context_->publish_io(*this)) {
+        // Context already stopping: complete inline with stopped (the same
+        // completion abort_inflight_io would deliver) instead of publishing
+        // into a context that is shutting down.
+        complete_submit_stopped();
+        execute();
+      }
     } else {
       // Immediate completion (success or non-EAGAIN errno).
       if (this->result < 0) {
@@ -93,7 +102,10 @@ class native_io_operation : public io_context::operation_base {
       } else {
         completion_ = completion_kind::value;
       }
-      context_->publish_cpu(*this);
+      if (!context_->publish_cpu(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
     }
   }
 
@@ -193,12 +205,21 @@ class native_poll_operation : public io_context::operation_base {
       // stop-token cancel: set_value(operation_canceled, ...).
       completion_ = completion_kind::value_with_ec;
       error_ = std::make_error_code(std::errc::operation_canceled);
-      context_->publish_cpu(*this);
+      if (!context_->publish_cpu(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
       return;
     }
 
     completion_ = completion_kind::value;
-    context_->publish_io(*this);
+    if (!context_->publish_io(*this)) {
+      // Context already stopping: complete inline with stopped (the same
+      // completion abort_inflight_io would deliver) instead of publishing
+      // into a context that is shutting down.
+      complete_submit_stopped();
+      execute();
+    }
   }
 
   void execute() noexcept override {
@@ -269,7 +290,10 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
 
   void start() noexcept {
     canceled_ = stop_requested(receiver_);
-    context_->publish_cpu(*this);
+    if (!context_->publish_cpu(*this)) {
+      // Context already stopping: complete inline instead of stranding.
+      execute();
+    }
   }
 
   void execute() noexcept override {

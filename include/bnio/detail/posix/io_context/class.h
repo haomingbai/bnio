@@ -159,7 +159,13 @@ class BNIO_EXPORT io_context {
           }
         }
 
-        context_->publish_cpu(*this);
+        // The submission critical section (locked state check + enqueue)
+        // is ordered against stop()'s state transition by the submit lock.
+        // If the context is already stopping, publish_cpu() rejects the
+        // enqueue and we complete inline so the operation never strands.
+        if (!context_->publish_cpu(*this)) {
+          complete();
+        }
       }
 
       /**
@@ -374,10 +380,7 @@ class BNIO_EXPORT io_context {
       operation& operator=(operation&&) = delete;
 
       void start() noexcept {
-        int expected = 0;  // running
-        if (context_->global_state_.life_state.compare_exchange_strong(
-                expected, 1,  // 1 = stopping
-                std::memory_order_acq_rel, std::memory_order_acquire)) {
+        if (context_->begin_stop()) {
           // This thread is responsible for stopping.
           context_->stop_internal();
           context_->stopped_.store(true, std::memory_order_release);
@@ -614,16 +617,53 @@ class BNIO_EXPORT io_context {
 
   /**
    * Publishes an operation for passive native submission by a worker.
+   *
+   * Mirrors publish_cpu: checks the shutdown state under the submit lock
+   * and, only while the context is not stopping, enqueues the operation
+   * and wakes a sleeping worker as needed. The wake-channel write is bound
+   * to the submit lock (see wake_locked), so it can never race the
+   * destructor's close.
+   *
+   * @return true if the operation was published; false if the context is
+   *         already stopping and the operation was NOT enqueued — the
+   *         caller must complete it inline (set_stopped), mirroring the
+   *         abort path.
    */
-  void publish_io(operation_base& operation) noexcept;
+  [[nodiscard]] bool publish_io(operation_base& operation) noexcept;
 
-  /** Publishes CPU work for execution by one context run-loop worker. */
-  void publish_cpu(detail::native_operation_base& operation) noexcept;
+  /**
+   * Publishes CPU work for execution by one context run-loop worker.
+   *
+   * Checks the shutdown state under the submit lock and, only while the
+   * context is not stopping, enqueues the operation and wakes a sleeping
+   * worker as needed. publish_cpu assumes the publish happens against a
+   * running context; the in-lock state check makes that assumption explicit
+   * and atomic with the enqueue.
+   *
+   * @return true if the operation was published (enqueued, or posted to the
+   *         worker-local queue); false if the context is already stopping
+   *         and the operation was NOT enqueued — the caller must complete
+   *         it inline (e.g. set_stopped) so it never strands.
+   *
+   * Only state-involving work (check, enqueue, wake decision) runs inside
+   * the critical section; the caller executes the operation afterwards.
+   */
+  [[nodiscard]] bool publish_cpu(detail::native_operation_base& operation) noexcept;
 
   void wake_one_worker() noexcept;
 
   /** Wakes one worker only when every published worker is sleeping. */
   void wake_one_if_all_workers_sleeping() noexcept;
+
+  // Internal wake helpers. The *_locked variants require the caller to
+  // already hold global_state_.submit_lock; they are used by the publish
+  // paths so the wake-channel write stays bound to the submit lock without
+  // re-locking. The public wake_one_worker / wake_one_if_all_workers_sleeping
+  // acquire the lock themselves and re-check the shutdown state first:
+  // after ~io_context has published the terminal state and closed the
+  // channel under the same lock, a wake would write to a closed fd.
+  void wake_locked() noexcept;
+  void wake_if_all_sleeping_locked() noexcept;
 
   void register_timer(detail::timer_slot& timer) noexcept;
 
@@ -663,6 +703,22 @@ class BNIO_EXPORT io_context {
    */
   int stop_internal() noexcept;
 
+  /**
+   * Elects this thread as the stopping thread and publishes the stopping
+   * state inside the submit-path lock.
+   *
+   * Ordering the state transition against publish_cpu()'s
+   * check-state + enqueue critical section (same lock) is what binds
+   * enqueue to state: operations that passed the check are drained before
+   * workers exit, and operations that see the stopping state do not
+   * enqueue. The election CAS on stop_requested_ keeps exactly one
+   * stopping thread while stop() and join() share this path.
+   *
+   * @return true if this thread owns the stop, false if another thread
+   *         already owns it (the caller must wait for stopped_).
+   */
+  [[nodiscard]] bool begin_stop() noexcept;
+
   // Consumes the timer's lock-protected list of active wait operations.
   [[nodiscard]] detail::timer_operation_queue take_timer_operations_locked(
       detail::timer_slot& timer) noexcept;
@@ -681,6 +737,10 @@ class BNIO_EXPORT io_context {
   /** Worker lifecycle counter. Incremented at the top of run(), decremented
    *  on every return path. io_context::stop() polls this until zero. */
   std::atomic<std::size_t> running_workers_{0};
+
+  /** Stop-thread election flag. Exactly one thread wins the CAS and then
+   *  publishes life_state inside the submit-path lock (see begin_stop()). */
+  std::atomic<int> stop_requested_{0};
 
   /** Signalled when the context has fully stopped. Join() waiters spin
    *  on this flag. Independent from life_state to avoid torn reads. */

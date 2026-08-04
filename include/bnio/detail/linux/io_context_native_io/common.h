@@ -138,7 +138,10 @@ class native_io_operation : public io_context::operation_base {
       error_ = std::make_error_code(std::errc::operation_canceled);
       this->result = 0;
       this->flags = 0;
-      context_->publish_cpu(*this);
+      if (!context_->publish_cpu(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
       return;
     }
 
@@ -147,7 +150,13 @@ class native_io_operation : public io_context::operation_base {
     }
 
     completion_ = completion_kind::value;
-    context_->publish_io(*this);
+    if (!context_->publish_io(*this)) {
+      // Context already stopping: complete inline with stopped (the same
+      // completion abort_inflight_io would deliver) instead of publishing
+      // into a context that is shutting down.
+      complete_submit_stopped();
+      execute();
+    }
   }
 
   void execute() noexcept override {
@@ -194,7 +203,10 @@ class native_io_operation : public io_context::operation_base {
       } else {
         completion_ = completion_kind::value;
       }
-      context_->publish_cpu(*this);
+      if (!context_->publish_cpu(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
       return true;
     } else {
       return false;
@@ -253,7 +265,10 @@ class resolve_operation
 
   void start() noexcept {
     canceled_ = stop_requested(receiver_);
-    context_->publish_cpu(*this);
+    if (!context_->publish_cpu(*this)) {
+      // Context already stopping: complete inline instead of stranding.
+      execute();
+    }
   }
 
   void execute() noexcept override {

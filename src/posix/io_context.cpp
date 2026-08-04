@@ -53,8 +53,17 @@ io_context::~io_context() noexcept {
     global_state_.try_fetch_timeout_operations = nullptr;
   }
 
-  // The wake channel is owned by io_context and outlives all workers.
-  global_state_.wake_channel_.close();
+  // Bind the wake-channel close to the submit lock. publish_cpu /
+  // publish_io and every wake helper write the channel inside the same
+  // lock, so a close can never race a wake write (Issue 2's write-after-
+  // close use-after-free). Publishing the terminal state first also makes
+  // every later submission observe the stopping state and reject inline
+  // instead of touching the queue or the channel after destruction begins.
+  {
+    std::lock_guard guard(global_state_.submit_lock);
+    global_state_.life_state.store(1, std::memory_order_release);
+    global_state_.wake_channel_.close();
+  }
 }
 
 bool io_context::is_open() const noexcept {
@@ -107,11 +116,7 @@ void io_context::run() noexcept {
 }
 
 int io_context::stop() noexcept {
-  // Try to become the stopping thread.
-  int expected = 0;  // running
-  if (!global_state_.life_state.compare_exchange_strong(
-          expected, 1,  // 1 = stopping
-          std::memory_order_acq_rel, std::memory_order_acquire)) {
+  if (!begin_stop()) {
     // Already stopping or stopped — spin until fully stopped.
     while (!stopped_.load(std::memory_order_acquire)) {
       std::this_thread::yield();
@@ -123,6 +128,24 @@ int io_context::stop() noexcept {
   stop_internal();
   stopped_.store(true, std::memory_order_release);
   return 0;
+}
+
+bool io_context::begin_stop() noexcept {
+  // Elect exactly one stopping thread; stop() and join() share this path.
+  int expected = 0;
+  if (!stop_requested_.compare_exchange_strong(
+          expected, 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
+    return false;
+  }
+  // Publish the stopping state inside the same lock used by publish_cpu()'s
+  // state-check + enqueue critical section, binding enqueue to the state.
+  // Any operation that passed the check before this store is ordered before
+  // the workers' final drain and is guaranteed to complete.
+  {
+    std::lock_guard<std::mutex> guard(global_state_.submit_lock);
+    global_state_.life_state.store(1, std::memory_order_release);
+  }
+  return true;
 }
 
 int io_context::stop_internal() noexcept {

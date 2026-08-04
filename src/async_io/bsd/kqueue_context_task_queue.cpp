@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <cerrno>
+#include <mutex>
 
 #include "kqueue_context_internal.h"
 
@@ -121,6 +122,14 @@ int kqueue_context::trigger_wakeup() noexcept {
   // Fall back to per-context EVFILT_USER NOTE_TRIGGER for legacy
   // standalone operation (no global state).
   if (global_state_ != nullptr && global_state_->wake_channel_.is_open()) {
+    // Bind the shared wake-channel write to the submit lock so the
+    // io_context destructor's close (under the same lock) can never race
+    // it. Re-check after acquiring the lock: the channel may have been
+    // closed while we waited for the lock.
+    std::lock_guard guard(global_state_->submit_lock);
+    if (!global_state_->wake_channel_.is_open()) {
+      return -EBADF;
+    }
     return global_state_->wake_channel_.wake();
   }
 

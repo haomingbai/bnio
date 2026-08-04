@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <cerrno>
+#include <mutex>
 
 #include "io_uring_context_internal.h"
 
@@ -81,8 +82,18 @@ void io_uring_context::end_wait() noexcept {
 }
 
 int io_uring_context::signal_eventfd() noexcept {
-  return global_state_ != nullptr ? global_state_->wake_channel_.wake()
-                                  : -EINVAL;
+  if (global_state_ == nullptr) {
+    return -EINVAL;
+  }
+  // Bind the shared wake-channel write to the submit lock so the
+  // io_context destructor's close (under the same lock) can never race
+  // it. Re-check after acquiring the lock: the channel may have been
+  // closed while we waited for the lock.
+  std::lock_guard guard(global_state_->submit_lock);
+  if (!global_state_->wake_channel_.is_open()) {
+    return -EBADF;
+  }
+  return global_state_->wake_channel_.wake();
 }
 
 void io_uring_context::drain_eventfd() noexcept {
