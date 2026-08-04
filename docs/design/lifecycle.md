@@ -323,43 +323,65 @@ Before writing bnio code, verify:
 - [ ] Views from `view()` do not outlive their owner.
 - [ ] Move-only types are moved, not copied.
 
-## Known Issues: Concurrent Shutdown
+## Concurrent Shutdown: Submit-Path Locking
 
-Two races exist when an external thread submits operations concurrently with
-another thread shutting the context down. Both are reproducible with
-deterministic thread orchestration, but their trigger probability in normal
-usage is low: each requires the submit to land inside a narrow window around the
-last worker's final drain or the context's destruction.
+Concurrent shutdown — an external thread submitting while another thread
+stops or destroys the context — is handled by one lock shared by the
+submission and the shutdown paths.
 
-### Issue 1 — Operation stranded across `stop()` (never completes)
+### The submit lock
 
-`publish_cpu()` (`src/posix/io_context_queue.cpp:24-34`) pushes into the shared
-MPSC CPU queue and never re-checks the shutdown state. If the push lands after
-the last worker's final drain in `finish()`
-(`src/async_io/bsd/kqueue_context_run_loop.cpp:298-304`) — i.e. after
-`running_workers_` has dropped to 0 — no thread ever pops the operation again,
-and its receiver never receives `set_value`/`set_stopped`. Because the context
-is single-shot (`run()` refuses to re-enter once `life_state` is non-zero), the
-operation is stranded permanently.
+`global_state_.submit_lock` (a `std::mutex`) serializes the state-involving
+parts of every submission with the shutdown / destruction state
+transitions:
 
-Trigger probability is low: the submit must fall inside the window between the
-last worker's final queue drain and the shutdown completing — a few instructions
-in practice.
+- `publish_cpu()` and `publish_io()` (non-worker paths) run
+  **lock → check the shutdown state → enqueue → wake** inside the critical
+  section. The critical section contains only state-involving work; the
+  caller executes the operation afterwards.
+- `begin_stop()` publishes the stopping state under the same lock;
+  `~io_context()` publishes the terminal state and closes the wake channel
+  under the same lock.
+- Every wake-channel write — publish paths, timer paths, native
+  `notify_one_waiter()` — is bound to the submit lock, so a close can never
+  race a write.
 
-### Issue 2 — Use-after-free when the context is destroyed mid-submit
+`publish_cpu` / `publish_io` **assume the publish happens against a running
+(non-stopped) context**; the in-lock check makes that assumption explicit
+and atomic with the enqueue. When the context is already stopping they do
+not enqueue (the queue may no longer be drained) and return `false`; the
+caller then completes the operation inline (e.g. `set_stopped`). This
+closes both previously-documented shutdown races:
 
-If a non-worker thread is inside `publish_cpu()` /
-`wake_one_if_all_workers_sleeping()` (`src/posix/io_context_queue.cpp:45-50`)
-while another thread destroys the `io_context` (`~io_context`,
-`src/posix/io_context.cpp:47-58`, which closes the wake channel), the submitter
-accesses the freed `global_state_` member — a heap use-after-free — and may
-`write()` to a closed/reused wake-channel fd. Rule 3 requires the context to
-outlive all operation usage, but the API offers no guard: a submitter holding a
-scheduler (a raw `io_context*`) cannot detect that the context has been
-destroyed, so the correct destruction timing is only enforceable by joining all
-submitting threads first.
+- an operation submitted after the last worker's final drain completes
+  inline instead of stranding in a queue no worker ever drains again;
+- an in-flight submission cannot touch the shared queue or the wake channel
+  after the destructor begins tearing the context down.
 
-Trigger probability is low: it requires destroying the context while another
-thread is still submitting, which Rule 3 already asks callers to avoid.
+`stop()` and `join()` share a single stopping thread, elected by the
+`stop_requested_` CAS; that thread flips `life_state` under the submit
+lock. The context remains single-shot: `run()` refuses to re-enter once
+`life_state` is non-zero.
 
-Both issues are tracked in the [roadmap](roadmap.md).
+### Performance overhead
+
+Measured on macOS (Apple Silicon, 18 logical cores, kqueue) with the
+internal schedule-throughput harness (report in `.artifacts/lock-bench/`):
+1M empty `schedule()` tasks per run, 5 runs per cell, 1–128 concurrent
+submitters, 1–2 workers, pre-allocated operation pools (no hot-path
+allocation). Regression vs. the lock-free baseline (negative = faster):
+
+| scheme | 1–8 submitters | 18 | 36–128 |
+|--------|---------------:|---:|-------:|
+| `std::mutex` (merged) | −1.2% | −1.0% | −2.2% |
+| spin lock (rejected) | −63.5% | −14.7% | −6.3% |
+| `std::shared_mutex` (rejected) | +42.0% | +60.5% | +97.5% |
+
+`std::mutex` is throughput-neutral (≈ −6% … +5% per cell) and stable at
+every concurrency level: serializing the tiny critical section removes the
+cross-thread CAS contention on the shared queue head that the lock-free
+path suffers from. The spin lock is dramatically faster at low contention
+(1.5–2.5×) but unstable under oversubscription — a preempted holder stalls
+every waiter, and the two measurement matrices disagreed by 20–40 points.
+The rw lock collapses above ~18 submitters (its shared-mode reader count is
+a single contended cacheline). The `std::mutex` scheme is the merged one.
