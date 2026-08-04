@@ -37,6 +37,10 @@ bnio_add_integration_io_context_test(
   lifecycle/stop_operation_completion_test.cpp
   PROPERTIES TIMEOUT 10)
 bnio_add_integration_io_context_test(
+  lifecycle_submit_after_stop
+  lifecycle/submit_after_stop_test.cpp
+  PROPERTIES TIMEOUT 10)
+bnio_add_integration_io_context_test(
   lifecycle_join
   lifecycle/join_test.cpp
   PROPERTIES TIMEOUT 10)

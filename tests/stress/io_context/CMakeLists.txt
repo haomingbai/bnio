@@ -17,3 +17,5 @@ bnio_add_stress_io_context_test(timer_stress timer_stress_test.cpp
                                 PROPERTIES TIMEOUT 10)
 bnio_add_stress_io_context_test(read_write_stress read_write_stress_test.cpp
                                 PROPERTIES TIMEOUT 10)
+bnio_add_stress_io_context_test(shutdown_submit shutdown_submit_stress_test.cpp
+                                PROPERTIES TIMEOUT 60)
