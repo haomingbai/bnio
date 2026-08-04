@@ -212,21 +212,28 @@ pending waits on the timer-ready list with stopped completion. It does not
 submit a native timer operation merely to recompute a deadline, because
 passive deadline selection happens naturally on the next worker loop check.
 
-When `io_context::stop()` is called, `abort_pending_timer_waits()` - called
-by `stop_internal()` before waking workers - iterates every active and
-inactive timer slot. Each slot's pending submitted waits are detached,
-marked `timer_completion_kind::stopped`, and enqueued into
-`timers_.ready`. Every native worker that enters its `finish()` path then
-drains these stopped completions via `consume_timeout_operations()` during
-its regular Phase 1 drain loop, so every receiver waiting on a timer
-receives `set_stopped()`.
+When `io_context::stop()` is called, `begin_stop()` first calls
+`abort_pending_timer_waits()` — **before** taking `submit_lock` and
+publishing `life_state = 1`.  The abort iterates every active and
+inactive timer slot, detaches each slot's pending submitted waits, marks
+them `timer_completion_kind::stopped`, and enqueues them into
+`timers_.ready`.  Only then is the stopping state published, so every
+native worker that later observes `life_state != 0` and enters its
+`finish()` path sees a fully populated `timers_.ready` and drains those
+stopped completions via `consume_timeout_operations()` during its Phase 1
+drain loop.  Every receiver waiting on a timer receives `set_stopped()`.
 
-`abort_pending_timer_waits()` is called before workers are woken to
-observe the stopped state (`life_state`) (the CAS has already published
-stopping, but the worker wake loop runs only afterward). This ordering
-ensures that stopped timer completions are enqueued while workers are
-still executing, preventing the receiver-hanging problem where timer ops
-were silently freed by the destructor without any completion signal.
+This ordering — abort before the stopping-state publication — is the
+happens-before guarantee: the release store of `life_state` on the stop
+thread is sequenced after `abort_pending_timer_waits()` in program order,
+and any worker's acquire load of `life_state` that observes the non-zero
+value synchronizes-with that store.  Workers that are actively spinning
+(not sleeping in a syscall) are therefore guaranteed to see the aborted
+operations on `timers_.ready` before they enter their final drain,
+closing the window where a worker could observe the stopping state,
+drain the still-empty `timers_.ready`, and exit before the abort staged
+the operations — which would permanently strand them with no worker left
+to drain.
 
 ## Invariants
 

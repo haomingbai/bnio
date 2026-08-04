@@ -363,6 +363,28 @@ closes both previously-documented shutdown races:
 lock. The context remains single-shot: `run()` refuses to re-enter once
 `life_state` is non-zero.
 
+### Timer abort ordering
+
+`begin_stop()` calls `abort_pending_timer_waits()` **before** publishing
+`life_state = 1` under `submit_lock`.  This guarantees that when any worker
+observes the stopping state and enters its final `finish()` drain, the
+aborted timer operations are already staged on `timers_.ready`.  Without
+this ordering a worker that is actively spinning (not sleeping in a syscall)
+could observe `life_state == 1`, drain the still-empty `timers_.ready` in
+`finish()`, and exit before the abort moves the operations — permanently
+stranding them with no worker left to drain.
+
+### Native context single-owner guarantee
+
+`io_uring_context` and `kqueue_context` are **single-owner, non-reentrant**
+by design.  Each call to `io_context::run()` creates a fresh native context
+instance; no two threads ever share the same native context in production
+use.  Concurrent calls to `run()` on the same native context object are
+**undefined behavior**.  The `run_active_` CAS in `enter_run()` exists to
+make races easier to detect under debug assertions, not to make concurrent
+calls correct.  Callers that bypass `io_context` and use the native
+contexts directly must ensure at most one thread calls `run()` at a time.
+
 ### Performance overhead
 
 Measured on macOS (Apple Silicon, 18 logical cores, kqueue) with the

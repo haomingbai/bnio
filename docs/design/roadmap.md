@@ -251,3 +251,28 @@ Resolved by the `lock: bind submission to the shutdown state` fix series;
 verified by `tests/integration/io_context/lifecycle/submit_after_stop_test.cpp`
 and `tests/stress/io_context/shutdown_submit_stress_test.cpp`, plus the
 deterministic lldb schedules in `.artifacts/lldb/`.
+
+- **Issue 3 — stranded timer operations:** `abort_pending_timer_waits()`
+  used to run after `begin_stop()` published `life_state = 1`.  A worker
+  that was actively spinning (not sleeping in a syscall) could observe
+  the stopping state, enter `finish()`, drain the still-empty
+  `timers_.ready`, and exit — all before `abort_pending_timer_waits()`
+  moved the parked operations to `timers_.ready`.  The operations were
+  then permanently stranded with no worker left to drain them.
+  `begin_stop()` now calls `abort_pending_timer_waits()` *before*
+  publishing the stopping state, so the aborted operations are already
+  staged on `timers_.ready` when any worker observes `life_state != 0`
+  and enters its final drain.
+
+Resolved by the `fix: order timer abort before life_state publication` fix;
+verified by `tests/stress/io_context/timer_stop_race_stress_test.cpp` and the
+GDB schedules in `.artifacts/repro_timer_race.gdb`.
+
+- **Issue 4 — nested I/O publish during finish():** `finish()` Phase 3b
+  used a single-shot `if (consume_io_tasks())` check.  An I/O operation
+  published by a receiver callback during the Phase 3b
+  `drain_local_tasks()` / `drain_local_cpu_tasks()` iteration could strand
+  in the global I/O queue (Linux) or `local_state_.io` (BSD) and be
+  silently discarded by `queue_exit()` without a completion.  Phase 3b
+  now loops `while (consume_io_tasks())` until no more I/O tasks appear,
+  closing the nested-publish window.
