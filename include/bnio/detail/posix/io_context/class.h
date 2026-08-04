@@ -691,21 +691,30 @@ class BNIO_EXPORT io_context {
    *
    *  Drains every active and inactive timer slot's submitted queue, sets
    *  each operation's completion to timer_completion_kind::stopped, and
-   *  pushes them to timers_.ready.  Worker finish() picks them up via
-   *  consume_timeout_operations().
+   *  pushes them to timers_.ready.  Called by begin_stop() BEFORE
+   *  life_state is published so that workers entering finish() observe a
+   *  fully populated timers_.ready — no worker can drain the ready list
+   *  before the abort has staged the operations.
    */
   void abort_pending_timer_waits() noexcept;
 
   /**
-   * Performs the actual stop work (abort timers, wake and wait for
-   * workers).  Assumes the caller already owns the stopping CAS,
-   * i.e. life_state == stopping.
+   * Waits for every other worker to observe the stopping state and exit.
+   * Timer waits were already aborted by begin_stop() before life_state
+   * was published, so this function only spins on the wake channel until
+   * running_workers_ drops to zero (or one, when called from a worker).
    */
   int stop_internal() noexcept;
 
   /**
-   * Elects this thread as the stopping thread and publishes the stopping
-   * state inside the submit-path lock.
+   * Elects this thread as the stopping thread, aborts pending timer
+   * waits, and publishes the stopping state inside the submit-path lock.
+   *
+   * abort_pending_timer_waits() runs BEFORE taking submit_lock so that
+   * the release-store of life_state happens after the abort in program
+   * order.  Any worker whose acquire-load of life_state observes the
+   * non-zero value is therefore guaranteed to see a fully populated
+   * timers_.ready when it enters finish().
    *
    * Ordering the state transition against publish_cpu()'s
    * check-state + enqueue critical section (same lock) is what binds

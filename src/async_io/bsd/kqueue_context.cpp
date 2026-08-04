@@ -96,7 +96,10 @@ void kqueue_context::set_global_state(kqueue_task_queue_state* state) noexcept {
 
 void kqueue_context::assert_running() const noexcept {
 #ifndef NDEBUG
-  assert(state_.load(std::memory_order_acquire) == context_state::running);
+  const context_state s = state_.load(std::memory_order_acquire);
+  // The winning thread may legitimately observe finishing if stop() was
+  // requested before run() on this native context (see io_context::run()).
+  assert(s == context_state::running || s == context_state::finishing);
 #endif
 }
 

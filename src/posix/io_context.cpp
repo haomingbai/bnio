@@ -137,6 +137,14 @@ bool io_context::begin_stop() noexcept {
           expected, 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
     return false;
   }
+  // Abort all pending timer waits BEFORE publishing the stopping state.
+  // This guarantees that when workers observe life_state != 0 and enter
+  // finish(), the aborted operations are already staged on timers_.ready.
+  // Without this ordering a worker that is actively spinning (not sleeping
+  // in a syscall) could observe life_state == 1, drain the still-empty
+  // timers_.ready in finish(), and exit before abort_pending_timer_waits()
+  // moves the operations — leaving them permanently stranded.
+  abort_pending_timer_waits();
   // Publish the stopping state inside the same lock used by publish_cpu()'s
   // state-check + enqueue critical section, binding enqueue to the state.
   // Any operation that passed the check before this store is ordered before
@@ -149,13 +157,11 @@ bool io_context::begin_stop() noexcept {
 }
 
 int io_context::stop_internal() noexcept {
-  // Abort all pending timer waits BEFORE workers observe the stopping
-  // state (already set by caller).  This keeps set_stopped as the sole
-  // signal for timer operations during shutdown.
-  abort_pending_timer_waits();
-
-  // Repeatedly signal the shared wake channel until every *other*
-  // worker has observed the stopping flag and exited.
+  // Timer waits were already aborted by begin_stop() before the stopping
+  // state was published.  Now wait for every other worker to observe the
+  // stopping flag and exit.  Workers drain timers_.ready during finish(),
+  // and the ordering in begin_stop() guarantees the operations are already
+  // staged there before any worker can enter its final drain.
   const bool in_worker_context = is_in_context();
   const std::size_t self_count = in_worker_context ? 1 : 0;
   while (running_workers_.load(std::memory_order_acquire) >
