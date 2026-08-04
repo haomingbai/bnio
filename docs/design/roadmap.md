@@ -4,7 +4,7 @@ This document describes the next phase of `bnio` development. It replaces the
 former `kqueue-roadmap.md`, which tracked the BSD port — that port is now
 complete and shipped.
 
-The next phase has one committed direction and one open branch:
+The next phase has two committed directions and one open branch:
 
 1. **POSIX `io_context` consolidation** — the committed next step. Merge the two
    structurally-mirrored native backends into one POSIX-shared implementation.
@@ -12,6 +12,8 @@ The next phase has one committed direction and one open branch:
    exclusive options: templatize the library with allocator support, or adopt
    PMR. A decision is deferred; this document presents both so the trade-offs
    can be compared.
+3. **Concurrent shutdown hardening** — fix two low-probability shutdown races
+   (stranded operations and mid-submit destruction use-after-free); see §3.
 
 ## Current state (ground truth)
 
@@ -222,3 +224,35 @@ This branch is intentionally left unresolved. The POSIX consolidation (§1) is
 the prerequisite: it removes the duplicated context/task-queue types, so
 whichever memory strategy is chosen afterwards is applied once rather than
 twice.
+
+---
+
+## 3. Concurrent shutdown hardening (known issues)
+
+Two shutdown races are documented in `docs/design/lifecycle.md` (Known Issues):
+
+- **Issue 1 — stranded operations:** an operation submitted concurrently with
+  `stop()` can land in the shared MPSC CPU queue after the last worker's final
+  drain and never complete (`set_value`/`set_stopped` never delivered).
+- **Issue 2 — mid-submit destruction UAF:** destroying the `io_context` while a
+  non-worker thread is inside `publish_cpu()`/`publish_io()` causes a heap
+  use-after-free on `global_state_` and use of a closed wake-channel fd.
+
+Both have low trigger probability in normal usage (the submit must land in a
+narrow window around the final drain or the destruction) and are reproducible
+deterministically via a three-thread orchestration. Planned fixes:
+
+- **Issue 1** needs a guaranteed final consumer. Either `stop_internal()` drains
+  the remaining queue before returning, or a shutdown handshake (an in-flight
+  submit counter plus a `draining_` flag) gates every submission entry point
+  (`publish_cpu`, `publish_io`, timer starts) with `seq_cst` ordering. A naive
+  "re-check after push" fix is unsound — it cannot distinguish a still-queued
+  operation from one already consumed and would double-complete it.
+- **Issue 2** needs API-boundary protection. Either schedulers hold a
+  reference-counted handle to the shared runtime state (delaying destruction
+  until the last reference is gone), or the lifecycle contract is documented as
+  a hard rule: all submitting threads must be joined before the context is
+  destroyed.
+
+Priority: low (low trigger probability). Scheduled after the POSIX
+consolidation (§1).

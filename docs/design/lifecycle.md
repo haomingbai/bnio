@@ -322,3 +322,44 @@ Before writing bnio code, verify:
 - [ ] `ssl_context` outlives all `ssl_stream` objects created from it.
 - [ ] Views from `view()` do not outlive their owner.
 - [ ] Move-only types are moved, not copied.
+
+## Known Issues: Concurrent Shutdown
+
+Two races exist when an external thread submits operations concurrently with
+another thread shutting the context down. Both are reproducible with
+deterministic thread orchestration, but their trigger probability in normal
+usage is low: each requires the submit to land inside a narrow window around the
+last worker's final drain or the context's destruction.
+
+### Issue 1 — Operation stranded across `stop()` (never completes)
+
+`publish_cpu()` (`src/posix/io_context_queue.cpp:24-34`) pushes into the shared
+MPSC CPU queue and never re-checks the shutdown state. If the push lands after
+the last worker's final drain in `finish()`
+(`src/async_io/bsd/kqueue_context_run_loop.cpp:298-304`) — i.e. after
+`running_workers_` has dropped to 0 — no thread ever pops the operation again,
+and its receiver never receives `set_value`/`set_stopped`. Because the context
+is single-shot (`run()` refuses to re-enter once `life_state` is non-zero), the
+operation is stranded permanently.
+
+Trigger probability is low: the submit must fall inside the window between the
+last worker's final queue drain and the shutdown completing — a few instructions
+in practice.
+
+### Issue 2 — Use-after-free when the context is destroyed mid-submit
+
+If a non-worker thread is inside `publish_cpu()` /
+`wake_one_if_all_workers_sleeping()` (`src/posix/io_context_queue.cpp:45-50`)
+while another thread destroys the `io_context` (`~io_context`,
+`src/posix/io_context.cpp:47-58`, which closes the wake channel), the submitter
+accesses the freed `global_state_` member — a heap use-after-free — and may
+`write()` to a closed/reused wake-channel fd. Rule 3 requires the context to
+outlive all operation usage, but the API offers no guard: a submitter holding a
+scheduler (a raw `io_context*`) cannot detect that the context has been
+destroyed, so the correct destruction timing is only enforceable by joining all
+submitting threads first.
+
+Trigger probability is low: it requires destroying the context while another
+thread is still submitting, which Rule 3 already asks callers to avoid.
+
+Both issues are tracked in the [roadmap](roadmap.md).
