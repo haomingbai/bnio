@@ -106,7 +106,7 @@ concept has_immediate_io = requires(Model& model) {
 #endif
 }
 
-template <class Model, class Receiver>
+template <class Model, class Receiver, bool EnableImmediate = true>
 class native_io_operation : public io_context::operation_base {
  public:
   native_io_operation(io_context& context, Model model, Receiver receiver)
@@ -188,7 +188,7 @@ class native_io_operation : public io_context::operation_base {
 
  private:
   [[nodiscard]] bool try_complete_immediate() noexcept {
-    if constexpr (has_immediate_io<Model>) {
+    if constexpr (EnableImmediate && has_immediate_io<Model>) {
       const int result = model_.try_immediate();
       if (should_wait_for_immediate_result(result)) {
         return false;
@@ -226,7 +226,7 @@ class native_io_operation : public io_context::operation_base {
   std::error_code error_;
 };
 
-template <class Model>
+template <class Model, bool EnableImmediate = true>
 class native_io_sender {
  public:
   using completion_signatures = typename Model::completion_signatures;
@@ -236,15 +236,17 @@ class native_io_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return native_io_operation<Model, std::remove_cvref_t<Receiver> >(
-        *context_, std::move(model_), std::move(receiver));
+    return native_io_operation<Model, std::remove_cvref_t<Receiver>,
+                               EnableImmediate>(*context_, std::move(model_),
+                                                std::move(receiver));
   }
 
   template <class Receiver>
     requires std::copy_constructible<Model>
   auto connect(Receiver receiver) const& {
-    return native_io_operation<Model, std::remove_cvref_t<Receiver> >(
-        *context_, model_, std::move(receiver));
+    return native_io_operation<Model, std::remove_cvref_t<Receiver>,
+                               EnableImmediate>(*context_, model_,
+                                                std::move(receiver));
   }
 
  private:

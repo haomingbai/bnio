@@ -259,7 +259,9 @@ class kqueue_accept_request {
     helper.prep_read(descriptor_);
   }
 
-  [[nodiscard]] int start_io() noexcept {
+  [[nodiscard]] int start_io() noexcept { return perform_io(); }
+
+  [[nodiscard]] int perform_io() noexcept {
     int supported_flags = 0;
 #if defined(SOCK_CLOEXEC)
     supported_flags |= SOCK_CLOEXEC;
@@ -270,11 +272,6 @@ class kqueue_accept_request {
     if ((flags_ & ~supported_flags) != 0) {
       return -EINVAL;
     }
-    const int nonblocking = detail::set_nonblocking(descriptor_);
-    return nonblocking < 0 ? nonblocking : perform_io();
-  }
-
-  [[nodiscard]] int perform_io() noexcept {
     const int accepted = ::accept(descriptor_, nullptr, nullptr);
     if (accepted < 0) {
       return detail::nonblocking_io_result(-1);
@@ -324,17 +321,28 @@ class kqueue_connect_request {
 
   [[nodiscard]] int start_io() noexcept {
     const int nonblocking = detail::set_nonblocking(descriptor_);
-    if (nonblocking < 0) {
-      return nonblocking;
-    }
-    if (::connect(descriptor_, address_.data(), address_.size()) == 0 ||
-        errno == EISCONN) {
-      return 0;
-    }
-    return detail::nonblocking_io_result(-1);
+    return nonblocking < 0 ? nonblocking : perform_io();
   }
 
   [[nodiscard]] int perform_io() noexcept {
+    if (!initiated_) {
+      const int nonblocking = detail::set_nonblocking(descriptor_);
+      if (nonblocking < 0) {
+        return nonblocking;
+      }
+      initiated_ = true;
+      const int rc = ::connect(descriptor_, address_.data(), address_.size());
+      if (rc == 0 || errno == EISCONN) {
+        return 0;
+      }
+      if (errno == EINPROGRESS || errno == EALREADY) {
+        return -EAGAIN;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        return -EAGAIN;
+      }
+      return -errno;
+    }
     int error = 0;
     socklen_t size = sizeof(error);
     if (::getsockopt(descriptor_, SOL_SOCKET, SO_ERROR, &error, &size) != 0) {
@@ -355,6 +363,7 @@ class kqueue_connect_request {
  private:
   int descriptor_;
   socket_address address_;
+  bool initiated_ = false;
 };
 
 using kqueue_receive_sender =

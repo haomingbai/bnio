@@ -40,7 +40,7 @@ enum class ssl_handshake_type;
 namespace detail {
 class descriptor_write_all_state;
 class socket_write_all_state;
-template <class Request, class Receiver>
+template <class Request, class Receiver, bool EnableImmediate>
 class native_io_operation;
 template <class Receiver>
 class native_poll_operation;
@@ -249,6 +249,7 @@ class BNIO_EXPORT io_context {
     /**
      * Creates a sender for one socket read operation.
      */
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_read_some(async_io::stream_socket_view socket,
                                        mutable_buffer buffer,
                                        int flags = 0) const;
@@ -263,19 +264,24 @@ class BNIO_EXPORT io_context {
      * Creates a sender for one socket write operation without retrying short
      * writes.
      */
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_write_some(async_io::stream_socket_view socket,
                                         const_buffer buffer,
                                         int flags = 0) const;
 
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
                                      mutable_buffer buffer,
                                      int flags = 0) const;
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
                                   const_buffer buffer, int flags = 0) const;
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
                                           mutable_buffer buffer,
                                           ip::endpoint& endpoint,
                                           int flags = 0) const;
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                      const_buffer buffer,
                                      const ip::endpoint& endpoint,
@@ -290,6 +296,7 @@ class BNIO_EXPORT io_context {
     /**
      * Creates a sender for one descriptor read operation at an offset.
      */
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
                                        mutable_buffer buffer,
                                        std::uint64_t offset = 0) const;
@@ -305,6 +312,7 @@ class BNIO_EXPORT io_context {
      * Creates a sender for one descriptor write operation at an offset without
      * retrying short writes.
      */
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
                                         const_buffer buffer,
                                         std::uint64_t offset = 0) const;
@@ -312,12 +320,14 @@ class BNIO_EXPORT io_context {
     /**
      * Creates a sender that accepts one connection.
      */
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                     int flags = 0) const;
 
     /**
      * Creates a sender that connects a socket to an endpoint.
      */
+    template <bool EnableImmediate = true>
     [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                      const ip::endpoint& endpoint) const;
 
@@ -515,7 +525,7 @@ class BNIO_EXPORT io_context {
   friend class detail::socket_write_all_state;
   template <class Receiver>
   friend class detail::timer_wait_operation;
-  template <class Request, class Receiver>
+  template <class Request, class Receiver, bool EnableImmediate>
   friend class detail::native_io_operation;
   template <class Receiver>
   friend class detail::native_poll_operation;
@@ -530,6 +540,7 @@ class BNIO_EXPORT io_context {
   [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
                                 mutable_buffer buffer, int flags = 0);
 
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_read_some(async_io::stream_socket_view socket,
                                      mutable_buffer buffer, int flags = 0);
 
@@ -544,6 +555,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender for one write operation through a non-owning
    * stream socket view.
    */
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_write_some(async_io::stream_socket_view socket,
                                       const_buffer buffer, int flags = 0);
 
@@ -554,6 +566,7 @@ class BNIO_EXPORT io_context {
                                 mutable_buffer buffer,
                                 std::uint64_t offset = 0);
 
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
                                      mutable_buffer buffer,
                                      std::uint64_t offset = 0);
@@ -567,17 +580,22 @@ class BNIO_EXPORT io_context {
   /**
    * Creates a sender for one write operation to a file descriptor.
    */
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
                                       const_buffer buffer,
                                       std::uint64_t offset = 0);
 
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
                                    mutable_buffer buffer, int flags = 0);
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
                                 const_buffer buffer, int flags = 0);
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
                                         mutable_buffer buffer,
                                         ip::endpoint& endpoint, int flags = 0);
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                    const_buffer buffer,
                                    const ip::endpoint& endpoint, int flags = 0);
@@ -585,12 +603,14 @@ class BNIO_EXPORT io_context {
    * Creates a sender that accepts one connection from a non-owning
    * listening socket view.
    */
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                   int flags = 0);
 
   /**
    * Creates a sender that connects a non-owning stream socket view.
    */
+  template <bool EnableImmediate = true>
   [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                    const ip::endpoint& endpoint);
 

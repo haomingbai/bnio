@@ -33,9 +33,12 @@ inline auto io_context::async_read(async_io::stream_socket_view socket,
       detail::socket_read_all_state(*this, socket, buffer, flags));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_read_some(async_io::stream_socket_view socket,
                                         mutable_buffer buffer, int flags) {
-  return detail::native_io_sender(
+  using request_type =
+      decltype(detail::make_stream_read_request(socket, buffer, flags));
+  return detail::native_io_sender<request_type, EnableImmediate>(
       *this, detail::make_stream_read_request(socket, buffer, flags));
 }
 
@@ -45,37 +48,53 @@ inline auto io_context::async_write(async_io::stream_socket_view socket,
       detail::socket_write_all_state(*this, socket, buffer, flags));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_write_some(async_io::stream_socket_view socket,
                                          const_buffer buffer, int flags) {
-  return detail::native_io_sender(
+  using request_type =
+      decltype(detail::make_stream_write_request(socket, buffer, flags));
+  return detail::native_io_sender<request_type, EnableImmediate>(
       *this, detail::make_stream_write_request(socket, buffer, flags));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_receive(async_io::datagram_socket_view socket,
                                       mutable_buffer buffer, int flags) {
-  return detail::native_io_sender(
+  using request_type =
+      decltype(detail::make_datagram_receive_request(socket, buffer, flags));
+  return detail::native_io_sender<request_type, EnableImmediate>(
       *this, detail::make_datagram_receive_request(socket, buffer, flags));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_send(async_io::datagram_socket_view socket,
                                    const_buffer buffer, int flags) {
-  return detail::native_io_sender(
+  using request_type =
+      decltype(detail::make_datagram_send_request(socket, buffer, flags));
+  return detail::native_io_sender<request_type, EnableImmediate>(
       *this, detail::make_datagram_send_request(socket, buffer, flags));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_receive_from(
     async_io::datagram_socket_view socket, mutable_buffer buffer,
     ip::endpoint& endpoint, int flags) {
-  return detail::native_io_sender(
+  using request_type = decltype(detail::make_datagram_receive_from_request(
+      socket, buffer, endpoint, flags));
+  return detail::native_io_sender<request_type, EnableImmediate>(
       *this, detail::make_datagram_receive_from_request(socket, buffer,
                                                         endpoint, flags));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_send_to(async_io::datagram_socket_view socket,
                                       const_buffer buffer,
                                       const ip::endpoint& endpoint, int flags) {
-  return detail::native_io_sender(*this, detail::make_datagram_send_to_request(
-                                             socket, buffer, endpoint, flags));
+  using request_type = decltype(detail::make_datagram_send_to_request(
+      socket, buffer, endpoint, flags));
+  return detail::native_io_sender<request_type, EnableImmediate>(
+      *this,
+      detail::make_datagram_send_to_request(socket, buffer, endpoint, flags));
 }
 
 inline auto io_context::async_read(async_io::descriptor_view descriptor,
@@ -85,10 +104,13 @@ inline auto io_context::async_read(async_io::descriptor_view descriptor,
       detail::descriptor_read_all_state(*this, descriptor, buffer, offset));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_read_some(async_io::descriptor_view descriptor,
                                         mutable_buffer buffer,
                                         std::uint64_t offset) {
-  return detail::native_io_sender(
+  using request_type =
+      decltype(detail::make_file_read_request(descriptor, buffer, offset));
+  return detail::native_io_sender<request_type, EnableImmediate>(
       *this, detail::make_file_read_request(descriptor, buffer, offset));
 }
 
@@ -98,22 +120,29 @@ inline auto io_context::async_write(async_io::descriptor_view descriptor,
       detail::descriptor_write_all_state(*this, descriptor, buffer, offset));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_write_some(async_io::descriptor_view descriptor,
                                          const_buffer buffer,
                                          std::uint64_t offset) {
-  return detail::native_io_sender(
+  using request_type =
+      decltype(detail::make_file_write_request(descriptor, buffer, offset));
+  return detail::native_io_sender<request_type, EnableImmediate>(
       *this, detail::make_file_write_request(descriptor, buffer, offset));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_accept(async_io::stream_socket_view socket,
                                      int flags) {
-  return detail::native_io_sender(*this,
-                                  detail::make_accept_request(socket, flags));
+  using request_type = decltype(detail::make_accept_request(socket, flags));
+  return detail::native_io_sender<request_type, EnableImmediate>(
+      *this, detail::make_accept_request(socket, flags));
 }
 
+template <bool EnableImmediate>
 inline auto io_context::async_connect(async_io::stream_socket_view socket,
                                       const ip::endpoint& endpoint) {
-  return detail::native_io_sender(
+  using request_type = decltype(detail::make_connect_request(socket, endpoint));
+  return detail::native_io_sender<request_type, EnableImmediate>(
       *this, detail::make_connect_request(socket, endpoint));
 }
 
@@ -145,10 +174,11 @@ auto io_context::basic_scheduler<Kind>::async_read(
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_read_some(
     async_io::stream_socket_view socket, mutable_buffer buffer,
     int flags) const {
-  return context_->async_read_some(socket, buffer, flags);
+  return context_->async_read_some<EnableImmediate>(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
@@ -158,37 +188,44 @@ auto io_context::basic_scheduler<Kind>::async_write(
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_write_some(
     async_io::stream_socket_view socket, const_buffer buffer, int flags) const {
-  return context_->async_write_some(socket, buffer, flags);
+  return context_->async_write_some<EnableImmediate>(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_receive(
     async_io::datagram_socket_view socket, mutable_buffer buffer,
     int flags) const {
-  return context_->async_receive(socket, buffer, flags);
+  return context_->async_receive<EnableImmediate>(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_send(
     async_io::datagram_socket_view socket, const_buffer buffer,
     int flags) const {
-  return context_->async_send(socket, buffer, flags);
+  return context_->async_send<EnableImmediate>(socket, buffer, flags);
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_receive_from(
     async_io::datagram_socket_view socket, mutable_buffer buffer,
     ip::endpoint& endpoint, int flags) const {
-  return context_->async_receive_from(socket, buffer, endpoint, flags);
+  return context_->async_receive_from<EnableImmediate>(socket, buffer, endpoint,
+                                                       flags);
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_send_to(
     async_io::datagram_socket_view socket, const_buffer buffer,
     const ip::endpoint& endpoint, int flags) const {
-  return context_->async_send_to(socket, buffer, endpoint, flags);
+  return context_->async_send_to<EnableImmediate>(socket, buffer, endpoint,
+                                                  flags);
 }
 
 template <io_context::schedule_kind Kind>
@@ -199,10 +236,11 @@ auto io_context::basic_scheduler<Kind>::async_read(
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_read_some(
     async_io::descriptor_view descriptor, mutable_buffer buffer,
     std::uint64_t offset) const {
-  return context_->async_read_some(descriptor, buffer, offset);
+  return context_->async_read_some<EnableImmediate>(descriptor, buffer, offset);
 }
 
 template <io_context::schedule_kind Kind>
@@ -213,22 +251,26 @@ auto io_context::basic_scheduler<Kind>::async_write(
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_write_some(
     async_io::descriptor_view descriptor, const_buffer buffer,
     std::uint64_t offset) const {
-  return context_->async_write_some(descriptor, buffer, offset);
+  return context_->async_write_some<EnableImmediate>(descriptor, buffer,
+                                                     offset);
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_accept(
     async_io::stream_socket_view socket, int flags) const {
-  return context_->async_accept(socket, flags);
+  return context_->async_accept<EnableImmediate>(socket, flags);
 }
 
 template <io_context::schedule_kind Kind>
+template <bool EnableImmediate>
 auto io_context::basic_scheduler<Kind>::async_connect(
     async_io::stream_socket_view socket, const ip::endpoint& endpoint) const {
-  return context_->async_connect(socket, endpoint);
+  return context_->async_connect<EnableImmediate>(socket, endpoint);
 }
 
 template <io_context::schedule_kind Kind>

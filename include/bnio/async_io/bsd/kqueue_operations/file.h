@@ -87,20 +87,25 @@ class kqueue_file_read_request {
     if (buffer_.size > 0 && buffer_.data == nullptr) {
       return -EFAULT;
     }
-    struct stat status{};
-    if (::fstat(descriptor_.native_handle(), &status) != 0) {
-      return -errno;
-    }
-    regular_file_ = S_ISREG(status.st_mode);
-    if (regular_file_) {
-      return perform_positioned_io();
-    }
-    const int nonblocking =
-        detail::set_descriptor_nonblocking(descriptor_.native_handle());
-    return nonblocking < 0 ? nonblocking : perform_io();
+    return perform_io();
   }
 
   [[nodiscard]] int perform_io() noexcept {
+    if (!resolved_) {
+      struct stat status{};
+      if (::fstat(descriptor_.native_handle(), &status) != 0) {
+        return -errno;
+      }
+      regular_file_ = S_ISREG(status.st_mode);
+      if (!regular_file_) {
+        const int nonblocking =
+            detail::set_descriptor_nonblocking(descriptor_.native_handle());
+        if (nonblocking < 0) {
+          return nonblocking;
+        }
+      }
+      resolved_ = true;
+    }
     if (regular_file_) {
       return perform_positioned_io();
     }
@@ -139,6 +144,7 @@ class kqueue_file_read_request {
   buffer_view buffer_;
   std::uint64_t offset_;
   bool regular_file_ = false;
+  bool resolved_ = false;
 };
 
 /** A descriptor write that selects file or readiness behavior in start(). */
@@ -159,20 +165,25 @@ class kqueue_file_write_request {
     if (size_ > 0 && data_ == nullptr) {
       return -EFAULT;
     }
-    struct stat status{};
-    if (::fstat(descriptor_.native_handle(), &status) != 0) {
-      return -errno;
-    }
-    regular_file_ = S_ISREG(status.st_mode);
-    if (regular_file_) {
-      return perform_positioned_io();
-    }
-    const int nonblocking =
-        detail::set_descriptor_nonblocking(descriptor_.native_handle());
-    return nonblocking < 0 ? nonblocking : perform_io();
+    return perform_io();
   }
 
   [[nodiscard]] int perform_io() noexcept {
+    if (!resolved_) {
+      struct stat status{};
+      if (::fstat(descriptor_.native_handle(), &status) != 0) {
+        return -errno;
+      }
+      regular_file_ = S_ISREG(status.st_mode);
+      if (!regular_file_) {
+        const int nonblocking =
+            detail::set_descriptor_nonblocking(descriptor_.native_handle());
+        if (nonblocking < 0) {
+          return nonblocking;
+        }
+      }
+      resolved_ = true;
+    }
     if (regular_file_) {
       return perform_positioned_io();
     }
@@ -212,6 +223,7 @@ class kqueue_file_write_request {
   std::size_t size_;
   std::uint64_t offset_;
   bool regular_file_ = false;
+  bool resolved_ = false;
 };
 
 using kqueue_file_read_sender =

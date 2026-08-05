@@ -189,6 +189,20 @@ sender/receiver contract uses only these two completion channels; `set_error`
 is not part of it — no bnio `completion_signatures` include it, and no bnio
 receiver implements it.
 
+#### Eager Immediate-Completion Toggle
+Each lowest-layer scheduler factory takes `template <bool EnableImmediate =
+true>` (`scheduler.async_read_some<false>(...)`, `async_write_some`,
+`async_accept`, `async_connect`, descriptor `async_read_some`/`async_write_some`,
+`async_receive`/`async_send`). Eager (default) issues one non-blocking syscall
+at `start()` and completes immediately unless it would block; non-eager skips
+the probe: BSD calls `perform_io()` and parks on a kqueue filter on EAGAIN,
+Linux submits the SQE directly. Results are identical in both modes — regular
+files never wait on kqueue readiness (EVFILT_READ on a regular file never
+fires), and non-eager connect still issues `::connect()`, ruling out false
+success. Linux accept/connect had no immediate attempt, so the modes are
+equivalent there. The switch threads through the native I/O operation
+templates and the read/write-all state.
+
 ### Internal Header Layout
 
 The shared `io_context` layer keeps one class declaration and one source
