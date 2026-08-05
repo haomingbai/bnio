@@ -119,7 +119,7 @@ TEST(IoContextReadWriteTest, ready_socket_read_completes_without_queue) {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
+  auto sender = receiver_socket.async_read_some(scheduler, bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -146,7 +146,7 @@ TEST(IoContextReadWriteTest, passive_drain_reads_io) {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
+  auto sender = receiver_socket.async_read_some(scheduler, bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   constexpr std::string_view payload = "passive";
@@ -278,7 +278,7 @@ TEST(IoContextReadWriteTest, io_idle_drain_reads) {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
+  auto sender = receiver_socket.async_read_some(scheduler, bnio::buffer(bytes));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   constexpr std::string_view payload = "auto";
@@ -321,7 +321,8 @@ TEST(IoContextReadWriteTest, io_idle_drain_read_write_pair) {
   write_receiver.target = 2;
   auto write_state = write_receiver.state;
 
-  auto read_sender = receiver_socket.async_read(scheduler, bnio::buffer(bytes));
+  auto read_sender =
+      receiver_socket.async_read_some(scheduler, bnio::buffer(bytes));
   auto write_sender =
       sender_socket.async_write(scheduler, bnio::buffer(payload), MSG_NOSIGNAL);
   auto read_operation =
@@ -366,7 +367,7 @@ TEST(IoContextReadWriteTest, descriptor_pipe_read_write_pair) {
   write_receiver.target = 2;
   auto write_state = write_receiver.state;
 
-  auto read_sender = scheduler.async_read(
+  auto read_sender = scheduler.async_read_some(
       bnio::async_io::descriptor_view(descriptors[0]), bnio::buffer(bytes));
   auto write_sender = scheduler.async_write(
       bnio::async_io::descriptor_view(descriptors[1]), bnio::buffer(payload));
@@ -514,13 +515,6 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
     bexec::start(operation);
 
     EXPECT_EQ(state->signal, signal_kind::none);
-#if defined(BNIO_SYSTEM_BSD)
-    std::array<char, 64> started_bytes{};
-    EXPECT_EQ(::pread(fd, started_bytes.data(), started_bytes.size(), 0),
-              static_cast<ssize_t>(payload.size()));
-    EXPECT_TRUE(
-        std::memcmp(started_bytes.data(), payload.data(), payload.size()) == 0);
-#endif
     context.run();
 
     EXPECT_EQ(state->signal, signal_kind::value);
@@ -545,9 +539,6 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     EXPECT_EQ(state->signal, signal_kind::none);
-#if defined(BNIO_SYSTEM_BSD)
-    EXPECT_TRUE(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
-#endif
     context.run();
 
     EXPECT_EQ(state->signal, signal_kind::value);
@@ -641,9 +632,12 @@ TEST(IoContextReadWriteTest, socketpair_70kb_write_all) {
 
 // Positive coverage for set_stopped: io_context::stop() interrupting an
 // inflight blocking socket read must produce set_stopped on the receiver.
-// All other tests in this file complete reads via data arrival or cancel
-// paths (ec=operation_canceled via set_value); this test exercises the pure
-// io_context::stop() interruption path.
+// async_read is read-all; with the peer never writing, the composite
+// operation parks on its first child read. io_context::stop() aborts the
+// inflight child and propagates set_stopped through the read-all loop to
+// the receiver. All other tests in this file complete reads via data arrival
+// or cancel paths (ec=operation_canceled via set_value); this test exercises
+// the pure io_context::stop() interruption path.
 TEST(IoContextReadWriteTest, inflight_socket_read_aborted_by_io_context_stop) {
   bnio::io_context context;
   if (!context_available(context)) {
@@ -656,7 +650,8 @@ TEST(IoContextReadWriteTest, inflight_socket_read_aborted_by_io_context_stop) {
   bnio::tcp_socket receiver_socket(sockets[0]);
   bnio::tcp_socket sender_socket(sockets[1]);
 
-  // Peer never writes: read blocks forever until interrupted.
+  // Peer never writes: the read-all operation parks on its first child read
+  // until interrupted.
   std::array<char, 16> bytes{};
 
   pair_byte_receiver receiver;
@@ -738,8 +733,8 @@ TEST(IoContextReadWriteTest, inflight_write_all_aborted_by_io_context_stop) {
   receiver.completions = nullptr;
   auto state = receiver.state;
 
-  auto sender = sender_socket.async_write(scheduler, bnio::buffer(payload),
-                                          MSG_NOSIGNAL);
+  auto sender =
+      sender_socket.async_write(scheduler, bnio::buffer(payload), MSG_NOSIGNAL);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
@@ -812,12 +807,12 @@ TEST(IoContextReadWriteTest, zero_size_buffer_write_reports_success) {
   EXPECT_EQ(state->size, 0u);
 }
 
-// Covers write_all_operation::repeat_receiver::set_stopped (write_all.h:245-246)
-// and complete_canceled (write_all.h:293-310): when the user stop-token is
-// requested mid-loop and io_context::stop() interrupts the inflight write_some,
-// the repeat_receiver sees stop_requested == true and calls complete_canceled,
-// which reports set_value(operation_canceled, transferred) to the downstream
-// receiver instead of set_stopped.
+// Covers write_all_operation::repeat_receiver::set_stopped
+// (write_all.h:245-246) and complete_canceled (write_all.h:293-310): when the
+// user stop-token is requested mid-loop and io_context::stop() interrupts the
+// inflight write_some, the repeat_receiver sees stop_requested == true and
+// calls complete_canceled, which reports set_value(operation_canceled,
+// transferred) to the downstream receiver instead of set_stopped.
 //
 // Setup: fill the sender's send buffer so write_some parks on EVFILT_WRITE.
 // The receiver exposes an inplace_stop_token from a source that is NOT yet
@@ -871,8 +866,8 @@ TEST(IoContextReadWriteTest, write_all_stop_token_mid_loop_canceled) {
   receiver.env = stop_env{source.get_token()};
   auto state = receiver.state;
 
-  auto sender = sender_socket.async_write(scheduler, bnio::buffer(payload),
-                                          MSG_NOSIGNAL);
+  auto sender =
+      sender_socket.async_write(scheduler, bnio::buffer(payload), MSG_NOSIGNAL);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 

@@ -21,6 +21,7 @@
 #error "bnio::detail::native_io requires a POSIX platform."
 #endif
 
+#include <bnio/detail/posix/io_context/read_all.h>
 #include <bnio/detail/posix/io_context/timer_wait.h>
 #include <bnio/detail/posix/io_context/write_all.h>
 
@@ -28,8 +29,8 @@ namespace bnio {
 
 inline auto io_context::async_read(async_io::stream_socket_view socket,
                                    mutable_buffer buffer, int flags) {
-  return detail::native_io_sender(
-      *this, detail::make_stream_read_request(socket, buffer, flags));
+  return detail::write_all_sender<detail::socket_read_all_state>(
+      detail::socket_read_all_state(*this, socket, buffer, flags));
 }
 
 inline auto io_context::async_read_some(async_io::stream_socket_view socket,
@@ -80,8 +81,8 @@ inline auto io_context::async_send_to(async_io::datagram_socket_view socket,
 inline auto io_context::async_read(async_io::descriptor_view descriptor,
                                    mutable_buffer buffer,
                                    std::uint64_t offset) {
-  return detail::native_io_sender(
-      *this, detail::make_file_read_request(descriptor, buffer, offset));
+  return detail::write_all_sender<detail::descriptor_read_all_state>(
+      detail::descriptor_read_all_state(*this, descriptor, buffer, offset));
 }
 
 inline auto io_context::async_read_some(async_io::descriptor_view descriptor,

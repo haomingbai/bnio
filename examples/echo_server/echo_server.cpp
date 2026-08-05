@@ -128,7 +128,7 @@ void echo_session::do_read() {
     }
     void set_stopped() noexcept { se->done(); }
   };
-  reg_.spawn(so_.async_read(ctx_.get_post_scheduler(), bnio::buffer(buf_)),
+  reg_.spawn(so_.async_read_some(ctx_.get_post_scheduler(), bnio::buffer(buf_)),
              R{shared_from_this()});
 }
 

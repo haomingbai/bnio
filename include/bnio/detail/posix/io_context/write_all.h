@@ -16,6 +16,8 @@ namespace bnio::detail {
 
 class socket_write_all_state {
  public:
+  static constexpr bool zero_byte_is_error = true;
+
   socket_write_all_state(io_context& context,
                          async_io::stream_socket_view socket,
                          const_buffer buffer, int flags) noexcept
@@ -54,6 +56,8 @@ class socket_write_all_state {
 
 class descriptor_write_all_state {
  public:
+  static constexpr bool zero_byte_is_error = true;
+
   descriptor_write_all_state(io_context& context,
                              async_io::descriptor_view descriptor,
                              const_buffer buffer, std::uint64_t offset) noexcept
@@ -143,10 +147,15 @@ class write_all_step_operation {
       return;
     }
     if (bytes == 0) {
-      // EOF (peer closed): terminate.
+      // Zero-byte transfer: for write-all this is an error (peer closed /
+      // broken pipe); for read-all it is EOF, which terminates successfully.
       state_->done = true;
-      complete_value(std::make_error_code(std::errc::broken_pipe),
-                     state_->transferred);
+      if constexpr (State::zero_byte_is_error) {
+        complete_value(std::make_error_code(std::errc::broken_pipe),
+                       state_->transferred);
+      } else {
+        complete_value(std::error_code{}, state_->transferred);
+      }
       return;
     }
 

@@ -138,13 +138,16 @@ implements it.
 
 Read and write names are intentionally precise:
 
-`async_read()` reads one available chunk and completes with that chunk size. It
-may complete with fewer bytes than the buffer size, including `0` for EOF on
-plain descriptors or TCP sockets.
+`async_read()` is read-all for TCP streams and file descriptors. It repeats
+bounded native reads until the supplied buffer is full or EOF is observed. EOF
+(a native read returning 0) completes successfully with `ec={}` and the number
+of bytes read so far; a size of `0` means EOF arrived before any data. A
+first-step error propagates its `ec` directly.
 
-`async_read_some()` is the explicit spelling for the same one-read behavior. It
-is useful in generic code where the distinction from write-all APIs should be
-visible.
+`async_read_some()` is the explicit spelling for one read attempt. It completes
+with the byte count of one bounded native read, which may be fewer than the
+buffer size, including `0` for EOF on plain descriptors or TCP sockets. Use it
+when the caller wants manual framing or single-read behavior.
 
 `async_write()` is write-all for TCP streams, TLS streams, and file
 descriptors. It repeats bounded native writes until the entire buffer is

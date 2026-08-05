@@ -140,7 +140,7 @@ otherwise. See the note below the Scheduler Level table for the full contract.
 
 | Factory | Owner | `set_value` (success payload) |
 |---------|-------|-------------------------------|
-| `socket.async_read(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes read by one operation |
+| `socket.async_read(scheduler, buffer, flags)` | `tcp_socket` | `size_t` total bytes read until buffer full or EOF |
 | `socket.async_read_some(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes read by one operation |
 | `socket.async_write(scheduler, buffer, flags)` | `tcp_socket` | `size_t` total bytes written |
 | `socket.async_write_some(scheduler, buffer, flags)` | `tcp_socket` | `size_t` bytes written by one operation |
@@ -164,7 +164,7 @@ The `set_value` column lists only the success payload. The actual signature is
 
 | Factory | Lowest-Layer Parameter | `set_value` (success payload) |
 |---------|------------------------|-------------------------------|
-| `scheduler.async_read(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes read by one operation |
+| `scheduler.async_read(view, buffer, flags)` | `stream_socket_view` | `size_t` total bytes read until buffer full or EOF |
 | `scheduler.async_read_some(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes read by one operation |
 | `scheduler.async_write(view, buffer, flags)` | `stream_socket_view` | `size_t` total bytes written |
 | `scheduler.async_write_some(view, buffer, flags)` | `stream_socket_view` | `size_t` bytes written by one operation |
@@ -174,7 +174,7 @@ The `set_value` column lists only the success payload. The actual signature is
 | `scheduler.async_receive(view, buffer, flags)` | `datagram_socket_view` | one datagram byte count |
 | `scheduler.async_send_to(view, buffer, endpoint, flags)` | `datagram_socket_view` | one datagram byte count |
 | `scheduler.async_receive_from(view, buffer, endpoint, flags)` | `datagram_socket_view` | one datagram byte count |
-| `scheduler.async_read(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read by one operation |
+| `scheduler.async_read(descriptor, buffer, offset)` | `descriptor_view` | `size_t` total bytes read until buffer full or EOF |
 | `scheduler.async_read_some(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read by one operation |
 | `scheduler.async_write(descriptor, buffer, offset)` | `descriptor_view` | `size_t` total bytes written |
 | `scheduler.async_write_some(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes written by one operation |

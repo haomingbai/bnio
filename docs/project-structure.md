@@ -249,6 +249,8 @@ High-level async runtime, stream owners, and buffer types.
 - `design/architecture/io-context-layer.md` — Layer 3 documentation.
 - `design/architecture/header-namespace-map.md` — header dependency graph and
   namespace map.
+- `design/architecture/io-context-read-all-eager.md` — read-all semantics and
+  the eager-optional (immediate-I/O) design for `io_context`.
 - `design/lifecycle.md` — lifetime and ownership rules.
 - `design/io_uring-setup.md` — io_uring setup flags and optimization.
 - `design/timer.md` — timer subsystem design.

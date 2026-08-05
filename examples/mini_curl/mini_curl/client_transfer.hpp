@@ -74,11 +74,11 @@ inline void mini_curl_client::receive() noexcept {
 
   if (options_.use_tls) {
     registry_.spawn(
-        ssl_stream_->async_read(scheduler, bnio::buffer(receive_buffer_)),
+        ssl_stream_->async_read_some(scheduler, bnio::buffer(receive_buffer_)),
         receive_receiver{shared_from_this()});
   } else {
     registry_.spawn(
-        socket_.async_read(scheduler, bnio::buffer(receive_buffer_)),
+        socket_.async_read_some(scheduler, bnio::buffer(receive_buffer_)),
         receive_receiver{shared_from_this()});
   }
 }

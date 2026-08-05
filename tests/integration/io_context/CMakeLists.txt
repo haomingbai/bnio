@@ -14,6 +14,8 @@ bnio_add_integration_io_context_test(io_context_accept_connect
                                      io_context_accept_connect_test.cpp)
 bnio_add_integration_io_context_test(io_context_poll
                                      io_context_poll_test.cpp)
+bnio_add_integration_io_context_test(io_context_read_all
+                                     io_context_read_all_test.cpp)
 bnio_add_integration_io_context_test(io_context_read_write
                                      io_context_read_write_test.cpp)
 bnio_add_integration_io_context_test(io_context_scheduler

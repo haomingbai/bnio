@@ -310,7 +310,7 @@ detached_task echo_session(io_context& ctx, tcp_socket sk) {
 
   while (true) {
     auto read_result =
-        co_await async_result(sk.async_read(scheduler, buffer(buf), 0));
+        co_await async_result(sk.async_read_some(scheduler, buffer(buf), 0));
     if (!read_result || read_result.value() == 0) {
       break;
     }

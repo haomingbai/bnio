@@ -27,6 +27,8 @@ namespace bnio::detail {
  */
 class socket_read_all_state {
  public:
+  static constexpr bool zero_byte_is_error = false;
+
   socket_read_all_state(io_context& context,
                         async_io::stream_socket_view socket,
                         mutable_buffer buffer, int flags) noexcept
@@ -68,6 +70,8 @@ class socket_read_all_state {
  */
 class descriptor_read_all_state {
  public:
+  static constexpr bool zero_byte_is_error = false;
+
   descriptor_read_all_state(io_context& context,
                             async_io::descriptor_view descriptor,
                             mutable_buffer buffer,

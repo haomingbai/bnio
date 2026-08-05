@@ -123,7 +123,7 @@ struct client : std::enable_shared_from_this<client> {
       void set_stopped() noexcept { c->done(); }
     };
     auto op = bexec::connect(
-        so.async_read(ctx.get_post_scheduler(), bnio::buffer(buf)),
+        so.async_read_some(ctx.get_post_scheduler(), bnio::buffer(buf)),
         R{shared_from_this()});
     bexec::start(op);
   }
