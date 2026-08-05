@@ -21,8 +21,8 @@ namespace bnio::detail {
  *
  * Its interface (remaining, current_buffer, advance, done, make_sender)
  * is identical to socket_write_all_state, so the same wire-up
- * templates – write_all_step_operation, write_all_step_sender,
- * write_all_step_factory, write_all_done_predicate, write_all_operation,
+ * templates – write_all_step_complete, write_all_step_factory,
+ * write_all_done_predicate, write_all_operation,
  * and write_all_sender – work unchanged.
  */
 class socket_read_all_state {

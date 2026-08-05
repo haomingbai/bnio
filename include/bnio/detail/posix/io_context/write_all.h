@@ -10,6 +10,8 @@
 #define BNIO_DETAIL_POSIX_IO_CONTEXT_WRITE_ALL_H_
 
 #include <bexec/detail/manual_lifetime.hpp>
+#include <bexec/just.hpp>
+#include <bexec/let.hpp>
 #include <bexec/repeat_until.hpp>
 
 namespace bnio::detail {
@@ -98,99 +100,31 @@ class descriptor_write_all_state {
   bool done = false;
 };
 
-template <class State, class Receiver>
-class write_all_step_operation {
- public:
-  using receiver_type = std::remove_cvref_t<Receiver>;
-
-  class child_receiver {
-   public:
-    explicit child_receiver(write_all_step_operation& operation) noexcept
-        : operation_(&operation) {}
-
-    [[nodiscard]] decltype(auto) get_env() const noexcept {
-      return bexec::get_env(operation_->receiver_);
-    }
-
-    void set_value(std::error_code ec, std::size_t bytes) noexcept {
-      operation_->handle_value(ec, bytes);
-    }
-
-    void set_stopped() noexcept { operation_->complete_stopped(); }
-
-   private:
-    write_all_step_operation* operation_;
-  };
-
-  using child_sender_type = decltype(std::declval<State&>().make_sender());
-  using child_operation_type = decltype(bexec::connect(
-      std::declval<child_sender_type>(), std::declval<child_receiver>()));
-
-  write_all_step_operation(State* state, Receiver receiver)
-      : state_(state), receiver_(std::move(receiver)) {}
-
-  void start() noexcept {
-    child_operation_.emplace_from([this] {
-      return bexec::connect(state_->make_sender(), child_receiver(*this));
-    });
-    bexec::start(*child_operation_);
-  }
-
- private:
-  void handle_value(std::error_code ec, std::size_t bytes) noexcept {
-    if (ec) {
-      // Failure/cancellation: terminate. Must set done=true so repeat_until's
-      // predicate exits the loop; otherwise the same failed operation would be
-      // retried forever.
-      state_->done = true;
-      complete_value(ec, state_->transferred);
-      return;
-    }
-    if (bytes == 0) {
-      // Zero-byte transfer: for write-all this is an error (peer closed /
-      // broken pipe); for read-all it is EOF, which terminates successfully.
-      state_->done = true;
-      if constexpr (State::zero_byte_is_error) {
-        complete_value(std::make_error_code(std::errc::broken_pipe),
-                       state_->transferred);
-      } else {
-        complete_value(std::error_code{}, state_->transferred);
-      }
-      return;
-    }
-
-    state_->advance(bytes);
-    complete_value(std::error_code{}, state_->transferred);
-  }
-
-  void complete_value(std::error_code ec, std::size_t bytes_written) noexcept {
-    bexec::set_value(std::move(receiver_), ec, bytes_written);
-  }
-
-  void complete_stopped() noexcept { bexec::set_stopped(std::move(receiver_)); }
-
-  State* state_;
-  receiver_type receiver_;
-  bexec::detail::manual_lifetime<child_operation_type> child_operation_;
-};
-
 template <class State>
-class write_all_step_sender {
- public:
-  using completion_signatures = bexec::completion_signatures<
-      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
-
-  explicit write_all_step_sender(State* state) noexcept : state_(state) {}
-
-  template <class Receiver>
-  auto connect(Receiver receiver) const noexcept {
-    return write_all_step_operation<State, std::remove_cvref_t<Receiver> >(
-        state_, std::move(receiver));
+[[nodiscard]] auto write_all_step_complete(State* state, std::error_code ec,
+                                           std::size_t bytes) noexcept {
+  if (ec) {
+    // Failure/cancellation: terminate. Must set done=true so repeat_until's
+    // predicate exits the loop; otherwise the same failed operation would be
+    // retried forever.
+    state->done = true;
+    return bexec::just(ec, state->transferred);
+  }
+  if (bytes == 0) {
+    // Zero-byte transfer: for write-all this is an error (peer closed /
+    // broken pipe); for read-all it is EOF, which terminates successfully.
+    state->done = true;
+    if constexpr (State::zero_byte_is_error) {
+      return bexec::just(std::make_error_code(std::errc::broken_pipe),
+                         state->transferred);
+    } else {
+      return bexec::just(std::error_code{}, state->transferred);
+    }
   }
 
- private:
-  State* state_;
-};
+  state->advance(bytes);
+  return bexec::just(std::error_code{}, state->transferred);
+}
 
 template <class State>
 class write_all_step_factory {
@@ -198,7 +132,11 @@ class write_all_step_factory {
   explicit write_all_step_factory(State* state) noexcept : state_(state) {}
 
   [[nodiscard]] auto operator()() const noexcept {
-    return write_all_step_sender<State>(state_);
+    return bexec::let_value(
+        state_->make_sender(),
+        [state = state_](std::error_code ec, std::size_t bytes) noexcept {
+          return write_all_step_complete(state, ec, bytes);
+        });
   }
 
  private:
