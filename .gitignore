@@ -20,3 +20,6 @@ coverage/
 .vscode/
 .github/
 !.github/workflows/
+
+# Exclude vim swap files
+*.swp

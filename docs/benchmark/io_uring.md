@@ -241,20 +241,20 @@ These observations are based on the benchmark data and the implementation model.
 
 6. **No errors across the entire matrix.** All 96 configurations completed cleanly — both server implementations and the client are stable under all tested configurations.
 
-### 5.10 Performance Change vs Previous Run (July 2026)
+### 5.10 Performance Change vs Previous Run (2026-07-28)
 
-The current codebase introduces additional locking in the submit path, shutdown state management, and timer abort ordering to fix several race conditions. This section compares the current results against the previous benchmark run from 2026-07-28.
+The current codebase fixes several race conditions by adding a submit-path lock, binding submission to the shutdown state, and reordering timer aborts during shutdown. The implementation lives in commits `e76b8a5` (submit-path locking) and `64908cb` (timer-abort ordering and shutdown/stranding fixes); `03b566e` and `298fb1f` document the design. This section compares the current results against the previous benchmark run from 2026-07-28.
 
 | Metric | Previous (Jul 28) | Current (Aug 4) | Change |
 | --- | ---: | ---: | ---: |
 | Overall avg ratio | 1.068× | 1.073× | +0.52% |
 | bnio wins | 40/48 | 43/48 | +3 |
-| w=1 avg ratio | 1.000× | 0.998× | −0.11% |
+| w=1 avg ratio | 1.000× | 0.998× | -0.11% |
 | w=8 avg ratio | 1.138× | 1.151× | +1.12% |
 
 Throughput performance is **stable to slightly improved** compared to the previous run. The overall ratio increased from 1.068× to 1.073×, and bnio now wins 43 out of 48 configurations (up from 40). The multi-worker scaling advantage at w=8 improved from 1.138× to 1.151×.
 
-Minor regressions exist in isolated configurations (11 configs with >2% ratio drop), primarily at w=1 and at 64 KB message sizes. The largest single-config regression is w=8/c=64/msg=64 KB (−7.1%), but this is within the noise floor for bandwidth-limited tests at tiny request counts (~1,600 req/s). These regressions are small in absolute terms and are consistent with the expected overhead of the new submit-path locking on per-operation accounting paths.
+Minor regressions exist in isolated configurations (11 configs with >2% ratio drop), primarily at w=1 and at 64 KB message sizes. The largest single-config regression is w=8/c=64/msg=64 KB (-7.1%), but this is within the noise floor for bandwidth-limited tests at tiny request counts (~1,600 req/s). These regressions are small in absolute terms and are consistent with the expected overhead of the new submit-path locking on per-operation accounting paths.
 
 ---
 
@@ -384,35 +384,33 @@ These observations are based on the benchmark data and the implementation model.
 
 ### 6.9 Performance Change vs Previous Run
 
-The current codebase introduces additional locking in the submit path, shutdown state management, and timer abort ordering to fix several race conditions (see commits `64908cb`, `298fb1f`, `e76b8a5`, `03b566e`). These changes have a measurable impact on timer-churn performance:
+The same correctness fixes described in Section 5.10 — submit-path locking, shutdown state binding, and timer-abort ordering — have a measurable impact on timer-churn performance:
 
 | Metric | Previous (Jul 28) | Current (Aug 4) | Change |
 | --- | ---: | ---: | ---: |
-| Overall avg lifecycle ratio | 1.216× | 1.081× | **−11.05%** |
-| bnio wins | 12/12 | 11/12 | −1 |
-| Best single-config ratio | 1.333× | 1.179× | −11.6% |
-| bnio peak lifecycle/s | 22,741,100 | 20,040,900 | −11.9% |
+| Overall avg lifecycle ratio | 1.216× | 1.081× | **-11.05%** |
+| bnio wins | 12/12 | 11/12 | -1 |
+| Best single-config ratio | 1.333× | 1.179× | -11.6% |
+| bnio peak lifecycle/s | 22,741,100 | 20,040,900 | -11.9% |
 | asio peak lifecycle/s | 17,996,200 | 18,837,600 | +4.7% |
 
 The regression is significant: the overall bnio/asio lifecycle ratio dropped from 1.216× to 1.081×, a decline of 11.05%. All 12 timer configurations show a regression, with the largest drops at:
 
 | Configuration | Old Ratio | New Ratio | Δ |
 | --- | ---: | ---: | ---: |
-| timers=256, rounds=500 | 1.279× | 1.017× | −20.5% |
-| timers=4,096, rounds=1,000 | 1.311× | 1.095× | −16.5% |
-| timers=4,096, rounds=500 | 1.333× | 1.147× | −14.0% |
-| timers=1,024, rounds=500 | 1.192× | 1.029× | −13.7% |
+| timers=256, rounds=500 | 1.279× | 1.017× | -20.5% |
+| timers=4,096, rounds=1,000 | 1.311× | 1.095× | -16.5% |
+| timers=4,096, rounds=500 | 1.333× | 1.147× | -14.0% |
+| timers=1,024, rounds=500 | 1.192× | 1.029× | -13.7% |
 
-**Root cause analysis:** The timer churn benchmark is an adversarial workload for the new locking scheme. Each update round performs `timers/4` destroy-and-recreate cycles plus expiry resets and async_wait starts for all live timers — every one of these operations now acquires internal locks that were previously lock-free or used more granular synchronization. With up to 16,384 timers being created, reset, cancelled, and destroyed in tight succession, the lock contention is substantial.
+**Root cause analysis:** The timer churn benchmark is an adversarial workload for the new locking scheme. Each update round performs `timers/4` destroy-and-recreate cycles, resets the expiry on the remaining timers, and starts a fresh async_wait on every live timer — every one of these operations now goes through the locked submit path and the stricter timer-abort ordering that were previously lock-free or used more granular synchronization. With up to 16,384 timers created, reset, cancelled, and destroyed in tight succession, lock contention is substantial.
 
 Specifically, the changes that contribute to this regression:
 
-1. **Submit-path locking** (`e76b8a5`): Every timer operation (create, cancel, reset, destroy) now goes through a locked submission path to ensure correctness during shutdown. Previously, some of these paths used lock-free atomic operations.
+1. **Submit-path locking and shutdown state binding** (`e76b8a5`): Every timer operation (create, cancel, reset, destroy) now goes through a locked submission path bound to the shutdown state, adding an acquisition on every submit. Previously, some of these paths used lock-free atomic operations.
 
-2. **Timer abort ordering** (`298fb1f`): Timer cancellation now follows a stricter ordering protocol to prevent use-after-free, adding synchronization points on the hot path.
+2. **Timer abort ordering and shutdown/stranding fixes** (`64908cb`): `begin_stop()` now aborts pending timer waits before publishing the stopping state, and the shutdown drain closes the timer-stranding and nested-I/O races. Together these add synchronization on the control-plane path.
 
-3. **Shutdown state binding** (`03b566e`): Operations are now bound to the shutdown state under a lock, adding an acquisition on every submit.
-
-It is important to note that **throughput is largely unaffected** (−0.11% at w=1, actually improved at w=8). The TCP echo workload is dominated by I/O completion handling, where the new locks are amortized over much larger per-operation costs. The timer churn benchmark, by contrast, stresses the pure control-plane path where lock overhead dominates.
+**Throughput is largely unaffected** (-0.11% at w=1, slightly improved at w=8): the TCP echo workload is dominated by I/O completion handling, which amortizes the new locks over much larger per-operation costs. The timer churn benchmark, by contrast, stresses the pure control-plane path, where lock overhead dominates.
 
 **Trade-off assessment:** The ~11% timer throughput regression is the cost of fixing several real race conditions that could cause crashes, hangs, or use-after-free in production use. The fixes are correctness-critical; the performance impact is confined to timer-heavy workloads and does not affect the more common network-I/O path.
