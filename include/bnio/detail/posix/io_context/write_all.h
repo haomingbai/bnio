@@ -16,6 +16,22 @@
 
 namespace bnio::detail {
 
+// Adaptive eager I/O control attached to each read-all/write-all step native
+// I/O operation. Consulted by native_io_operation::start() to decide whether
+// to probe for immediate completion. The eager flag is rewritten by the step
+// completion handler based on whether the previous step filled its buffer
+// (bytes == expected).
+template <class State>
+class adaptive_eager_control {
+ public:
+  explicit adaptive_eager_control(State* state) noexcept : state_(state) {}
+  [[nodiscard]] bool operator()() const noexcept {
+    return state_->context->enable_immediate_io() && state_->eager;
+  }
+ private:
+  State* state_;
+};
+
 class socket_write_all_state {
  public:
   static constexpr bool zero_byte_is_error = true;
@@ -38,7 +54,8 @@ class socket_write_all_state {
 
   [[nodiscard]] auto make_sender() noexcept {
     return native_io_sender(
-        *context, make_stream_write_request(socket, current_buffer(), flags));
+        *context, make_stream_write_request(socket, current_buffer(), flags),
+        adaptive_eager_control<socket_write_all_state>{this});
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -54,6 +71,9 @@ class socket_write_all_state {
   int flags;
   std::size_t transferred = 0;
   bool done = false;
+  // Adaptive eager probing: cleared when the previous step had a short
+  // transfer, so the next step skips the immediate-completion probe.
+  bool eager = true;
 };
 
 class descriptor_write_all_state {
@@ -81,8 +101,10 @@ class descriptor_write_all_state {
 
   [[nodiscard]] auto make_sender() noexcept {
     return native_io_sender(
-        *context, make_file_write_request(descriptor, current_buffer(),
-                                          offset + transferred));
+        *context,
+        make_file_write_request(descriptor, current_buffer(),
+                                offset + transferred),
+        adaptive_eager_control<descriptor_write_all_state>{this});
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -98,6 +120,9 @@ class descriptor_write_all_state {
   std::uint64_t offset;
   std::size_t transferred = 0;
   bool done = false;
+  // Adaptive eager probing: cleared when the previous step had a short
+  // transfer, so the next step skips the immediate-completion probe.
+  bool eager = true;
 };
 
 template <class State>
@@ -132,9 +157,12 @@ class write_all_step_factory {
   explicit write_all_step_factory(State* state) noexcept : state_(state) {}
 
   [[nodiscard]] auto operator()() const noexcept {
+    const std::size_t expected = state_->remaining();
     return bexec::let_value(
         state_->make_sender(),
-        [state = state_](std::error_code ec, std::size_t bytes) noexcept {
+        [state = state_, expected](std::error_code ec,
+                                   std::size_t bytes) noexcept {
+          state->eager = (bytes == expected);
           return write_all_step_complete(state, ec, bytes);
         });
   }

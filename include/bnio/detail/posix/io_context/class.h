@@ -40,7 +40,7 @@ enum class ssl_handshake_type;
 namespace detail {
 class descriptor_write_all_state;
 class socket_write_all_state;
-template <class Request, class Receiver>
+template <class Request, class Control, class Receiver>
 class native_io_operation;
 template <class Receiver>
 class native_poll_operation;
@@ -527,7 +527,7 @@ class BNIO_EXPORT io_context {
   friend class detail::socket_write_all_state;
   template <class Receiver>
   friend class detail::timer_wait_operation;
-  template <class Request, class Receiver>
+  template <class Request, class Control, class Receiver>
   friend class detail::native_io_operation;
   template <class Receiver>
   friend class detail::native_poll_operation;
