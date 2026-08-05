@@ -47,7 +47,8 @@ class socket_read_all_state {
 
   [[nodiscard]] auto make_sender() noexcept {
     return native_io_sender(
-        *context, make_stream_read_request(socket, current_buffer(), flags));
+        *context, make_stream_read_request(socket, current_buffer(), flags),
+        adaptive_eager_control<socket_read_all_state>{this});
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -63,6 +64,9 @@ class socket_read_all_state {
   int flags;
   std::size_t transferred = 0;
   bool done = false;
+  // Adaptive eager probing: cleared when the previous step had a short
+  // transfer, so the next step skips the immediate-completion probe.
+  bool eager = true;
 };
 
 /**
@@ -93,9 +97,11 @@ class descriptor_read_all_state {
   }
 
   [[nodiscard]] auto make_sender() noexcept {
-    return native_io_sender(*context,
-                            make_file_read_request(descriptor, current_buffer(),
-                                                   offset + transferred));
+    return native_io_sender(
+        *context,
+        make_file_read_request(descriptor, current_buffer(),
+                               offset + transferred),
+        adaptive_eager_control<descriptor_read_all_state>{this});
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -111,6 +117,9 @@ class descriptor_read_all_state {
   std::uint64_t offset;
   std::size_t transferred = 0;
   bool done = false;
+  // Adaptive eager probing: cleared when the previous step had a short
+  // transfer, so the next step skips the immediate-completion probe.
+  bool eager = true;
 };
 
 // read_all_sender reuses write_all_sender with a read-specific state.

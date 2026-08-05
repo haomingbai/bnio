@@ -21,6 +21,15 @@ namespace bnio::detail {
   return std::error_code(-result, std::generic_category());
 }
 
+// Default eager control: consult the context immutable switch.
+class context_eager_control {
+ public:
+  explicit context_eager_control(io_context* context) noexcept : context_(context) {}
+  [[nodiscard]] bool operator()() const noexcept { return context_->enable_immediate_io(); }
+ private:
+  io_context* context_;
+};
+
 template <class Receiver>
 [[nodiscard]] bool stop_requested(const Receiver& receiver) noexcept {
   auto env = bexec::get_env(receiver);
@@ -106,12 +115,14 @@ concept has_immediate_io = requires(Model& model) {
 #endif
 }
 
-template <class Model, class Receiver>
+template <class Model, class Control, class Receiver>
 class native_io_operation : public io_context::operation_base {
  public:
-  native_io_operation(io_context& context, Model model, Receiver receiver)
+  native_io_operation(io_context& context, Model model, Control control,
+                      Receiver receiver)
       : context_(&context),
         model_(std::move(model)),
+        control_(std::move(control)),
         receiver_(std::move(receiver)) {}
 
   void prepare(bnio::base::submission_queue_entry& sqe) noexcept override {
@@ -191,7 +202,7 @@ class native_io_operation : public io_context::operation_base {
     if constexpr (has_immediate_io<Model>) {
       // The runtime switch gates eager probing; when disabled the operation
       // goes straight to io_uring submission in start().
-      if (!context_->enable_immediate_io()) {
+      if (!control_()) {
         return false;
       }
 
@@ -227,35 +238,45 @@ class native_io_operation : public io_context::operation_base {
 
   io_context* context_;
   Model model_;
+  Control control_;
   std::remove_cvref_t<Receiver> receiver_;
   completion_kind completion_ = completion_kind::value;
   std::error_code error_;
 };
 
-template <class Model>
+template <class Model, class Control = context_eager_control>
 class native_io_sender {
  public:
   using completion_signatures = typename Model::completion_signatures;
 
   native_io_sender(io_context& context, Model model) noexcept
-      : context_(&context), model_(std::move(model)) {}
+      : context_(&context),
+        model_(std::move(model)),
+        control_(context_eager_control{&context}) {}
+
+  native_io_sender(io_context& context, Model model, Control control) noexcept
+      : context_(&context),
+        model_(std::move(model)),
+        control_(std::move(control)) {}
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return native_io_operation<Model, std::remove_cvref_t<Receiver> >(
-        *context_, std::move(model_), std::move(receiver));
+    return native_io_operation<Model, Control, std::remove_cvref_t<Receiver> >(
+        *context_, std::move(model_), std::move(control_),
+        std::move(receiver));
   }
 
   template <class Receiver>
-    requires std::copy_constructible<Model>
+    requires std::copy_constructible<Model> && std::copy_constructible<Control>
   auto connect(Receiver receiver) const& {
-    return native_io_operation<Model, std::remove_cvref_t<Receiver> >(
-        *context_, model_, std::move(receiver));
+    return native_io_operation<Model, Control, std::remove_cvref_t<Receiver> >(
+        *context_, model_, control_, std::move(receiver));
   }
 
  private:
   io_context* context_;
   Model model_;
+  Control control_;
 };
 
 template <class Receiver>

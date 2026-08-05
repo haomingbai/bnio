@@ -33,12 +33,23 @@ template <class Receiver>
   return std::error_code(-result, std::generic_category());
 }
 
-template <class Request, class Receiver>
+// Default eager control: consult the context immutable switch.
+class context_eager_control {
+ public:
+  explicit context_eager_control(io_context* context) noexcept : context_(context) {}
+  [[nodiscard]] bool operator()() const noexcept { return context_->enable_immediate_io(); }
+ private:
+  io_context* context_;
+};
+
+template <class Request, class Control, class Receiver>
 class native_io_operation : public io_context::operation_base {
  public:
-  native_io_operation(io_context& context, Request request, Receiver receiver)
+  native_io_operation(io_context& context, Request request, Control control,
+                      Receiver receiver)
       : context_(&context),
         request_(std::move(request)),
+        control_(std::move(control)),
         receiver_(std::move(receiver)) {}
 
   void prepare(async_io::bsd_native::kqueue_helper& helper) noexcept override {
@@ -78,7 +89,7 @@ class native_io_operation : public io_context::operation_base {
       return;
     }
 
-    if (context_->enable_immediate_io()) {
+    if (control_()) {
       this->result = request_.start_io();
     } else {
       this->result = request_.perform_io();
@@ -149,35 +160,45 @@ class native_io_operation : public io_context::operation_base {
 
   io_context* context_;
   Request request_;
+  Control control_;
   std::remove_cvref_t<Receiver> receiver_;
   completion_kind completion_ = completion_kind::value;
   std::error_code error_;
 };
 
-template <class Request>
+template <class Request, class Control = context_eager_control>
 class native_io_sender {
  public:
   using completion_signatures = typename Request::completion_signatures;
 
   native_io_sender(io_context& context, Request request) noexcept
-      : context_(&context), request_(std::move(request)) {}
+      : context_(&context),
+        request_(std::move(request)),
+        control_(context_eager_control{&context}) {}
+
+  native_io_sender(io_context& context, Request request, Control control) noexcept
+      : context_(&context),
+        request_(std::move(request)),
+        control_(std::move(control)) {}
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return native_io_operation<Request, std::remove_cvref_t<Receiver> >(
-        *context_, std::move(request_), std::move(receiver));
+    return native_io_operation<Request, Control, std::remove_cvref_t<Receiver> >(
+        *context_, std::move(request_), std::move(control_),
+        std::move(receiver));
   }
 
   template <class Receiver>
-    requires std::copy_constructible<Request>
+    requires std::copy_constructible<Request> && std::copy_constructible<Control>
   auto connect(Receiver receiver) const& {
-    return native_io_operation<Request, std::remove_cvref_t<Receiver> >(
-        *context_, request_, std::move(receiver));
+    return native_io_operation<Request, Control, std::remove_cvref_t<Receiver> >(
+        *context_, request_, control_, std::move(receiver));
   }
 
  private:
   io_context* context_;
   Request request_;
+  Control control_;
 };
 
 template <class Receiver>
