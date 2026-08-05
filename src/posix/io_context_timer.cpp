@@ -225,11 +225,6 @@ void io_context::queue_timer_completion(
 bool io_context::try_fetch_timeout_operations(
     time_point& deadline, detail::native_operation_base*& operations) noexcept {
   operations = nullptr;
-  // Read the clock before the CAS gate / lock so the worker's clock call is
-  // not inside the timers_.mutex critical section. A stale now pops fewer
-  // timers this round; the leftover ones stay in the heap and their deadline
-  // becomes the poll timeout, so the next fetch cycle catches them.
-  const time_point now = clock::now();
   // Use a lock-free CAS gate to serialize concurrent workers trying to
   // drain the timer heap. Workers that lose the CAS skip the expensive
   // heap walk entirely.
@@ -248,6 +243,11 @@ bool io_context::try_fetch_timeout_operations(
     return false;
   }
 
+  // Note: unlike register_timer/set_timer_expiry, the clock read stays inside
+  // the critical section here. This path runs once per run-loop iteration
+  // (amortized), and reading before the CAS gate would add a wasted clock
+  // call on every CAS-loss / lock-busy retry under contention.
+  const time_point now = clock::now();
   while (timers_.heap_deadline() <= now) {
     detail::timer_slot* const timer = timers_.pop_heap();
     if (timer == nullptr) {
