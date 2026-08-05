@@ -169,6 +169,12 @@ class await_result<void> {
     return result;
   }
 
+  static await_result error(std::error_code) {
+    await_result result;
+    result.status_ = await_status::error;
+    return result;
+  }
+
   static await_result stopped() {
     await_result result;
     result.status_ = await_status::stopped;
