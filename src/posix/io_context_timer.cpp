@@ -25,6 +25,13 @@ timer_operation_base::timer_operation_base(io_context& context) noexcept
 
 void io_context::register_timer(detail::timer_slot& timer) noexcept {
   bool wake_worker = false;
+  // Read the clock before taking timers_.mutex so the (relatively expensive)
+  // clock call overlaps lock acquisition instead of lengthening the critical
+  // section. steady_clock is monotonic, so a stale now read can only make the
+  // heap-vs-inactive decision more conservative (a timer that expired while we
+  // waited for the lock lands in the heap and fires on the next fetch cycle)
+  // and can never cause an early fire.
+  const time_point now = clock::now();
   {
     std::lock_guard context_lock(timers_.mutex);
     if (timer.context != nullptr) {
@@ -40,7 +47,7 @@ void io_context::register_timer(detail::timer_slot& timer) noexcept {
     // If the timer has already expired, place it directly in the inactive
     // (ready) list so it fires immediately. Otherwise insert it into the
     // pairing heap ordered by expiry.
-    if (timer.expiry > clock::now()) {
+    if (timer.expiry > now) {
       timers_.push_heap(timer);
       wake_worker = timers_.heap_deadline() < previous_deadline;
     } else {
@@ -106,6 +113,10 @@ std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
                                          time_point expiry) noexcept {
   std::size_t count = 0;
   bool wake_worker = false;
+  // Same rationale as register_timer: read the clock before the lock so the
+  // per-op clock call is not inside the timers_.mutex critical section. A
+  // stale now only delays, never advances, the expiry decision.
+  const time_point now = clock::now();
   {
     std::lock_guard context_lock(timers_.mutex);
     if (timer.context != this) {
@@ -128,7 +139,7 @@ std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
     enqueue_timer_operations_locked(canceled.head,
                                     detail::timer_completion_kind::canceled);
 
-    if (timer.expiry > clock::now()) {
+    if (timer.expiry > now) {
       timers_.push_heap(timer);
     } else {
       timers_.push_inactive(timer);
@@ -214,6 +225,11 @@ void io_context::queue_timer_completion(
 bool io_context::try_fetch_timeout_operations(
     time_point& deadline, detail::native_operation_base*& operations) noexcept {
   operations = nullptr;
+  // Read the clock before the CAS gate / lock so the worker's clock call is
+  // not inside the timers_.mutex critical section. A stale now pops fewer
+  // timers this round; the leftover ones stay in the heap and their deadline
+  // becomes the poll timeout, so the next fetch cycle catches them.
+  const time_point now = clock::now();
   // Use a lock-free CAS gate to serialize concurrent workers trying to
   // drain the timer heap. Workers that lose the CAS skip the expensive
   // heap walk entirely.
@@ -232,7 +248,6 @@ bool io_context::try_fetch_timeout_operations(
     return false;
   }
 
-  const time_point now = clock::now();
   while (timers_.heap_deadline() <= now) {
     detail::timer_slot* const timer = timers_.pop_heap();
     if (timer == nullptr) {
@@ -291,9 +306,8 @@ steady_timer::~steady_timer() noexcept {
 
 steady_timer::steady_timer(steady_timer&& other) noexcept {
   io_context* context = other.timer_.context;
-  time_point expiry = clock::now();
   if (context != nullptr) {
-    expiry = context->timer_expiry(other.timer_);
+    const time_point expiry = context->timer_expiry(other.timer_);
     context->unregister_timer(other.timer_);
     timer_.expiry = expiry;
     context->register_timer(timer_);
