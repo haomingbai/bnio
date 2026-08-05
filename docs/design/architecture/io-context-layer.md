@@ -76,6 +76,7 @@ using platform_io_context_options =
 
 struct io_context_options {
     std::uint32_t concurrency_hint = 1;
+    bool enable_immediate_io = true;
     platform_io_context_options platform{};
 };
 ```
@@ -86,6 +87,10 @@ shared group state, and inserts its worker at the head of the worker list.
 This preserves **one thread, one uring/kqueue** without a construction-time
 primary context. Work may be started before `run()` because it first enters the
 shared queues.
+
+`enable_immediate_io` (default `true`) selects the eager immediate-completion
+mode (see "Eager Immediate-Completion Toggle" below). It is read once at
+`io_context` construction and is immutable afterwards.
 
 When single-issuer mode is available, each lazily created Linux ring is
 initially disabled. The same thread that calls its `run()` enables the ring
@@ -190,18 +195,19 @@ is not part of it — no bnio `completion_signatures` include it, and no bnio
 receiver implements it.
 
 #### Eager Immediate-Completion Toggle
-Each lowest-layer scheduler factory takes `template <bool EnableImmediate =
-true>` (`scheduler.async_read_some<false>(...)`, `async_write_some`,
-`async_accept`, `async_connect`, descriptor `async_read_some`/`async_write_some`,
-`async_receive`/`async_send`). Eager (default) issues one non-blocking syscall
-at `start()` and completes immediately unless it would block; non-eager skips
-the probe: BSD calls `perform_io()` and parks on a kqueue filter on EAGAIN,
-Linux submits the SQE directly. Results are identical in both modes — regular
-files never wait on kqueue readiness (EVFILT_READ on a regular file never
-fires), and non-eager connect still issues `::connect()`, ruling out false
-success. Linux accept/connect had no immediate attempt, so the modes are
-equivalent there. The switch threads through the native I/O operation
-templates and the read/write-all state.
+
+The eager switch is a runtime `io_context_options` field:
+`enable_immediate_io` (default `true`, immutable after construction; readable
+through `io_context::enable_immediate_io()`). Eager (default) issues one
+non-blocking syscall at `start()` and completes immediately unless it would
+block; non-eager skips the probe: BSD calls `perform_io()` and parks on a
+kqueue filter on EAGAIN, Linux submits the SQE directly. Results are identical
+in both modes — regular files never wait on kqueue readiness (EVFILT_READ on a
+regular file never fires), and non-eager connect still issues `::connect()`,
+ruling out false success. Linux accept/connect had no immediate attempt, so the
+modes are equivalent there. The switch is stored once at construction and read
+per operation; the scheduler/context factories no longer take a template
+parameter, and the read/write-all state honors it via the same runtime flag.
 
 ### Internal Header Layout
 

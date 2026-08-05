@@ -1,12 +1,12 @@
-// Coverage for the eager / immediate-completion toggle (commit B).
+// Coverage for the eager / immediate-completion toggle (commit C).
 //
-// Every lowest-layer scheduler factory accepts an optional
-// `template <bool EnableImmediate = true>` parameter. With the default (eager
-// on) an operation first attempts one non-blocking syscall before registering
-// readiness; with `<false>` (eager off) it skips that probe and goes straight
-// to readiness waiting (kqueue) or SQE submission (io_uring). Both modes must
-// produce identical observable results, so each scenario below runs twice,
-// once with eager on and once with eager off.
+// The eager switch is a runtime io_context option:
+// `io_context_options.enable_immediate_io` (default true, immutable after
+// construction). With eager on an operation first attempts one non-blocking
+// syscall before registering readiness; with false it skips that probe and
+// goes straight to readiness waiting (kqueue) or SQE submission (io_uring).
+// Both modes must produce identical observable results, so each scenario
+// below runs twice, once with eager on and once with eager off.
 //
 // On Linux accept/connect never had an immediate attempt, so the two modes are
 // equivalent there; every test must pass on both the BSD kqueue and the Linux
@@ -46,6 +46,17 @@
 #endif
 
 namespace {
+
+// Builds io_context_options selecting the eager mode for a scenario. The
+// switch is immutable after io_context construction, so each helper creates
+// its own context from these options and calls the scheduler factories
+// without a template argument.
+template <bool Eager>
+[[nodiscard]] bnio::io_context_options eager_options() {
+  bnio::io_context_options options;
+  options.enable_immediate_io = Eager;
+  return options;
+}
 
 struct pair_byte_receiver {
   std::shared_ptr<shared_state> state = std::make_shared<shared_state>();
@@ -193,7 +204,7 @@ struct loopback_listener {
 
 template <bool Eager>
 void recv_ready_success() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
@@ -210,8 +221,8 @@ void recv_ready_success() {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_read_some<Eager>(receiver_socket.view(),
-                                                 bnio::buffer(bytes), 0);
+  auto sender =
+      scheduler.async_read_some(receiver_socket.view(), bnio::buffer(bytes), 0);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -223,7 +234,7 @@ void recv_ready_success() {
 
 template <bool Eager>
 void recv_eagain_then_ready() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
@@ -237,8 +248,8 @@ void recv_eagain_then_ready() {
 
   // Start with no data pending: the first attempt returns EAGAIN and both
   // modes park on readiness.
-  auto sender = scheduler.async_read_some<Eager>(receiver_socket.view(),
-                                                 bnio::buffer(bytes), 0);
+  auto sender =
+      scheduler.async_read_some(receiver_socket.view(), bnio::buffer(bytes), 0);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
@@ -256,7 +267,7 @@ void recv_eagain_then_ready() {
 
 template <bool Eager>
 void recv_eof() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
@@ -271,8 +282,8 @@ void recv_eof() {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_read_some<Eager>(receiver_socket.view(),
-                                                 bnio::buffer(bytes), 0);
+  auto sender =
+      scheduler.async_read_some(receiver_socket.view(), bnio::buffer(bytes), 0);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -283,7 +294,7 @@ void recv_eof() {
 
 template <bool Eager>
 void send_ready_success() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
@@ -295,8 +306,8 @@ void send_ready_success() {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_write_some<Eager>(
-      sender_socket.view(), bnio::buffer(payload), MSG_NOSIGNAL);
+  auto sender = scheduler.async_write_some(sender_socket.view(),
+                                           bnio::buffer(payload), MSG_NOSIGNAL);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -313,7 +324,7 @@ void send_ready_success() {
 
 template <bool Eager>
 void send_eagain_then_ready() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
@@ -347,8 +358,8 @@ void send_eagain_then_ready() {
   byte_receiver receiver;
   receiver.context = &context;
   auto state = receiver.state;
-  auto sender = scheduler.async_write_some<Eager>(
-      sender_socket.view(), bnio::buffer(payload), MSG_NOSIGNAL);
+  auto sender = scheduler.async_write_some(sender_socket.view(),
+                                           bnio::buffer(payload), MSG_NOSIGNAL);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
@@ -381,7 +392,7 @@ void send_eagain_then_ready() {
 
 template <bool Eager>
 void accept_ready_success() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   loopback_listener listener;
@@ -395,8 +406,8 @@ void accept_ready_success() {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_accept<Eager>(listener.acceptor.view(),
-                                              SOCK_CLOEXEC | SOCK_NONBLOCK);
+  auto sender = scheduler.async_accept(listener.acceptor.view(),
+                                       SOCK_CLOEXEC | SOCK_NONBLOCK);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -411,7 +422,7 @@ void accept_ready_success() {
 
 template <bool Eager>
 void accept_eagain_then_ready() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   loopback_listener listener;
@@ -423,8 +434,8 @@ void accept_eagain_then_ready() {
 
   // Start the accept first: no connection is pending, so the eager probe
   // returns EAGAIN and both modes park on readiness.
-  auto sender = scheduler.async_accept<Eager>(listener.acceptor.view(),
-                                              SOCK_CLOEXEC | SOCK_NONBLOCK);
+  auto sender = scheduler.async_accept(listener.acceptor.view(),
+                                       SOCK_CLOEXEC | SOCK_NONBLOCK);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
@@ -443,7 +454,7 @@ void accept_eagain_then_ready() {
 
 template <bool Eager>
 void connect_ready_success() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   loopback_listener listener;
@@ -456,7 +467,7 @@ void connect_ready_success() {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_connect<Eager>(
+  auto sender = scheduler.async_connect(
       client.view(), bnio::ip::endpoint::loopback_v4(listener.port));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
@@ -475,7 +486,7 @@ void connect_ready_success() {
 
 template <bool Eager>
 void connect_refused_or_reasonable_error() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   // Reserve an ephemeral loopback port, then close the probe so no TCP
@@ -495,8 +506,8 @@ void connect_refused_or_reasonable_error() {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_connect<Eager>(
-      client.view(), bnio::ip::endpoint::loopback_v4(port));
+  auto sender = scheduler.async_connect(client.view(),
+                                        bnio::ip::endpoint::loopback_v4(port));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -533,7 +544,7 @@ void file_write_read() {
   constexpr std::string_view payload = "eager optional file io";
 
   {
-    bnio::io_context context;
+    bnio::io_context context(eager_options<Eager>());
     if (!context_available(context)) {
       EXPECT_EQ(::close(fd), 0);
       return;
@@ -544,7 +555,7 @@ void file_write_read() {
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = scheduler.async_write_some<Eager>(
+    auto sender = scheduler.async_write_some(
         bnio::async_io::descriptor_view(fd), bnio::buffer(payload), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
@@ -555,7 +566,7 @@ void file_write_read() {
   }
 
   {
-    bnio::io_context context;
+    bnio::io_context context(eager_options<Eager>());
     if (!context_available(context)) {
       EXPECT_EQ(::close(fd), 0);
       return;
@@ -567,8 +578,8 @@ void file_write_read() {
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = scheduler.async_read_some<Eager>(
-        bnio::async_io::descriptor_view(fd), bnio::buffer(bytes), 0);
+    auto sender = scheduler.async_read_some(bnio::async_io::descriptor_view(fd),
+                                            bnio::buffer(bytes), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -584,15 +595,15 @@ void file_write_read() {
 template <bool Eager>
 void invalid_descriptor_errors() {
   {
-    bnio::io_context context;
+    bnio::io_context context(eager_options<Eager>());
     auto scheduler = context.get_post_scheduler();
     std::array<char, 8> bytes{};
     byte_receiver receiver;
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = scheduler.async_read_some<Eager>(
-        bnio::async_io::descriptor_view(), bnio::buffer(bytes), 0);
+    auto sender = scheduler.async_read_some(bnio::async_io::descriptor_view(),
+                                            bnio::buffer(bytes), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -602,15 +613,15 @@ void invalid_descriptor_errors() {
   }
 
   {
-    bnio::io_context context;
+    bnio::io_context context(eager_options<Eager>());
     auto scheduler = context.get_post_scheduler();
     constexpr std::string_view payload = "invalid descriptor";
     byte_receiver receiver;
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = scheduler.async_write_some<Eager>(
-        bnio::async_io::descriptor_view(), bnio::buffer(payload), 0);
+    auto sender = scheduler.async_write_some(bnio::async_io::descriptor_view(),
+                                             bnio::buffer(payload), 0);
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -622,7 +633,7 @@ void invalid_descriptor_errors() {
 
 template <bool Eager>
 void pre_stopped_token_canceled() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
@@ -638,8 +649,8 @@ void pre_stopped_token_canceled() {
   receiver.env = stop_env{source.get_token()};
   auto state = receiver.state;
 
-  auto sender = scheduler.async_read_some<Eager>(receiver_socket.view(),
-                                                 bnio::buffer(bytes), 0);
+  auto sender =
+      scheduler.async_read_some(receiver_socket.view(), bnio::buffer(bytes), 0);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -650,7 +661,7 @@ void pre_stopped_token_canceled() {
 
 template <bool Eager>
 void io_context_stop_aborts_inflight_read() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
@@ -665,8 +676,8 @@ void io_context_stop_aborts_inflight_read() {
   receiver.completions = nullptr;
   auto state = receiver.state;
 
-  auto sender = scheduler.async_read_some<Eager>(receiver_socket.view(),
-                                                 bnio::buffer(bytes), 0);
+  auto sender =
+      scheduler.async_read_some(receiver_socket.view(), bnio::buffer(bytes), 0);
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
@@ -713,7 +724,7 @@ void io_context_stop_aborts_inflight_read() {
 
 template <bool Eager>
 void udp_send_receive() {
-  bnio::io_context context;
+  bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
   bnio::udp::socket server;
@@ -747,9 +758,9 @@ void udp_send_receive() {
   auto send_state = send_receiver.state;
 
   auto receive_sender =
-      scheduler.async_receive<Eager>(server.view(), bnio::buffer(bytes), 0);
+      scheduler.async_receive(server.view(), bnio::buffer(bytes), 0);
   auto send_sender =
-      scheduler.async_send<Eager>(client.view(), bnio::buffer(payload), 0);
+      scheduler.async_send(client.view(), bnio::buffer(payload), 0);
 
   auto receive_operation =
       bexec::connect(std::move(receive_sender), std::move(receive_receiver));

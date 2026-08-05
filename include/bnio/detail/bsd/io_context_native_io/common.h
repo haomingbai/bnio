@@ -33,7 +33,7 @@ template <class Receiver>
   return std::error_code(-result, std::generic_category());
 }
 
-template <class Request, class Receiver, bool EnableImmediate = true>
+template <class Request, class Receiver>
 class native_io_operation : public io_context::operation_base {
  public:
   native_io_operation(io_context& context, Request request, Receiver receiver)
@@ -78,7 +78,7 @@ class native_io_operation : public io_context::operation_base {
       return;
     }
 
-    if constexpr (EnableImmediate) {
+    if (context_->enable_immediate_io()) {
       this->result = request_.start_io();
     } else {
       this->result = request_.perform_io();
@@ -154,7 +154,7 @@ class native_io_operation : public io_context::operation_base {
   std::error_code error_;
 };
 
-template <class Request, bool EnableImmediate = true>
+template <class Request>
 class native_io_sender {
  public:
   using completion_signatures = typename Request::completion_signatures;
@@ -164,17 +164,15 @@ class native_io_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return native_io_operation<Request, std::remove_cvref_t<Receiver>,
-                               EnableImmediate>(*context_, std::move(request_),
-                                                std::move(receiver));
+    return native_io_operation<Request, std::remove_cvref_t<Receiver> >(
+        *context_, std::move(request_), std::move(receiver));
   }
 
   template <class Receiver>
     requires std::copy_constructible<Request>
   auto connect(Receiver receiver) const& {
-    return native_io_operation<Request, std::remove_cvref_t<Receiver>,
-                               EnableImmediate>(*context_, request_,
-                                                std::move(receiver));
+    return native_io_operation<Request, std::remove_cvref_t<Receiver> >(
+        *context_, request_, std::move(receiver));
   }
 
  private:

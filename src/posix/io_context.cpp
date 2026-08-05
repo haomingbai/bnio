@@ -18,7 +18,8 @@ thread_local detail::native_context* io_context::current_worker_native_ =
 io_context::io_context() noexcept : io_context(io_context_options{}) {}
 
 io_context::io_context(const io_context_options& options) noexcept
-    : native_(options.platform) {
+    : native_(options.platform),
+      enable_immediate_io_(options.enable_immediate_io) {
   {
     // Probe availability without reserving a worker or designating a primary
     // native context. Every actual native queue is created by the thread that

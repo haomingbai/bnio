@@ -28,7 +28,7 @@ class timer_operation_base;
 template <class Receiver>
 class timer_wait_operation;
 class timer_wait_sender;
-template <class Model, class Receiver, bool EnableImmediate>
+template <class Model, class Receiver>
 class native_io_operation;
 
 enum class timer_completion_kind {

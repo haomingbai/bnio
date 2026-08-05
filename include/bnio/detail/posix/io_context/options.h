@@ -31,6 +31,21 @@ struct io_context_options {
   std::uint32_t concurrency_hint = 1;
 
   /**
+   * Enables eager immediate completion for I/O operations.
+   *
+   * When true (the default), native I/O operations probe for immediate
+   * completion in start(): the backend issues a non-blocking attempt and
+   * only registers with the native poller when the resource is not ready.
+   * When false, the probe is skipped and the operation registers directly
+   * with the native poller, waiting for readiness before performing I/O.
+   *
+   * The value is immutable after construction: the io_context reads it once
+   * at construction time and stores it, so the hot path only performs a
+   * single bool read.
+   */
+  bool enable_immediate_io = true;
+
+  /**
    * Native-context options for the configured backend.
    */
   platform_io_context_options platform{};
