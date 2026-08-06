@@ -44,6 +44,12 @@ struct BNIO_EXPORT io_uring_local_task_queue_state {
   /** Removes the whole CPU queue in bulk; used by fetch and stealing. */
   [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
 
+  /** Returns whether the local CPU queue is non-empty. Relaxed peek; the
+   *  caller must hold the owner list's lock so the node cannot be freed. */
+  [[nodiscard]] bool has_cpu_tasks() const noexcept {
+    return cpu_head.load(std::memory_order_relaxed) != nullptr;
+  }
+
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
 
   /** Doubly-linked list links for the shared run/suspend lists. */
@@ -64,6 +70,8 @@ struct BNIO_EXPORT io_uring_worker_state_list {
   std::mutex lock;
   /** Head of the intrusive list. */
   io_uring_local_task_queue_state* head = nullptr;
+  /** Tail of the intrusive list; kept so rotation to the tail is O(1). */
+  io_uring_local_task_queue_state* tail = nullptr;
   /** Round-robin cursor; points into the list. Only the suspend list uses
    *  it (for wake_one_sleeping()). */
   io_uring_local_task_queue_state* cursor = nullptr;
@@ -103,6 +111,9 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
   std::atomic<io_uring_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
+  /** Total workers currently inside run() (active + suspended). Incremented
+   *  by enter_run(), decremented at run() exit. */
+  std::atomic<std::size_t> running_workers{0};
 
   /** Running/suspended worker local states, each list guarded by its own
    *  lock. */
@@ -283,6 +294,8 @@ inline void io_uring_link_local_state(
   node->next = list.head;
   if (list.head != nullptr) {
     list.head->prev = node;
+  } else {
+    list.tail = node;  // list was empty; node is both head and tail
   }
   list.head = node;
 }
@@ -299,6 +312,8 @@ inline void io_uring_unlink_local_state(
   }
   if (node->next != nullptr) {
     node->next->prev = node->prev;
+  } else {
+    list.tail = node->prev;  // node was the tail
   }
   node->prev = nullptr;
   node->next = nullptr;
@@ -310,6 +325,25 @@ inline bool io_uring_local_state_in_list(
     const io_uring_worker_state_list& list,
     const io_uring_local_task_queue_state* node) noexcept {
   return node->prev != nullptr || list.head == node;
+}
+
+/** Moves node to the tail of the worker list (round-robin rotation), O(1)
+ *  thanks to the maintained tail pointer. Caller holds the list's lock. Used
+ *  by stealing so the probe order rotates globally instead of per-thread
+ *  cursors. */
+inline void io_uring_rotate_local_state_to_tail(
+    io_uring_worker_state_list& list,
+    io_uring_local_task_queue_state* node) noexcept {
+  io_uring_unlink_local_state(list, node);
+  if (list.tail != nullptr) {
+    list.tail->next = node;
+    node->prev = list.tail;
+  } else {  // list became empty; node is the only element again
+    list.head = node;
+    node->prev = nullptr;
+  }
+  node->next = nullptr;
+  list.tail = node;
 }
 
 inline bool io_uring_task_queue_state::wake_one_sleeping() noexcept {

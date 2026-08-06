@@ -75,6 +75,22 @@ bool io_uring_context::run_cpu_batch() noexcept {
 }
 
 io_uring_operation_base* io_uring_context::steal_cpu_tasks() noexcept {
+  // Conservative gate: only attempt a steal while MORE workers are active
+  // than suspended (active > suspend  <=>  2*active > running). A worker
+  // suspends only after finding no work, so when the majority are suspended
+  // the remaining active workers' local queues are likely empty too, and
+  // scanning the run list would just pay run.lock contention for nothing.
+  // The two loads are deliberately not coordinated — this is a racy,
+  // relaxed heuristic that only decides whether the scan is worth the lock;
+  // the actual steal below stays correct regardless of the gate's accuracy.
+  const std::size_t active =
+      global_state_->awake_workers.load(std::memory_order_relaxed);
+  const std::size_t running =
+      global_state_->running_workers.load(std::memory_order_relaxed);
+  if (active * 2 <= running) {
+    return nullptr;
+  }
+
   // The lock guards both the list traversal and the lifetime of every node:
   // a worker unregisters its local state under the same lock before its
   // context (and local state) is destroyed, so a visited node is never freed
@@ -83,36 +99,33 @@ io_uring_operation_base* io_uring_context::steal_cpu_tasks() noexcept {
   io_uring_worker_state_list& run = global_state_->workers.run;
   std::lock_guard<std::mutex> guard(run.lock);
 
-  // Validate the saved cursor is still in the list; otherwise restart from
-  // the head. Head insertion never moves existing nodes, so a valid cursor
-  // keeps its position without re-traversal.
-  io_uring_local_task_queue_state* start = run.head;
-  if (scheduling_state_.steal_cursor != nullptr) {
-    io_uring_local_task_queue_state* scan = start;
-    while (scan != nullptr && scan != scheduling_state_.steal_cursor) {
-      scan = scan->next;
-    }
-    if (scan != nullptr) {
-      start = scheduling_state_.steal_cursor;
-    } else {
-      scheduling_state_.steal_cursor = nullptr;
-    }
-  }
-
-  // Traverse the list starting at the cursor, stealing the first non-empty
-  // local queue in bulk. Stop as soon as a batch is stolen.
-  io_uring_local_task_queue_state* node = start;
+  // Fairness via shared list rotation: every stealer probes from the run
+  // list head and moves each probed node to the tail, so the head keeps
+  // advancing globally and all workers share one rotating scan order — no
+  // per-thread cursor to keep in sync. Wrap after one full circuit.
+  //
+  // Each probe is a relaxed load first: only pay for the locked-RMW exchange
+  // (pop_cpu_all) on a node that actually shows work, so a doomed scan costs
+  // n loads + n O(1) rotations instead of n exchanges. This must happen under
+  // run.lock — a lock-free traversal could dereference a node whose owner
+  // unregisters (and whose context is destroyed) concurrently.
+  io_uring_local_task_queue_state* node = run.head;
+  const io_uring_local_task_queue_state* const start = run.head;
   while (node != nullptr) {
-    if (node != &local_state_) {
+    io_uring_local_task_queue_state* const next = node->next;
+    if (node != &local_state_ && node->has_cpu_tasks()) {
       if (io_uring_operation_base* operations = node->pop_cpu_all()) {
-        scheduling_state_.steal_cursor = node->next;
+        io_uring_rotate_local_state_to_tail(run, node);
         return reverse_tasks(operations);
       }
     }
-    node = node->next;
+    io_uring_rotate_local_state_to_tail(run, node);
+    if (next == start) {
+      break;
+    }
+    node = next;
   }
 
-  scheduling_state_.steal_cursor = nullptr;
   return nullptr;
 }
 

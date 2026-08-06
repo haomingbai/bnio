@@ -367,9 +367,6 @@ class BNIO_EXPORT kqueue_context {
   struct scheduling_state {
     /** Remaining local inline-completion budget for this round. */
     unsigned local_task_budget = 0;
-    /** Steal start point for the next round; points at a node in the shared
-     *  local_states list. Head insertion never invalidates it. */
-    kqueue_local_task_queue_state* steal_cursor = nullptr;
     /** Monotonic registration sequence; mirrors wait-queue insertion order. */
     std::uint64_t next_registration_sequence = 0;
   };

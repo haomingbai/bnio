@@ -52,6 +52,7 @@ bool kqueue_context::enter_run() noexcept {
   run_state_.waiting.store(false, std::memory_order_release);
   if (global_state_ != nullptr) {
     global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
+    global_state_->running_workers.fetch_add(1, std::memory_order_acq_rel);
   }
 
   // Register the shared wake fd (EVFILT_READ | EV_CLEAR) so io_context
@@ -113,6 +114,7 @@ void kqueue_context::run() noexcept {
   current_context_ = previous_context;
   if (global_state_ != nullptr) {
     global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
+    global_state_->running_workers.fetch_sub(1, std::memory_order_acq_rel);
   }
   run_state_.run_active.store(false, std::memory_order_release);
 }

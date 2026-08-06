@@ -476,12 +476,9 @@ class BNIO_EXPORT io_uring_context {
   io_uring_local_task_queue_state local_state_;
   io_uring_io_operation_base* inflight_io_head_ = nullptr;
 
-  /** Run-loop scheduling budget and steal cursor. */
+  /** Run-loop scheduling budget. */
   struct scheduling_state {
     unsigned local_task_budget = 0;
-    /** Steal start point for the next round; points at a node in the shared
-     *  local_states list. Head insertion never invalidates it. */
-    io_uring_local_task_queue_state* steal_cursor = nullptr;
   };
   scheduling_state scheduling_state_;
 };
