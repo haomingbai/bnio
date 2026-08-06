@@ -65,6 +65,18 @@ bool kqueue_context::enter_run() noexcept {
     (void)queue_.control(&wake_fd_event, 1, nullptr, 0, nullptr);
   }
 
+  // Register the per-worker wake channel so a directed wake can target
+  // this worker without waking the whole group.
+  if (local_state_.wake_channel_.is_open()) {
+    bnio::base::event local_wake_event(
+        static_cast<std::uintptr_t>(local_state_.wake_channel_.read_fd()),
+        EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, local_wakeup_user_data());
+    (void)queue_.control(&local_wake_event, 1, nullptr, 0, nullptr);
+  }
+
+  // Publish this worker's local state so remote threads can steal CPU work.
+  register_local_state();
+
   return true;
 }
 
@@ -93,6 +105,10 @@ void kqueue_context::run() noexcept {
         break;
     }
   }
+
+  // Unregister before the context (and its local state) is destroyed so a
+  // concurrent stealer can never observe a dangling local_state.
+  unregister_local_state();
 
   current_context_ = previous_context;
   if (global_state_ != nullptr) {
@@ -147,24 +163,19 @@ kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
     (void)collect_ready_events(false);
   }
 
-  // 2. Process local CPU tasks (completions, posts, etc.).
-  if (kqueue_operation_base* operations =
-          reverse_tasks(local_state_.cpu.pop_all())) {
-    execute_tasks(operations);
+  // 2. Run one CPU task, trying local → shared → steal in that order.
+  //    Stopping after a single task keeps work from piling up on this
+  //    thread's stack, so other workers can steal it instead.
+  if (run_one_cpu_task()) {
     return run_phase::run_ready_tasks;
   }
 
-  // 3. Move global → local CPU tasks.
-  if (consume_global_state()) {
-    return run_phase::run_ready_tasks;
-  }
-
-  // 4. Consume timer expirations.
+  // 3. Consume timer expirations.
   if (consume_timeout_operations()) {
     return run_phase::run_ready_tasks;
   }
 
-  // 5. Register pending I/O tasks with kqueue — always a separate step
+  // 4. Register pending I/O tasks with kqueue — always a separate step
   //    so repeat_until chains that generate I/O during CPU processing
   //    don't starve the kqueue filter set.  Matches Linux's explicit
   //    consume_io_tasks() call after CPU draing.
@@ -173,15 +184,6 @@ kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
   }
 
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
-}
-
-bool kqueue_context::consume_local_state() noexcept {
-  if (kqueue_operation_base* operations =
-          reverse_tasks(local_state_.cpu.pop_all())) {
-    execute_tasks(operations);
-    return true;
-  }
-  return consume_io_tasks();
 }
 
 kqueue_context::run_phase kqueue_context::handle_wait_for_work() noexcept {
@@ -201,7 +203,7 @@ kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
   // Bounded busy-spin: check for new events and CPU tasks up to
   // wait_spin_count times before falling through to kevent().
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
-    if (collect_ready_events(false) || consume_global_state() ||
+    if (collect_ready_events(false) || run_one_cpu_task() ||
         consume_timeout_operations()) {
       return run_phase::run_ready_tasks;
     }
@@ -217,9 +219,8 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   // worker and wake it via EVFILT_USER trigger.
   begin_wait();
 
-  if (collect_ready_events(false) || consume_global_state() ||
-      consume_timeout_operations() || consume_local_state() ||
-      should_finish()) {
+  if (collect_ready_events(false) || run_one_cpu_task() ||
+      consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
@@ -236,8 +237,8 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
       if (timeout_operations != nullptr) {
         local_state_.push_cpu(timeout_operations);
       }
-      if (timeout_operations != nullptr || consume_global_state() ||
-          consume_local_state() || should_finish()) {
+      if (timeout_operations != nullptr || run_one_cpu_task() ||
+          consume_io_tasks() || should_finish()) {
         end_wait();
         return should_finish() ? run_phase::finish_drain
                                : run_phase::run_ready_tasks;
@@ -255,8 +256,8 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   // A timeout is only a reason to become running. The normal ready phase
   // performs another complete work/timer decision before this worker sleeps.
   if (collected_events || timeout_pointer != nullptr ||
-      consume_global_state() || consume_timeout_operations() ||
-      consume_local_state()) {
+      run_one_cpu_task() || consume_timeout_operations() ||
+      consume_io_tasks()) {
     return run_phase::run_ready_tasks;
   }
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
@@ -287,23 +288,18 @@ bool kqueue_context::should_finish() const noexcept {
 void kqueue_context::drain_local_cpu_tasks() noexcept {
   for (;;) {
     (void)consume_timeout_operations();
-    if (kqueue_operation_base* operations =
-            reverse_tasks(local_state_.cpu.pop_all())) {
-      execute_tasks(operations);
-      continue;
+    if (!run_one_cpu_task()) {
+      break;
     }
-    break;
   }
 }
 
 void kqueue_context::finish() noexcept {
   // Phase 1: drain already-ready kevents, CPU tasks, and timer abort ops.
   for (;;) {
-    (void)consume_global_state();
     (void)collect_ready_events(false);
-    (void)consume_global_state();
     (void)consume_timeout_operations();
-    if (!consume_local_state()) break;
+    if (!run_one_cpu_task() && !consume_io_tasks()) break;
   }
 
   // Phase 2: safety net for abnormal shutdown (closing flag) where
@@ -319,12 +315,11 @@ void kqueue_context::finish() noexcept {
   // Phase 3b: drain any new I/O operations generated by Phase 3
   // callbacks — and any further I/O operations those in turn generate.
   // When set_stopped() propagates through receiver chains, custom
-  // receivers may start new I/O via publish_io(), which lands in
-  // local_state_.io through the worker-local fast path.  Phase 3
-  // above only drains the CPU queue, so those new I/O tasks would be
-  // stranded permanently.  We loop consume_io_tasks() →
-  // abort_inflight_io() → drain until no more I/O tasks appear,
-  // closing the nested-publish window.
+  // receivers may start new I/O via publish_io(), which lands in the
+  // shared global I/O queue.  Phase 3 above only drains the CPU queue,
+  // so those new I/O tasks would be stranded permanently.  We loop
+  // consume_io_tasks() → abort_inflight_io() → drain until no more I/O
+  // tasks appear, closing the nested-publish window.
   while (consume_io_tasks()) {
     abort_inflight_io();
     drain_local_cpu_tasks();

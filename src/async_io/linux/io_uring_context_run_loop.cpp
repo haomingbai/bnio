@@ -74,6 +74,16 @@ bool io_uring_context::enter_run() noexcept {
     return false;
   }
 
+  // Arm the per-worker wake channel for directed wakeups and publish this
+  // worker's local state so remote threads can steal CPU work.
+  if (submit_local_eventfd_poll() < 0) {
+    state_.store(context_state::finished, std::memory_order_release);
+    global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
+    run_active_.store(false, std::memory_order_release);
+    return false;
+  }
+  register_local_state();
+
   return true;
 }
 
@@ -107,6 +117,10 @@ void io_uring_context::run() noexcept {
         break;
     }
   }
+
+  // Unregister before the context (and its local state) is destroyed so a
+  // concurrent stealer can never observe a dangling local_state.
+  unregister_local_state();
 
   current_context_ = previous_context;
   global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
@@ -143,7 +157,7 @@ bool io_uring_context::consume_timeout_operations() noexcept {
     return false;
   }
 
-  local_tasks_.push(operations);
+  local_state_.push_cpu(operations);
   return true;
 }
 
@@ -155,12 +169,10 @@ io_uring_context::handle_run_ready_tasks() noexcept {
   // Always drain CQEs first to keep the ring backlog small under load.
   (void)collect_ready_cqes();
 
-  if (io_uring_operation_base* operations = local_tasks_.pop_all()) {
-    execute_tasks(operations);
-    return run_phase::run_ready_tasks;
-  }
-
-  if (move_cpu_tasks()) {
+  // Run one CPU task, trying local → shared → steal in that order.
+  // Stopping after a single task keeps work from piling up on this
+  // thread's stack, so other workers can steal it instead.
+  if (run_one_cpu_task()) {
     return run_phase::run_ready_tasks;
   }
 
@@ -194,7 +206,7 @@ io_uring_context::run_phase io_uring_context::spin_for_work() noexcept {
   // to wait_spin_count times before falling through to a blocking wait.
   // This avoids the syscall cost when completions arrive quickly.
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
-    if (collect_ready_cqes() || move_cpu_tasks() ||
+    if (collect_ready_cqes() || run_one_cpu_task() ||
         consume_timeout_operations()) {
       return run_phase::run_ready_tasks;
     }
@@ -211,7 +223,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   // publishers can detect a sleeping worker and wake it via eventfd.
   begin_wait();
 
-  if (collect_ready_cqes() || move_cpu_tasks() ||
+  if (collect_ready_cqes() || run_one_cpu_task() ||
       consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
@@ -227,9 +239,9 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
     if (global_state_->try_fetch_timeout_operations(
             global_state_->timeout_heap, deadline, timeout_operations)) {
       if (timeout_operations != nullptr) {
-        local_tasks_.push(timeout_operations);
+        local_state_.push_cpu(timeout_operations);
       }
-      if (timeout_operations != nullptr || move_cpu_tasks() ||
+      if (timeout_operations != nullptr || run_one_cpu_task() ||
           consume_io_tasks() || should_finish()) {
         end_wait();
         return should_finish() ? run_phase::finish_drain
@@ -249,6 +261,11 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
     state_.store(context_state::finished, std::memory_order_release);
     return run_phase::finished;
   }
+  if (submit_local_eventfd_poll() < 0) {
+    end_wait();
+    state_.store(context_state::finished, std::memory_order_release);
+    return run_phase::finished;
+  }
   const int wait_result = wait_for_cqe_event(timeout_pointer);
   end_wait();
 
@@ -256,7 +273,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
     return run_phase::finished;
   }
 
-  if (collect_ready_cqes() || move_cpu_tasks() ||
+  if (collect_ready_cqes() || run_one_cpu_task() ||
       consume_timeout_operations() || consume_io_tasks()) {
     return run_phase::run_ready_tasks;
   }
@@ -291,17 +308,13 @@ bool io_uring_context::should_finish() const noexcept {
 
 void io_uring_context::drain_local_tasks(bool include_cqe) noexcept {
   for (;;) {
-    (void)move_cpu_tasks();
     if (include_cqe) {
       (void)collect_ready_cqes();
-      (void)move_cpu_tasks();
     }
     (void)consume_timeout_operations();
-    io_uring_operation_base* operations = local_tasks_.pop_all();
-    if (operations == nullptr) {
+    if (!run_one_cpu_task()) {
       break;
     }
-    execute_tasks(operations);
   }
 }
 

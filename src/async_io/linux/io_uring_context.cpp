@@ -61,6 +61,8 @@ int io_uring_context::queue_init(
   queue_initialized_ = true;
   apply_context_options(options);
   eventfd_poll_pending_ = false;
+  local_eventfd_poll_pending_ = false;
+  (void)local_state_.wake_channel_.open();
 
   bnio::base::params queue_params;
   const unsigned flags = prepare_queue_params(options_, queue_params);
@@ -122,9 +124,10 @@ void io_uring_context::queue_exit() noexcept {
 
   state_.store(context_state::finished, std::memory_order_release);
 
-  (void)local_tasks_.pop_all();
-  (void)local_io_tasks_.pop_all();
+  (void)local_state_.pop_cpu_all();
   eventfd_poll_pending_ = false;
+  local_eventfd_poll_pending_ = false;
+  local_state_.wake_channel_.close();
   ring_disabled_ = false;
   ring_.queue_exit();
   queue_initialized_ = false;

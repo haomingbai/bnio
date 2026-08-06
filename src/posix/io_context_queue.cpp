@@ -11,14 +11,9 @@
 namespace bnio {
 
 bool io_context::publish_io(operation_base& operation) noexcept {
-  // Worker-local fast path: publish directly to the running native
-  // context's local queue to avoid CAS on the shared MPSC queue and
-  // prevent descriptor/connection migration to another kqueue.
-  if (current_worker_native_ != nullptr) {
-    current_worker_native_->publish_io(operation);
-    return true;
-  }
-
+  // Experimental: worker-local fast path removed so all I/O publications
+  // contend on the global queue, breaking connection affinity.
+  //
   // Critical section, ordered against begin_stop() / ~io_context() by the
   // same submit_lock. Contains only state-involving work: check the shutdown
   // state, enqueue, and decide whether a sleeping worker must be woken.

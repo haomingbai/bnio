@@ -143,6 +143,24 @@ class BNIO_EXPORT kqueue_context {
   /** Publishes I/O for passive preparation by the context run loop. */
   void publish_io(kqueue_io_operation_base& operation) noexcept;
 
+  /**
+   * Returns the worker-local task queue state.
+   *
+   * The state is linked into the shared task queue state's local_states
+   * list while the worker is running. Remote threads must hold
+   * global_state_->local_states_lock while touching it (see steal_cpu_one).
+   */
+  [[nodiscard]] kqueue_local_task_queue_state* local_state() noexcept {
+    return &local_state_;
+  }
+
+  /**
+   * Fetches one CPU task, trying the local queue first, then the shared
+   * queue, then remote stealing. Stops at the first source that yields a
+   * task so work never accumulates on this thread's stack.
+   */
+  [[nodiscard]] kqueue_operation_base* fetch_cpu_task() noexcept;
+
  private:
   struct operation_queue {
     void push(kqueue_operation_base& operation) noexcept;
@@ -154,15 +172,18 @@ class BNIO_EXPORT kqueue_context {
     kqueue_operation_base* head = nullptr;
   };
 
-  struct local_task_queue_state {
-    void push_cpu(kqueue_operation_base& operation) noexcept;
-    void push_cpu(kqueue_operation_base* operations) noexcept;
-    void push_io(kqueue_io_operation_base& operation) noexcept;
-    void clear() noexcept;
+  /**
+   * Attempts to steal a batch of CPU tasks from another worker's local
+   * queue. Holds global_state_->local_states_lock for the whole traversal;
+   * the lock also keeps the visited worker from being destroyed mid-steal.
+   */
+  [[nodiscard]] kqueue_operation_base* steal_cpu_tasks() noexcept;
 
-    operation_queue cpu;
-    kqueue_io_operation_base* io = nullptr;
-  };
+  /** Registers this worker's local state in the shared list (head insert). */
+  void register_local_state() noexcept;
+
+  /** Unregisters this worker's local state from the shared list. */
+  void unregister_local_state() noexcept;
 
   enum class context_state {
     running,
@@ -194,8 +215,8 @@ class BNIO_EXPORT kqueue_context {
   void drain_local_cpu_tasks() noexcept;
 
   void push_cpu_tasks(operation_queue& operations) noexcept;
-  [[nodiscard]] bool consume_global_state() noexcept;
-  [[nodiscard]] bool consume_local_state() noexcept;
+  /** Fetches and executes one CPU task. Returns true if a task ran. */
+  [[nodiscard]] bool run_one_cpu_task() noexcept;
 
   /** Consumes staged local I/O tasks after ready CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;
@@ -219,6 +240,7 @@ class BNIO_EXPORT kqueue_context {
 
   [[nodiscard]] int trigger_wakeup() noexcept;
   [[nodiscard]] static void* wakeup_user_data() noexcept;
+  [[nodiscard]] static void* local_wakeup_user_data() noexcept;
 
   [[nodiscard]] run_phase handle_run_ready_tasks() noexcept;
   [[nodiscard]] run_phase handle_wait_for_work() noexcept;
@@ -301,10 +323,14 @@ class BNIO_EXPORT kqueue_context {
 
   static thread_local kqueue_context* current_context_;
   kqueue_task_queue_state* global_state_ = nullptr;
-  local_task_queue_state local_state_;
-  kqueue_io_operation_base* incoming_io_tasks_ = nullptr;
+  kqueue_local_task_queue_state local_state_;
+  /** Standalone-mode IO queue (no global state); unused in multi-worker. */
+  kqueue_io_operation_base* local_io_head_ = nullptr;
   kqueue_io_operation_base* inflight_io_head_ = nullptr;
   unsigned local_task_budget_ = 0;
+  /** Steal start point for the next round; points at a node in the shared
+   *  local_states list. Head insertion never invalidates it. */
+  kqueue_local_task_queue_state* steal_cursor_ = nullptr;
 };
 
 }  // namespace bnio::async_io::bsd_native

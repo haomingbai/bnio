@@ -132,6 +132,13 @@ bool kqueue_context::process_event(const bnio::base::event& event,
     return false;
   }
 
+  if (event.udata() == local_wakeup_user_data()) {
+    // Directed wake: only this worker is signalled. Drain the per-worker
+    // channel so the edge-triggered EVFILT_READ can fire again.
+    (void)local_state_.wake_channel_.drain();
+    return false;
+  }
+
   auto* operation = static_cast<kqueue_io_operation_base*>(event.udata());
   if (operation == nullptr) {
     return false;

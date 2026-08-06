@@ -71,6 +71,17 @@ unsigned io_uring_context::collect_cqe_tasks(
           return;
         }
 
+        if (data.user_data == local_eventfd_user_data()) {
+          // Directed wake: only this worker is signalled. Drain the
+          // per-worker channel and re-arm its poll.
+          local_eventfd_poll_pending_ = false;
+          (void)local_state_.wake_channel_.drain();
+          if (submit_local_eventfd_poll() < 0) {
+            state_.store(context_state::finishing, std::memory_order_release);
+          }
+          return;
+        }
+
         if (enqueue_cqe_task(data, cqe_tasks)) {
           ++task_count;
         }
@@ -82,7 +93,7 @@ void io_uring_context::dispatch_cqe_tasks(operation_queue& cqe_tasks,
                                           unsigned task_count) noexcept {
   // Tier 1 — inline: small batch, always push to the local queue.
   if (task_count <= options_.cqe_inline_completion_threshold) {
-    local_tasks_.push(cqe_tasks.pop_all());
+    local_state_.push_cpu(cqe_tasks.pop_all());
     return;
   }
 
@@ -91,7 +102,7 @@ void io_uring_context::dispatch_cqe_tasks(operation_queue& cqe_tasks,
   // CQEs never spill to the shared CPU queue on this path.
   if (options_.local_queue_threshold == 0 ||
       (local_task_budget_ > 0 && task_count <= local_task_budget_)) {
-    local_tasks_.push(cqe_tasks.pop_all());
+    local_state_.push_cpu(cqe_tasks.pop_all());
     if (options_.local_queue_threshold > 0) {
       local_task_budget_ -= task_count;
     }
