@@ -83,7 +83,7 @@ kqueue_operation_base* kqueue_context::fetch_cpu_task() noexcept {
   return steal_cpu_tasks();
 }
 
-bool kqueue_context::run_one_cpu_task() noexcept {
+bool kqueue_context::run_cpu_batch() noexcept {
   if (kqueue_operation_base* operations = fetch_cpu_task()) {
     execute_tasks(operations);
     return true;

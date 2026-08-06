@@ -172,7 +172,7 @@ io_uring_context::handle_run_ready_tasks() noexcept {
   // Run one CPU task, trying local → shared → steal in that order.
   // Stopping after a single task keeps work from piling up on this
   // thread's stack, so other workers can steal it instead.
-  if (run_one_cpu_task()) {
+  if (run_cpu_batch()) {
     return run_phase::run_ready_tasks;
   }
 
@@ -206,7 +206,7 @@ io_uring_context::run_phase io_uring_context::spin_for_work() noexcept {
   // to wait_spin_count times before falling through to a blocking wait.
   // This avoids the syscall cost when completions arrive quickly.
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
-    if (collect_ready_cqes() || run_one_cpu_task() ||
+    if (collect_ready_cqes() || run_cpu_batch() ||
         consume_timeout_operations()) {
       return run_phase::run_ready_tasks;
     }
@@ -223,7 +223,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   // publishers can detect a sleeping worker and wake it via eventfd.
   begin_wait();
 
-  if (collect_ready_cqes() || run_one_cpu_task() ||
+  if (collect_ready_cqes() || run_cpu_batch() ||
       consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
@@ -241,7 +241,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
       if (timeout_operations != nullptr) {
         local_state_.push_cpu(timeout_operations);
       }
-      if (timeout_operations != nullptr || run_one_cpu_task() ||
+      if (timeout_operations != nullptr || run_cpu_batch() ||
           consume_io_tasks() || should_finish()) {
         end_wait();
         return should_finish() ? run_phase::finish_drain
@@ -273,7 +273,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
     return run_phase::finished;
   }
 
-  if (collect_ready_cqes() || run_one_cpu_task() ||
+  if (collect_ready_cqes() || run_cpu_batch() ||
       consume_timeout_operations() || consume_io_tasks()) {
     return run_phase::run_ready_tasks;
   }
@@ -312,7 +312,7 @@ void io_uring_context::drain_local_tasks(bool include_cqe) noexcept {
       (void)collect_ready_cqes();
     }
     (void)consume_timeout_operations();
-    if (!run_one_cpu_task()) {
+    if (!run_cpu_batch()) {
       break;
     }
   }

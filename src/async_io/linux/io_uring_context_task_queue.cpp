@@ -66,7 +66,7 @@ io_uring_operation_base* io_uring_context::fetch_cpu_task() noexcept {
   return steal_cpu_tasks();
 }
 
-bool io_uring_context::run_one_cpu_task() noexcept {
+bool io_uring_context::run_cpu_batch() noexcept {
   if (io_uring_operation_base* operations = fetch_cpu_task()) {
     execute_tasks(operations);
     return true;

@@ -166,7 +166,7 @@ kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
   // 2. Run one CPU task, trying local → shared → steal in that order.
   //    Stopping after a single task keeps work from piling up on this
   //    thread's stack, so other workers can steal it instead.
-  if (run_one_cpu_task()) {
+  if (run_cpu_batch()) {
     return run_phase::run_ready_tasks;
   }
 
@@ -203,7 +203,7 @@ kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
   // Bounded busy-spin: check for new events and CPU tasks up to
   // wait_spin_count times before falling through to kevent().
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
-    if (collect_ready_events(false) || run_one_cpu_task() ||
+    if (collect_ready_events(false) || run_cpu_batch() ||
         consume_timeout_operations()) {
       return run_phase::run_ready_tasks;
     }
@@ -219,7 +219,7 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   // worker and wake it via EVFILT_USER trigger.
   begin_wait();
 
-  if (collect_ready_events(false) || run_one_cpu_task() ||
+  if (collect_ready_events(false) || run_cpu_batch() ||
       consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
@@ -237,7 +237,7 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
       if (timeout_operations != nullptr) {
         local_state_.push_cpu(timeout_operations);
       }
-      if (timeout_operations != nullptr || run_one_cpu_task() ||
+      if (timeout_operations != nullptr || run_cpu_batch() ||
           consume_io_tasks() || should_finish()) {
         end_wait();
         return should_finish() ? run_phase::finish_drain
@@ -256,7 +256,7 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   // A timeout is only a reason to become running. The normal ready phase
   // performs another complete work/timer decision before this worker sleeps.
   if (collected_events || timeout_pointer != nullptr ||
-      run_one_cpu_task() || consume_timeout_operations() ||
+      run_cpu_batch() || consume_timeout_operations() ||
       consume_io_tasks()) {
     return run_phase::run_ready_tasks;
   }
@@ -288,7 +288,7 @@ bool kqueue_context::should_finish() const noexcept {
 void kqueue_context::drain_local_cpu_tasks() noexcept {
   for (;;) {
     (void)consume_timeout_operations();
-    if (!run_one_cpu_task()) {
+    if (!run_cpu_batch()) {
       break;
     }
   }
@@ -299,7 +299,7 @@ void kqueue_context::finish() noexcept {
   for (;;) {
     (void)collect_ready_events(false);
     (void)consume_timeout_operations();
-    if (!run_one_cpu_task() && !consume_io_tasks()) break;
+    if (!run_cpu_batch() && !consume_io_tasks()) break;
   }
 
   // Phase 2: safety net for abnormal shutdown (closing flag) where
