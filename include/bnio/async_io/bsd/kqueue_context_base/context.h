@@ -148,16 +148,16 @@ class BNIO_EXPORT kqueue_context {
    *
    * The state is linked into the shared task queue state's local_states
    * list while the worker is running. Remote threads must hold
-   * global_state_->local_states_lock while touching it (see steal_cpu_one).
+   * global_state_->local_states_lock while touching it (see steal_cpu_tasks).
    */
   [[nodiscard]] kqueue_local_task_queue_state* local_state() noexcept {
     return &local_state_;
   }
 
   /**
-   * Fetches one CPU task, trying the local queue first, then the shared
-   * queue, then remote stealing. Stops at the first source that yields a
-   * task so work never accumulates on this thread's stack.
+   * Fetches a batch of CPU tasks, trying the local queue first, then the
+   * shared queue, then remote stealing. Stops at the first source that
+   * yields tasks so work never accumulates on this thread's stack.
    */
   [[nodiscard]] kqueue_operation_base* fetch_cpu_task() noexcept;
 
@@ -215,8 +215,8 @@ class BNIO_EXPORT kqueue_context {
   void drain_local_cpu_tasks() noexcept;
 
   void push_cpu_tasks(operation_queue& operations) noexcept;
-  /** Fetches and executes one CPU task. Returns true if a task ran. */
-  [[nodiscard]] bool run_one_cpu_task() noexcept;
+  /** Fetches and executes a batch of CPU tasks. Returns true if work ran. */
+  [[nodiscard]] bool run_cpu_batch() noexcept;
 
   /** Consumes staged local I/O tasks after ready CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;

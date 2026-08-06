@@ -190,18 +190,21 @@ class BNIO_EXPORT io_uring_context {
    *
    * The state is linked into the shared task queue state's local_states
    * list while the worker is running. Remote threads must hold
-   * global_state_->local_states_lock while touching it (see steal_cpu_one).
+   * global_state_->local_states_lock while touching it (see steal_cpu_tasks).
    */
   [[nodiscard]] io_uring_local_task_queue_state* local_state() noexcept {
     return &local_state_;
   }
 
   /**
-   * Fetches one CPU task, trying the local queue first, then the shared
-   * queue, then remote stealing. Stops at the first source that yields a
-   * task so work never accumulates on this thread's stack.
+   * Fetches a batch of CPU tasks, trying the local queue first, then the
+   * shared queue, then remote stealing. Stops at the first source that
+   * yields tasks so work never accumulates on this thread's stack.
    */
   [[nodiscard]] io_uring_operation_base* fetch_cpu_task() noexcept;
+
+  /** Fetches and executes a batch of CPU tasks. Returns true if work ran. */
+  [[nodiscard]] bool run_cpu_batch() noexcept;
 
  private:
   struct operation_queue {
