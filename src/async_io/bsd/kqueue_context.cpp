@@ -35,7 +35,7 @@ void kqueue_context::apply_context_options(
 }
 
 int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
-  if (queue_initialized_) {
+  if (run_state_.queue_initialized) {
     return -EALREADY;
   }
 
@@ -63,12 +63,12 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
 
   (void)local_state_.pop_cpu_all();
   local_io_head_ = nullptr;
-  next_registration_sequence_ = 0;
+  scheduling_state_.next_registration_sequence = 0;
   event_buffer_ = std::move(events);
-  run_active_.store(false, std::memory_order_release);
-  waiting_.store(false, std::memory_order_release);
-  queue_initialized_ = true;
-  state_.store(context_state::running, std::memory_order_release);
+  run_state_.run_active.store(false, std::memory_order_release);
+  run_state_.waiting.store(false, std::memory_order_release);
+  run_state_.queue_initialized = true;
+  run_state_.state.store(context_state::running, std::memory_order_release);
   return 0;
 }
 
@@ -79,28 +79,28 @@ void kqueue_context::queue_exit() noexcept {
   // operations in-flight.
   abort_inflight_io();
 
-  state_.store(context_state::finished, std::memory_order_release);
+  run_state_.state.store(context_state::finished, std::memory_order_release);
 
   (void)local_state_.pop_cpu_all();
   local_io_head_ = nullptr;
-  next_registration_sequence_ = 0;
+  scheduling_state_.next_registration_sequence = 0;
 
   local_state_.wake_channel_.close();
   event_buffer_.reset();
   queue_.close();
-  queue_initialized_ = false;
+  run_state_.queue_initialized = false;
 }
 
 bool kqueue_context::is_open() const noexcept { return queue_.is_open(); }
 
 void kqueue_context::set_global_state(kqueue_task_queue_state* state) noexcept {
-  assert(!run_active_.load(std::memory_order_acquire));
+  assert(!run_state_.run_active.load(std::memory_order_acquire));
   global_state_ = state;
 }
 
 void kqueue_context::assert_running() const noexcept {
 #ifndef NDEBUG
-  const context_state s = state_.load(std::memory_order_acquire);
+  const context_state s = run_state_.state.load(std::memory_order_acquire);
   // The winning thread may legitimately observe finishing if stop() was
   // requested before run() on this native context (see io_context::run()).
   assert(s == context_state::running || s == context_state::finishing);

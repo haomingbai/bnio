@@ -230,6 +230,22 @@ class BNIO_EXPORT kqueue_context {
   /** Aborts all inflight I/O operations during shutdown. */
   void abort_inflight_io() noexcept;
 
+  /** Completes a linked list of unregistered I/O operations as stopped and
+   *  pushes them to the local CPU queue. */
+  void drain_io_list_complete_stopped(
+      kqueue_io_operation_base* head) noexcept;
+
+  /**
+   * Prepares and registers one I/O operation with kqueue.
+   *
+   * @return true if the operation was registered and added to the inflight
+   *         list; false if it completed immediately (preparation or
+   *         registration failure, or a nop task), in which case the caller
+   *         must push the operation to the CPU queue.
+   */
+  [[nodiscard]] bool prepare_and_register_operation(
+      kqueue_io_operation_base& operation) noexcept;
+
   /** Moves due passive-timer completions into the local CPU queue. */
   [[nodiscard]] bool consume_timeout_operations() noexcept;
 
@@ -242,11 +258,37 @@ class BNIO_EXPORT kqueue_context {
   [[nodiscard]] static void* wakeup_user_data() noexcept;
   [[nodiscard]] static void* local_wakeup_user_data() noexcept;
 
+  /** Classifies a kevent udata value into a dispatch kind. */
+  enum class event_udata_kind {
+    shared_wake,
+    local_wake,
+    operation,
+  };
+
+  [[nodiscard]] static event_udata_kind classify_udata(void* udata) noexcept;
+
   [[nodiscard]] run_phase handle_run_ready_tasks() noexcept;
   [[nodiscard]] run_phase handle_wait_for_work() noexcept;
   [[nodiscard]] run_phase handle_finish_drain() noexcept;
   [[nodiscard]] run_phase spin_for_work() noexcept;
   [[nodiscard]] run_phase wait_for_io_work() noexcept;
+
+  /**
+   * Fetches due timer operations from the shared heap and computes the wait
+   * timeout for the native poller.
+   *
+   * @param[out] deadline        Timer deadline fetched from the shared heap.
+   * @param[out] timeout         Filled with the remaining time until deadline.
+   * @param[out] timeout_pointer Points at @p timeout when a deadline was
+   *                             fetched; null for an unbounded wait.
+   * @return true if work was found (timer operations pushed, a CPU batch ran,
+   *         I/O was consumed, or finish was requested) and the caller should
+   *         leave the wait.
+   */
+  [[nodiscard]] bool compute_io_wait_timeout(
+      async_io::time_point& deadline, timespec& timeout,
+      const timespec*& timeout_pointer) noexcept;
+
   [[nodiscard]] bool closing_requested() const noexcept;
   [[nodiscard]] bool stop_requested() const noexcept;
   [[nodiscard]] bool should_finish() const noexcept;
@@ -310,16 +352,35 @@ class BNIO_EXPORT kqueue_context {
    *  (no re-arm), removes it from inflight, and completes it with `result`. */
   void fail_operation(kqueue_io_operation_base& operation, int result) noexcept;
 
+  /** Run-loop lifecycle and run flags. */
+  struct run_state {
+    /** Overall lifecycle state (running / finishing / finished). */
+    std::atomic<context_state> state{context_state::finished};
+    /** Whether a run loop is active on this context. */
+    std::atomic_bool run_active{false};
+    /** Whether this worker has published a sleeping state. */
+    std::atomic_bool waiting{false};
+    /** Whether queue_init() has completed. */
+    bool queue_initialized = false;
+  };
+
+  /** Scheduling cursors and sequence counters. */
+  struct scheduling_state {
+    /** Remaining local inline-completion budget for this round. */
+    unsigned local_task_budget = 0;
+    /** Steal start point for the next round; points at a node in the shared
+     *  local_states list. Head insertion never invalidates it. */
+    kqueue_local_task_queue_state* steal_cursor = nullptr;
+    /** Monotonic registration sequence; mirrors wait-queue insertion order. */
+    std::uint64_t next_registration_sequence = 0;
+  };
+
   bnio::base::kqueue queue_;
   kqueue_context_options options_{};
-  std::atomic<context_state> state_{context_state::finished};
-  bool queue_initialized_ = false;
-
-  std::uint64_t next_registration_sequence_ = 0;
+  run_state run_state_;
+  scheduling_state scheduling_state_;
 
   std::unique_ptr<bnio::base::event[]> event_buffer_;
-  std::atomic_bool run_active_{false};
-  std::atomic_bool waiting_{false};
 
   static thread_local kqueue_context* current_context_;
   kqueue_task_queue_state* global_state_ = nullptr;
@@ -327,10 +388,6 @@ class BNIO_EXPORT kqueue_context {
   /** Standalone-mode IO queue (no global state); unused in multi-worker. */
   kqueue_io_operation_base* local_io_head_ = nullptr;
   kqueue_io_operation_base* inflight_io_head_ = nullptr;
-  unsigned local_task_budget_ = 0;
-  /** Steal start point for the next round; points at a node in the shared
-   *  local_states list. Head insertion never invalidates it. */
-  kqueue_local_task_queue_state* steal_cursor_ = nullptr;
 };
 
 }  // namespace bnio::async_io::bsd_native

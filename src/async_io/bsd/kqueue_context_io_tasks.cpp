@@ -58,32 +58,36 @@ bool kqueue_context::consume_io_tasks() noexcept {
     operation->result = 0;
     operation->flags = 0;
 
-    const int prepare_result = prepare_io(*operation);
-    if (prepare_result < 0) {
-      operation->result = prepare_result;
-      operation->complete_submit_error(prepare_result);
-      local_state_.push_cpu(*operation);
-      continue;
-    }
-
-    // nop tasks carry no registration nodes and complete immediately.
-    bool complete_immediately = operation->registration_count == 0;
-    if (!complete_immediately) {
-      const int register_result = register_operation(*operation);
-      if (register_result < 0) {
-        operation->result = register_result;
-        operation->complete_submit_error(register_result);
-        complete_immediately = true;
-      } else {
-        add_inflight(*operation);
-      }
-    }
-
-    if (complete_immediately) {
+    if (!prepare_and_register_operation(*operation)) {
       local_state_.push_cpu(*operation);
     }
   }
 
+  return true;
+}
+
+bool kqueue_context::prepare_and_register_operation(
+    kqueue_io_operation_base& operation) noexcept {
+  const int prepare_result = prepare_io(operation);
+  if (prepare_result < 0) {
+    operation.result = prepare_result;
+    operation.complete_submit_error(prepare_result);
+    return false;
+  }
+
+  // nop tasks carry no registration nodes and complete immediately.
+  if (operation.registration_count == 0) {
+    return false;
+  }
+
+  const int register_result = register_operation(operation);
+  if (register_result < 0) {
+    operation.result = register_result;
+    operation.complete_submit_error(register_result);
+    return false;
+  }
+
+  add_inflight(operation);
   return true;
 }
 
@@ -117,7 +121,7 @@ int kqueue_context::prepare_io(kqueue_io_operation_base& operation) noexcept {
     node.filter = helper.event(index).filter();
     node.task = helper.task();
     node.poll_mask = helper.poll_mask();
-    node.sequence = next_registration_sequence_++;
+    node.sequence = scheduling_state_.next_registration_sequence++;
   }
   operation.registration_count = static_cast<std::uint8_t>(event_count);
   return 0;
@@ -343,26 +347,20 @@ void kqueue_context::abort_inflight_io() noexcept {
   // Drain unregistered I/O from the global queue and the standalone local
   // buffer so they are completed instead of leaked.
   if (global_state_ != nullptr) {
-    kqueue_io_operation_base* ops = global_state_->pop_io_all();
-    while (ops != nullptr) {
-      kqueue_io_operation_base* next = ops->io_next;
-      ops->io_next = nullptr;
-      ops->result = -ECANCELED;
-      ops->complete_submit_stopped();
-      local_state_.push_cpu(*ops);
-      ops = next;
-    }
+    drain_io_list_complete_stopped(global_state_->pop_io_all());
   }
+  drain_io_list_complete_stopped(std::exchange(local_io_head_, nullptr));
+}
 
-  kqueue_io_operation_base* unregistered =
-      std::exchange(local_io_head_, nullptr);
-  while (unregistered != nullptr) {
-    kqueue_io_operation_base* next = unregistered->io_next;
-    unregistered->io_next = nullptr;
-    unregistered->result = -ECANCELED;
-    unregistered->complete_submit_stopped();
-    local_state_.push_cpu(*unregistered);
-    unregistered = next;
+void kqueue_context::drain_io_list_complete_stopped(
+    kqueue_io_operation_base* head) noexcept {
+  while (head != nullptr) {
+    kqueue_io_operation_base* next = head->io_next;
+    head->io_next = nullptr;
+    head->result = -ECANCELED;
+    head->complete_submit_stopped();
+    local_state_.push_cpu(*head);
+    head = next;
   }
 }
 

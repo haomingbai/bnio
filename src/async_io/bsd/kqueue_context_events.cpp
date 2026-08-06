@@ -65,10 +65,11 @@ void kqueue_context::dispatch_event_tasks(operation_queue& event_tasks,
   }
 
   if (options_.local_queue_threshold == 0 ||
-      (local_task_budget_ > 0 && task_count <= local_task_budget_)) {
+      (scheduling_state_.local_task_budget > 0 &&
+       task_count <= scheduling_state_.local_task_budget)) {
     local_state_.push_cpu(reverse_tasks(event_tasks.pop_all()));
     if (options_.local_queue_threshold > 0) {
-      local_task_budget_ -= task_count;
+      scheduling_state_.local_task_budget -= task_count;
     }
     return;
   }
@@ -101,14 +102,11 @@ bool kqueue_context::dispatch_event_result(
   //   error (non-zero data): propagate the errno from the kevent.
   //   write EOF: translate to EPIPE or fflags.
   //   otherwise: perform the actual I/O step; retry on EAGAIN.
-  if (task == kqueue_task::poll) {
-    operation.result = static_cast<int>(poll_result(poll_mask, event));
-  } else if (event.has_error() && event.data() != 0) {
-    operation.result = -static_cast<int>(event.data());
-  } else if (task == kqueue_task::write && event.has_eof()) {
-    operation.result =
-        event.fflags() == 0 ? -EPIPE : -static_cast<int>(event.fflags());
-  } else {
+  //
+  // Performs the native I/O step and returns whether the operation completed.
+  // A false return means the operation was re-armed after EAGAIN and must
+  // stay inflight.
+  const auto perform_io_step = [&]() noexcept -> bool {
     operation.result =
         operation.owns_io_step() ? operation.perform_io() : -EOPNOTSUPP;
     if (operation.result == -EAGAIN || operation.result == -EWOULDBLOCK) {
@@ -116,27 +114,62 @@ bool kqueue_context::dispatch_event_result(
         return false;  // re-armed; keep inflight
       }
     }
+    return true;
+  };
+
+  switch (task) {
+    case kqueue_task::poll:
+      operation.result = static_cast<int>(poll_result(poll_mask, event));
+      break;
+
+    case kqueue_task::write:
+      if (event.has_error() && event.data() != 0) {
+        operation.result = -static_cast<int>(event.data());
+      } else if (event.has_eof()) {
+        operation.result =
+            event.fflags() == 0 ? -EPIPE : -static_cast<int>(event.fflags());
+      } else if (!perform_io_step()) {
+        return false;
+      }
+      break;
+
+    case kqueue_task::read:
+    case kqueue_task::none:
+    case kqueue_task::nop:
+    default:
+      // Error and EOF are handled per-task above; any other task value
+      // performs the native I/O step, matching the original implicit-else
+      // fallback.
+      if (event.has_error() && event.data() != 0) {
+        operation.result = -static_cast<int>(event.data());
+      } else if (!perform_io_step()) {
+        return false;
+      }
+      break;
   }
   return true;
 }
 
 bool kqueue_context::process_event(const bnio::base::event& event,
                                    operation_queue& tasks) noexcept {
-  if (event.udata() == wakeup_user_data()) {
-    // Drain the shared wake channel so edge-triggered EVFILT_READ can
-    // re-fire on the next write. This handles both the legacy
-    // EVFILT_USER path and the new shared-pipe path uniformly.
-    if (global_state_ != nullptr) {
-      (void)global_state_->wake_channel_.drain();
-    }
-    return false;
-  }
+  switch (classify_udata(event.udata())) {
+    case event_udata_kind::shared_wake:
+      // Drain the shared wake channel so edge-triggered EVFILT_READ can
+      // re-fire on the next write. This handles both the legacy
+      // EVFILT_USER path and the new shared-pipe path uniformly.
+      if (global_state_ != nullptr) {
+        (void)global_state_->wake_channel_.drain();
+      }
+      return false;
 
-  if (event.udata() == local_wakeup_user_data()) {
-    // Directed wake: only this worker is signalled. Drain the per-worker
-    // channel so the edge-triggered EVFILT_READ can fire again.
-    (void)local_state_.wake_channel_.drain();
-    return false;
+    case event_udata_kind::local_wake:
+      // Directed wake: only this worker is signalled. Drain the per-worker
+      // channel so the edge-triggered EVFILT_READ can fire again.
+      (void)local_state_.wake_channel_.drain();
+      return false;
+
+    case event_udata_kind::operation:
+      break;
   }
 
   auto* operation = static_cast<kqueue_io_operation_base*>(event.udata());
@@ -180,6 +213,17 @@ bool kqueue_context::process_event(const bnio::base::event& event,
   remove_inflight(*operation);
   tasks.push(*operation);
   return true;
+}
+
+kqueue_context::event_udata_kind kqueue_context::classify_udata(
+    void* udata) noexcept {
+  if (udata == wakeup_user_data()) {
+    return event_udata_kind::shared_wake;
+  }
+  if (udata == local_wakeup_user_data()) {
+    return event_udata_kind::local_wake;
+  }
+  return event_udata_kind::operation;
 }
 
 unsigned kqueue_context::poll_result(

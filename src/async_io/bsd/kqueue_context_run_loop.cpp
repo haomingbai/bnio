@@ -33,23 +33,23 @@ void compute_wait_timespec(async_io::time_point deadline,
 
 bool kqueue_context::enter_run() noexcept {
   bool expected_active = false;
-  if (!run_active_.compare_exchange_strong(expected_active, true,
-                                           std::memory_order_acq_rel,
-                                           std::memory_order_acquire)) {
+  if (!run_state_.run_active.compare_exchange_strong(
+          expected_active, true, std::memory_order_acq_rel,
+          std::memory_order_acquire)) {
     return false;
   }
   // Only the thread that wins the CAS checks state.  Concurrent callers
   // that lose the race return immediately — they must not assert on a
-  // state_ value left by a previous run cycle.
+  // run_state_.state value left by a previous run cycle.
   assert_running();
 
   if (!is_open()) {
-    run_active_.store(false, std::memory_order_release);
+    run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
 
   current_context_ = this;
-  waiting_.store(false, std::memory_order_release);
+  run_state_.waiting.store(false, std::memory_order_release);
   if (global_state_ != nullptr) {
     global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   }
@@ -114,14 +114,14 @@ void kqueue_context::run() noexcept {
   if (global_state_ != nullptr) {
     global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
   }
-  run_active_.store(false, std::memory_order_release);
+  run_state_.run_active.store(false, std::memory_order_release);
 }
 
 int kqueue_context::stop() noexcept {
   context_state expected = context_state::running;
-  if (!state_.compare_exchange_strong(expected, context_state::finishing,
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_acquire) &&
+  if (!run_state_.state.compare_exchange_strong(
+          expected, context_state::finishing, std::memory_order_acq_rel,
+          std::memory_order_acquire) &&
       expected != context_state::finishing) {
     return 0;
   }
@@ -151,7 +151,7 @@ bool kqueue_context::consume_timeout_operations() noexcept {
 }
 
 kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
-  local_task_budget_ = options_.local_queue_threshold;
+  scheduling_state_.local_task_budget = options_.local_queue_threshold;
 
   // 1. Poll ready kevents only when there is inflight I/O that could have
   //    produced a completion. Without inflight I/O, kevent() would always
@@ -228,26 +228,11 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
 
   timespec timeout{};
   const timespec* timeout_pointer = nullptr;
-  if (global_state_ != nullptr && global_state_->timeout_heap != nullptr &&
-      global_state_->try_fetch_timeout_operations != nullptr) {
-    async_io::time_point deadline{};
-    kqueue_operation_base* timeout_operations = nullptr;
-    if (global_state_->try_fetch_timeout_operations(
-            global_state_->timeout_heap, deadline, timeout_operations)) {
-      if (timeout_operations != nullptr) {
-        local_state_.push_cpu(timeout_operations);
-      }
-      if (timeout_operations != nullptr || run_cpu_batch() ||
-          consume_io_tasks() || should_finish()) {
-        end_wait();
-        return should_finish() ? run_phase::finish_drain
-                               : run_phase::run_ready_tasks;
-      }
-      if (deadline != async_io::time_point::max()) {
-        compute_wait_timespec(deadline, timeout);
-        timeout_pointer = &timeout;
-      }
-    }
+  async_io::time_point deadline{};
+  if (compute_io_wait_timeout(deadline, timeout, timeout_pointer)) {
+    end_wait();
+    return should_finish() ? run_phase::finish_drain
+                           : run_phase::run_ready_tasks;
   }
 
   const bool collected_events = collect_ready_events(true, timeout_pointer);
@@ -263,13 +248,44 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
 }
 
+bool kqueue_context::compute_io_wait_timeout(
+    async_io::time_point& deadline, timespec& timeout,
+    const timespec*& timeout_pointer) noexcept {
+  timeout_pointer = nullptr;
+  if (global_state_ == nullptr || global_state_->timeout_heap == nullptr ||
+      global_state_->try_fetch_timeout_operations == nullptr) {
+    return false;
+  }
+
+  kqueue_operation_base* timeout_operations = nullptr;
+  if (!global_state_->try_fetch_timeout_operations(
+          global_state_->timeout_heap, deadline, timeout_operations)) {
+    return false;
+  }
+
+  if (timeout_operations != nullptr) {
+    local_state_.push_cpu(timeout_operations);
+  }
+  if (timeout_operations != nullptr || run_cpu_batch() ||
+      consume_io_tasks() || should_finish()) {
+    return true;
+  }
+
+  if (deadline != async_io::time_point::max()) {
+    compute_wait_timespec(deadline, timeout);
+    timeout_pointer = &timeout;
+  }
+  return false;
+}
+
 bool kqueue_context::closing_requested() const noexcept {
   return global_state_ != nullptr &&
          global_state_->life_state.load(std::memory_order_acquire) != 0;
 }
 
 bool kqueue_context::stop_requested() const noexcept {
-  return state_.load(std::memory_order_acquire) != context_state::running;
+  return run_state_.state.load(std::memory_order_acquire) !=
+         context_state::running;
 }
 
 bool kqueue_context::should_finish() const noexcept {
@@ -325,7 +341,7 @@ void kqueue_context::finish() noexcept {
     drain_local_cpu_tasks();
   }
 
-  state_.store(context_state::finished, std::memory_order_release);
+  run_state_.state.store(context_state::finished, std::memory_order_release);
 }
 
 }  // namespace bnio::async_io::bsd_native
