@@ -17,9 +17,8 @@
  *    scheduling window
  */
 
-#include <gtest/gtest.h>
-
 #include <bnio/bnio.h>
+#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
@@ -38,8 +37,8 @@ struct op_holder : op_holder_base {
   Op op;
   template <typename Sender, typename Receiver>
   explicit op_holder(Sender&& s, Receiver&& r)
-      : op(bexec::connect(std::forward<Sender>(s),
-                          std::forward<Receiver>(r))) {}
+      : op(bexec::connect(std::forward<Sender>(s), std::forward<Receiver>(r))) {
+  }
 };
 
 struct timer_recv {
@@ -105,7 +104,7 @@ TEST(TimerStopRaceStressTest, repeated_stop_with_pending_timers) {
   }
 
   EXPECT_EQ(failures, 0) << failures << " / " << kIterations
-                          << " iterations had stranded timer operations";
+                         << " iterations had stranded timer operations";
 }
 
 // Test B: Burst-stop pattern — submit many far-future timers while the
@@ -162,8 +161,8 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
       (void)timer.expires_at(far);
       auto sender = timer.async_wait();
       using Op = decltype(bexec::connect(sender, timer_recv{nullptr}));
-      auto h = std::make_unique<op_holder<Op>>(sender,
-                                                timer_recv{&burst_completed});
+      auto h =
+          std::make_unique<op_holder<Op>>(sender, timer_recv{&burst_completed});
       bexec::start(h->op);
       burst_ops.push_back(std::move(h));
     }
@@ -179,7 +178,7 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
   }
 
   EXPECT_EQ(failures, 0) << failures << " / " << kIterations
-                          << " iterations had stranded timer operations";
+                         << " iterations had stranded timer operations";
 }
 
 }  // namespace

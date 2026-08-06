@@ -1,6 +1,5 @@
-#include <gtest/gtest.h>
-
 #include <bnio/bnio.h>
+#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
@@ -40,8 +39,8 @@ struct op_holder : op_holder_base {
   Op op;
   template <typename Sender, typename Receiver>
   explicit op_holder(Sender&& s, Receiver&& r)
-      : op(bexec::connect(std::forward<Sender>(s),
-                          std::forward<Receiver>(r))) {}
+      : op(bexec::connect(std::forward<Sender>(s), std::forward<Receiver>(r))) {
+  }
 };
 
 // Test 1: join_completes_sender
@@ -117,14 +116,13 @@ TEST(LifecycleTest, join_races_with_schedule) {
 
   auto sched = ctx->get_post_scheduler();
   using Sender = decltype(sched.schedule());
-  using Op = decltype(bexec::connect(std::declval<Sender>(),
-                                      schedule_recv{nullptr}));
+  using Op =
+      decltype(bexec::connect(std::declval<Sender>(), schedule_recv{nullptr}));
 
   // Post N schedule operations on the heap so they outlive the test loop.
   for (int i = 0; i < N; ++i) {
     auto sender = sched.schedule();
-    auto h = std::make_unique<op_holder<Op>>(
-        sender, schedule_recv{&completed});
+    auto h = std::make_unique<op_holder<Op>>(sender, schedule_recv{&completed});
     bexec::start(h->op);
     ops.push_back(std::move(h));
   }

@@ -1,15 +1,13 @@
-#include <gtest/gtest.h>
-
 #include <bnio/bnio.h>
+#include <gtest/gtest.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
 #include <memory>
 #include <thread>
 #include <vector>
-
-#include <sys/socket.h>
-#include <unistd.h>
 
 namespace {
 
@@ -22,8 +20,8 @@ struct op_holder : op_holder_base {
   Op op;
   template <typename Sender, typename Receiver>
   explicit op_holder(Sender&& s, Receiver&& r)
-      : op(bexec::connect(std::forward<Sender>(s),
-                          std::forward<Receiver>(r))) {}
+      : op(bexec::connect(std::forward<Sender>(s), std::forward<Receiver>(r))) {
+  }
 };
 
 // Receiver for the second (phantom) async_read_some.
@@ -54,13 +52,11 @@ struct first_receiver {
   std::vector<std::unique_ptr<op_holder_base>>* ops = nullptr;
 
   void set_value(std::error_code /*ec*/, std::size_t /*n*/) noexcept {
-    if (first_counter)
-      first_counter->fetch_add(1, std::memory_order_relaxed);
+    if (first_counter) first_counter->fetch_add(1, std::memory_order_relaxed);
   }
 
   void set_stopped() noexcept {
-    if (first_counter)
-      first_counter->fetch_add(1, std::memory_order_relaxed);
+    if (first_counter) first_counter->fetch_add(1, std::memory_order_relaxed);
 
     // Phase 3 bug repro: start a new I/O operation from within
     // set_stopped(). When this is called from finish() Phase 3
@@ -70,8 +66,8 @@ struct first_receiver {
     // so this operation is never consumed.
     auto sched = ctx->get_post_scheduler();
     auto view = bnio::async_io::stream_socket_view(fd);
-    auto sender = sched.async_read_some(
-        view, bnio::buffer(second_buf, second_buf_size));
+    auto sender =
+        sched.async_read_some(view, bnio::buffer(second_buf, second_buf_size));
 
     using Op = decltype(bexec::connect(sender, second_receiver{}));
     auto holder = std::make_unique<op_holder<Op>>(

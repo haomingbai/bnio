@@ -300,10 +300,9 @@ class ssl_async_operation_base {
     const int committed =
         BIO_nwrite(read_bio(*stream_), &data, bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
-      post_complete_error(
-          last_ssl_error());  // Invariant violation: goes through
-                              // deliver_terminal -> deliver_value ->
-                              // set_value(ec)
+      post_complete_error(last_ssl_error());  // Invariant violation: goes
+                                              // through deliver_terminal ->
+                                              // deliver_value -> set_value(ec)
       return;
     }
 
@@ -318,10 +317,9 @@ class ssl_async_operation_base {
     const int consumed =
         BIO_nread(write_bio(*stream_), &data, bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {
-      post_complete_error(
-          last_ssl_error());  // Invariant violation: goes through
-                              // deliver_terminal -> deliver_value ->
-                              // set_value(ec)
+      post_complete_error(last_ssl_error());  // Invariant violation: goes
+                                              // through deliver_terminal ->
+                                              // deliver_value -> set_value(ec)
       return;
     }
 

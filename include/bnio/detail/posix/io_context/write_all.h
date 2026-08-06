@@ -28,6 +28,7 @@ class adaptive_eager_control {
   [[nodiscard]] bool operator()() const noexcept {
     return state_->context->enable_immediate_io() && state_->eager;
   }
+
  private:
   State* state_;
 };

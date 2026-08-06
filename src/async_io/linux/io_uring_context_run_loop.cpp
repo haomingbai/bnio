@@ -223,8 +223,8 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   // publishers can detect a sleeping worker and wake it via eventfd.
   begin_wait();
 
-  if (collect_ready_cqes() || run_cpu_batch() ||
-      consume_timeout_operations() || consume_io_tasks() || should_finish()) {
+  if (collect_ready_cqes() || run_cpu_batch() || consume_timeout_operations() ||
+      consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
@@ -259,8 +259,8 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
     return run_phase::finished;
   }
 
-  if (collect_ready_cqes() || run_cpu_batch() ||
-      consume_timeout_operations() || consume_io_tasks()) {
+  if (collect_ready_cqes() || run_cpu_batch() || consume_timeout_operations() ||
+      consume_io_tasks()) {
     return run_phase::run_ready_tasks;
   }
 
@@ -289,8 +289,8 @@ io_uring_context::run_phase io_uring_context::prepare_wait_timeout(
   if (timeout_operations != nullptr) {
     local_state_.push_cpu(timeout_operations);
   }
-  if (timeout_operations != nullptr || run_cpu_batch() ||
-      consume_io_tasks() || should_finish()) {
+  if (timeout_operations != nullptr || run_cpu_batch() || consume_io_tasks() ||
+      should_finish()) {
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
   }

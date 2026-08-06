@@ -1,13 +1,11 @@
+#include <bnio/bnio.h>
 #include <gtest/gtest.h>
 
-#include <bnio/bnio.h>
-
 #include <atomic>
-#include <memory>
-#include <thread>
-
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
+#include <memory>
+#include <thread>
 
 namespace {
 
@@ -22,9 +20,7 @@ struct worker_entered_receiver {
   void set_value(std::error_code /*ec*/) noexcept {
     flag->store(true, std::memory_order_release);
   }
-  void set_stopped() noexcept {
-    flag->store(true, std::memory_order_release);
-  }
+  void set_stopped() noexcept { flag->store(true, std::memory_order_release); }
 };
 
 TEST(LifecycleTest, stop_run_uaf_stress) {
@@ -55,8 +51,8 @@ TEST(LifecycleTest, stop_run_uaf_stress) {
     // running_workers_ has already been incremented by run().
     auto scheduler = ctx->get_post_scheduler();
     auto sender = scheduler.schedule();
-    auto op = bexec::connect(sender,
-                             worker_entered_receiver{&g_worker_entered});
+    auto op =
+        bexec::connect(sender, worker_entered_receiver{&g_worker_entered});
     bexec::start(op);
 
     std::thread worker([&ctx]() { ctx->run(); });

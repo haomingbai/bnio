@@ -1,6 +1,5 @@
-#include <gtest/gtest.h>
-
 #include <bnio/bnio.h>
+#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>

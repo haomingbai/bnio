@@ -26,9 +26,9 @@
 #include <cstdint>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <type_traits>
 #include <utility>
-#include <thread>
 
 #include "bnio/async_io/dns/query.h"
 
@@ -364,8 +364,7 @@ class BNIO_EXPORT io_context {
     using completion_signatures =
         bexec::completion_signatures<bexec::set_value_t()>;
 
-    explicit join_sender(io_context& context) noexcept
-        : context_(&context) {}
+    explicit join_sender(io_context& context) noexcept : context_(&context) {}
 
     template <class Receiver>
     class operation {
@@ -386,7 +385,8 @@ class BNIO_EXPORT io_context {
           bexec::set_value(std::move(receiver_));
         } else {
           // Another thread is already stopping or the context is stopped.
-          while (!context_->lifecycle_.stopped.load(std::memory_order_acquire)) {
+          while (
+              !context_->lifecycle_.stopped.load(std::memory_order_acquire)) {
             std::this_thread::yield();
           }
           bexec::set_value(std::move(receiver_));
@@ -659,7 +659,8 @@ class BNIO_EXPORT io_context {
    * Only state-involving work (check, enqueue, wake decision) runs inside
    * the critical section; the caller executes the operation afterwards.
    */
-  [[nodiscard]] bool publish_cpu(detail::native_operation_base& operation) noexcept;
+  [[nodiscard]] bool publish_cpu(
+      detail::native_operation_base& operation) noexcept;
 
   /** Wakes one worker only when every published worker is sleeping. */
   void wake_one_if_all_workers_sleeping() noexcept;
@@ -730,13 +731,14 @@ class BNIO_EXPORT io_context {
       void* state, time_point& deadline,
       detail::native_operation_base*& operations) noexcept;
 
-  // Stage helpers for try_fetch_timeout_operations(). drain_expired_timers_locked
-  // runs inside the timers_.mutex critical section; reverse_ready_operations
-  // runs after it is released.
+  // Stage helpers for try_fetch_timeout_operations().
+  // drain_expired_timers_locked runs inside the timers_.mutex critical section;
+  // reverse_ready_operations runs after it is released.
   void drain_expired_timers_locked(time_point now) noexcept;
 
-  void reverse_ready_operations(detail::timer_operation_base* ready,
-                                detail::native_operation_base*& operations) noexcept;
+  void reverse_ready_operations(
+      detail::timer_operation_base* ready,
+      detail::native_operation_base*& operations) noexcept;
 
   /** Aborts all pending timer waits with set_stopped (io_context::stop only).
    *

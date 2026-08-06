@@ -325,9 +325,8 @@ class ssl_io_step_operation {
     const int committed = BIO_nwrite(read_bio(*state_->stream), &data,
                                      ssl_bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
-      complete_error(
-          last_ssl_error());  // Invariant violation: passed through
-                              // set_value(ec, bytes)
+      complete_error(last_ssl_error());  // Invariant violation: passed through
+                                         // set_value(ec, bytes)
       return;
     }
 
@@ -343,9 +342,8 @@ class ssl_io_step_operation {
     const int consumed = BIO_nread(write_bio(*state_->stream), &data,
                                    ssl_bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {
-      complete_error(
-          last_ssl_error());  // Invariant violation: passed through
-                              // set_value(ec, bytes)
+      complete_error(last_ssl_error());  // Invariant violation: passed through
+                                         // set_value(ec, bytes)
       return;
     }
 

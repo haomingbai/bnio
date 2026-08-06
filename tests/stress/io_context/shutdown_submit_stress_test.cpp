@@ -1,6 +1,5 @@
-#include <gtest/gtest.h>
-
 #include <bnio/bnio.h>
+#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
@@ -19,8 +18,8 @@ struct op_holder : op_holder_base {
   Op op;
   template <typename Sender, typename Receiver>
   explicit op_holder(Sender&& s, Receiver&& r)
-      : op(bexec::connect(std::forward<Sender>(s),
-                          std::forward<Receiver>(r))) {}
+      : op(bexec::connect(std::forward<Sender>(s), std::forward<Receiver>(r))) {
+  }
 };
 
 struct counting_recv {
@@ -89,7 +88,7 @@ TEST(ShutdownSubmitStressTest, concurrent_schedule_after_stop_all_complete) {
         auto scheduler = ctx->get_post_scheduler();
         using Sender = decltype(scheduler.schedule());
         using Op = decltype(bexec::connect(std::declval<Sender>(),
-                                            counting_recv{nullptr}));
+                                           counting_recv{nullptr}));
         auto& ops = poster_ops[static_cast<std::size_t>(p)];
         ops.reserve(static_cast<std::size_t>(kOpsPerPoster));
         // Announce readiness, then park until the worker has fully exited.
@@ -102,8 +101,8 @@ TEST(ShutdownSubmitStressTest, concurrent_schedule_after_stop_all_complete) {
         }
         for (int i = 0; i < kOpsPerPoster; ++i) {
           auto sender = scheduler.schedule();
-          auto h = std::make_unique<op_holder<Op>>(
-              sender, counting_recv{&completed});
+          auto h = std::make_unique<op_holder<Op>>(sender,
+                                                   counting_recv{&completed});
           bexec::start(h->op);
           ops.push_back(std::move(h));
         }
@@ -128,8 +127,7 @@ TEST(ShutdownSubmitStressTest, concurrent_schedule_after_stop_all_complete) {
     // operations never complete and would leave completed < posted.
     const int expected = posted.load(std::memory_order_acquire);
     for (int i = 0;
-         i < 200 && completed.load(std::memory_order_acquire) < expected;
-         ++i) {
+         i < 200 && completed.load(std::memory_order_acquire) < expected; ++i) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 

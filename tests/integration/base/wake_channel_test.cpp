@@ -24,8 +24,7 @@ TEST(WakeChannelTest, wake_eagain_treated_as_success) {
   // Fill the eventfd counter to its maximum so the next write returns
   // EAGAIN.  The counter max is UINT64_MAX - 1.
   const std::uint64_t max_val = UINT64_MAX - 1;
-  const ssize_t written =
-      ::write(channel.read_fd(), &max_val, sizeof(max_val));
+  const ssize_t written = ::write(channel.read_fd(), &max_val, sizeof(max_val));
   ASSERT_GT(written, 0);
 
   // wake() tries to add 1, which would exceed UINT64_MAX - 1, so the

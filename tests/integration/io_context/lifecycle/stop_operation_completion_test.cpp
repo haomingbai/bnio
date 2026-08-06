@@ -1,6 +1,5 @@
-#include <gtest/gtest.h>
-
 #include <bnio/bnio.h>
+#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
@@ -19,8 +18,8 @@ struct op_holder : op_holder_base {
   Op op;
   template <typename Sender, typename Receiver>
   explicit op_holder(Sender&& s, Receiver&& r)
-      : op(bexec::connect(std::forward<Sender>(s),
-                          std::forward<Receiver>(r))) {}
+      : op(bexec::connect(std::forward<Sender>(s), std::forward<Receiver>(r))) {
+  }
 };
 
 struct counting_recv {
@@ -61,14 +60,14 @@ TEST(LifecycleTest, stop_completes_all_schedule_ops) {
 
   auto sched = ctx->get_post_scheduler();
   using Sender = decltype(sched.schedule());
-  using Op = decltype(bexec::connect(std::declval<Sender>(),
-                                      counting_recv{nullptr}));
+  using Op =
+      decltype(bexec::connect(std::declval<Sender>(), counting_recv{nullptr}));
 
   std::thread poster([&]() {
     for (int i = 0; i < N; i++) {
       auto sender = sched.schedule();
-      auto h = std::make_unique<op_holder<Op>>(
-          sender, counting_recv{&completed});
+      auto h =
+          std::make_unique<op_holder<Op>>(sender, counting_recv{&completed});
       bexec::start(h->op);
       ops.push_back(std::move(h));
     }
@@ -108,8 +107,7 @@ TEST(LifecycleTest, stop_completes_all_timer_ops) {
     (void)timers[i].expires_at(far);
     auto sender = timers[i].async_wait();
     using Op = decltype(bexec::connect(sender, timer_recv{nullptr}));
-    auto h = std::make_unique<op_holder<Op>>(
-        sender, timer_recv{&completed});
+    auto h = std::make_unique<op_holder<Op>>(sender, timer_recv{&completed});
     bexec::start(h->op);
     ops.push_back(std::move(h));
   }

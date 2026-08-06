@@ -232,8 +232,7 @@ class BNIO_EXPORT kqueue_context {
 
   /** Completes a linked list of unregistered I/O operations as stopped and
    *  pushes them to the local CPU queue. */
-  void drain_io_list_complete_stopped(
-      kqueue_io_operation_base* head) noexcept;
+  void drain_io_list_complete_stopped(kqueue_io_operation_base* head) noexcept;
 
   /**
    * Prepares and registers one I/O operation with kqueue.

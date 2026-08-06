@@ -240,9 +240,8 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
 
   // A timeout is only a reason to become running. The normal ready phase
   // performs another complete work/timer decision before this worker sleeps.
-  if (collected_events || timeout_pointer != nullptr ||
-      run_cpu_batch() || consume_timeout_operations() ||
-      consume_io_tasks()) {
+  if (collected_events || timeout_pointer != nullptr || run_cpu_batch() ||
+      consume_timeout_operations() || consume_io_tasks()) {
     return run_phase::run_ready_tasks;
   }
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
@@ -266,8 +265,8 @@ bool kqueue_context::compute_io_wait_timeout(
   if (timeout_operations != nullptr) {
     local_state_.push_cpu(timeout_operations);
   }
-  if (timeout_operations != nullptr || run_cpu_batch() ||
-      consume_io_tasks() || should_finish()) {
+  if (timeout_operations != nullptr || run_cpu_batch() || consume_io_tasks() ||
+      should_finish()) {
     return true;
   }
 

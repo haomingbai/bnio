@@ -24,8 +24,12 @@ namespace bnio::detail {
 // Default eager control: consult the context immutable switch.
 class context_eager_control {
  public:
-  explicit context_eager_control(io_context* context) noexcept : context_(context) {}
-  [[nodiscard]] bool operator()() const noexcept { return context_->enable_immediate_io(); }
+  explicit context_eager_control(io_context* context) noexcept
+      : context_(context) {}
+  [[nodiscard]] bool operator()() const noexcept {
+    return context_->enable_immediate_io();
+  }
+
  private:
   io_context* context_;
 };
@@ -262,8 +266,7 @@ class native_io_sender {
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return native_io_operation<Model, Control, std::remove_cvref_t<Receiver> >(
-        *context_, std::move(model_), std::move(control_),
-        std::move(receiver));
+        *context_, std::move(model_), std::move(control_), std::move(receiver));
   }
 
   template <class Receiver>
