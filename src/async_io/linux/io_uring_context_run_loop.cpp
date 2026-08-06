@@ -169,8 +169,8 @@ io_uring_context::handle_run_ready_tasks() noexcept {
   // Always drain CQEs first to keep the ring backlog small under load.
   (void)collect_ready_cqes();
 
-  // Run one CPU task, trying local → shared → steal in that order.
-  // Stopping after a single task keeps work from piling up on this
+  // Run one batch of CPU tasks, trying local → shared → steal in that
+  // order. Stopping after one batch keeps work from piling up on this
   // thread's stack, so other workers can steal it instead.
   if (run_cpu_batch()) {
     return run_phase::run_ready_tasks;
