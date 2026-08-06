@@ -16,7 +16,7 @@ bnio/bnio.h  (umbrella)
 │   ├── detail/posix/io_context/native_context.h
 │   │   ├── async_io/linux/io_uring_context.h
 │   │   └── async_io/bsd/kqueue_context.h
-│   ├── detail/posix/io_context/{options, state, native_worker,
+│   ├── detail/posix/io_context/{options,
 │   │                      timer_types, steady_timer}.h
 │   └── detail/posix/io_context/native_io.h
 │       ├── detail/posix/io_context/{timer_wait, write_all}.h
@@ -99,9 +99,6 @@ bnio
 │   ├── basic_scheduler<Kind>             dispatch/post scheduler handles
 │   └── schedule_sender<Kind>             scheduler sender types
 ├── detail                                Layer 3 internals
-│   ├── native_context_state              native-context options
-│   ├── native_worker_state               atomic worker-list head
-│   ├── native_worker                     per-thread native context slot
 │   ├── timer_state_data                  timer heap/list + passive timeout state
 │   └── *_write_all_state                 layer-2 sender compositions
 ├── ip

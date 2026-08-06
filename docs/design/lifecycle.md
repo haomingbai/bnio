@@ -380,7 +380,7 @@ stranding them with no worker left to drain.
 by design.  Each call to `io_context::run()` creates a fresh native context
 instance; no two threads ever share the same native context in production
 use.  Concurrent calls to `run()` on the same native context object are
-**undefined behavior**.  The `run_active_` CAS in `enter_run()` exists to
+**undefined behavior**.  The `run_state_.run_active` CAS in `enter_run()` exists to
 make races easier to detect under debug assertions, not to make concurrent
 calls correct.  Callers that bypass `io_context` and use the native
 contexts directly must ensure at most one thread calls `run()` at a time.

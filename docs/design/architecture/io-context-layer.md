@@ -9,8 +9,7 @@ worker ownership, timers, and source implementation live under
 `io_context` is the event-loop owner and scheduler factory:
 
 1. **Event loop host** — `run()` drives the selected io_uring or kqueue loop.
-   Each thread calling `run()` creates a native context directly (without the
-   intermediate `native_worker` wrapper that was removed in 0.0.4).
+   Each thread calling `run()` creates a native context directly.
 2. **Scheduler factory** — produces dispatch and post schedulers.
 3. **Passive I/O backend** — publishes scheduler I/O to a shared queue that a
    worker drains on its owning native-context thread.
@@ -21,9 +20,6 @@ cohesive `detail` state objects rather than defining all internal data inline:
 | State / Detail Type | Header | Responsibility |
 |---------------------|--------|----------------|
 | `detail::native_context` and related aliases | `detail/posix/io_context/native_context.h` | Select the native context, options, operation bases, and shared task state. |
-| `detail::native_context_state` | `detail/posix/io_context/state.h` | Native options used to create contexts lazily. |
-| `detail::native_worker_state` | `detail/posix/io_context/state.h` | Atomically published head of the native-worker list. |
-| `detail::native_worker` | `detail/posix/io_context/native_worker.h` | Per-run-thread owner of one native context. |
 | platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake-worker count, and worker-group stopping state (`life_state`). |
 | `detail::timer_state_data` | `detail/posix/io_context/timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
 
@@ -219,7 +215,7 @@ implementation:
 | `io_context.h` | Public `io_context` umbrella. |
 | `detail/posix/io_context/class.h` | `io_context`, schedulers, operation base, and private hooks. |
 | `detail/posix/io_context/native_context.h` | Backend-selected native type aliases. |
-| `detail/posix/io_context/{options,state,native_worker}.h` | Options, shared worker list, and per-thread native owner. |
+| `detail/posix/io_context/options.h` | `io_context_options` and the selected native context options. |
 | `detail/posix/io_context/{timer_types,steady_timer}.h` | Timer slots, queues, state, and public `steady_timer`. |
 | `detail/posix/io_context/native_io.h` | Shared scheduler/context forwarding functions; selects backend request factories. |
 | `detail/posix/io_context/{timer_wait,write_all}.h` | Shared timer wait and composed full-write sender templates. |
@@ -316,7 +312,7 @@ sequenceDiagram
     participant S as scheduler
     participant Stream as tcp_socket
     participant Op as operation
-    participant Worker as native_worker (slot)
+    participant Worker as run-loop worker
     participant UCtx as io_uring_context
     participant Ring as base::ring
     participant K as Kernel

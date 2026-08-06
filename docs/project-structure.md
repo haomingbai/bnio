@@ -100,8 +100,6 @@ High-level async runtime, stream owners, and buffer types.
   options, operation bases, and task-queue state.
 - `detail/posix/io_context/options.h` — `io_context_options` and the selected native
   context options.
-- `detail/posix/io_context/state.h` and `detail/posix/io_context/native_worker.h` — grouped runtime state and
-  the per-run-thread owner of a native context.
 - `detail/posix/io_context/timer_types.h` and `steady_timer.h` — timer operations,
   timer state, slot/heap types, and `steady_timer`.
 - `detail/posix/io_context/native_io.h` — shared context/scheduler forwarding

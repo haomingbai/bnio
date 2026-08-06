@@ -153,11 +153,11 @@ kqueue_operation_base* kqueue_context::steal_cpu_tasks() noexcept {
 
   // Validate the saved cursor is still in the list, else restart from head.
   kqueue_local_task_queue_state* start = run.head;
-  if (steal_cursor_ != nullptr) {
+  if (scheduling_state_.steal_cursor != nullptr) {
     kqueue_local_task_queue_state* scan = start;
-    while (scan != nullptr && scan != steal_cursor_) scan = scan->next;
-    if (scan != nullptr) start = steal_cursor_;
-    else steal_cursor_ = nullptr;
+    while (scan != nullptr && scan != scheduling_state_.steal_cursor) scan = scan->next;
+    if (scan != nullptr) start = scheduling_state_.steal_cursor;
+    else scheduling_state_.steal_cursor = nullptr;
   }
 
   // Steal the first non-empty victim's whole local queue; stop immediately.
@@ -165,14 +165,14 @@ kqueue_operation_base* kqueue_context::steal_cpu_tasks() noexcept {
   while (node != nullptr) {
     if (node != &local_state_) {
       if (kqueue_operation_base* operations = node->pop_cpu_all()) {
-        steal_cursor_ = node->next;   // next round resumes after this victim
+        scheduling_state_.steal_cursor = node->next;   // next round resumes after this victim
         return reverse_tasks(operations);
       }
     }
     node = node->next;
   }
 
-  steal_cursor_ = nullptr;
+  scheduling_state_.steal_cursor = nullptr;
   return nullptr;
 }
 ```
@@ -185,7 +185,7 @@ Key points:
 - **UAF protection.** The victim unregisters its `local_state_` under the run
   list lock before its context is destroyed. A stealer holding the same lock
   therefore never dereferences a freed node.
-- **Fairness via a per-worker cursor.** `steal_cursor_` is a private member of
+- **Fairness via a per-worker cursor.** `scheduling_state_.steal_cursor` is a private member of
   each `kqueue_context`. It records where the last successful steal left off
   so the next round begins after that victim instead of always at the head.
   Head insertion never moves an existing node, so a valid cursor stays valid
@@ -205,7 +205,7 @@ publisher can find it there.
 
 ```cpp
 void kqueue_context::begin_wait() noexcept {
-  waiting_.store(true, std::memory_order_release);
+  run_state_.waiting.store(true, std::memory_order_release);
   if (global_state_ == nullptr) return;
   {
     std::lock_guard<std::mutex> guard(global_state_->workers.run.lock);
@@ -237,7 +237,7 @@ void kqueue_context::end_wait() noexcept {
     }
     global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   }
-  waiting_.store(false, std::memory_order_release);
+  run_state_.waiting.store(false, std::memory_order_release);
 }
 ```
 
