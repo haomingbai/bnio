@@ -89,6 +89,19 @@ void io_context::wake_one_sleeping_locked() noexcept {
 
 void io_context::wake_one_if_all_workers_sleeping() noexcept {
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
+  // Timer deadlines are delivered by each worker's blocking timeout: a worker
+  // blocked in io_uring_enter with a timeout wakes itself when its deadline
+  // arrives. So a new or earlier timer deadline only needs to wake a worker
+  // when every worker is already blocked (their armed timeouts would fire too
+  // late); otherwise the awake worker observes the new nearest deadline on its
+  // next run-loop pass and re-arms its own timeout. The timer entry points
+  // stage this wake only when the heap deadline moved earlier (or a wait was
+  // canceled), so reaching here with all workers sleeping implies a genuine
+  // re-arm is needed. Waking exactly one sleeping worker is sufficient: it
+  // re-arms at the earlier deadline and dispatches it when it fires.
+  if (global_state_.awake_workers.load(std::memory_order_acquire) != 0) {
+    return;
+  }
   wake_one_sleeping_locked();
 }
 
