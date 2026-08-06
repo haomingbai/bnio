@@ -54,14 +54,14 @@ void io_uring_context::apply_context_options(
 
 int io_uring_context::queue_init(
     const io_uring_context_options& options) noexcept {
-  if (queue_initialized_) {
+  if (run_state_.queue_initialized) {
     return -EALREADY;
   }
-  run_active_.store(false, std::memory_order_release);
-  queue_initialized_ = true;
+  run_state_.run_active.store(false, std::memory_order_release);
+  run_state_.queue_initialized = true;
   apply_context_options(options);
-  eventfd_poll_pending_ = false;
-  local_eventfd_poll_pending_ = false;
+  poll_state_.eventfd_poll_pending = false;
+  poll_state_.local_eventfd_poll_pending = false;
   (void)local_state_.wake_channel_.open();
 
   bnio::base::params queue_params;
@@ -70,19 +70,20 @@ int io_uring_context::queue_init(
 
   if (result >= 0) {
     kernel_features_ = queue_params.features();
-    ring_disabled_ = (queue_params.flags() &
-                      bnio::base::detail::io_uring_setup_r_disabled) != 0;
+    run_state_.ring_disabled =
+        (queue_params.flags() &
+         bnio::base::detail::io_uring_setup_r_disabled) != 0;
   } else {
     kernel_features_ = 0;
-    ring_disabled_ = false;
+    run_state_.ring_disabled = false;
   }
 
   if (result < 0) {
-    state_.store(context_state::finished, std::memory_order_release);
+    run_state_.state.store(context_state::finished, std::memory_order_release);
     return result;
   }
 
-  state_.store(context_state::running, std::memory_order_release);
+  run_state_.state.store(context_state::running, std::memory_order_release);
   return 0;
 }
 
@@ -122,15 +123,15 @@ void io_uring_context::queue_exit() noexcept {
   // operations in-flight.
   abort_inflight_io();
 
-  state_.store(context_state::finished, std::memory_order_release);
+  run_state_.state.store(context_state::finished, std::memory_order_release);
 
   (void)local_state_.pop_cpu_all();
-  eventfd_poll_pending_ = false;
-  local_eventfd_poll_pending_ = false;
+  poll_state_.eventfd_poll_pending = false;
+  poll_state_.local_eventfd_poll_pending = false;
   local_state_.wake_channel_.close();
-  ring_disabled_ = false;
+  run_state_.ring_disabled = false;
   ring_.queue_exit();
-  queue_initialized_ = false;
+  run_state_.queue_initialized = false;
 }
 
 bool io_uring_context::is_open() const noexcept { return ring_.is_open(); }

@@ -121,20 +121,20 @@ int io_uring_context::enable_ring() noexcept {
   if (!ring_.is_open()) {
     return -EINVAL;
   }
-  if (!ring_disabled_) {
+  if (!run_state_.ring_disabled) {
     return 0;
   }
 
   const int result = ring_.enable();
   if (result >= 0) {
-    ring_disabled_ = false;
+    run_state_.ring_disabled = false;
   }
   return result;
 }
 
 void io_uring_context::assert_running() const noexcept {
 #ifndef NDEBUG
-  const context_state s = state_.load(std::memory_order_acquire);
+  const context_state s = run_state_.state.load(std::memory_order_acquire);
   assert(s == context_state::running || s == context_state::finishing);
 #endif
 }

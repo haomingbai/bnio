@@ -43,6 +43,17 @@ bool io_uring_context::collect_ready_cqes() noexcept {
   return true;
 }
 
+io_uring_context::cqe_user_data_kind io_uring_context::classify_cqe_user_data(
+    void* user_data) noexcept {
+  if (user_data == eventfd_user_data()) {
+    return cqe_user_data_kind::eventfd;
+  }
+  if (user_data == local_eventfd_user_data()) {
+    return cqe_user_data_kind::local_eventfd;
+  }
+  return cqe_user_data_kind::operation;
+}
+
 unsigned io_uring_context::collect_cqe_tasks(
     operation_queue& cqe_tasks) noexcept {
   if (!ring_.is_open()) {
@@ -59,31 +70,35 @@ unsigned io_uring_context::collect_cqe_tasks(
         data.result = cqe.res();
         data.flags = cqe.flags();
 
-        if (data.user_data == eventfd_user_data()) {
-          // Self-pipe notification: the eventfd poll CQE arrived.
-          // Drain all queued eventfd notifications and re-arm the poll
-          // so the ring can wake us again when new work arrives.
-          eventfd_poll_pending_ = false;
-          drain_eventfd();
-          if (submit_eventfd_poll() < 0) {
-            state_.store(context_state::finishing, std::memory_order_release);
-          }
-          return;
-        }
+        switch (classify_cqe_user_data(data.user_data)) {
+          case cqe_user_data_kind::eventfd:
+            // Self-pipe notification: the eventfd poll CQE arrived.
+            // Drain all queued eventfd notifications and re-arm the poll
+            // so the ring can wake us again when new work arrives.
+            poll_state_.eventfd_poll_pending = false;
+            drain_eventfd();
+            if (submit_eventfd_poll() < 0) {
+              run_state_.state.store(context_state::finishing,
+                                     std::memory_order_release);
+            }
+            return;
 
-        if (data.user_data == local_eventfd_user_data()) {
-          // Directed wake: only this worker is signalled. Drain the
-          // per-worker channel and re-arm its poll.
-          local_eventfd_poll_pending_ = false;
-          (void)local_state_.wake_channel_.drain();
-          if (submit_local_eventfd_poll() < 0) {
-            state_.store(context_state::finishing, std::memory_order_release);
-          }
-          return;
-        }
+          case cqe_user_data_kind::local_eventfd:
+            // Directed wake: only this worker is signalled. Drain the
+            // per-worker channel and re-arm its poll.
+            poll_state_.local_eventfd_poll_pending = false;
+            (void)local_state_.wake_channel_.drain();
+            if (submit_local_eventfd_poll() < 0) {
+              run_state_.state.store(context_state::finishing,
+                                     std::memory_order_release);
+            }
+            return;
 
-        if (enqueue_cqe_task(data, cqe_tasks)) {
-          ++task_count;
+          case cqe_user_data_kind::operation:
+            if (enqueue_cqe_task(data, cqe_tasks)) {
+              ++task_count;
+            }
+            return;
         }
       });
   return task_count;
@@ -101,10 +116,11 @@ void io_uring_context::dispatch_cqe_tasks(operation_queue& cqe_tasks,
   // When local_queue_threshold is 0 (default) this tier is unlimited and
   // CQEs never spill to the shared CPU queue on this path.
   if (options_.local_queue_threshold == 0 ||
-      (local_task_budget_ > 0 && task_count <= local_task_budget_)) {
+      (scheduling_state_.local_task_budget > 0 &&
+       task_count <= scheduling_state_.local_task_budget)) {
     local_state_.push_cpu(cqe_tasks.pop_all());
     if (options_.local_queue_threshold > 0) {
-      local_task_budget_ -= task_count;
+      scheduling_state_.local_task_budget -= task_count;
     }
     return;
   }

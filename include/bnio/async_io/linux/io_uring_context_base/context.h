@@ -266,9 +266,6 @@ class BNIO_EXPORT io_uring_context {
    */
   void push_cpu_tasks(operation_queue& operations) noexcept;
 
-  /** Moves shared CPU tasks into the run-loop-local queue. */
-  [[nodiscard]] bool move_cpu_tasks() noexcept;
-
   /** Consumes ring-local control I/O and all shared I/O after CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;
 
@@ -344,6 +341,20 @@ class BNIO_EXPORT io_uring_context {
   [[nodiscard]] run_phase wait_for_io_work() noexcept;
 
   /**
+   * Fetches due timeout operations and, when none becomes ready, fills the
+   * wait timespec with the nearest timer deadline.
+   *
+   * @param timeout         The timespec filled when a deadline is available.
+   * @param timeout_pointer Set to point at timeout when a deadline is
+   *                        available, left null otherwise.
+   * @return run_phase::wait_for_work when the caller should rearm the wake
+   *         polls and block; otherwise the phase to enter because work was
+   *         found.
+   */
+  [[nodiscard]] run_phase prepare_wait_timeout(
+      __kernel_timespec& timeout, __kernel_timespec*& timeout_pointer) noexcept;
+
+  /**
    * Returns whether the shared state has requested closing.
    */
   [[nodiscard]] bool closing_requested() const noexcept;
@@ -373,6 +384,22 @@ class BNIO_EXPORT io_uring_context {
    * Collects and dispatches ready CQE-backed tasks.
    */
   [[nodiscard]] bool collect_ready_cqes() noexcept;
+
+  /**
+   * Kind of a CQE user-data pointer, used to dispatch collected CQEs.
+   */
+  enum class cqe_user_data_kind {
+    eventfd,
+    local_eventfd,
+    operation,
+  };
+
+  /**
+   * Classifies a CQE user-data pointer as the shared eventfd sentinel, the
+   * per-worker wake channel sentinel, or an operation.
+   */
+  [[nodiscard]] static cqe_user_data_kind classify_cqe_user_data(
+      void* user_data) noexcept;
 
   /**
    * Collects ready CQEs into an operation queue.
@@ -426,23 +453,37 @@ class BNIO_EXPORT io_uring_context {
   bnio::base::ring ring_;
   io_uring_context_options options_{};
   unsigned kernel_features_ = 0;
-  std::atomic<context_state> state_{context_state::finished};
-  bool queue_initialized_ = false;
-  bool ring_disabled_ = false;
 
-  std::atomic_bool run_active_{false};
-  std::atomic_bool waiting_{false};
-  bool eventfd_poll_pending_ = false;
-  bool local_eventfd_poll_pending_ = false;
+  /** Lifecycle state and run-loop flags for this context. */
+  struct run_state {
+    std::atomic<context_state> state{context_state::finished};
+    std::atomic_bool run_active{false};
+    std::atomic_bool waiting{false};
+    bool queue_initialized = false;
+    bool ring_disabled = false;
+  };
+  run_state run_state_;
+
+  /** Poll-arming state for the shared and per-worker wake channels. */
+  struct poll_state {
+    bool eventfd_poll_pending = false;
+    bool local_eventfd_poll_pending = false;
+  };
+  poll_state poll_state_;
 
   static thread_local io_uring_context* current_context_;
   io_uring_task_queue_state* global_state_ = nullptr;
   io_uring_local_task_queue_state local_state_;
   io_uring_io_operation_base* inflight_io_head_ = nullptr;
-  unsigned local_task_budget_ = 0;
-  /** Steal start point for the next round; points at a node in the shared
-   *  local_states list. Head insertion never invalidates it. */
-  io_uring_local_task_queue_state* steal_cursor_ = nullptr;
+
+  /** Run-loop scheduling budget and steal cursor. */
+  struct scheduling_state {
+    unsigned local_task_budget = 0;
+    /** Steal start point for the next round; points at a node in the shared
+     *  local_states list. Head insertion never invalidates it. */
+    io_uring_local_task_queue_state* steal_cursor = nullptr;
+  };
+  scheduling_state scheduling_state_;
 };
 
 }  // namespace bnio::async_io::linux_native

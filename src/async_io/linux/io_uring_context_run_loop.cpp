@@ -36,19 +36,19 @@ void compute_wait_timespec(async_io::time_point deadline,
 
 bool io_uring_context::enter_run() noexcept {
   bool expected_active = false;
-  if (!run_active_.compare_exchange_strong(expected_active, true,
-                                           std::memory_order_acq_rel,
-                                           std::memory_order_acquire)) {
+  if (!run_state_.run_active.compare_exchange_strong(
+          expected_active, true, std::memory_order_acq_rel,
+          std::memory_order_acquire)) {
     return false;
   }
   // Only the thread that wins the CAS checks state.  Concurrent callers
   // that lose the race return immediately — they must not assert on a
-  // state_ value left by a previous run cycle.  See stop_internal()
-  // ordering guarantee in io_context::begin_stop().
+  // run_state_.state value left by a previous run cycle.  See
+  // stop_internal() ordering guarantee in io_context::begin_stop().
   assert_running();
 
   if (!is_open()) {
-    run_active_.store(false, std::memory_order_release);
+    run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
 
@@ -58,28 +58,28 @@ bool io_uring_context::enter_run() noexcept {
   // With SINGLE_ISSUER | R_DISABLED, this call makes the run-loop thread the
   // designated issuer before any SQE can be submitted.
   if (enable_ring() < 0) {
-    state_.store(context_state::finished, std::memory_order_release);
-    run_active_.store(false, std::memory_order_release);
+    run_state_.state.store(context_state::finished, std::memory_order_release);
+    run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
 
   current_context_ = this;
-  waiting_.store(false, std::memory_order_release);
+  run_state_.waiting.store(false, std::memory_order_release);
   global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   const int poll_result = submit_eventfd_poll();
   if (poll_result < 0) {
-    state_.store(context_state::finished, std::memory_order_release);
+    run_state_.state.store(context_state::finished, std::memory_order_release);
     global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
-    run_active_.store(false, std::memory_order_release);
+    run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
 
   // Arm the per-worker wake channel for directed wakeups and publish this
   // worker's local state so remote threads can steal CPU work.
   if (submit_local_eventfd_poll() < 0) {
-    state_.store(context_state::finished, std::memory_order_release);
+    run_state_.state.store(context_state::finished, std::memory_order_release);
     global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
-    run_active_.store(false, std::memory_order_release);
+    run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
   register_local_state();
@@ -124,14 +124,14 @@ void io_uring_context::run() noexcept {
 
   current_context_ = previous_context;
   global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
-  run_active_.store(false, std::memory_order_release);
+  run_state_.run_active.store(false, std::memory_order_release);
 }
 
 int io_uring_context::stop() noexcept {
   context_state expected = context_state::running;
-  if (!state_.compare_exchange_strong(expected, context_state::finishing,
-                                      std::memory_order_acq_rel,
-                                      std::memory_order_acquire) &&
+  if (!run_state_.state.compare_exchange_strong(
+          expected, context_state::finishing, std::memory_order_acq_rel,
+          std::memory_order_acquire) &&
       expected != context_state::finishing) {
     return 0;
   }
@@ -164,7 +164,7 @@ bool io_uring_context::consume_timeout_operations() noexcept {
 io_uring_context::run_phase
 io_uring_context::handle_run_ready_tasks() noexcept {
   // Reset the local-queue budget for this pass through the run loop.
-  local_task_budget_ = options_.local_queue_threshold;
+  scheduling_state_.local_task_budget = options_.local_queue_threshold;
 
   // Always drain CQEs first to keep the ring backlog small under load.
   (void)collect_ready_cqes();
@@ -232,38 +232,24 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
 
   __kernel_timespec timeout{};
   __kernel_timespec* timeout_pointer = nullptr;
-  if (global_state_->timeout_heap != nullptr &&
-      global_state_->try_fetch_timeout_operations != nullptr) {
-    async_io::time_point deadline{};
-    io_uring_operation_base* timeout_operations = nullptr;
-    if (global_state_->try_fetch_timeout_operations(
-            global_state_->timeout_heap, deadline, timeout_operations)) {
-      if (timeout_operations != nullptr) {
-        local_state_.push_cpu(timeout_operations);
-      }
-      if (timeout_operations != nullptr || run_cpu_batch() ||
-          consume_io_tasks() || should_finish()) {
-        end_wait();
-        return should_finish() ? run_phase::finish_drain
-                               : run_phase::run_ready_tasks;
-      }
-
-      if (deadline != async_io::time_point::max()) {
-        compute_wait_timespec(deadline, timeout);
-        timeout_pointer = &timeout;
-      }
-    }
+  const run_phase timeout_result =
+      prepare_wait_timeout(timeout, timeout_pointer);
+  if (timeout_result != run_phase::wait_for_work) {
+    end_wait();
+    return timeout_result;
   }
 
+  // Rearm both wake polls before blocking so a concurrent publisher can
+  // always wake this worker.
   const int poll_result = submit_eventfd_poll();
   if (poll_result < 0) {
     end_wait();
-    state_.store(context_state::finished, std::memory_order_release);
+    run_state_.state.store(context_state::finished, std::memory_order_release);
     return run_phase::finished;
   }
   if (submit_local_eventfd_poll() < 0) {
     end_wait();
-    state_.store(context_state::finished, std::memory_order_release);
+    run_state_.state.store(context_state::finished, std::memory_order_release);
     return run_phase::finished;
   }
   const int wait_result = wait_for_cqe_event(timeout_pointer);
@@ -285,12 +271,45 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   return should_finish() ? run_phase::finish_drain : run_phase::wait_for_work;
 }
 
+io_uring_context::run_phase io_uring_context::prepare_wait_timeout(
+    __kernel_timespec& timeout, __kernel_timespec*& timeout_pointer) noexcept {
+  // No timer heap configured: block without a deadline.
+  if (global_state_->timeout_heap == nullptr ||
+      global_state_->try_fetch_timeout_operations == nullptr) {
+    return run_phase::wait_for_work;
+  }
+
+  async_io::time_point deadline{};
+  io_uring_operation_base* timeout_operations = nullptr;
+  if (!global_state_->try_fetch_timeout_operations(
+          global_state_->timeout_heap, deadline, timeout_operations)) {
+    return run_phase::wait_for_work;
+  }
+
+  if (timeout_operations != nullptr) {
+    local_state_.push_cpu(timeout_operations);
+  }
+  if (timeout_operations != nullptr || run_cpu_batch() ||
+      consume_io_tasks() || should_finish()) {
+    return should_finish() ? run_phase::finish_drain
+                           : run_phase::run_ready_tasks;
+  }
+
+  // No work found; arm the blocking wait with the nearest timer deadline.
+  if (deadline != async_io::time_point::max()) {
+    compute_wait_timespec(deadline, timeout);
+    timeout_pointer = &timeout;
+  }
+  return run_phase::wait_for_work;
+}
+
 bool io_uring_context::closing_requested() const noexcept {
   return global_state_->life_state.load(std::memory_order_acquire) != 0;
 }
 
 bool io_uring_context::stop_requested() const noexcept {
-  return state_.load(std::memory_order_acquire) != context_state::running;
+  return run_state_.state.load(std::memory_order_acquire) !=
+         context_state::running;
 }
 
 bool io_uring_context::should_finish() const noexcept {
@@ -345,7 +364,7 @@ void io_uring_context::finish() noexcept {
     drain_local_tasks(/*include_cqe=*/false);
   }
 
-  state_.store(context_state::finished, std::memory_order_release);
+  run_state_.state.store(context_state::finished, std::memory_order_release);
 }
 
 }  // namespace bnio::async_io::linux_native

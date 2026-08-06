@@ -87,15 +87,15 @@ io_uring_operation_base* io_uring_context::steal_cpu_tasks() noexcept {
   // the head. Head insertion never moves existing nodes, so a valid cursor
   // keeps its position without re-traversal.
   io_uring_local_task_queue_state* start = run.head;
-  if (steal_cursor_ != nullptr) {
+  if (scheduling_state_.steal_cursor != nullptr) {
     io_uring_local_task_queue_state* scan = start;
-    while (scan != nullptr && scan != steal_cursor_) {
+    while (scan != nullptr && scan != scheduling_state_.steal_cursor) {
       scan = scan->next;
     }
     if (scan != nullptr) {
-      start = steal_cursor_;
+      start = scheduling_state_.steal_cursor;
     } else {
-      steal_cursor_ = nullptr;
+      scheduling_state_.steal_cursor = nullptr;
     }
   }
 
@@ -105,14 +105,14 @@ io_uring_operation_base* io_uring_context::steal_cpu_tasks() noexcept {
   while (node != nullptr) {
     if (node != &local_state_) {
       if (io_uring_operation_base* operations = node->pop_cpu_all()) {
-        steal_cursor_ = node->next;
+        scheduling_state_.steal_cursor = node->next;
         return reverse_tasks(operations);
       }
     }
     node = node->next;
   }
 
-  steal_cursor_ = nullptr;
+  scheduling_state_.steal_cursor = nullptr;
   return nullptr;
 }
 
@@ -149,11 +149,11 @@ void io_uring_context::notify_one_waiter() noexcept {
 }
 
 bool io_uring_context::is_waiting() const noexcept {
-  return waiting_.load(std::memory_order_acquire);
+  return run_state_.waiting.load(std::memory_order_acquire);
 }
 
 void io_uring_context::begin_wait() noexcept {
-  waiting_.store(true, std::memory_order_release);
+  run_state_.waiting.store(true, std::memory_order_release);
   // Move from the run list to the suspend list. The two list locks are
   // taken separately (never nested) to avoid deadlock between a waking
   // and a sleeping worker.
@@ -186,7 +186,7 @@ void io_uring_context::end_wait() noexcept {
     io_uring_link_local_state(run, &local_state_);
   }
   global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
-  waiting_.store(false, std::memory_order_release);
+  run_state_.waiting.store(false, std::memory_order_release);
 }
 
 int io_uring_context::signal_eventfd() noexcept {
@@ -216,8 +216,9 @@ int io_uring_context::submit_eventfd_poll() noexcept {
   if (!ring_.is_open() || wake_fd < 0) {
     return -EINVAL;
   }
-  if (eventfd_poll_pending_ ||
-      state_.load(std::memory_order_acquire) != context_state::running) {
+  if (poll_state_.eventfd_poll_pending ||
+      run_state_.state.load(std::memory_order_acquire) !=
+          context_state::running) {
     return 0;
   }
 
@@ -241,7 +242,7 @@ int io_uring_context::submit_eventfd_poll() noexcept {
       return submit_result < 0 ? submit_result : -EAGAIN;
     }
 
-    eventfd_poll_pending_ = true;
+    poll_state_.eventfd_poll_pending = true;
     return submit_result;
   }
 
@@ -260,8 +261,9 @@ int io_uring_context::submit_local_eventfd_poll() noexcept {
   if (!ring_.is_open() || local_fd < 0) {
     return -EINVAL;
   }
-  if (local_eventfd_poll_pending_ ||
-      state_.load(std::memory_order_acquire) != context_state::running) {
+  if (poll_state_.local_eventfd_poll_pending ||
+      run_state_.state.load(std::memory_order_acquire) !=
+          context_state::running) {
     return 0;
   }
 
@@ -285,7 +287,7 @@ int io_uring_context::submit_local_eventfd_poll() noexcept {
       return submit_result < 0 ? submit_result : -EAGAIN;
     }
 
-    local_eventfd_poll_pending_ = true;
+    poll_state_.local_eventfd_poll_pending = true;
     return submit_result;
   }
 
