@@ -29,24 +29,18 @@ int kqueue_context::post(kqueue_operation_base& operation) noexcept {
 void kqueue_context::publish_io(kqueue_io_operation_base& operation) noexcept {
   assert_running();
 
-  // Worker-local fast path: when publish_io is called from the worker
-  // thread that is currently running this context, push directly to the
-  // local IO queue to avoid CAS on the shared MPSC queue and prevent
-  // descriptor/connection migration to another worker's kqueue.
-  if (current_context_ == this) {
-    local_state_.push_io(operation);
-    return;
-  }
-
+  // Experimental: worker-local fast path removed so all I/O publications
+  // contend on the global queue, breaking connection affinity.
   if (global_state_ != nullptr) {
     global_state_->push_io(operation);
     notify_one_waiter();
     return;
   }
 
-  assert(!run_active_.load(std::memory_order_acquire) ||
-         current_context_ == this);
-  local_state_.push_io(operation);
+  // Standalone mode (no shared state): keep a local IO queue drained by
+  // consume_io_tasks(). IO stealing is intentionally unsupported.
+  operation.io_next = local_io_head_;
+  local_io_head_ = &operation;
 }
 
 void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {
@@ -68,26 +62,101 @@ void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {
   notify_one_waiter();
 }
 
-bool kqueue_context::consume_global_state() noexcept {
-  if (global_state_ == nullptr) {
-    return false;
+kqueue_operation_base* kqueue_context::fetch_cpu_task() noexcept {
+  // 1. Worker-local queue first: fastest and preserves locality.
+  if (kqueue_operation_base* operations = local_state_.pop_cpu_all()) {
+    return reverse_tasks(operations);
   }
 
-  bool consumed = false;
-  if (kqueue_operation_base* incoming = global_state_->pop_cpu_all()) {
-    local_state_.push_cpu(reverse_tasks(incoming));
-    consumed = true;
+  if (global_state_ == nullptr) {
+    return nullptr;
   }
-  if (kqueue_io_operation_base* incoming = global_state_->pop_io_all()) {
-    kqueue_io_operation_base** tail = &incoming;
-    while (*tail != nullptr) {
-      tail = &(*tail)->io_next;
+
+  // 2. Shared CPU queue.
+  if (kqueue_operation_base* operations = global_state_->pop_cpu_all()) {
+    return reverse_tasks(operations);
+  }
+
+  // 3. Steal from another worker's local queue. Only reached when both
+  //    local and shared queues are empty, so a stealing worker is by
+  //    definition relatively idle.
+  return steal_cpu_tasks();
+}
+
+bool kqueue_context::run_one_cpu_task() noexcept {
+  if (kqueue_operation_base* operations = fetch_cpu_task()) {
+    execute_tasks(operations);
+    return true;
+  }
+  return false;
+}
+
+kqueue_operation_base* kqueue_context::steal_cpu_tasks() noexcept {
+  if (global_state_ == nullptr) {
+    return nullptr;
+  }
+
+  // The lock guards both the list traversal and the lifetime of every node:
+  // a worker unregisters its local state under the same lock before its
+  // context (and local state) is destroyed, so a visited node is never freed
+  // while we touch it (UAF protection).
+  std::lock_guard<std::mutex> guard(global_state_->local_states_lock);
+
+  // Validate the saved cursor is still in the list; otherwise restart from
+  // the head. Head insertion never moves existing nodes, so a valid cursor
+  // keeps its position without re-traversal.
+  kqueue_local_task_queue_state* start = global_state_->local_states;
+  if (steal_cursor_ != nullptr) {
+    kqueue_local_task_queue_state* scan = start;
+    while (scan != nullptr && scan != steal_cursor_) {
+      scan = scan->next;
     }
-    *tail = incoming_io_tasks_;
-    incoming_io_tasks_ = incoming;
-    consumed = true;
+    if (scan != nullptr) {
+      start = steal_cursor_;
+    } else {
+      steal_cursor_ = nullptr;
+    }
   }
-  return consumed;
+
+  // Traverse the list starting at the cursor, stealing the first non-empty
+  // local queue in bulk. Stop as soon as a batch is stolen.
+  kqueue_local_task_queue_state* node = start;
+  do {
+    if (node != &local_state_) {
+      if (kqueue_operation_base* operations = node->pop_cpu_all()) {
+        steal_cursor_ = node->next;
+        return reverse_tasks(operations);
+      }
+    }
+    node = node->next;
+  } while (node != nullptr);
+
+  steal_cursor_ = nullptr;
+  return nullptr;
+}
+
+void kqueue_context::register_local_state() noexcept {
+  if (global_state_ == nullptr) {
+    return;
+  }
+  std::lock_guard<std::mutex> guard(global_state_->local_states_lock);
+  local_state_.next = global_state_->local_states;
+  global_state_->local_states = &local_state_;
+}
+
+void kqueue_context::unregister_local_state() noexcept {
+  if (global_state_ == nullptr) {
+    return;
+  }
+  std::lock_guard<std::mutex> guard(global_state_->local_states_lock);
+  kqueue_local_task_queue_state** link = &global_state_->local_states;
+  while (*link != nullptr && *link != &local_state_) {
+    link = &(*link)->next;
+  }
+  if (*link == &local_state_) {
+    *link = local_state_.next;
+    local_state_.next = nullptr;
+  }
 }
 
 void kqueue_context::notify_one_waiter() noexcept {
@@ -145,6 +214,11 @@ int kqueue_context::trigger_wakeup() noexcept {
 void* kqueue_context::wakeup_user_data() noexcept {
   static int wakeup_sentinel = 0;
   return &wakeup_sentinel;
+}
+
+void* kqueue_context::local_wakeup_user_data() noexcept {
+  static int local_wakeup_sentinel = 0;
+  return &local_wakeup_sentinel;
 }
 
 }  // namespace bnio::async_io::bsd_native

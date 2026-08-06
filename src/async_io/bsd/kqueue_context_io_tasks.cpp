@@ -35,23 +35,18 @@ namespace {
 }  // namespace
 
 bool kqueue_context::consume_io_tasks() noexcept {
-  kqueue_io_operation_base* queue_local =
-      std::exchange(local_state_.io, nullptr);
-  kqueue_io_operation_base* global_io =
-      std::exchange(incoming_io_tasks_, nullptr);
+  kqueue_io_operation_base* operations = nullptr;
+  if (global_state_ != nullptr) {
+    operations = global_state_->pop_io_all();
+  } else {
+    operations = std::exchange(local_io_head_, nullptr);
+  }
+  if (operations == nullptr) {
+    return false;
+  }
 
-  // Merge local and global IO queues. Both are MPSC-LIFO, so each is
-  // reversed individually to restore FIFO producer order, then the global
-  // list is appended to the local tail.
-  kqueue_io_operation_base* operations = reverse_io_tasks(queue_local);
-  kqueue_io_operation_base** tail = &operations;
-  while (*tail != nullptr) {
-    tail = &(*tail)->io_next;
-  }
-  *tail = reverse_io_tasks(global_io);
-  while (*tail != nullptr) {
-    tail = &(*tail)->io_next;
-  }
+  // MPSC publication is LIFO; restore producer order before registering.
+  operations = reverse_io_tasks(operations);
   if (operations == nullptr) {
     return false;
   }
@@ -345,7 +340,7 @@ void kqueue_context::abort_inflight_io() noexcept {
     local_state_.push_cpu(*op);
   }
 
-  // Drain unregistered I/O from the global queue and the local incoming
+  // Drain unregistered I/O from the global queue and the standalone local
   // buffer so they are completed instead of leaked.
   if (global_state_ != nullptr) {
     kqueue_io_operation_base* ops = global_state_->pop_io_all();
@@ -360,7 +355,7 @@ void kqueue_context::abort_inflight_io() noexcept {
   }
 
   kqueue_io_operation_base* unregistered =
-      std::exchange(incoming_io_tasks_, nullptr);
+      std::exchange(local_io_head_, nullptr);
   while (unregistered != nullptr) {
     kqueue_io_operation_base* next = unregistered->io_next;
     unregistered->io_next = nullptr;

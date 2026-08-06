@@ -185,6 +185,24 @@ class BNIO_EXPORT io_uring_context {
   /** Publishes I/O for passive preparation by the context run loop. */
   void publish_io(io_uring_io_operation_base& operation) noexcept;
 
+  /**
+   * Returns the worker-local task queue state.
+   *
+   * The state is linked into the shared task queue state's local_states
+   * list while the worker is running. Remote threads must hold
+   * global_state_->local_states_lock while touching it (see steal_cpu_one).
+   */
+  [[nodiscard]] io_uring_local_task_queue_state* local_state() noexcept {
+    return &local_state_;
+  }
+
+  /**
+   * Fetches one CPU task, trying the local queue first, then the shared
+   * queue, then remote stealing. Stops at the first source that yields a
+   * task so work never accumulates on this thread's stack.
+   */
+  [[nodiscard]] io_uring_operation_base* fetch_cpu_task() noexcept;
+
  private:
   struct operation_queue {
     void push(io_uring_operation_base& operation) noexcept;
@@ -195,6 +213,19 @@ class BNIO_EXPORT io_uring_context {
 
     io_uring_operation_base* head = nullptr;
   };
+
+  /**
+   * Attempts to steal a batch of CPU tasks from another worker's local
+   * queue. Holds global_state_->local_states_lock for the whole traversal;
+   * the lock also keeps the visited worker from being destroyed mid-steal.
+   */
+  [[nodiscard]] io_uring_operation_base* steal_cpu_tasks() noexcept;
+
+  /** Registers this worker's local state in the shared list (head insert). */
+  void register_local_state() noexcept;
+
+  /** Unregisters this worker's local state from the shared list. */
+  void unregister_local_state() noexcept;
 
   int prepare_io(io_uring_io_operation_base& operation) noexcept;
 
@@ -273,6 +304,16 @@ class BNIO_EXPORT io_uring_context {
    * Returns the sentinel user data used for eventfd poll SQEs.
    */
   [[nodiscard]] static void* eventfd_user_data() noexcept;
+
+  /**
+   * Submits the per-worker local wake channel poll request.
+   */
+  [[nodiscard]] int submit_local_eventfd_poll() noexcept;
+
+  /**
+   * Returns the sentinel user data used for local wake channel poll SQEs.
+   */
+  [[nodiscard]] static void* local_eventfd_user_data() noexcept;
 
   /**
    * Runs ready local and posted tasks.
@@ -389,14 +430,16 @@ class BNIO_EXPORT io_uring_context {
   std::atomic_bool run_active_{false};
   std::atomic_bool waiting_{false};
   bool eventfd_poll_pending_ = false;
+  bool local_eventfd_poll_pending_ = false;
 
   static thread_local io_uring_context* current_context_;
   io_uring_task_queue_state* global_state_ = nullptr;
-  operation_queue local_tasks_;
-  // Reserved for future ring-local I/O batching.
-  operation_queue local_io_tasks_;
+  io_uring_local_task_queue_state local_state_;
   io_uring_io_operation_base* inflight_io_head_ = nullptr;
   unsigned local_task_budget_ = 0;
+  /** Steal start point for the next round; points at a node in the shared
+   *  local_states list. Head insertion never invalidates it. */
+  io_uring_local_task_queue_state* steal_cursor_ = nullptr;
 };
 
 }  // namespace bnio::async_io::linux_native

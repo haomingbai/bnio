@@ -58,8 +58,11 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
   // no longer created here — wake is now driven by the shared channel
   // owned by io_context.
 
-  local_state_.clear();
-  incoming_io_tasks_ = nullptr;
+  // Open the per-worker wake channel used for directed wakeups.
+  (void)local_state_.wake_channel_.open();
+
+  (void)local_state_.pop_cpu_all();
+  local_io_head_ = nullptr;
   next_registration_sequence_ = 0;
   event_buffer_ = std::move(events);
   run_active_.store(false, std::memory_order_release);
@@ -78,10 +81,11 @@ void kqueue_context::queue_exit() noexcept {
 
   state_.store(context_state::finished, std::memory_order_release);
 
-  local_state_.clear();
-  incoming_io_tasks_ = nullptr;
+  (void)local_state_.pop_cpu_all();
+  local_io_head_ = nullptr;
   next_registration_sequence_ = 0;
 
+  local_state_.wake_channel_.close();
   event_buffer_.reset();
   queue_.close();
   queue_initialized_ = false;

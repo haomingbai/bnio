@@ -67,6 +67,32 @@ struct kqueue_registration_state {
   kqueue_registration_state* wait_prev = nullptr;
 };
 
+/** Per-worker local CPU queue and wake channel.
+ *
+ * Each worker publishes one of these into the shared state's intrusive
+ * local_states list (head insertion). The owner thread pushes and pops its
+ * own queue lock-free; remote threads only steal under local_states_lock,
+ * which keeps the owning worker from being destroyed (UAF protection).
+ */
+struct BNIO_EXPORT kqueue_local_task_queue_state {
+  void push_cpu(kqueue_operation_base& operation) noexcept;
+
+  /** Pushes a linked list of tasks (order preserved relative to the caller's
+   *  reversed FIFO). */
+  void push_cpu(kqueue_operation_base* operations) noexcept;
+
+  /** Removes the whole CPU queue in bulk; used by fetch and stealing. */
+  [[nodiscard]] kqueue_operation_base* pop_cpu_all() noexcept;
+
+  std::atomic<kqueue_operation_base*> cpu_head{nullptr};
+
+  /** Intrusive link in the shared state's local_states list. */
+  kqueue_local_task_queue_state* next = nullptr;
+
+  /** Per-worker wake channel for directed wakeups. */
+  bnio::base::wake_channel wake_channel_;
+};
+
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT kqueue_task_queue_state {
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
@@ -83,6 +109,11 @@ struct BNIO_EXPORT kqueue_task_queue_state {
   std::atomic<kqueue_operation_base*> cpu_head{nullptr};
   std::atomic<kqueue_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
+
+  /** Guards the local_states list and the lifetime of its nodes. */
+  std::mutex local_states_lock;
+  /** Head of the intrusive per-worker local_state list. */
+  kqueue_local_task_queue_state* local_states = nullptr;
 
   std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
   /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */
@@ -191,6 +222,30 @@ class BNIO_EXPORT kqueue_io_operation_base : public kqueue_operation_base {
   /** Performs one bounded nonblocking syscall after readiness. */
   [[nodiscard]] virtual int perform_io() noexcept { return 0; }
 };
+
+inline void kqueue_local_task_queue_state::push_cpu(
+    kqueue_operation_base& operation) noexcept {
+  kqueue_operation_base* head = cpu_head.load(std::memory_order_relaxed);
+  do {
+    operation.next = head;
+  } while (!cpu_head.compare_exchange_weak(
+      head, &operation, std::memory_order_release, std::memory_order_relaxed));
+}
+
+inline void kqueue_local_task_queue_state::push_cpu(
+    kqueue_operation_base* operations) noexcept {
+  while (operations != nullptr) {
+    kqueue_operation_base* operation = operations;
+    operations = operations->next;
+    operation->next = nullptr;
+    push_cpu(*operation);
+  }
+}
+
+inline kqueue_operation_base*
+kqueue_local_task_queue_state::pop_cpu_all() noexcept {
+  return cpu_head.exchange(nullptr, std::memory_order_acquire);
+}
 
 inline void kqueue_task_queue_state::push_cpu(
     kqueue_operation_base& operation) noexcept {

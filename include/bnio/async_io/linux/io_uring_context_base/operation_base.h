@@ -24,6 +24,32 @@ namespace bnio::async_io::linux_native {
 class io_uring_operation_base;
 class io_uring_io_operation_base;
 
+/** Per-worker local CPU queue and wake channel.
+ *
+ * Each worker publishes one of these into the shared state's intrusive
+ * local_states list (head insertion). The owner thread pushes and pops its
+ * own queue lock-free; remote threads only steal under local_states_lock,
+ * which keeps the owning worker from being destroyed (UAF protection).
+ */
+struct BNIO_EXPORT io_uring_local_task_queue_state {
+  void push_cpu(io_uring_operation_base& operation) noexcept;
+
+  /** Pushes a linked list of tasks (order preserved relative to the caller's
+   *  reversed FIFO). */
+  void push_cpu(io_uring_operation_base* operations) noexcept;
+
+  /** Removes the whole CPU queue in bulk; used by fetch and stealing. */
+  [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
+
+  std::atomic<io_uring_operation_base*> cpu_head{nullptr};
+
+  /** Intrusive link in the shared state's local_states list. */
+  io_uring_local_task_queue_state* next = nullptr;
+
+  /** Per-worker wake channel for directed wakeups. */
+  bnio::base::wake_channel wake_channel_;
+};
+
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT io_uring_task_queue_state {
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
@@ -40,6 +66,11 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
   std::atomic<io_uring_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
+
+  /** Guards the local_states list and the lifetime of its nodes. */
+  std::mutex local_states_lock;
+  /** Head of the intrusive per-worker local_state list. */
+  io_uring_local_task_queue_state* local_states = nullptr;
 
   std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
 
@@ -158,6 +189,30 @@ class BNIO_EXPORT io_uring_io_operation_base : public io_uring_operation_base {
   io_uring_io_operation_base* io_next = nullptr;
   io_uring_io_operation_base* io_prev = nullptr;
 };
+
+inline void io_uring_local_task_queue_state::push_cpu(
+    io_uring_operation_base& operation) noexcept {
+  io_uring_operation_base* head = cpu_head.load(std::memory_order_relaxed);
+  do {
+    operation.next = head;
+  } while (!cpu_head.compare_exchange_weak(
+      head, &operation, std::memory_order_release, std::memory_order_relaxed));
+}
+
+inline void io_uring_local_task_queue_state::push_cpu(
+    io_uring_operation_base* operations) noexcept {
+  while (operations != nullptr) {
+    io_uring_operation_base* operation = operations;
+    operations = operations->next;
+    operation->next = nullptr;
+    push_cpu(*operation);
+  }
+}
+
+inline io_uring_operation_base*
+io_uring_local_task_queue_state::pop_cpu_all() noexcept {
+  return cpu_head.exchange(nullptr, std::memory_order_acquire);
+}
 
 inline void io_uring_task_queue_state::push_cpu(
     io_uring_operation_base& operation) noexcept {

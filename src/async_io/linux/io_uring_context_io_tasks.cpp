@@ -37,7 +37,7 @@ bool io_uring_context::consume_io_tasks() noexcept {
       prepared = static_cast<io_uring_io_operation_base*>(operation->next);
       operation->next = nullptr;
       operation->complete_submit_error(result);
-      local_tasks_.push(*operation);
+      local_state_.push_cpu(*operation);
     }
   };
 
@@ -59,7 +59,7 @@ bool io_uring_context::consume_io_tasks() noexcept {
         operations = static_cast<io_uring_io_operation_base*>(operation->next);
         operation->next = nullptr;
         operation->complete_submit_error(submit_result);
-        local_tasks_.push(*operation);
+        local_state_.push_cpu(*operation);
       }
       return true;
     }
@@ -68,7 +68,7 @@ bool io_uring_context::consume_io_tasks() noexcept {
     operation->next = nullptr;
     if (prepare_result < 0) {
       operation->complete_submit_error(prepare_result);
-      local_tasks_.push(*operation);
+      local_state_.push_cpu(*operation);
     } else {
       operation->next = prepared;
       prepared = operation;
@@ -181,7 +181,7 @@ void io_uring_context::abort_inflight_io() noexcept {
 
     op->result = -ECANCELED;
     op->complete_submit_stopped();
-    local_tasks_.push(*op);
+    local_state_.push_cpu(*op);
   }
 
   if (global_state_ != nullptr) {
@@ -192,7 +192,7 @@ void io_uring_context::abort_inflight_io() noexcept {
       ops->next = nullptr;
       ops->result = -ECANCELED;
       ops->complete_submit_stopped();
-      local_tasks_.push(*ops);
+      local_state_.push_cpu(*ops);
       ops = next;
     }
   }
