@@ -23,7 +23,7 @@ bool io_context::publish_io(operation_base& operation) noexcept {
     return false;
   }
   global_state_.push_io(operation);
-  wake_if_all_sleeping_locked();
+  wake_one_sleeping_locked();
   return true;
 }
 
@@ -57,7 +57,7 @@ bool io_context::publish_cpu(
     return false;
   }
   global_state_.push_cpu(operation);
-  wake_if_all_sleeping_locked();
+  wake_one_sleeping_locked();
   return true;
 }
 
@@ -73,22 +73,28 @@ void io_context::wake_locked() noexcept {
   (void)global_state_.wake_channel_.wake();
 }
 
-void io_context::wake_if_all_sleeping_locked() noexcept {
-  // Caller must hold global_state_.submit_lock.
-  if (global_state_.awake_workers.load(std::memory_order_acquire) != 0) {
+void io_context::wake_one_sleeping_locked() noexcept {
+  // Caller must hold global_state_.submit_lock. Prefer a directed wake of
+  // exactly one sleeping worker over the shared broadcast channel: each
+  // worker listens to both its per-worker wake channel and the shared one,
+  // so a single write reaches only the intended worker (no thundering
+  // herd). Falls back to the shared channel when nobody is suspended.
+  if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
     return;
   }
-  wake_locked();
+  if (!global_state_.wake_one_sleeping()) {
+    wake_locked();
+  }
 }
 
 void io_context::wake_one_worker() noexcept {
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
-  wake_locked();
+  wake_one_sleeping_locked();
 }
 
 void io_context::wake_one_if_all_workers_sleeping() noexcept {
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
-  wake_if_all_sleeping_locked();
+  wake_one_sleeping_locked();
 }
 
 }  // namespace bnio

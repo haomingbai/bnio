@@ -69,10 +69,13 @@ struct kqueue_registration_state {
 
 /** Per-worker local CPU queue and wake channel.
  *
- * Each worker publishes one of these into the shared state's intrusive
- * local_states list (head insertion). The owner thread pushes and pops its
- * own queue lock-free; remote threads only steal under local_states_lock,
- * which keeps the owning worker from being destroyed (UAF protection).
+ * Each worker is linked into exactly one of the shared state's two
+ * intrusive doubly-linked lists at a time: the run list while it is
+ * processing work, or the suspend list while it sleeps in the native
+ * poller.  A worker moves itself between the lists under the
+ * corresponding list lock when it begins/ends a wait; remote threads
+ * only touch a node while holding that node's list lock, which also
+ * keeps the owning worker from being destroyed (UAF protection).
  */
 struct BNIO_EXPORT kqueue_local_task_queue_state {
   void push_cpu(kqueue_operation_base& operation) noexcept;
@@ -86,11 +89,35 @@ struct BNIO_EXPORT kqueue_local_task_queue_state {
 
   std::atomic<kqueue_operation_base*> cpu_head{nullptr};
 
-  /** Intrusive link in the shared state's local_states list. */
+  /** Doubly-linked list links for the shared run/suspend lists. */
+  kqueue_local_task_queue_state* prev = nullptr;
   kqueue_local_task_queue_state* next = nullptr;
 
   /** Per-worker wake channel for directed wakeups. */
   bnio::base::wake_channel wake_channel_;
+};
+
+/** One doubly-linked list of worker local states guarded by its own lock.
+ *
+ * The list head and its guard lock are kept together so every operation on
+ * the list takes exactly the lock that owns it; a worker resides in at most
+ * one of the two lists at any time. */
+struct BNIO_EXPORT kqueue_worker_state_list {
+  /** Guards the list and the lifetime of its nodes. */
+  std::mutex lock;
+  /** Head of the intrusive list. */
+  kqueue_local_task_queue_state* head = nullptr;
+  /** Round-robin cursor; points into the list. Only the suspend list uses
+   *  it (for wake_one_sleeping()). */
+  kqueue_local_task_queue_state* cursor = nullptr;
+};
+
+/** Worker-local-state registry split into running and suspended lists. */
+struct BNIO_EXPORT kqueue_worker_state_registry {
+  /** Workers currently processing work (steal targets). */
+  kqueue_worker_state_list run;
+  /** Workers sleeping in the native poller (directed-wake targets). */
+  kqueue_worker_state_list suspend;
 };
 
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
@@ -106,14 +133,23 @@ struct BNIO_EXPORT kqueue_task_queue_state {
 
   [[nodiscard]] kqueue_io_operation_base* pop_io_all() noexcept;
 
+  /**
+   * Wakes exactly one sleeping worker by writing its per-worker wake
+   * channel. Takes only the suspend list's lock: a node on the suspend
+   * list is alive (the owner unregisters under the same lock before its
+   * context is destroyed), so the write cannot race a close.
+   *
+   * @return true if a worker was woken; false if nobody is sleeping.
+   */
+  [[nodiscard]] bool wake_one_sleeping() noexcept;
+
   std::atomic<kqueue_operation_base*> cpu_head{nullptr};
   std::atomic<kqueue_io_operation_base*> io_head{nullptr};
   std::atomic<std::size_t> awake_workers{0};
 
-  /** Guards the local_states list and the lifetime of its nodes. */
-  std::mutex local_states_lock;
-  /** Head of the intrusive per-worker local_state list. */
-  kqueue_local_task_queue_state* local_states = nullptr;
+  /** Running/suspended worker local states, each list guarded by its own
+   *  lock. */
+  kqueue_worker_state_registry workers;
 
   std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
   /** Opaque shared lazy timer heap and its non-blocking fetch entry point. */
@@ -123,15 +159,11 @@ struct BNIO_EXPORT kqueue_task_queue_state {
   /** Shared wake channel owned by io_context.
    *
    * io_context creates the channel once and writes to it to wake
-   * workers.  Each worker's kqueue_context registers EVFILT_READ |
-   * EV_CLEAR on the read end before sleeping.
-   *
-   * @warning A single write wakes ALL workers whose kqueues have
-   * EVFILT_READ registered on the read end (minor thundering herd).
-   * The per-worker overhead is one ::read → EAGAIN plus one
-   * pop_cpu_all() CAS — negligible for typical 4–8 worker
-   * concurrency.  During stop(), waking all workers is the desired
-   * behaviour.
+   * workers during shutdown.  Each worker's kqueue_context registers
+   * EVFILT_READ | EV_CLEAR on the read end before sleeping.  In normal
+   * operation a single worker is woken directly via its per-worker
+   * channel (see wake_one_sleeping()); this shared channel remains the
+   * broadcast path used by stop() and as a fallback.
    */
   bnio::base::wake_channel wake_channel_;
 
@@ -272,6 +304,69 @@ inline kqueue_operation_base* kqueue_task_queue_state::pop_cpu_all() noexcept {
 inline kqueue_io_operation_base*
 kqueue_task_queue_state::pop_io_all() noexcept {
   return io_head.exchange(nullptr, std::memory_order_acquire);
+}
+
+/** Links a local state at the head of a worker list. Caller holds the
+ *  list's lock. */
+inline void kqueue_link_local_state(
+    kqueue_worker_state_list& list,
+    kqueue_local_task_queue_state* node) noexcept {
+  node->prev = nullptr;
+  node->next = list.head;
+  if (list.head != nullptr) {
+    list.head->prev = node;
+  }
+  list.head = node;
+}
+
+/** Unlinks a local state from its worker list. Caller holds the list's
+ *  lock. */
+inline void kqueue_unlink_local_state(
+    kqueue_worker_state_list& list,
+    kqueue_local_task_queue_state* node) noexcept {
+  if (node->prev != nullptr) {
+    node->prev->next = node->next;
+  } else {
+    list.head = node->next;
+  }
+  if (node->next != nullptr) {
+    node->next->prev = node->prev;
+  }
+  node->prev = nullptr;
+  node->next = nullptr;
+}
+
+/** Returns whether the node is currently linked into the given list.
+ *  Caller holds the list's lock. */
+inline bool kqueue_local_state_in_list(
+    const kqueue_worker_state_list& list,
+    const kqueue_local_task_queue_state* node) noexcept {
+  return node->prev != nullptr || list.head == node;
+}
+
+inline bool kqueue_task_queue_state::wake_one_sleeping() noexcept {
+  kqueue_worker_state_list& suspend = workers.suspend;
+  std::lock_guard<std::mutex> guard(suspend.lock);
+  // Validate the saved cursor is still in the list; otherwise restart from
+  // the head. The cursor advances so repeated wake-ups rotate fairly.
+  kqueue_local_task_queue_state* start = suspend.head;
+  if (suspend.cursor != nullptr) {
+    kqueue_local_task_queue_state* scan = start;
+    while (scan != nullptr && scan != suspend.cursor) {
+      scan = scan->next;
+    }
+    if (scan != nullptr) {
+      start = suspend.cursor;
+    } else {
+      suspend.cursor = nullptr;
+    }
+  }
+  if (start == nullptr) {
+    return false;
+  }
+  (void)start->wake_channel_.wake();
+  suspend.cursor = start->next;
+  return true;
 }
 
 }  // namespace bnio::async_io::bsd_native

@@ -670,12 +670,15 @@ class BNIO_EXPORT io_context {
   // Internal wake helpers. The *_locked variants require the caller to
   // already hold global_state_.submit_lock; they are used by the publish
   // paths so the wake-channel write stays bound to the submit lock without
-  // re-locking. The public wake_one_worker / wake_one_if_all_workers_sleeping
-  // acquire the lock themselves and re-check the shutdown state first:
-  // after ~io_context has published the terminal state and closed the
-  // channel under the same lock, a wake would write to a closed fd.
+  // re-locking. wake_one_sleeping_locked() prefers a directed wake of a
+  // single sleeping worker via its per-worker channel and falls back to the
+  // shared broadcast channel when nobody is suspended. The public
+  // wake_one_worker / wake_one_if_all_workers_sleeping acquire the lock
+  // themselves and re-check the shutdown state first: after ~io_context has
+  // published the terminal state and closed the channel under the same lock,
+  // a wake would write to a closed fd.
   void wake_locked() noexcept;
-  void wake_if_all_sleeping_locked() noexcept;
+  void wake_one_sleeping_locked() noexcept;
 
   void register_timer(detail::timer_slot& timer) noexcept;
 
