@@ -78,13 +78,15 @@ io_uring_operation_base* io_uring_context::steal_cpu_tasks() noexcept {
   // The lock guards both the list traversal and the lifetime of every node:
   // a worker unregisters its local state under the same lock before its
   // context (and local state) is destroyed, so a visited node is never freed
-  // while we touch it (UAF protection).
-  std::lock_guard<std::mutex> guard(global_state_->local_states_lock);
+  // while we touch it (UAF protection). Only running workers can hold CPU
+  // tasks worth stealing, so we traverse the run list.
+  io_uring_worker_state_list& run = global_state_->workers.run;
+  std::lock_guard<std::mutex> guard(run.lock);
 
   // Validate the saved cursor is still in the list; otherwise restart from
   // the head. Head insertion never moves existing nodes, so a valid cursor
   // keeps its position without re-traversal.
-  io_uring_local_task_queue_state* start = global_state_->local_states;
+  io_uring_local_task_queue_state* start = run.head;
   if (steal_cursor_ != nullptr) {
     io_uring_local_task_queue_state* scan = start;
     while (scan != nullptr && scan != steal_cursor_) {
@@ -100,7 +102,7 @@ io_uring_operation_base* io_uring_context::steal_cpu_tasks() noexcept {
   // Traverse the list starting at the cursor, stealing the first non-empty
   // local queue in bulk. Stop as soon as a batch is stolen.
   io_uring_local_task_queue_state* node = start;
-  do {
+  while (node != nullptr) {
     if (node != &local_state_) {
       if (io_uring_operation_base* operations = node->pop_cpu_all()) {
         steal_cursor_ = node->next;
@@ -108,27 +110,35 @@ io_uring_operation_base* io_uring_context::steal_cpu_tasks() noexcept {
       }
     }
     node = node->next;
-  } while (node != nullptr);
+  }
 
   steal_cursor_ = nullptr;
   return nullptr;
 }
 
 void io_uring_context::register_local_state() noexcept {
-  std::lock_guard<std::mutex> guard(global_state_->local_states_lock);
-  local_state_.next = global_state_->local_states;
-  global_state_->local_states = &local_state_;
+  io_uring_worker_state_list& run = global_state_->workers.run;
+  std::lock_guard<std::mutex> guard(run.lock);
+  io_uring_link_local_state(run, &local_state_);
 }
 
 void io_uring_context::unregister_local_state() noexcept {
-  std::lock_guard<std::mutex> guard(global_state_->local_states_lock);
-  io_uring_local_task_queue_state** link = &global_state_->local_states;
-  while (*link != nullptr && *link != &local_state_) {
-    link = &(*link)->next;
+  // Unlink from whichever list the worker currently resides in. Only one
+  // list is touched here; a worker is never on both at once.
+  {
+    io_uring_worker_state_list& run = global_state_->workers.run;
+    std::lock_guard<std::mutex> guard(run.lock);
+    if (io_uring_local_state_in_list(run, &local_state_)) {
+      io_uring_unlink_local_state(run, &local_state_);
+      return;
+    }
   }
-  if (*link == &local_state_) {
-    *link = local_state_.next;
-    local_state_.next = nullptr;
+  {
+    io_uring_worker_state_list& suspend = global_state_->workers.suspend;
+    std::lock_guard<std::mutex> guard(suspend.lock);
+    if (io_uring_local_state_in_list(suspend, &local_state_)) {
+      io_uring_unlink_local_state(suspend, &local_state_);
+    }
   }
 }
 
@@ -144,12 +154,37 @@ bool io_uring_context::is_waiting() const noexcept {
 
 void io_uring_context::begin_wait() noexcept {
   waiting_.store(true, std::memory_order_release);
+  // Move from the run list to the suspend list. The two list locks are
+  // taken separately (never nested) to avoid deadlock between a waking
+  // and a sleeping worker.
+  {
+    io_uring_worker_state_list& run = global_state_->workers.run;
+    std::lock_guard<std::mutex> guard(run.lock);
+    io_uring_unlink_local_state(run, &local_state_);
+  }
+  {
+    io_uring_worker_state_list& suspend = global_state_->workers.suspend;
+    std::lock_guard<std::mutex> guard(suspend.lock);
+    io_uring_link_local_state(suspend, &local_state_);
+  }
   [[maybe_unused]] const std::size_t previous =
       global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
   assert(previous != 0);
 }
 
 void io_uring_context::end_wait() noexcept {
+  // Move back from the suspend list to the run list, again without
+  // nesting the two list locks.
+  {
+    io_uring_worker_state_list& suspend = global_state_->workers.suspend;
+    std::lock_guard<std::mutex> guard(suspend.lock);
+    io_uring_unlink_local_state(suspend, &local_state_);
+  }
+  {
+    io_uring_worker_state_list& run = global_state_->workers.run;
+    std::lock_guard<std::mutex> guard(run.lock);
+    io_uring_link_local_state(run, &local_state_);
+  }
   global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   waiting_.store(false, std::memory_order_release);
 }
