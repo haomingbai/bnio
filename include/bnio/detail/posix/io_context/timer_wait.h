@@ -32,15 +32,17 @@ class timer_wait_operation : public timer_operation_base {
   }
 
   void execute() noexcept override {
-    const timer_completion_kind completion = this->timer_completion();
-    if (completion == timer_completion_kind::stopped) {
-      bexec::set_stopped(std::move(receiver_));
-    } else {
-      std::error_code ec;
-      if (completion == timer_completion_kind::canceled) {
-        ec = std::make_error_code(std::errc::operation_canceled);
-      }
-      bexec::set_value(std::move(receiver_), ec);
+    switch (this->timer_completion()) {
+      case timer_completion_kind::stopped:
+        bexec::set_stopped(std::move(receiver_));
+        break;
+      case timer_completion_kind::canceled:
+        bexec::set_value(std::move(receiver_),
+                         std::make_error_code(std::errc::operation_canceled));
+        break;
+      case timer_completion_kind::value:
+        bexec::set_value(std::move(receiver_), std::error_code{});
+        break;
     }
   }
 

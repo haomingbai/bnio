@@ -12,7 +12,6 @@
 #include <bnio/buffer.h>
 #include <bnio/detail/posix/io_context/native_context.h>
 #include <bnio/detail/posix/io_context/options.h>
-#include <bnio/detail/posix/io_context/state.h>
 #include <bnio/detail/posix/io_context/steady_timer.h>
 #include <bnio/detail/posix/io_context/timer_types.h>
 #include <bnio/export.h>
@@ -383,11 +382,11 @@ class BNIO_EXPORT io_context {
         if (context_->begin_stop()) {
           // This thread is responsible for stopping.
           context_->stop_internal();
-          context_->stopped_.store(true, std::memory_order_release);
+          context_->lifecycle_.stopped.store(true, std::memory_order_release);
           bexec::set_value(std::move(receiver_));
         } else {
           // Another thread is already stopping or the context is stopped.
-          while (!context_->stopped_.load(std::memory_order_acquire)) {
+          while (!context_->lifecycle_.stopped.load(std::memory_order_acquire)) {
             std::this_thread::yield();
           }
           bexec::set_value(std::move(receiver_));
@@ -494,7 +493,7 @@ class BNIO_EXPORT io_context {
    */
   [[nodiscard]] bool is_stopped() const noexcept {
     return global_state_.life_state.load(std::memory_order_acquire) != 0 ||
-           stopped_.load(std::memory_order_acquire);
+           lifecycle_.stopped.load(std::memory_order_acquire);
   }
 
   /**
@@ -506,7 +505,7 @@ class BNIO_EXPORT io_context {
    * as a single non-atomic bool load.
    */
   [[nodiscard]] bool enable_immediate_io() const noexcept {
-    return enable_immediate_io_;
+    return immutable_flags_.enable_immediate_io;
   }
 
   /**
@@ -662,8 +661,6 @@ class BNIO_EXPORT io_context {
    */
   [[nodiscard]] bool publish_cpu(detail::native_operation_base& operation) noexcept;
 
-  void wake_one_worker() noexcept;
-
   /** Wakes one worker only when every published worker is sleeping. */
   void wake_one_if_all_workers_sleeping() noexcept;
 
@@ -673,12 +670,23 @@ class BNIO_EXPORT io_context {
   // re-locking. wake_one_sleeping_locked() prefers a directed wake of a
   // single sleeping worker via its per-worker channel and falls back to the
   // shared broadcast channel when nobody is suspended. The public
-  // wake_one_worker / wake_one_if_all_workers_sleeping acquire the lock
-  // themselves and re-check the shutdown state first: after ~io_context has
-  // published the terminal state and closed the channel under the same lock,
-  // a wake would write to a closed fd.
+  // wake_one_if_all_workers_sleeping acquires the lock itself and re-checks
+  // the shutdown state first: after ~io_context has published the terminal
+  // state and closed the channel under the same lock, a wake would write to
+  // a closed fd.
   void wake_locked() noexcept;
   void wake_one_sleeping_locked() noexcept;
+
+  /**
+   * Returns whether a worker may enter the run loop: the context is not
+   * stopping and the native backend was available at construction.
+   */
+  [[nodiscard]] bool can_start_run() const noexcept;
+
+  /**
+   * Decrements the running worker count on every run() return path.
+   */
+  void release_worker_slot() noexcept;
 
   void register_timer(detail::timer_slot& timer) noexcept;
 
@@ -695,12 +703,40 @@ class BNIO_EXPORT io_context {
   void start_timer_wait(detail::timer_operation_base& operation,
                         detail::timer_slot& timer) noexcept;
 
+  // *_locked variants of the timer entry points. The caller must already
+  // hold timers_.mutex. Each returns whether a sleeping worker must be
+  // woken (the public wrapper wakes on the caller's behalf); the entry
+  // points that also return a cancellation count combine both.
+  [[nodiscard]] bool register_timer_locked(detail::timer_slot& timer,
+                                           time_point now) noexcept;
+
+  [[nodiscard]] bool unregister_timer_locked(
+      detail::timer_slot& timer) noexcept;
+
+  [[nodiscard]] std::pair<std::size_t, bool> cancel_timer_locked(
+      detail::timer_slot& timer) noexcept;
+
+  [[nodiscard]] std::pair<std::size_t, bool> set_timer_expiry_locked(
+      detail::timer_slot& timer, time_point expiry, time_point now) noexcept;
+
+  [[nodiscard]] bool start_timer_wait_locked(
+      detail::timer_operation_base& operation,
+      detail::timer_slot& timer) noexcept;
+
   [[nodiscard]] bool try_fetch_timeout_operations(
       time_point& deadline,
       detail::native_operation_base*& operations) noexcept;
   [[nodiscard]] static bool try_fetch_timeout_operations_thunk(
       void* state, time_point& deadline,
       detail::native_operation_base*& operations) noexcept;
+
+  // Stage helpers for try_fetch_timeout_operations(). drain_expired_timers_locked
+  // runs inside the timers_.mutex critical section; reverse_ready_operations
+  // runs after it is released.
+  void drain_expired_timers_locked(time_point now) noexcept;
+
+  void reverse_ready_operations(detail::timer_operation_base* ready,
+                                detail::native_operation_base*& operations) noexcept;
 
   /** Aborts all pending timer waits with set_stopped (io_context::stop only).
    *
@@ -717,7 +753,8 @@ class BNIO_EXPORT io_context {
    * Waits for every other worker to observe the stopping state and exit.
    * Timer waits were already aborted by begin_stop() before life_state
    * was published, so this function only spins on the wake channel until
-   * running_workers_ drops to zero (or one, when called from a worker).
+   * lifecycle_.running_workers drops to zero (or one, when called from a
+   * worker).
    */
   int stop_internal() noexcept;
 
@@ -735,11 +772,11 @@ class BNIO_EXPORT io_context {
    * check-state + enqueue critical section (same lock) is what binds
    * enqueue to state: operations that passed the check are drained before
    * workers exit, and operations that see the stopping state do not
-   * enqueue. The election CAS on stop_requested_ keeps exactly one
+   * enqueue. The election CAS on lifecycle_.stop_requested keeps exactly one
    * stopping thread while stop() and join() share this path.
    *
    * @return true if this thread owns the stop, false if another thread
-   *         already owns it (the caller must wait for stopped_).
+   *         already owns it (the caller must wait for lifecycle_.stopped).
    */
   [[nodiscard]] bool begin_stop() noexcept;
 
@@ -756,25 +793,48 @@ class BNIO_EXPORT io_context {
       detail::timer_completion_kind completion) noexcept;
 
   detail::native_task_queue_state global_state_;
-  detail::native_context_state native_;
+  platform_io_context_options native_options_;
 
-  /** Eager immediate I/O switch, fixed at construction (see options.h). */
-  bool enable_immediate_io_ = true;
+  /**
+   * Configuration fixed once at construction and read-only afterwards.
+   *
+   * Both fields are written exactly once by the constructor before the
+   * context is shared with other threads: enable_immediate_io comes from
+   * io_context_options and native_available from the native availability
+   * probe. enable_immediate_io is read as a plain bool on the hot path;
+   * native_available is kept atomic because is_open() and run() read it
+   * with acquire ordering.
+   */
+  struct immutable_flags {
+    explicit immutable_flags(bool eager_immediate_io) noexcept
+        : enable_immediate_io(eager_immediate_io) {}
 
-  /** Worker lifecycle counter. Incremented at the top of run(), decremented
-   *  on every return path. io_context::stop() polls this until zero. */
-  std::atomic<std::size_t> running_workers_{0};
+    /** Eager immediate I/O switch, fixed at construction (see options.h). */
+    bool enable_immediate_io = true;
 
-  /** Stop-thread election flag. Exactly one thread wins the CAS and then
-   *  publishes life_state inside the submit-path lock (see begin_stop()). */
-  std::atomic<int> stop_requested_{0};
+    /** Whether the native backend was available when this context was
+     *  created. */
+    std::atomic_bool native_available{false};
+  } immutable_flags_;
 
-  /** Signalled when the context has fully stopped. Join() waiters spin
-   *  on this flag. Independent from life_state to avoid torn reads. */
-  std::atomic_bool stopped_{false};
+  /**
+   * Lifecycle state shared between the run()/stop()/join() paths.
+   */
+  struct lifecycle_state {
+    /** Worker lifecycle counter. Incremented at the top of run(), decremented
+     *  on every return path. io_context::stop() polls this until zero. */
+    std::atomic<std::size_t> running_workers{0};
+
+    /** Stop-thread election flag. Exactly one thread wins the CAS and then
+     *  publishes life_state inside the submit-path lock (see begin_stop()). */
+    std::atomic<int> stop_requested{0};
+
+    /** Signalled when the context has fully stopped. Join() waiters spin
+     *  on this flag. Independent from life_state to avoid torn reads. */
+    std::atomic_bool stopped{false};
+  } lifecycle_;
 
   detail::timer_state_data timers_;
-  std::atomic_bool native_available_{false};
 
   static thread_local io_context* current_context_;
   static thread_local detail::native_context* current_worker_native_;

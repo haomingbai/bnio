@@ -87,11 +87,6 @@ void io_context::wake_one_sleeping_locked() noexcept {
   }
 }
 
-void io_context::wake_one_worker() noexcept {
-  std::lock_guard<std::mutex> guard(global_state_.submit_lock);
-  wake_one_sleeping_locked();
-}
-
 void io_context::wake_one_if_all_workers_sleeping() noexcept {
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
   wake_one_sleeping_locked();

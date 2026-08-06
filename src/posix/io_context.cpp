@@ -18,14 +18,15 @@ thread_local detail::native_context* io_context::current_worker_native_ =
 io_context::io_context() noexcept : io_context(io_context_options{}) {}
 
 io_context::io_context(const io_context_options& options) noexcept
-    : native_(options.platform),
-      enable_immediate_io_(options.enable_immediate_io) {
+    : native_options_(options.platform),
+      immutable_flags_(options.enable_immediate_io) {
   {
     // Probe availability without reserving a worker or designating a primary
     // native context. Every actual native queue is created by the thread that
     // calls run().
-    detail::native_context probe(native_.options);
-    native_available_.store(probe.is_open(), std::memory_order_release);
+    detail::native_context probe(native_options_);
+    immutable_flags_.native_available.store(probe.is_open(),
+                                            std::memory_order_release);
   }
 
   // Create the shared wake channel owned by io_context. Each worker's
@@ -68,7 +69,18 @@ io_context::~io_context() noexcept {
 }
 
 bool io_context::is_open() const noexcept {
-  return native_available_.load(std::memory_order_acquire);
+  return immutable_flags_.native_available.load(std::memory_order_acquire);
+}
+
+bool io_context::can_start_run() const noexcept {
+  // A worker may enter the run loop only while the context is not stopping
+  // and the native backend was available at construction.
+  return global_state_.life_state.load(std::memory_order_acquire) == 0 &&
+         immutable_flags_.native_available.load(std::memory_order_acquire);
+}
+
+void io_context::release_worker_slot() noexcept {
+  lifecycle_.running_workers.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 void io_context::run() noexcept {
@@ -79,17 +91,16 @@ void io_context::run() noexcept {
   // Previously each native backend performed this increment deep inside
   // its own run() loop, which left a window between set_global_state()
   // and the increment where stop() saw 0 workers.
-  running_workers_.fetch_add(1, std::memory_order_acq_rel);
+  lifecycle_.running_workers.fetch_add(1, std::memory_order_acq_rel);
 
-  if (global_state_.life_state.load(std::memory_order_acquire) != 0 ||
-      !native_available_.load(std::memory_order_acquire)) {
-    running_workers_.fetch_sub(1, std::memory_order_acq_rel);
+  if (!can_start_run()) {
+    release_worker_slot();
     return;
   }
 
-  detail::native_context ctx(native_.options);
+  detail::native_context ctx(native_options_);
   if (!ctx.is_open()) {
-    running_workers_.fetch_sub(1, std::memory_order_acq_rel);
+    release_worker_slot();
     return;
   }
   ctx.set_global_state(&global_state_);
@@ -99,7 +110,7 @@ void io_context::run() noexcept {
   if (global_state_.life_state.load(std::memory_order_acquire)) {
     (void)ctx.stop();
     ctx.set_global_state(nullptr);
-    running_workers_.fetch_sub(1, std::memory_order_acq_rel);
+    release_worker_slot();
     return;
   }
 
@@ -111,7 +122,7 @@ void io_context::run() noexcept {
   // access global_state_ after stop() returns and the caller
   // destroys the io_context.
   ctx.set_global_state(nullptr);
-  running_workers_.fetch_sub(1, std::memory_order_acq_rel);
+  release_worker_slot();
   current_worker_native_ = nullptr;
   current_context_ = previous_context;
 }
@@ -119,7 +130,7 @@ void io_context::run() noexcept {
 int io_context::stop() noexcept {
   if (!begin_stop()) {
     // Already stopping or stopped — spin until fully stopped.
-    while (!stopped_.load(std::memory_order_acquire)) {
+    while (!lifecycle_.stopped.load(std::memory_order_acquire)) {
       std::this_thread::yield();
     }
     return 0;
@@ -127,14 +138,14 @@ int io_context::stop() noexcept {
 
   // We own the stop. Perform the actual stop work and signal completion.
   stop_internal();
-  stopped_.store(true, std::memory_order_release);
+  lifecycle_.stopped.store(true, std::memory_order_release);
   return 0;
 }
 
 bool io_context::begin_stop() noexcept {
   // Elect exactly one stopping thread; stop() and join() share this path.
   int expected = 0;
-  if (!stop_requested_.compare_exchange_strong(
+  if (!lifecycle_.stop_requested.compare_exchange_strong(
           expected, 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
     return false;
   }
@@ -165,7 +176,7 @@ int io_context::stop_internal() noexcept {
   // staged there before any worker can enter its final drain.
   const bool in_worker_context = is_in_context();
   const std::size_t self_count = in_worker_context ? 1 : 0;
-  while (running_workers_.load(std::memory_order_acquire) >
+  while (lifecycle_.running_workers.load(std::memory_order_acquire) >
          self_count) {
     (void)global_state_.wake_channel_.wake();
     std::this_thread::yield();

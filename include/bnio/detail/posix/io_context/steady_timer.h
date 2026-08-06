@@ -132,6 +132,11 @@ class BNIO_EXPORT steady_timer {
   template <class Receiver>
   friend class detail::timer_wait_operation;
 
+  /** Unregisters other's timer, moves its expiry into this timer, and
+   *  re-registers this timer with the same context. Shared by the move
+   *  constructor and move assignment. */
+  void transfer_from(steady_timer& other) noexcept;
+
   detail::timer_slot timer_;
 };
 

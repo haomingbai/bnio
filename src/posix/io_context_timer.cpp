@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstddef>
 #include <mutex>
+#include <utility>
 
 #include "bnio/async_io/time.h"
 #include "bnio/detail/posix/io_context/steady_timer.h"
@@ -23,6 +24,30 @@ timer_operation_base::timer_operation_base(io_context& context) noexcept
 
 }  // namespace detail
 
+bool io_context::register_timer_locked(detail::timer_slot& timer,
+                                       time_point now) noexcept {
+  // Caller must hold timers_.mutex.
+  if (timer.context != nullptr) {
+    return false;
+  }
+
+  timer.context = this;
+  timer.submitted = {};
+  timer.previous = nullptr;
+  timer.child = nullptr;
+  timer.next = nullptr;
+  const time_point previous_deadline = timers_.heap_deadline();
+  // If the timer has already expired, place it directly in the inactive
+  // (ready) list so it fires immediately. Otherwise insert it into the
+  // pairing heap ordered by expiry.
+  if (timer.expiry > now) {
+    timers_.push_heap(timer);
+    return timers_.heap_deadline() < previous_deadline;
+  }
+  timers_.push_inactive(timer);
+  return false;
+}
+
 void io_context::register_timer(detail::timer_slot& timer) noexcept {
   bool wake_worker = false;
   // Read the clock before taking timers_.mutex so the (relatively expensive)
@@ -34,51 +59,38 @@ void io_context::register_timer(detail::timer_slot& timer) noexcept {
   const time_point now = clock::now();
   {
     std::lock_guard context_lock(timers_.mutex);
-    if (timer.context != nullptr) {
-      return;
-    }
-
-    timer.context = this;
-    timer.submitted = {};
-    timer.previous = nullptr;
-    timer.child = nullptr;
-    timer.next = nullptr;
-    const time_point previous_deadline = timers_.heap_deadline();
-    // If the timer has already expired, place it directly in the inactive
-    // (ready) list so it fires immediately. Otherwise insert it into the
-    // pairing heap ordered by expiry.
-    if (timer.expiry > now) {
-      timers_.push_heap(timer);
-      wake_worker = timers_.heap_deadline() < previous_deadline;
-    } else {
-      timers_.push_inactive(timer);
-    }
+    wake_worker = register_timer_locked(timer, now);
   }
 
   if (wake_worker) {
     wake_one_if_all_workers_sleeping();
   }
+}
+
+bool io_context::unregister_timer_locked(detail::timer_slot& timer) noexcept {
+  // Caller must hold timers_.mutex.
+  if (timer.context != this) {
+    return false;
+  }
+
+  if (timer.active) {
+    timers_.erase_heap(timer);
+  } else {
+    timers_.erase_inactive(timer);
+  }
+  timer.context = nullptr;
+  const detail::timer_operation_queue canceled =
+      take_timer_operations_locked(timer);
+  enqueue_timer_operations_locked(canceled.head,
+                                  detail::timer_completion_kind::canceled);
+  return canceled.head != nullptr;
 }
 
 void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
   bool wake_worker = false;
   {
     std::lock_guard context_lock(timers_.mutex);
-    if (timer.context != this) {
-      return;
-    }
-
-    if (timer.active) {
-      timers_.erase_heap(timer);
-    } else {
-      timers_.erase_inactive(timer);
-    }
-    timer.context = nullptr;
-    const detail::timer_operation_queue canceled =
-        take_timer_operations_locked(timer);
-    wake_worker = canceled.head != nullptr;
-    enqueue_timer_operations_locked(canceled.head,
-                                    detail::timer_completion_kind::canceled);
+    wake_worker = unregister_timer_locked(timer);
   }
 
   if (wake_worker) {
@@ -86,72 +98,83 @@ void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
   }
 }
 
+std::pair<std::size_t, bool> io_context::cancel_timer_locked(
+    detail::timer_slot& timer) noexcept {
+  // Caller must hold timers_.mutex. Returns the number of canceled waits
+  // and whether a sleeping worker must be woken.
+  if (timer.context != this) {
+    return {0, false};
+  }
+
+  const detail::timer_operation_queue canceled =
+      take_timer_operations_locked(timer);
+  enqueue_timer_operations_locked(canceled.head,
+                                  detail::timer_completion_kind::canceled);
+  return {canceled.size, canceled.head != nullptr};
+}
+
 std::size_t io_context::cancel_timer(detail::timer_slot& timer) noexcept {
-  std::size_t count = 0;
-  bool wake_worker = false;
+  std::pair<std::size_t, bool> result;
   {
     std::lock_guard context_lock(timers_.mutex);
-    if (timer.context != this) {
-      return 0;
-    }
-
-    const detail::timer_operation_queue canceled =
-        take_timer_operations_locked(timer);
-    count = canceled.size;
-    wake_worker = canceled.head != nullptr;
-    enqueue_timer_operations_locked(canceled.head,
-                                    detail::timer_completion_kind::canceled);
+    result = cancel_timer_locked(timer);
   }
 
-  if (wake_worker) {
+  if (result.second) {
     wake_one_if_all_workers_sleeping();
   }
-  return count;
+  return result.first;
+}
+
+std::pair<std::size_t, bool> io_context::set_timer_expiry_locked(
+    detail::timer_slot& timer, time_point expiry, time_point now) noexcept {
+  // Caller must hold timers_.mutex. Returns the number of canceled waits
+  // and whether a sleeping worker must be woken.
+  if (timer.context != this) {
+    return {0, false};
+  }
+
+  const time_point previous_deadline = timers_.heap_deadline();
+  const bool was_active = timer.active;
+  if (was_active) {
+    timers_.erase_heap(timer);
+  } else {
+    timers_.erase_inactive(timer);
+  }
+
+  timer.expiry = expiry;
+  const detail::timer_operation_queue canceled =
+      take_timer_operations_locked(timer);
+  const bool has_canceled_operations = canceled.head != nullptr;
+  enqueue_timer_operations_locked(canceled.head,
+                                  detail::timer_completion_kind::canceled);
+
+  if (timer.expiry > now) {
+    timers_.push_heap(timer);
+  } else {
+    timers_.push_inactive(timer);
+  }
+  const bool wake_worker =
+      has_canceled_operations || timers_.heap_deadline() < previous_deadline;
+  return {canceled.size, wake_worker};
 }
 
 std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
                                          time_point expiry) noexcept {
-  std::size_t count = 0;
-  bool wake_worker = false;
   // Same rationale as register_timer: read the clock before the lock so the
   // per-op clock call is not inside the timers_.mutex critical section. A
   // stale now only delays, never advances, the expiry decision.
   const time_point now = clock::now();
+  std::pair<std::size_t, bool> result;
   {
     std::lock_guard context_lock(timers_.mutex);
-    if (timer.context != this) {
-      return 0;
-    }
-
-    const time_point previous_deadline = timers_.heap_deadline();
-    const bool was_active = timer.active;
-    if (was_active) {
-      timers_.erase_heap(timer);
-    } else {
-      timers_.erase_inactive(timer);
-    }
-
-    timer.expiry = expiry;
-    const detail::timer_operation_queue canceled =
-        take_timer_operations_locked(timer);
-    count = canceled.size;
-    const bool has_canceled_operations = canceled.head != nullptr;
-    enqueue_timer_operations_locked(canceled.head,
-                                    detail::timer_completion_kind::canceled);
-
-    if (timer.expiry > now) {
-      timers_.push_heap(timer);
-    } else {
-      timers_.push_inactive(timer);
-    }
-    wake_worker =
-        has_canceled_operations || timers_.heap_deadline() < previous_deadline;
+    result = set_timer_expiry_locked(timer, expiry, now);
   }
 
-  if (wake_worker) {
+  if (result.second) {
     wake_one_if_all_workers_sleeping();
   }
-  return count;
+  return result.first;
 }
 
 io_context::time_point io_context::timer_expiry(
@@ -160,27 +183,34 @@ io_context::time_point io_context::timer_expiry(
   return timer.expiry;
 }
 
+bool io_context::start_timer_wait_locked(
+    detail::timer_operation_base& operation,
+    detail::timer_slot& timer) noexcept {
+  // Caller must hold timers_.mutex.
+  if (timer.context != this) {
+    operation.timer_next_ = nullptr;
+    enqueue_timer_operations_locked(&operation,
+                                    detail::timer_completion_kind::canceled);
+    return true;
+  }
+  if (!timer.active) {
+    operation.timer_next_ = nullptr;
+    enqueue_timer_operations_locked(&operation,
+                                    detail::timer_completion_kind::value);
+    return true;
+  }
+  operation.timer_next_ = timer.submitted.head;
+  timer.submitted.head = &operation;
+  ++timer.submitted.size;
+  return false;
+}
+
 void io_context::start_timer_wait(detail::timer_operation_base& operation,
                                   detail::timer_slot& timer) noexcept {
   bool wake_worker = false;
   {
     std::lock_guard context_lock(timers_.mutex);
-    if (timer.context != this) {
-      operation.timer_next_ = nullptr;
-      enqueue_timer_operations_locked(&operation,
-                                      detail::timer_completion_kind::canceled);
-      wake_worker = true;
-    } else if (!timer.active) {
-      operation.timer_next_ = nullptr;
-      enqueue_timer_operations_locked(&operation,
-                                      detail::timer_completion_kind::value);
-      wake_worker = true;
-    } else {
-      operation.timer_next_ = timer.submitted.head;
-      timer.submitted.head = &operation;
-      ++timer.submitted.size;
-      return;
-    }
+    wake_worker = start_timer_wait_locked(operation, timer);
   }
 
   if (wake_worker) {
@@ -219,7 +249,43 @@ void io_context::queue_timer_completion(
     operation.timer_next_ = nullptr;
     enqueue_timer_operations_locked(&operation, completion);
   }
+  // Note: the wake below is deliberately unconditional, unlike the *_locked
+  // timer entry points which only wake when they staged work. A queued timer
+  // completion must always reach the run loop, and switching this to a
+  // conditional wake would require proving equivalence; the original
+  // behavior is preserved.
   wake_one_if_all_workers_sleeping();
+}
+
+void io_context::drain_expired_timers_locked(time_point now) noexcept {
+  // Caller must hold timers_.mutex. Moves every timer whose deadline has
+  // passed out of the heap and enqueues its waits as value completions.
+  while (timers_.heap_deadline() <= now) {
+    detail::timer_slot* const timer = timers_.pop_heap();
+    if (timer == nullptr) {
+      break;
+    }
+
+    const detail::timer_operation_queue ready =
+        take_timer_operations_locked(*timer);
+    timers_.push_inactive(*timer);
+    enqueue_timer_operations_locked(ready.head,
+                                    detail::timer_completion_kind::value);
+  }
+}
+
+void io_context::reverse_ready_operations(
+    detail::timer_operation_base* ready,
+    detail::native_operation_base*& operations) noexcept {
+  // Reverses the lock-protected ready list into the caller's output list so
+  // the run loop executes the waits in submission order.
+  while (ready != nullptr) {
+    detail::timer_operation_base* const operation = ready;
+    ready = operation->timer_next_;
+    operation->timer_next_ = nullptr;
+    operation->next = operations;
+    operations = operation;
+  }
 }
 
 bool io_context::try_fetch_timeout_operations(
@@ -248,18 +314,7 @@ bool io_context::try_fetch_timeout_operations(
   // (amortized), and reading before the CAS gate would add a wasted clock
   // call on every CAS-loss / lock-busy retry under contention.
   const time_point now = clock::now();
-  while (timers_.heap_deadline() <= now) {
-    detail::timer_slot* const timer = timers_.pop_heap();
-    if (timer == nullptr) {
-      break;
-    }
-
-    const detail::timer_operation_queue ready =
-        take_timer_operations_locked(*timer);
-    timers_.push_inactive(*timer);
-    enqueue_timer_operations_locked(ready.head,
-                                    detail::timer_completion_kind::value);
-  }
+  drain_expired_timers_locked(now);
 
   deadline = timers_.heap_deadline();
   detail::timer_operation_base* ready = timers_.ready;
@@ -267,13 +322,7 @@ bool io_context::try_fetch_timeout_operations(
   context_lock.unlock();
   timers_.timeout_fetching.store(false, std::memory_order_release);
 
-  while (ready != nullptr) {
-    detail::timer_operation_base* const operation = ready;
-    ready = operation->timer_next_;
-    operation->timer_next_ = nullptr;
-    operation->next = operations;
-    operations = operation;
-  }
+  reverse_ready_operations(ready, operations);
   return true;
 }
 
@@ -304,7 +353,10 @@ steady_timer::~steady_timer() noexcept {
   }
 }
 
-steady_timer::steady_timer(steady_timer&& other) noexcept {
+void steady_timer::transfer_from(steady_timer& other) noexcept {
+  // Unregister the other timer, carry over its expiry, and re-register this
+  // slot with the same context so the moved-from timer leaves no registration
+  // behind.
   io_context* context = other.timer_.context;
   if (context != nullptr) {
     const time_point expiry = context->timer_expiry(other.timer_);
@@ -312,6 +364,10 @@ steady_timer::steady_timer(steady_timer&& other) noexcept {
     timer_.expiry = expiry;
     context->register_timer(timer_);
   }
+}
+
+steady_timer::steady_timer(steady_timer&& other) noexcept {
+  transfer_from(other);
 }
 
 steady_timer& steady_timer::operator=(steady_timer&& other) noexcept {
@@ -323,13 +379,7 @@ steady_timer& steady_timer::operator=(steady_timer&& other) noexcept {
     timer_.context->unregister_timer(timer_);
   }
 
-  io_context* context = other.timer_.context;
-  if (context != nullptr) {
-    const time_point expiry = context->timer_expiry(other.timer_);
-    context->unregister_timer(other.timer_);
-    timer_.expiry = expiry;
-    context->register_timer(timer_);
-  }
+  transfer_from(other);
   return *this;
 }
 
