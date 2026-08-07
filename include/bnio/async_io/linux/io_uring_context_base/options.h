@@ -105,6 +105,18 @@ struct io_uring_context_options {
    * the caller must keep it valid until queue_exit() or context destruction.
    */
   int event_fd = -1;
+
+  /**
+   * Enables single-probe CPU-task stealing from a peer worker.
+   *
+   * When a worker finds its local queue and the shared queue empty, it may
+   * probe one peer worker's local queue under the run-list lock and, if that
+   * peer owns CPU tasks, steal the entire batch.  Disabling this (false)
+   * avoids run.lock contention and cache-line traffic at the cost of
+   * potentially missing tail-balancing opportunities.  The shared MPSC queue
+   * already provides fair distribution for the common case.
+   */
+  bool enable_steal = true;
 };
 
 }  // namespace bnio::async_io::linux_native

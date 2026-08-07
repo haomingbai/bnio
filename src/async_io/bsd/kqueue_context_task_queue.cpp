@@ -119,41 +119,34 @@ kqueue_operation_base* kqueue_context::steal_cpu_tasks() noexcept {
     return nullptr;
   }
 
-  // The lock guards both the list traversal and the lifetime of every node:
-  // a worker unregisters its local state under the same lock before its
-  // context (and local state) is destroyed, so a visited node is never freed
-  // while we touch it (UAF protection). Only running workers can hold CPU
-  // tasks worth stealing, so we traverse the run list.
+  if (!options_.enable_steal) {
+    return nullptr;
+  }
+
+  // Single-probe steal: only inspect the run-list head (one peer).  The
+  // lock guards both the probe and the lifetime of the target node — a
+  // worker unregisters under the same lock before its context is destroyed,
+  // so the probed node is never freed while we touch it (UAF protection).
   kqueue_worker_state_list& run = global_state_->workers.run;
   std::lock_guard<std::mutex> guard(run.lock);
 
-  // Fairness via shared list rotation: every stealer probes from the run
-  // list head and moves each probed node to the tail, so the head keeps
-  // advancing globally and all workers share one rotating scan order — no
-  // per-thread cursor to keep in sync. Wrap after one full circuit.
-  //
-  // Each probe is a relaxed load first: only pay for the locked-RMW exchange
-  // (pop_cpu_all) on a node that actually shows work, so a doomed scan costs
-  // n loads + n O(1) rotations instead of n exchanges. This must happen under
-  // run.lock — a lock-free traversal could dereference a node whose owner
-  // unregisters (and whose context is destroyed) concurrently.
-  kqueue_local_task_queue_state* node = run.head;
-  const kqueue_local_task_queue_state* const start = run.head;
-  while (node != nullptr) {
-    kqueue_local_task_queue_state* const next = node->next;
-    if (node != &local_state_ && node->has_cpu_tasks()) {
-      if (kqueue_operation_base* operations = node->pop_cpu_all()) {
-        kqueue_rotate_local_state_to_tail(run, node);
-        return reverse_tasks(operations);
-      }
-    }
-    kqueue_rotate_local_state_to_tail(run, node);
-    if (next == start) {
-      break;
-    }
-    node = next;
+  kqueue_local_task_queue_state* const target = run.head;
+  if (target == nullptr || target == &local_state_) {
+    return nullptr;
   }
 
+  if (target->has_cpu_tasks()) {
+    if (kqueue_operation_base* operations = target->pop_cpu_all()) {
+      // Rotate the victim to the tail so the head advances for the next
+      // stealer — all workers share one global probe order.
+      kqueue_rotate_local_state_to_tail(run, target);
+      return reverse_tasks(operations);
+    }
+  }
+
+  // Head was empty — rotate it to the tail anyway so the next stealer
+  // probes a different node instead of hitting the same empty one.
+  kqueue_rotate_local_state_to_tail(run, target);
   return nullptr;
 }
 
