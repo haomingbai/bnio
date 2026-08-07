@@ -159,7 +159,8 @@ class BNIO_EXPORT kqueue_context {
    * shared queue, then remote stealing. Stops at the first source that
    * yields tasks so work never accumulates on this thread's stack.
    */
-  [[nodiscard]] kqueue_operation_base* fetch_cpu_task() noexcept;
+  [[nodiscard]] kqueue_operation_base* fetch_cpu_task(
+      bool allow_steal = true) noexcept;
 
  private:
   struct operation_queue {
@@ -216,7 +217,7 @@ class BNIO_EXPORT kqueue_context {
 
   void push_cpu_tasks(operation_queue& operations) noexcept;
   /** Fetches and executes a batch of CPU tasks. Returns true if work ran. */
-  [[nodiscard]] bool run_cpu_batch() noexcept;
+  [[nodiscard]] bool run_cpu_batch(bool allow_steal = true) noexcept;
 
   /** Consumes staged local I/O tasks after ready CPU work. */
   [[nodiscard]] bool consume_io_tasks() noexcept;

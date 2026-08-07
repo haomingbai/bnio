@@ -221,7 +221,7 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   // worker and wake it via EVFILT_USER trigger.
   begin_wait();
 
-  if (collect_ready_events(false) || run_cpu_batch() ||
+  if (collect_ready_events(false) || run_cpu_batch(/*allow_steal=*/false) ||
       consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
@@ -267,8 +267,12 @@ bool kqueue_context::compute_io_wait_timeout(
   if (timeout_operations != nullptr) {
     local_state_.push_cpu(timeout_operations);
   }
-  if (timeout_operations != nullptr || run_cpu_batch() || consume_io_tasks() ||
-      should_finish()) {
+  // Runs while the worker is marked sleeping (only called from
+  // wait_for_io_work() after begin_wait()), so skip the run-list steal —
+  // the pre-sleep steal already found nothing, and taking run.lock here
+  // would just add contention.
+  if (timeout_operations != nullptr || run_cpu_batch(/*allow_steal=*/false) ||
+      consume_io_tasks() || should_finish()) {
     return true;
   }
 

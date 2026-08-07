@@ -227,8 +227,8 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   // publishers can detect a sleeping worker and wake it via eventfd.
   begin_wait();
 
-  if (collect_ready_cqes() || run_cpu_batch() || consume_timeout_operations() ||
-      consume_io_tasks() || should_finish()) {
+  if (collect_ready_cqes() || run_cpu_batch(/*allow_steal=*/false) ||
+      consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
@@ -293,8 +293,12 @@ io_uring_context::run_phase io_uring_context::prepare_wait_timeout(
   if (timeout_operations != nullptr) {
     local_state_.push_cpu(timeout_operations);
   }
-  if (timeout_operations != nullptr || run_cpu_batch() || consume_io_tasks() ||
-      should_finish()) {
+  // Runs while the worker is marked sleeping (only called from
+  // wait_for_io_work() after begin_wait()), so skip the run-list steal —
+  // the pre-sleep steal already found nothing, and taking run.lock here
+  // would just add contention.
+  if (timeout_operations != nullptr || run_cpu_batch(/*allow_steal=*/false) ||
+      consume_io_tasks() || should_finish()) {
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
   }

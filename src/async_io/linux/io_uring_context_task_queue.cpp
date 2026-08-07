@@ -49,7 +49,8 @@ void io_uring_context::push_cpu_tasks(operation_queue& operations) noexcept {
   notify_one_waiter();
 }
 
-io_uring_operation_base* io_uring_context::fetch_cpu_task() noexcept {
+io_uring_operation_base* io_uring_context::fetch_cpu_task(
+    bool allow_steal) noexcept {
   // 1. Worker-local queue first: fastest and preserves locality.
   if (io_uring_operation_base* operations = local_state_.pop_cpu_all()) {
     return reverse_tasks(operations);
@@ -62,12 +63,18 @@ io_uring_operation_base* io_uring_context::fetch_cpu_task() noexcept {
 
   // 3. Steal from another worker's local queue. Only reached when both
   //    local and shared queues are empty, so a stealing worker is by
-  //    definition relatively idle.
+  //    definition relatively idle. Suppressed when allow_steal is false
+  //    (e.g. the re-checks after begin_wait), since the worker already
+  //    tried a steal while running and another one would only pay the
+  //    run list's lock for nothing.
+  if (!allow_steal) {
+    return nullptr;
+  }
   return steal_cpu_tasks();
 }
 
-bool io_uring_context::run_cpu_batch() noexcept {
-  if (io_uring_operation_base* operations = fetch_cpu_task()) {
+bool io_uring_context::run_cpu_batch(bool allow_steal) noexcept {
+  if (io_uring_operation_base* operations = fetch_cpu_task(allow_steal)) {
     execute_tasks(operations);
     return true;
   }
