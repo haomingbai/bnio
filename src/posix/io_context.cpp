@@ -21,12 +21,11 @@ io_context::io_context(const io_context_options& options) noexcept
     : native_options_(options.platform),
       immutable_flags_(options.enable_immediate_io) {
   {
-    // Probe availability without reserving a worker or designating a primary
-    // native context. Every actual native queue is created by the thread that
-    // calls run().
-    detail::native_context probe(native_options_);
-    immutable_flags_.native_available.store(probe.is_open(),
-                                            std::memory_order_release);
+    // Availability is checked lazily by run(), which creates the actual
+    // native context on the worker thread.  Each run() call serves as
+    // its own probe and returns an error_code when the backend is
+    // unavailable.
+    immutable_flags_.native_available.store(true, std::memory_order_release);
   }
 
   // Create the shared wake channel owned by io_context. Each worker's
@@ -82,8 +81,7 @@ bool io_context::can_start_run() const noexcept {
 void io_context::release_worker_slot() noexcept {
   lifecycle_.running_workers.fetch_sub(1, std::memory_order_acq_rel);
 }
-
-void io_context::run() noexcept {
+std::error_code io_context::run() noexcept {
   // Increment running_workers BEFORE any check so stop() always observes
   // this worker regardless of how far run() has progressed.  This closes
   // the use-after-free window: if stop() destroys the io_context while a
@@ -95,13 +93,13 @@ void io_context::run() noexcept {
 
   if (!can_start_run()) {
     release_worker_slot();
-    return;
+    return std::make_error_code(std::errc::operation_canceled);
   }
 
   detail::native_context ctx(native_options_);
   if (!ctx.is_open()) {
     release_worker_slot();
-    return;
+    return std::error_code(ENOMEM, std::generic_category());
   }
   ctx.set_global_state(&global_state_);
 
@@ -111,7 +109,7 @@ void io_context::run() noexcept {
     (void)ctx.stop();
     ctx.set_global_state(nullptr);
     release_worker_slot();
-    return;
+    return std::make_error_code(std::errc::operation_canceled);
   }
 
   io_context* previous_context = current_context_;
@@ -125,6 +123,7 @@ void io_context::run() noexcept {
   release_worker_slot();
   current_worker_native_ = nullptr;
   current_context_ = previous_context;
+  return std::error_code{};
 }
 
 int io_context::stop() noexcept {

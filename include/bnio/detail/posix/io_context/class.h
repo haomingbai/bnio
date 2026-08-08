@@ -463,8 +463,14 @@ class BNIO_EXPORT io_context {
 
   /**
    * Runs the context event loop.
+   *
+   * @return A default-constructed (success) error_code when the event
+   *         loop entered and ran normally, or an error_code carrying a
+   *         negative errno (e.g. ENOMEM) when the native I/O backend
+   *         could not be initialised.  The caller may wait and retry
+   *         run().
    */
-  void run() noexcept;
+  std::error_code run() noexcept;
 
   /**
    * Requests the context event loop to stop.
