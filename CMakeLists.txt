@@ -193,6 +193,7 @@ if(BNIO_INSTALL)
       "/${CMAKE_INSTALL_LIBDIR}/pkgconfig" "/")
   endif()
 
+  set(BNIO_BEXEC_MIN_VERSION "0.0.4")
   set(BNIO_PC_REQUIRES "bexec >= ${BNIO_BEXEC_MIN_VERSION}, openssl")
   if(BNIO_PLATFORM_LINUX)
     string(APPEND BNIO_PC_REQUIRES ", liburing >= 2.1")
