@@ -66,12 +66,10 @@ bool io_uring_context::enter_run() noexcept {
   current_context_ = this;
   run_state_.waiting.store(false, std::memory_order_release);
   global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
-  global_state_->running_workers.fetch_add(1, std::memory_order_acq_rel);
   const int poll_result = submit_eventfd_poll();
   if (poll_result < 0) {
     run_state_.state.store(context_state::finished, std::memory_order_release);
     global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
-    global_state_->running_workers.fetch_sub(1, std::memory_order_acq_rel);
     run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
@@ -81,7 +79,6 @@ bool io_uring_context::enter_run() noexcept {
   if (submit_local_eventfd_poll() < 0) {
     run_state_.state.store(context_state::finished, std::memory_order_release);
     global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
-    global_state_->running_workers.fetch_sub(1, std::memory_order_acq_rel);
     run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
@@ -127,7 +124,6 @@ void io_uring_context::run() noexcept {
 
   current_context_ = previous_context;
   global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
-  global_state_->running_workers.fetch_sub(1, std::memory_order_acq_rel);
   run_state_.run_active.store(false, std::memory_order_release);
 }
 

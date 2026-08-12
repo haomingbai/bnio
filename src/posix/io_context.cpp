@@ -79,17 +79,18 @@ bool io_context::can_start_run() const noexcept {
 }
 
 void io_context::release_worker_slot() noexcept {
-  lifecycle_.running_workers.fetch_sub(1, std::memory_order_acq_rel);
+  global_state_.running_workers.fetch_sub(1, std::memory_order_acq_rel);
 }
 std::error_code io_context::run() noexcept {
   // Increment running_workers BEFORE any check so stop() always observes
   // this worker regardless of how far run() has progressed.  This closes
   // the use-after-free window: if stop() destroys the io_context while a
   // worker is inside run(), the worker would access freed memory.
-  // Previously each native backend performed this increment deep inside
-  // its own run() loop, which left a window between set_global_state()
-  // and the increment where stop() saw 0 workers.
-  lifecycle_.running_workers.fetch_add(1, std::memory_order_acq_rel);
+  // The counter lives in global_state_ so the native backends' advisory
+  // heuristics (steal gate, wake fast path) share the same count; the
+  // increment itself stays here, before any check, never inside
+  // enter_run().
+  global_state_.running_workers.fetch_add(1, std::memory_order_acq_rel);
 
   if (!can_start_run()) {
     release_worker_slot();
@@ -175,7 +176,7 @@ int io_context::stop_internal() noexcept {
   // staged there before any worker can enter its final drain.
   const bool in_worker_context = is_in_context();
   const std::size_t self_count = in_worker_context ? 1 : 0;
-  while (lifecycle_.running_workers.load(std::memory_order_acquire) >
+  while (global_state_.running_workers.load(std::memory_order_acquire) >
          self_count) {
     (void)global_state_.wake_channel_.wake();
     std::this_thread::yield();

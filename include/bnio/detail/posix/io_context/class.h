@@ -761,8 +761,8 @@ class BNIO_EXPORT io_context {
    * Waits for every other worker to observe the stopping state and exit.
    * Timer waits were already aborted by begin_stop() before life_state
    * was published, so this function only spins on the wake channel until
-   * lifecycle_.running_workers drops to zero (or one, when called from a
-   * worker).
+   * global_state_.running_workers drops to zero (or one, when called from
+   * a worker).
    */
   int stop_internal() noexcept;
 
@@ -829,10 +829,6 @@ class BNIO_EXPORT io_context {
    * Lifecycle state shared between the run()/stop()/join() paths.
    */
   struct lifecycle_state {
-    /** Worker lifecycle counter. Incremented at the top of run(), decremented
-     *  on every return path. io_context::stop() polls this until zero. */
-    std::atomic<std::size_t> running_workers{0};
-
     /** Stop-thread election flag. Exactly one thread wins the CAS and then
      *  publishes life_state inside the submit-path lock (see begin_stop()). */
     std::atomic<int> stop_requested{0};

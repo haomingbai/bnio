@@ -57,7 +57,8 @@ model, each run-loop thread owns its own `io_uring_context` (allocated from
 `io_context`'s native worker pool). All workers in one high-level context share
 an `io_uring_task_queue_state`. That state contains separate MPSC CPU and I/O
 queues, the number of workers currently published as awake, the total number
-of workers inside `run()` (`running_workers`), the run/suspend worker-state
+of workers inside `io_context::run()` (`running_workers`, maintained by
+`io_context` itself), the run/suspend worker-state
 registry (used by CPU-task stealing and directed wakeup), and the stopping
 state (`life_state`) of the whole worker group. It deliberately has no I/O count, batch
 threshold, explicit-drain flag, or timer. A standalone
@@ -180,7 +181,7 @@ struct io_uring_task_queue_state {
     std::atomic<io_uring_operation_base*> cpu_head;
     std::atomic<io_uring_io_operation_base*> io_head;
     std::atomic<std::size_t> awake_workers;
-    std::atomic<std::size_t> running_workers;   // total workers inside run() (active + suspended)
+    std::atomic<std::size_t> running_workers;   // total workers inside io_context::run() (maintained by io_context)
     io_uring_worker_state_registry workers;     // run/suspend lists for stealing + directed wake
     std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
     void* timeout_heap = nullptr;
@@ -215,7 +216,8 @@ see [`worker-scheduling.md`](worker-scheduling.md).
 
 The BSD backend uses the same CPU/I/O publication split. A
 `kqueue_task_queue_state` owns separate MPSC heads, `awake_workers` /
-`running_workers`, the run/suspend worker-state registry, and the
+`running_workers` (the latter maintained by `io_context::run()`), the
+run/suspend worker-state registry, and the
 worker-group `life_state` flag (std::atomic<int>, 0=running, 1=stopping). With no shared state selected, a standalone
 `kqueue_context` keeps non-atomic local CPU and I/O queues.
 

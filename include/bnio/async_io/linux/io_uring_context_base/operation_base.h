@@ -110,9 +110,13 @@ struct BNIO_EXPORT io_uring_task_queue_state {
 
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
   std::atomic<io_uring_io_operation_base*> io_head{nullptr};
+  /** Workers not blocked in the native poller (active workers). Incremented
+   *  by enter_run(), decremented by begin_wait(), restored by end_wait(). */
   std::atomic<std::size_t> awake_workers{0};
-  /** Total workers currently inside run() (active + suspended). Incremented
-   *  by enter_run(), decremented at run() exit. */
+  /** Total workers currently inside io_context::run() (active + suspended +
+   *  entering). Incremented by io_context::run() before any check,
+   *  decremented on every run() return path; the native backends never touch
+   *  it. Feeds two racy advisory heuristics (steal gate, wake fast path). */
   std::atomic<std::size_t> running_workers{0};
 
   /** Running/suspended worker local states, each list guarded by its own

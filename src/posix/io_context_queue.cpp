@@ -88,12 +88,15 @@ void io_context::wake_one_sleeping_locked() noexcept {
   // there is no worker to wake.  The two acquire loads are not
   // synchronised with each other — this is a racy advisory check
   // that only decides whether to skip the expensive suspend.lock
-  // acquisition and the fallback broadcast write.  A false negative
-  // (a worker just entered begin_wait but awake_workers has not yet
-  // been decremented) merely delays the wake by one run-loop
-  // iteration, which is harmless; a false positive falls through to
-  // the existing path and finds nobody to wake — same cost as
-  // before.
+  // acquisition and the fallback broadcast write.  running_workers
+  // is the run()-level counter incremented before enter_run(), so it
+  // may transiently include workers that have not yet joined the
+  // awake set — that only makes the fast path skip more often
+  // (harmless, same cost as before).  A false negative (a worker
+  // just entered begin_wait but awake_workers has not yet been
+  // decremented) merely delays the wake by one run-loop iteration,
+  // which is harmless; a false positive falls through to the
+  // existing path and finds nobody to wake — same cost as before.
   if (global_state_.awake_workers.load(std::memory_order_acquire) >=
       global_state_.running_workers.load(std::memory_order_acquire)) {
     return;

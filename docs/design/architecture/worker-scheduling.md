@@ -104,7 +104,7 @@ struct kqueue_task_queue_state {
   std::atomic<kqueue_operation_base*> cpu_head;      // shared MPSC CPU queue
   std::atomic<kqueue_io_operation_base*> io_head;    // shared MPSC I/O queue
   std::atomic<std::size_t> awake_workers;            // workers not blocked in the poller
-  std::atomic<std::size_t> running_workers;          // total workers inside run() (active + suspended)
+  std::atomic<std::size_t> running_workers;          // total workers inside io_context::run() (active + suspended + entering)
   kqueue_worker_state_registry workers;              // run + suspend lists
   std::atomic<int> life_state;                       // 0 = running, 1 = stopping
   bnio::base::wake_channel wake_channel_;            // shared broadcast (stop + native notify_one_waiter)
@@ -112,11 +112,18 @@ struct kqueue_task_queue_state {
 };
 ```
 
-`running_workers` counts every thread currently inside `run()` — whether it is
-actively processing work or suspended in the poller. It is incremented by
-`enter_run()` and decremented when `run()` exits, and it feeds two heuristics:
-the steal gate (`2*awake_workers > running_workers`, §4) and the wake fast path
-(`awake_workers >= running_workers`, §6).
+`running_workers` counts every thread currently inside `io_context::run()` —
+whether it is actively processing work, suspended in the poller, or still
+entering the run loop. It is incremented by `io_context::run()` **before any
+check** and decremented on every run() return path (`release_worker_slot()`);
+the native backends never touch it directly. The early increment closes the
+use-after-free window in `stop()`: a worker that has entered `run()` but not
+yet `enter_run()` is still counted, so `stop_internal()` waits for it. The
+count feeds two heuristics: the steal gate (`2*awake_workers >
+running_workers`, §4) and the wake fast path (`awake_workers >=
+running_workers`, §6). Both are racy, relaxed advisory checks — because the
+count may transiently include workers that have not yet joined the awake set,
+they only err on the conservative side.
 
 ## 3. The fetch path: `fetch_cpu_task()`
 
@@ -189,6 +196,9 @@ kqueue_operation_base* kqueue_context::steal_cpu_tasks() noexcept {
   // The two loads are deliberately not coordinated — this is a racy,
   // relaxed heuristic that only decides whether the scan is worth the lock;
   // the actual steal below stays correct regardless of the gate's accuracy.
+  // running_workers is the run()-level counter (incremented before
+  // enter_run()), so it may transiently exceed active + suspended; the gate
+  // then errs on the conservative side, which is fine.
   const std::size_t active =
       global_state_->awake_workers.load(std::memory_order_relaxed);
   const std::size_t running =
@@ -231,7 +241,9 @@ Key points:
   active workers' local queues are likely empty too, and taking `run.lock`
   would be wasted contention. The two counter loads are deliberately not
   synchronized; the steal below remains correct regardless of the gate's
-  accuracy.
+  accuracy. `running_workers` is maintained by `io_context::run()` and may
+  transiently exceed active + suspended, which only makes the gate more
+  conservative.
 - **`enable_steal` makes stealing optional.** `kqueue_context_options` /
   `io_uring_context_options` expose a boolean `enable_steal` (default `true`).
   When `false`, `steal_cpu_tasks()` returns `nullptr` right after the gate,
@@ -365,12 +377,15 @@ void io_context::wake_one_sleeping_locked() noexcept {
   // there is no worker to wake.  The two acquire loads are not
   // synchronised with each other — this is a racy advisory check
   // that only decides whether to skip the expensive suspend.lock
-  // acquisition and the fallback broadcast write.  A false negative
-  // (a worker just entered begin_wait but awake_workers has not yet
-  // been decremented) merely delays the wake by one run-loop
-  // iteration, which is harmless; a false positive falls through to
-  // the existing path and finds nobody to wake — same cost as
-  // before.
+  // acquisition and the fallback broadcast write.  running_workers
+  // is the run()-level counter incremented before enter_run(), so it
+  // may transiently include workers that have not yet joined the
+  // awake set — that only makes the fast path skip more often
+  // (harmless, same cost as before).  A false negative (a worker
+  // just entered begin_wait but awake_workers has not yet been
+  // decremented) merely delays the wake by one run-loop iteration,
+  // which is harmless; a false positive falls through to the
+  // existing path and finds nobody to wake — same cost as before.
   if (global_state_.awake_workers.load(std::memory_order_acquire) >=
       global_state_.running_workers.load(std::memory_order_acquire)) {
     return;
@@ -389,7 +404,10 @@ acquisition and the fallback broadcast write on the hot publish path. A false
 negative (a worker entered `begin_wait()` but has not yet decremented
 `awake_workers`) merely delays the wake by one run-loop iteration, which is
 harmless; a false positive falls through to the existing path and finds nobody
-to wake, costing the same as before.
+to wake, costing the same as before. Because `running_workers` is the
+`run()`-level counter (incremented before `enter_run()`), it may transiently
+include workers that have not yet joined the awake set — the check then skips
+less often, never incorrectly.
 
 The directed write is safe against the worker's destruction because the
 worker unregisters under the suspend list lock before its context is

@@ -111,6 +111,9 @@ kqueue_operation_base* kqueue_context::steal_cpu_tasks() noexcept {
   // The two loads are deliberately not coordinated — this is a racy,
   // relaxed heuristic that only decides whether the scan is worth the lock;
   // the actual steal below stays correct regardless of the gate's accuracy.
+  // running_workers is the run()-level counter (incremented before
+  // enter_run()), so it may transiently exceed active + suspended; the gate
+  // then errs on the conservative side, which is fine.
   const std::size_t active =
       global_state_->awake_workers.load(std::memory_order_relaxed);
   const std::size_t running =
