@@ -20,7 +20,7 @@ cohesive `detail` state objects rather than defining all internal data inline:
 | State / Detail Type | Header | Responsibility |
 |---------------------|--------|----------------|
 | `detail::native_context` and related aliases | `detail/posix/io_context/native_context.h` | Select the native context, options, operation bases, and shared task state. |
-| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake-worker count, and worker-group stopping state (`life_state`). |
+| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake/running worker counts, run/suspend worker-state registry, submit lock, and worker-group stopping state (`life_state`). |
 | `detail::timer_state_data` | `detail/posix/io_context/timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
 
 The aggregate `detail/posix/io_context/native_io.h` is included after the complete
@@ -92,15 +92,19 @@ When single-issuer mode is available, each lazily created Linux ring is
 initially disabled. The same thread that calls its `run()` enables the ring
 before preparing or submitting SQEs, becoming that ring's designated issuer.
 
-High-level CPU work is published to the shared CPU queue. Wakeup scans the
-head-linked worker list and signals one sleeping worker. I/O is published to
-the lower-priority shared I/O queue. The worker that removes an I/O batch owns
-all SQ preparation and submission for that batch, so high-level queue code
-does not need native ring synchronization. Timer bookkeeping remains on the
-high-level context, but native workers consume its deadline passively while
-choosing their blocking timeout. Timer-ready completions bypass the shared CPU
-queue: the worker that performs the timer check links them directly into its
-local CPU queue. No reusable timer SQE or timer-update request exists.
+High-level CPU work is published to the shared CPU queue. Wakeup targets one
+sleeping worker through its per-worker wake channel (`wake_one_sleeping`),
+falling back to the shared broadcast channel when nobody is suspended. I/O is
+published to the lower-priority shared I/O queue. The worker that removes an
+I/O batch owns all SQ preparation and submission for that batch, so high-level
+queue code does not need native ring synchronization. Timer bookkeeping remains
+on the high-level context, but native workers consume its deadline passively
+while choosing their blocking timeout. Timer-ready completions bypass the
+shared CPU queue: the worker that performs the timer check links them directly
+into its local CPU queue. No reusable timer SQE or timer-update request
+exists. Worker scheduling (CPU-task stealing, run/suspend lists, directed
+wakeup) is documented in
+[`worker-scheduling.md`](worker-scheduling.md).
 
 The shared state is owned by `io_context`, not by any native context. Worker
 registration calls `set_global_state()` before publishing the new worker at the

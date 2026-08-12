@@ -56,9 +56,11 @@ and provides a single-threaded event loop. Under the **one-thread-one-uring**
 model, each run-loop thread owns its own `io_uring_context` (allocated from
 `io_context`'s native worker pool). All workers in one high-level context share
 an `io_uring_task_queue_state`. That state contains separate MPSC CPU and I/O
-queues, the number of workers currently published as awake, and the stopping
+queues, the number of workers currently published as awake, the total number
+of workers inside `run()` (`running_workers`), the run/suspend worker-state
+registry (used by CPU-task stealing and directed wakeup), and the stopping
 state (`life_state`) of the whole worker group. It deliberately has no I/O count, batch
-threshold, explicit-drain flag, timer, or lock. A standalone
+threshold, explicit-drain flag, or timer. A standalone
 `io_uring_context` must likewise be given an externally owned task queue state
 before `run()`.
 
@@ -117,9 +119,10 @@ Each ready-task pass first drains CQEs to keep the completion ring from
 overflowing, then checks local and shared CPU work before atomically taking
 every operation in the shared I/O queue. Before eventfd wait it publishes the
 local waiting flag, decrements the shared awake count, and repeats the
-CQE/CPU/I/O checks. A producer publishing after that transition writes eventfd
-to wake one worker. This supplies low-load progress while busy workloads form
-batches naturally.
+CQE/CPU/I/O checks. A producer publishing after that transition wakes exactly
+one sleeping worker through its per-worker wake channel (`wake_one_sleeping`),
+falling back to the shared broadcast channel only when nobody is suspended.
+This supplies low-load progress while busy workloads form batches naturally.
 
 `io_uring_context_options::event_fd` may name a caller-owned eventfd. A
 negative value, the default, makes the context create and own a private eventfd.
@@ -177,10 +180,13 @@ struct io_uring_task_queue_state {
     std::atomic<io_uring_operation_base*> cpu_head;
     std::atomic<io_uring_io_operation_base*> io_head;
     std::atomic<std::size_t> awake_workers;
+    std::atomic<std::size_t> running_workers;   // total workers inside run() (active + suspended)
+    io_uring_worker_state_registry workers;     // run/suspend lists for stealing + directed wake
     std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
     void* timeout_heap = nullptr;
     try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
-    bnio::base::wake_channel wake_channel_;
+    bnio::base::wake_channel wake_channel_;     // shared broadcast (stop + native notify_one_waiter)
+    std::mutex submit_lock;                     // publish/stop serialization
 };
 ```
 
@@ -198,12 +204,18 @@ waiting, then decrements `awake_workers`. It rechecks CQEs and CPU work and
 again takes all I/O before reading eventfd. If work appeared, it
 increments `awake_workers`, reopens locally, and resumes. A producer that sees
 a waiting worker writes that worker's eventfd, closing the lost-wakeup window
-without a timer.
+without a timer. Each worker owns a **per-worker** wake channel for directed
+wakeup (one sleeping worker is enough for a single publication), plus the
+shared channel used for broadcast (stop) and as a fallback when nobody is
+suspended. CPU-task stealing (`fetch_cpu_task()` → local → shared → steal) and
+the run/suspend worker-state registry are shared with the kqueue backend;
+see [`worker-scheduling.md`](worker-scheduling.md).
 
 ### `bsd_native::kqueue_context` — Passive Readiness Event Loop
 
 The BSD backend uses the same CPU/I/O publication split. A
-`kqueue_task_queue_state` owns separate MPSC heads, `awake_workers`, and the
+`kqueue_task_queue_state` owns separate MPSC heads, `awake_workers` /
+`running_workers`, the run/suspend worker-state registry, and the
 worker-group `life_state` flag (std::atomic<int>, 0=running, 1=stopping). With no shared state selected, a standalone
 `kqueue_context` keeps non-atomic local CPU and I/O queues.
 
@@ -235,8 +247,11 @@ registration table. The backend consequently exposes no public `prepare()`,
 CPU completions run before I/O publication is consumed. Immediately before a
 blocking `kevent()` call, the worker marks itself waiting, updates the shared
 awake count, and rechecks events, CPU work, I/O work, and shutdown. Producers
-that observe a waiting worker trigger `EVFILT_USER`; no active submission timer
-is involved.
+that observe a waiting worker wake exactly one sleeping worker through its
+per-worker wake channel (falling back to the shared broadcast channel); no
+active submission timer is involved. Worker sleep/wake, CPU-task stealing, and
+the run/suspend registry are shared with the io_uring backend — see
+[`worker-scheduling.md`](worker-scheduling.md).
 
 The reactor-specific completion path remains distinct from io_uring: after a
 read or write filter fires, the context performs one bounded nonblocking I/O
