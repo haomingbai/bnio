@@ -170,6 +170,14 @@ class BNIO_EXPORT io_uring_context {
   void set_global_state(io_uring_task_queue_state* state) noexcept;
 
   /**
+   * Returns the shared task queue state this worker is bound to, or null
+   * when it has not entered run() yet.
+   */
+  [[nodiscard]] io_uring_task_queue_state* get_global_state() const noexcept {
+    return global_state_;
+  }
+
+  /**
    * Wakes the run loop through the context eventfd.
    */
   void notify_one_waiter() noexcept;

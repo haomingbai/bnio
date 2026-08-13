@@ -19,7 +19,6 @@
 #include <bnio/base/bsd/kqueue.h>
 #include <bnio/export.h>
 
-#include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -130,6 +129,14 @@ class BNIO_EXPORT kqueue_context {
    * state must remain valid until this context stops running.
    */
   void set_global_state(kqueue_task_queue_state* state) noexcept;
+
+  /**
+   * Returns the shared task queue state this worker is bound to, or null
+   * when it has not entered run() yet.
+   */
+  [[nodiscard]] kqueue_task_queue_state* get_global_state() const noexcept {
+    return global_state_;
+  }
 
   /** Wakes one run-loop waiter. */
   void notify_one_waiter() noexcept;

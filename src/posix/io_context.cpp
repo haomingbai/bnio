@@ -20,14 +20,6 @@ io_context::io_context() noexcept : io_context(io_context_options{}) {}
 io_context::io_context(const io_context_options& options) noexcept
     : native_options_(options.platform),
       immutable_flags_(options.enable_immediate_io) {
-  {
-    // Availability is checked lazily by run(), which creates the actual
-    // native context on the worker thread.  Each run() call serves as
-    // its own probe and returns an error_code when the backend is
-    // unavailable.
-    immutable_flags_.native_available.store(true, std::memory_order_release);
-  }
-
   // Create the shared wake channel owned by io_context. Each worker's
   // native context registers read interest on the channel before
   // sleeping. io_context writes to the channel to wake workers.
@@ -68,14 +60,16 @@ io_context::~io_context() noexcept {
 }
 
 bool io_context::is_open() const noexcept {
-  return immutable_flags_.native_available.load(std::memory_order_acquire);
+  // The POSIX backend is selected at compile time on this platform, so
+  // construction always succeeds.  Runtime availability of the native
+  // backend is probed lazily by run(), which reports failure through its
+  // returned error_code.
+  return true;
 }
 
 bool io_context::can_start_run() const noexcept {
-  // A worker may enter the run loop only while the context is not stopping
-  // and the native backend was available at construction.
-  return global_state_.life_state.load(std::memory_order_acquire) == 0 &&
-         immutable_flags_.native_available.load(std::memory_order_acquire);
+  // A worker may enter the run loop only while the context is not stopping.
+  return global_state_.life_state.load(std::memory_order_acquire) == 0;
 }
 
 void io_context::release_worker_slot() noexcept {
@@ -114,6 +108,7 @@ std::error_code io_context::run() noexcept {
   }
 
   io_context* previous_context = current_context_;
+  detail::native_context* previous_worker_native = current_worker_native_;
   current_context_ = this;
   current_worker_native_ = &ctx;
   ctx.run();
@@ -122,7 +117,10 @@ std::error_code io_context::run() noexcept {
   // destroys the io_context.
   ctx.set_global_state(nullptr);
   release_worker_slot();
-  current_worker_native_ = nullptr;
+  // Restore both thread-local slots symmetrically so nested run() calls
+  // (an outer worker running a second context's loop) leave the worker's
+  // fast-path state pointing back at the outer context.
+  current_worker_native_ = previous_worker_native;
   current_context_ = previous_context;
   return std::error_code{};
 }

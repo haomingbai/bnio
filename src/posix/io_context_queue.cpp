@@ -32,7 +32,15 @@ bool io_context::publish_cpu(
   // Worker-local fast path: post directly to the running native context's
   // local queue. The worker always drains its local queue during finish(),
   // so the operation is guaranteed to complete even during shutdown.
-  if (current_worker_native_ != nullptr) {
+  //
+  // The bound-state check matters for nested run(): an outer worker's
+  // handler may post to a different context, and current_worker_native_
+  // then still points at the OUTER worker's native context. Posting to the
+  // wrong local queue would strand the operation — the inner run loop
+  // never drains the outer worker's local queue. Fall through to the
+  // shared-queue path for any context other than this one.
+  if (current_worker_native_ != nullptr &&
+      current_worker_native_->get_global_state() == &global_state_) {
     current_worker_native_->post(operation);
     return true;
   }

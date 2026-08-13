@@ -240,7 +240,7 @@ class BNIO_EXPORT io_context {
     [[nodiscard]] io_context& context() const noexcept { return *context_; }
 
     /**
-     * Creates a sender for one socket read operation.
+     * Creates a sender that reads the whole buffer from a socket.
      */
     [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
                                   mutable_buffer buffer, int flags = 0) const;
@@ -280,7 +280,8 @@ class BNIO_EXPORT io_context {
                                      const ip::endpoint& endpoint,
                                      int flags = 0) const;
     /**
-     * Creates a sender for one descriptor read operation at an offset.
+     * Creates a sender that reads the whole buffer from a descriptor at an
+     * offset.
      */
     [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
                                   mutable_buffer buffer,
@@ -456,8 +457,10 @@ class BNIO_EXPORT io_context {
   io_context& operator=(io_context&&) = delete;
 
   /**
-   * Returns whether the native backend was available when this context was
-   * created.
+   * Returns whether the context is open.  The POSIX backend is selected
+   * at compile time, so this always returns true; runtime availability of
+   * the native backend is probed lazily by run(), which reports failure
+   * through its returned error_code.
    */
   [[nodiscard]] bool is_open() const noexcept;
 
@@ -686,7 +689,7 @@ class BNIO_EXPORT io_context {
 
   /**
    * Returns whether a worker may enter the run loop: the context is not
-   * stopping and the native backend was available at construction.
+   * stopping.
    */
   [[nodiscard]] bool can_start_run() const noexcept;
 
@@ -806,12 +809,9 @@ class BNIO_EXPORT io_context {
   /**
    * Configuration fixed once at construction and read-only afterwards.
    *
-   * Both fields are written exactly once by the constructor before the
-   * context is shared with other threads: enable_immediate_io comes from
-   * io_context_options and native_available from the native availability
-   * probe. enable_immediate_io is read as a plain bool on the hot path;
-   * native_available is kept atomic because is_open() and run() read it
-   * with acquire ordering.
+   * enable_immediate_io comes from io_context_options and is written
+   * exactly once by the constructor before the context is shared with
+   * other threads; it is read as a plain bool on the hot path.
    */
   struct immutable_flags {
     explicit immutable_flags(bool eager_immediate_io) noexcept
@@ -819,10 +819,6 @@ class BNIO_EXPORT io_context {
 
     /** Eager immediate I/O switch, fixed at construction (see options.h). */
     bool enable_immediate_io = true;
-
-    /** Whether the native backend was available when this context was
-     *  created. */
-    std::atomic_bool native_available{false};
   } immutable_flags_;
 
   /**
