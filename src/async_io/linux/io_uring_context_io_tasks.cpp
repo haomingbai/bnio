@@ -40,6 +40,26 @@ bool io_uring_context::consume_io_tasks() noexcept {
       local_state_.push_cpu(*operation);
     }
   };
+  // Submit the prepared SQEs. On success, register every prepared
+  // operation in the inflight list before release_prepared clears
+  // their next pointers; on failure the caller decides how to fail
+  // the operations.
+  const auto submit_and_track_prepared = [this, &prepared,
+                                          &release_prepared]() noexcept -> int {
+    const int result = submit_ring();
+    if (result >= 0) {
+      // Add every prepared operation to the inflight list before
+      // release_prepared clears their next pointers.
+      auto* current = prepared;
+      while (current != nullptr) {
+        auto* next_op = static_cast<io_uring_io_operation_base*>(current->next);
+        add_inflight(*current);
+        current = next_op;
+      }
+      release_prepared();
+    }
+    return result;
+  };
 
   // Prepare each I/O operation into an SQE. Either batch it into the
   // prepared list or, on EAGAIN, flush pending SQEs and retry.  A submit
@@ -48,9 +68,8 @@ bool io_uring_context::consume_io_tasks() noexcept {
     io_uring_io_operation_base* operation = operations;
     const int prepare_result = prepare_io(*operation);
     if (prepare_result == -EAGAIN) {
-      const int submit_result = submit_ring();
+      const int submit_result = submit_and_track_prepared();
       if (submit_result >= 0) {
-        release_prepared();
         continue;
       }
       fail_prepared(submit_result);
@@ -76,18 +95,8 @@ bool io_uring_context::consume_io_tasks() noexcept {
   }
 
   if (prepared != nullptr) {
-    const int submit_result = submit_ring();
-    if (submit_result >= 0) {
-      // Add every prepared operation to the inflight list before
-      // release_prepared clears their next pointers.
-      auto* current = prepared;
-      while (current != nullptr) {
-        auto* next_op = static_cast<io_uring_io_operation_base*>(current->next);
-        add_inflight(*current);
-        current = next_op;
-      }
-      release_prepared();
-    } else {
+    const int submit_result = submit_and_track_prepared();
+    if (submit_result < 0) {
       fail_prepared(submit_result);
     }
   }

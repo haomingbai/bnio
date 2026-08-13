@@ -1,4 +1,9 @@
+#include <bnio/async_io/ip/endpoint.h>
+#include <bnio/async_io/linux/io_uring_operations/socket.h>
 #include <gtest/gtest.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <array>
 #include <system_error>
@@ -152,6 +157,88 @@ TEST(IoUringSenderTest, stop_token_completes_stopped_before_submit) {
   EXPECT_EQ(state->signal, signal_kind::error);
   EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
   EXPECT_TRUE(state->in_context);
+}
+
+TEST(IoUringSenderTest, accept_cancel_preserves_remote_endpoint) {
+  io_uring_context context;
+  if (!queue_init_or_skip(context)) {
+    GTEST_SKIP() << "io_uring is unavailable";
+  }
+
+  const int listener_fd =
+      ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_TCP);
+  EXPECT_TRUE(listener_fd >= 0);
+
+  // 1.2.3.4 in host byte order.
+  const bnio::async_io::ip::endpoint initial_endpoint(
+      bnio::async_io::ip::address::v4(0x01020304), 5);
+  bnio::async_io::ip::endpoint remote_endpoint = initial_endpoint;
+
+  bexec::inplace_stop_source source;
+  EXPECT_TRUE(source.request_stop());
+
+  stopped_receiver recv;
+  recv.context = &context;
+  recv.env = stop_env{source.get_token()};
+  recv.stop_on_completion = true;
+  auto state = recv.state;
+
+  io_uring_accept_operation operation(context, stream_socket_view(listener_fd),
+                                      remote_endpoint, 0, std::move(recv));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  EXPECT_TRUE(remote_endpoint.address().is_v4());
+  EXPECT_EQ(remote_endpoint.address().to_v4(),
+            initial_endpoint.address().to_v4());
+  EXPECT_EQ(remote_endpoint.port(), initial_endpoint.port());
+
+  EXPECT_EQ(::close(listener_fd), 0);
+}
+
+TEST(IoUringSenderTest, receive_from_cancel_preserves_remote_endpoint) {
+  io_uring_context context;
+  if (!queue_init_or_skip(context)) {
+    GTEST_SKIP() << "io_uring is unavailable";
+  }
+
+  const int receiver_fd =
+      ::socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, IPPROTO_UDP);
+  EXPECT_TRUE(receiver_fd >= 0);
+
+  // 1.2.3.4 in host byte order.
+  const bnio::async_io::ip::endpoint initial_endpoint(
+      bnio::async_io::ip::address::v4(0x01020304), 5);
+  bnio::async_io::ip::endpoint remote_endpoint = initial_endpoint;
+
+  std::array<char, 32> bytes{};
+
+  bexec::inplace_stop_source source;
+  EXPECT_TRUE(source.request_stop());
+
+  stopped_receiver recv;
+  recv.context = &context;
+  recv.env = stop_env{source.get_token()};
+  recv.stop_on_completion = true;
+  auto state = recv.state;
+
+  io_uring_receive_from_operation operation(
+      context, datagram_socket_view(receiver_fd),
+      buffer_view(bytes.data(), bytes.size()), remote_endpoint, 0,
+      std::move(recv));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  EXPECT_TRUE(remote_endpoint.address().is_v4());
+  EXPECT_EQ(remote_endpoint.address().to_v4(),
+            initial_endpoint.address().to_v4());
+  EXPECT_EQ(remote_endpoint.port(), initial_endpoint.port());
+
+  EXPECT_EQ(::close(receiver_fd), 0);
 }
 
 }  // namespace

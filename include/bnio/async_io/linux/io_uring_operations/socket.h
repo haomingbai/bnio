@@ -74,7 +74,9 @@ class io_uring_accept_operation
    * Converts a completed native peer address back into an async_io endpoint.
    */
   void execute() noexcept override {
-    if (remote_endpoint_ != nullptr && this->result >= 0) {
+    if (remote_endpoint_ != nullptr &&
+        this->completion_ == detail::io_uring_receiver_completion::value &&
+        this->result >= 0) {
       const auto endpoint =
           make_endpoint(reinterpret_cast<const sockaddr*>(&remote_address_),
                         remote_address_size_);
@@ -391,7 +393,8 @@ class io_uring_receive_from_operation
   }
 
   void execute() noexcept override {
-    if (this->result >= 0) {
+    if (this->completion_ == detail::io_uring_receiver_completion::value &&
+        this->result >= 0) {
       const auto endpoint =
           make_endpoint(reinterpret_cast<const sockaddr*>(&remote_address_),
                         message_.msg_namelen);

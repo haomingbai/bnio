@@ -256,6 +256,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   end_wait();
 
   if (wait_result < 0 && wait_result != -ETIME && !should_finish()) {
+    run_state_.state.store(context_state::finished, std::memory_order_release);
     return run_phase::finished;
   }
 
