@@ -213,11 +213,6 @@ class ssl_async_operation_base {
       return ssl_output_chunk_state::ready;
     }
 
-    if (available < -1) {
-      post_complete_value(last_ssl_error());
-      return ssl_output_chunk_state::error;
-    }
-
     transport_data_ = nullptr;
     transport_size_ = 0;
     return ssl_output_chunk_state::none;

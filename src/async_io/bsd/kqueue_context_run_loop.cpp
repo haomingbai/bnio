@@ -178,7 +178,7 @@ kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
   // 4. Register pending I/O tasks with kqueue — always a separate step
   //    so repeat_until chains that generate I/O during CPU processing
   //    don't starve the kqueue filter set.  Matches Linux's explicit
-  //    consume_io_tasks() call after CPU draing.
+  //    consume_io_tasks() call after CPU draining.
   if (consume_io_tasks()) {
     return run_phase::run_ready_tasks;
   }

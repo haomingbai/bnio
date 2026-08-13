@@ -47,9 +47,6 @@ bool kqueue_context::consume_io_tasks() noexcept {
 
   // MPSC publication is LIFO; restore producer order before registering.
   operations = reverse_io_tasks(operations);
-  if (operations == nullptr) {
-    return false;
-  }
 
   while (operations != nullptr) {
     kqueue_io_operation_base* operation = operations;

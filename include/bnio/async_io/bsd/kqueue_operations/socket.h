@@ -8,6 +8,7 @@
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_SOCKET_H_
 
 #include <bnio/async_io/bsd/kqueue_operations/detail/io_request.h>
+#include <bnio/async_io/bsd/kqueue_operations/detail/native_io.h>
 #include <bnio/async_io/bsd/socket_address.h>
 #include <bnio/async_io/buffer_view.h>
 #include <bnio/async_io/ip/endpoint.h>
@@ -19,7 +20,6 @@
 #include <algorithm>
 #include <bexec/completion_signatures.hpp>
 #include <cerrno>
-#include <climits>
 #include <cstddef>
 #include <system_error>
 #include <utility>
@@ -27,22 +27,6 @@
 namespace bnio::async_io::bsd_native {
 
 namespace detail {
-
-[[nodiscard]] inline std::size_t bounded_socket_io_size(
-    std::size_t size) noexcept {
-  return std::min(size, static_cast<std::size_t>(INT_MAX));
-}
-
-[[nodiscard]] inline int set_nonblocking(int descriptor) noexcept {
-  const int flags = ::fcntl(descriptor, F_GETFL, 0);
-  if (flags < 0) {
-    return -errno;
-  }
-  if ((flags & O_NONBLOCK) != 0) {
-    return 0;
-  }
-  return ::fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 ? 0 : -errno;
-}
 
 [[nodiscard]] inline int nonblocking_io_result(ssize_t result) noexcept {
   if (result >= 0) {
@@ -79,9 +63,9 @@ class kqueue_receive_request {
     if (buffer_.size > 0 && buffer_.data == nullptr) {
       return -EFAULT;
     }
-    return detail::nonblocking_io_result(::recv(
-        descriptor_, buffer_.data, detail::bounded_socket_io_size(buffer_.size),
-        flags_ | MSG_DONTWAIT));
+    return detail::nonblocking_io_result(
+        ::recv(descriptor_, buffer_.data, detail::bounded_io_size(buffer_.size),
+               flags_ | MSG_DONTWAIT));
   }
 
   template <class Receiver>
@@ -117,9 +101,9 @@ class kqueue_send_request {
     if (size_ > 0 && data_ == nullptr) {
       return -EFAULT;
     }
-    return detail::nonblocking_io_result(
-        ::send(descriptor_, data_, detail::bounded_socket_io_size(size_),
-               flags_ | MSG_DONTWAIT));
+    return detail::nonblocking_io_result(::send(descriptor_, data_,
+                                                detail::bounded_io_size(size_),
+                                                flags_ | MSG_DONTWAIT));
   }
 
   template <class Receiver>
@@ -160,10 +144,10 @@ class kqueue_receive_from_request {
     }
     remote_address_ = {};
     socklen_t size = sizeof(remote_address_);
-    const ssize_t result = ::recvfrom(
-        descriptor_, buffer_.data, detail::bounded_socket_io_size(buffer_.size),
-        flags_ | MSG_DONTWAIT, reinterpret_cast<sockaddr*>(&remote_address_),
-        &size);
+    const ssize_t result =
+        ::recvfrom(descriptor_, buffer_.data,
+                   detail::bounded_io_size(buffer_.size), flags_ | MSG_DONTWAIT,
+                   reinterpret_cast<sockaddr*>(&remote_address_), &size);
     if (result >= 0) {
       remote_size_ = size;
     }
@@ -226,7 +210,7 @@ class kqueue_send_to_request {
       return -EFAULT;
     }
     return detail::nonblocking_io_result(::sendto(
-        descriptor_, data_, detail::bounded_socket_io_size(size_),
+        descriptor_, data_, detail::bounded_io_size(size_),
         flags_ | MSG_DONTWAIT, remote_address_.data(), remote_address_.size()));
   }
 
@@ -277,7 +261,7 @@ class kqueue_accept_request {
       return detail::nonblocking_io_result(-1);
     }
 
-    const int nonblocking = detail::set_nonblocking(accepted);
+    const int nonblocking = detail::set_descriptor_nonblocking(accepted);
     if (nonblocking < 0) {
       (void)::close(accepted);
       return nonblocking;
@@ -320,13 +304,13 @@ class kqueue_connect_request {
   }
 
   [[nodiscard]] int start_io() noexcept {
-    const int nonblocking = detail::set_nonblocking(descriptor_);
+    const int nonblocking = detail::set_descriptor_nonblocking(descriptor_);
     return nonblocking < 0 ? nonblocking : perform_io();
   }
 
   [[nodiscard]] int perform_io() noexcept {
     if (!initiated_) {
-      const int nonblocking = detail::set_nonblocking(descriptor_);
+      const int nonblocking = detail::set_descriptor_nonblocking(descriptor_);
       if (nonblocking < 0) {
         return nonblocking;
       }

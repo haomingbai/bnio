@@ -186,36 +186,26 @@ class BNIO_EXPORT stream_socket_view {
 
   /**
    * Binds the socket to an IP endpoint.
-   *
-   * @see bind
    */
   [[nodiscard]] std::error_code bind(const ip::endpoint& endpoint) noexcept;
 
   /**
    * Marks the bound stream socket as listening.
-   *
-   * @see listen
    */
   [[nodiscard]] std::error_code listen(int backlog) noexcept;
 
   /**
    * Connects the socket to an IP endpoint.
-   *
-   * @see connect
    */
   [[nodiscard]] std::error_code connect(const ip::endpoint& endpoint) noexcept;
 
   /**
    * Shuts down socket send and/or receive operations.
-   *
-   * @see shutdown
    */
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
   /**
    * Enables or disables address reuse on the socket.
-   *
-   * @see setsockopt
    */
   [[nodiscard]] std::error_code set_reuse_address(bool enabled) noexcept;
 

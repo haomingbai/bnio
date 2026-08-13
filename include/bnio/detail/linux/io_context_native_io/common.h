@@ -67,7 +67,7 @@ concept has_immediate_io = requires(Model& model) {
          error == ESPIPE;
 }
 
-[[nodiscard]] constexpr int nowait_read_flag() noexcept {
+[[nodiscard]] constexpr int nowait_flag() noexcept {
 #ifdef RWF_NOWAIT
   return RWF_NOWAIT;
 #else
@@ -85,8 +85,7 @@ concept has_immediate_io = requires(Model& model) {
   if constexpr (sizeof(unsigned long) < sizeof(std::uint64_t)) {
     high = static_cast<unsigned long>(offset >> (sizeof(unsigned long) * 8U));
   }
-  return ::syscall(SYS_preadv2, descriptor, &view, 1, low, high,
-                   nowait_read_flag());
+  return ::syscall(SYS_preadv2, descriptor, &view, 1, low, high, nowait_flag());
 #else
   (void)descriptor;
   (void)data;
@@ -108,7 +107,7 @@ concept has_immediate_io = requires(Model& model) {
     high = static_cast<unsigned long>(offset >> (sizeof(unsigned long) * 8U));
   }
   return ::syscall(SYS_pwritev2, descriptor, &view, 1, low, high,
-                   nowait_read_flag());
+                   nowait_flag());
 #else
   (void)descriptor;
   (void)data;

@@ -7,18 +7,16 @@
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_FILE_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_FILE_H_
 
-#include <bnio/async_io/bsd/detail/kqueue_receiver_operation.h>
 #include <bnio/async_io/bsd/kqueue_operations/detail/io_request.h>
+#include <bnio/async_io/bsd/kqueue_operations/detail/native_io.h>
 #include <bnio/async_io/buffer_view.h>
 #include <bnio/async_io/descriptor_view.h>
-#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
-#include <climits>
 #include <cstdint>
 #include <limits>
 #include <utility>
@@ -26,11 +24,6 @@
 namespace bnio::async_io::bsd_native {
 
 namespace detail {
-
-[[nodiscard]] inline std::size_t bounded_file_io_size(
-    std::size_t size) noexcept {
-  return std::min(size, static_cast<std::size_t>(INT_MAX));
-}
 
 [[nodiscard]] inline int positioned_io_result(ssize_t result) noexcept {
   if (result >= 0) {
@@ -42,17 +35,6 @@ namespace detail {
 [[nodiscard]] inline bool valid_file_offset(std::uint64_t offset) noexcept {
   return offset <=
          static_cast<std::uint64_t>(std::numeric_limits<off_t>::max());
-}
-
-[[nodiscard]] inline int set_descriptor_nonblocking(int descriptor) noexcept {
-  const int flags = ::fcntl(descriptor, F_GETFL, 0);
-  if (flags < 0) {
-    return -errno;
-  }
-  if ((flags & O_NONBLOCK) != 0) {
-    return 0;
-  }
-  return ::fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) == 0 ? 0 : -errno;
 }
 
 [[nodiscard]] inline int nonblocking_descriptor_result(
@@ -111,7 +93,7 @@ class kqueue_file_read_request {
     }
     return detail::nonblocking_descriptor_result(
         ::read(descriptor_.native_handle(), buffer_.data,
-               detail::bounded_file_io_size(buffer_.size)));
+               detail::bounded_io_size(buffer_.size)));
   }
 
   [[nodiscard]] bool should_wait(int result) const noexcept {
@@ -134,7 +116,7 @@ class kqueue_file_read_request {
     ssize_t result;
     do {
       result = ::pread(descriptor_.native_handle(), buffer_.data,
-                       detail::bounded_file_io_size(buffer_.size),
+                       detail::bounded_io_size(buffer_.size),
                        static_cast<off_t>(offset_));
     } while (result < 0 && errno == EINTR);
     return detail::positioned_io_result(result);
@@ -187,9 +169,8 @@ class kqueue_file_write_request {
     if (regular_file_) {
       return perform_positioned_io();
     }
-    return detail::nonblocking_descriptor_result(
-        ::write(descriptor_.native_handle(), data_,
-                detail::bounded_file_io_size(size_)));
+    return detail::nonblocking_descriptor_result(::write(
+        descriptor_.native_handle(), data_, detail::bounded_io_size(size_)));
   }
 
   [[nodiscard]] bool should_wait(int result) const noexcept {
@@ -211,9 +192,9 @@ class kqueue_file_write_request {
 
     ssize_t result;
     do {
-      result = ::pwrite(descriptor_.native_handle(), data_,
-                        detail::bounded_file_io_size(size_),
-                        static_cast<off_t>(offset_));
+      result =
+          ::pwrite(descriptor_.native_handle(), data_,
+                   detail::bounded_io_size(size_), static_cast<off_t>(offset_));
     } while (result < 0 && errno == EINTR);
     return detail::positioned_io_result(result);
   }

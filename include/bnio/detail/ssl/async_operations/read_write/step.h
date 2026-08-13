@@ -224,12 +224,6 @@ class ssl_io_step_operation {
       return;
     }
 
-    if (available < -1) {
-      state_->done = true;
-      complete_value(last_ssl_error(), state_->bytes);
-      return;
-    }
-
     resume_after_flush();
   }
 
