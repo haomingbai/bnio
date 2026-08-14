@@ -7,7 +7,7 @@ on different platform backends.
 
 | Backend | Platform | Summary |
 | --- | --- | --- |
-| [io_uring (Linux)](io_uring.md) | Linux x86_64 | bnio leads in throughput (1.07×) and timer churn (1.08×) |
+| [io_uring (Linux)](io_uring.md) | Linux x86_64 | bnio leads in throughput (1.03×); trails in timer churn (0.97×) |
 | [kqueue (macOS/BSD)](kqueue.md) | macOS arm64 (Apple Silicon) | bnio near parity in throughput (0.98×); trails in timer churn (0.93×) |
 
 ## Methodology
@@ -23,8 +23,8 @@ All benchmarks compare functionally equivalent implementations: a bnio server/pr
 
 - Both implementations rebuilt in **Release** mode with `-march=native -mtune=native` immediately before testing.
 - The **same neutral client** drives both servers (for throughput benchmarks).
-- Server process **restarted** for every measured configuration.
-- Each configuration runs **1 iteration** (quick mode); full 3-iteration results may differ.
+- Server process **restarted** for every measured configuration and iteration.
+- Each configuration runs **3 iterations**; reported values are arithmetic means.
 
 ## Charts
 
