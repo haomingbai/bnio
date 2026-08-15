@@ -8,7 +8,7 @@ on different platform backends.
 | Backend | Platform | Summary |
 | --- | --- | --- |
 | [io_uring (Linux)](io_uring.md) | Linux x86_64 | bnio leads in throughput (1.03×); trails in timer churn (0.97×) |
-| [kqueue (macOS/BSD)](kqueue.md) | macOS arm64 (Apple Silicon) | bnio near parity in throughput (0.98×); trails in timer churn (0.93×) |
+| [kqueue (macOS/BSD)](kqueue.md) | macOS arm64 (Apple Silicon) | bnio near parity in throughput (0.96×); trails in timer churn (0.91×) |
 
 ## Methodology
 
