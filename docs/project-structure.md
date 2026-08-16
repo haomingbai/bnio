@@ -252,7 +252,6 @@ High-level async runtime, stream owners, and buffer types.
 - `design/lifecycle.md` — lifetime and ownership rules.
 - `design/io_uring-setup.md` — io_uring setup flags and optimization.
 - `design/timer.md` — timer subsystem design.
-- `design/roadmap.md` — next-phase roadmap (POSIX `io_context` consolidation; memory-customization branch).
 - `usage.md` → redirects to `usage/index.md`.
 - `usage/index.md` — usage guide (sender/receiver, operations, CPOs, submission
   modes, coroutines).

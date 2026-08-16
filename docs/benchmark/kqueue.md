@@ -392,4 +392,4 @@ On the kqueue (macOS/BSD) backend:
 
 - **Timer churn**: bnio's lifecycle ratio is 0.91× (2 of 12 wins), down slightly from the previous 0.927×. Small-timer workloads are at parity or better (timers=256 averages 1.01×), but large timer counts (4,096 and 16,384) trail by roughly 14–15%, an asio absolute advantage at scale rather than a bnio collapse.
 
-The kqueue backend remains under active optimization: the timer control-plane at large timer counts, 8-worker scaling, and the small-message steady-state all sit on the roadmap, along with further synchronization reduction. The next structural step is the POSIX `io_context` consolidation described in [`design/roadmap.md`](../design/roadmap.md).
+The kqueue backend remains under active optimization: the timer control-plane at large timer counts, 8-worker scaling, and the small-message steady-state are open optimization targets, along with further synchronization reduction.

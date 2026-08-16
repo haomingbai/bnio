@@ -84,8 +84,4 @@ filter fires. Positioned regular-file requests run in `start()` and post only
 their completion. The shared timer heap root becomes the passive blocking
 timeout for whichever worker is about to call `kevent()`.
 
-See [`roadmap.md`](../roadmap.md) for the next-phase plan, including the
-POSIX `io_context` consolidation that merges this kqueue backend with the
-io_uring backend into one shared implementation.
-
 ---
