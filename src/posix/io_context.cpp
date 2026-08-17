@@ -172,6 +172,18 @@ int io_context::stop_internal() noexcept {
   // stopping flag and exit.  Workers drain timers_.ready during finish(),
   // and the ordering in begin_stop() guarantees the operations are already
   // staged there before any worker can enter its final drain.
+  // Wake unconditionally before waiting.  The caller may be a signal
+  // handler running on a worker thread whose run loop is actually
+  // blocked inside the kernel (e.g. io_uring_enter); in that case
+  // is_in_context() is true and the loop below excludes this worker
+  // from the wait set, so without this wake nobody would ever write
+  // the channel and the worker would sleep forever.  Excluding self
+  // from the wait means "do not wait for our own exit" (waiting would
+  // self-deadlock in the signal frame), not "self needs no wake".
+  // A superfluous wake is harmless: workers drain the channel and
+  // re-arm (see src/async_io/linux/io_uring_context_cqe.cpp).
+  (void)global_state_.wake_channel_.wake();
+
   const bool in_worker_context = is_in_context();
   const std::size_t self_count = in_worker_context ? 1 : 0;
   while (global_state_.running_workers.load(std::memory_order_acquire) >

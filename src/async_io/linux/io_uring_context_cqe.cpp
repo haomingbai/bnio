@@ -21,15 +21,9 @@ int io_uring_context::wait_for_cqe_event(__kernel_timespec* timeout) noexcept {
     return ring_.wait_cqe_timeout(cqe, timeout);
   }
 
-  const int ring_fd = ring_.native_fd();
-
-  for (;;) {
-    const int result = bnio::base::ring::wait_cqe_event(ring_fd, 1);
-    if (result == -EINTR) {
-      continue;
-    }
-    return result;
-  }
+  // Do not retry on -EINTR here: propagate it so the run loop can
+  // re-evaluate should_finish() (e.g. a signal-driven stop()).
+  return bnio::base::ring::wait_cqe_event(ring_.native_fd(), 1);
 }
 
 bool io_uring_context::collect_ready_cqes() noexcept {

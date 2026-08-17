@@ -52,3 +52,12 @@ bnio_add_integration_io_context_test(
   lifecycle_nested_run
   lifecycle/nested_run_test.cpp
   PROPERTIES TIMEOUT 10)
+if(BNIO_PLATFORM_LINUX)
+  # Signal-driven stop() regression test: uses SIGUSR1 and a forked child,
+  # so it must not run concurrently with other tests. Linux-only because the
+  # defect lived in the io_uring wait path.
+  bnio_add_integration_io_context_test(
+    lifecycle_stop_from_signal_handler
+    lifecycle/stop_from_signal_handler_test.cpp
+    PROPERTIES RUN_SERIAL TRUE TIMEOUT 20)
+endif()

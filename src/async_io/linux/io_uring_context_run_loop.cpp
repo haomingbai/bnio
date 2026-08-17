@@ -255,7 +255,11 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   const int wait_result = wait_for_cqe_event(timeout_pointer);
   end_wait();
 
-  if (wait_result < 0 && wait_result != -ETIME && !should_finish()) {
+  // -EINTR is a spurious wakeup (e.g. SIGWINCH/SIGCHLD or a signal-driven
+  // stop()): never fatal. Fall through to the collect + state re-evaluation
+  // logic below, which either finishes (stop requested) or waits again.
+  if (wait_result < 0 && wait_result != -ETIME && wait_result != -EINTR &&
+      !should_finish()) {
     run_state_.state.store(context_state::finished, std::memory_order_release);
     return run_phase::finished;
   }
