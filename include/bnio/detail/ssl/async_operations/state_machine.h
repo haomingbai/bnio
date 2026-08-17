@@ -71,10 +71,18 @@ class ssl_async_operation_base {
  protected:
   class child_receiver {
    public:
+    // The env type depends only on the operation's Receiver template
+    // parameter; naming it explicitly keeps get_env's return type available
+    // while the operation class is still incomplete (child operation types
+    // are computed inside its own definition). A deduced decltype(auto)
+    // return would force the body — and its operation_->receiver_ access —
+    // to be instantiated too early.
+    using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
+
     explicit child_receiver(ssl_async_operation_base& operation) noexcept
         : operation_(&operation) {}
 
-    [[nodiscard]] decltype(auto) get_env() const noexcept {
+    [[nodiscard]] env_type get_env() const noexcept {
       return bexec::get_env(operation_->receiver_);
     }
 
@@ -90,10 +98,18 @@ class ssl_async_operation_base {
 
   class post_receiver {
    public:
+    // The env type depends only on the operation's Receiver template
+    // parameter; naming it explicitly keeps get_env's return type available
+    // while the operation class is still incomplete (child operation types
+    // are computed inside its own definition). A deduced decltype(auto)
+    // return would force the body — and its operation_->receiver_ access —
+    // to be instantiated too early.
+    using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
+
     explicit post_receiver(ssl_async_operation_base& operation) noexcept
         : operation_(&operation) {}
 
-    [[nodiscard]] decltype(auto) get_env() const noexcept {
+    [[nodiscard]] env_type get_env() const noexcept {
       return bexec::get_env(operation_->receiver_);
     }
 
