@@ -14,7 +14,7 @@ see [`usage/index.md`](usage/index.md); for runnable samples see
 | CMake         | 3.20            |                                      |
 | liburing      | 2.1             | Linux only; `pkg-config` required    |
 | OpenSSL       | 1.1             | `pkg-config` required; TLS feature   |
-| bexec         | 0.0.1           | Package, source tree, or FetchContent |
+| bexec         | 0.1.0           | Package, source tree, or FetchContent |
 
 ## Quick build
 
@@ -43,7 +43,7 @@ ctest --test-dir build --output-on-failure
 | `BNIO_GOOGLETEST_GIT_TAG`      | `v1.17.0`    | Git ref used by the test-only `FETCH` provider |
 | `BNIO_BEXEC_PROVIDER`          | `AUTO`       | `AUTO`, `FIND_PACKAGE`, `SOURCE`, `FETCH`     |
 | `BNIO_BEXEC_SOURCE_DIR`        | empty        | Path used by the `SOURCE` provider            |
-| `BNIO_BEXEC_GIT_TAG`           | `main`       | Git ref used by the `FETCH` provider          |
+| `BNIO_BEXEC_GIT_TAG`           | `v0.1.0`     | Git ref used by the `FETCH` provider          |
 
 When `bnio` is included with `add_subdirectory()` or `FetchContent`, tests,
 examples, and installation rules default to off so they do not modify the
