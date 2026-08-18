@@ -74,7 +74,7 @@ class kqueue_file_read_request {
 
   [[nodiscard]] int perform_io() noexcept {
     if (!resolved_) {
-      struct stat status{};
+      struct stat status {};
       if (::fstat(descriptor_.native_handle(), &status) != 0) {
         return -errno;
       }
@@ -152,7 +152,7 @@ class kqueue_file_write_request {
 
   [[nodiscard]] int perform_io() noexcept {
     if (!resolved_) {
-      struct stat status{};
+      struct stat status {};
       if (::fstat(descriptor_.native_handle(), &status) != 0) {
         return -errno;
       }

@@ -70,10 +70,10 @@ struct state : std::enable_shared_from_this<state> {
       }
       void set_stopped() noexcept { s->done(); }
     };
-    reg.spawn(so.async_send_to(ctx.get_post_scheduler(),
-                               bnio::const_buffer(msg.data(), msg.size()), to,
-                               0),
-              R{shared_from_this()});
+    reg.spawn(
+        so.async_send_to(ctx.get_post_scheduler(),
+                         bnio::const_buffer(msg.data(), msg.size()), to, 0),
+        R{shared_from_this()});
   }
 
   void recv() {
@@ -91,8 +91,8 @@ struct state : std::enable_shared_from_this<state> {
       }
       void set_stopped() noexcept { s->done(); }
     };
-    reg.spawn(so.async_receive_from(ctx.get_post_scheduler(),
-                                    bnio::buffer(buf), peer, 0),
+    reg.spawn(so.async_receive_from(ctx.get_post_scheduler(), bnio::buffer(buf),
+                                    peer, 0),
               R{shared_from_this()});
   }
 

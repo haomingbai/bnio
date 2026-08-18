@@ -15,10 +15,13 @@
 
 #include <bnio/bnio.h>
 #include <gtest/gtest.h>
-
-#include <bexec/bexec.hpp>
+#include <pthread.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <atomic>
+#include <bexec/bexec.hpp>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -27,11 +30,6 @@
 #include <system_error>
 #include <thread>
 #include <utility>
-
-#include <pthread.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 namespace {
 
@@ -87,9 +85,8 @@ struct accept_sink {
   std::atomic<int> accept_outcome{0};
   using accept_sender_t =
       decltype(acp.async_accept(ctx.get_post_scheduler(), 0));
-  using accept_op_t =
-      decltype(bexec::connect(std::declval<accept_sender_t>(),
-                              accept_sink{nullptr}));
+  using accept_op_t = decltype(bexec::connect(std::declval<accept_sender_t>(),
+                                              accept_sink{nullptr}));
   auto holder = std::make_unique<op_holder<accept_op_t>>(
       acp.async_accept(ctx.get_post_scheduler(), 0),
       accept_sink{&accept_outcome});
