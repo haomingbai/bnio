@@ -82,23 +82,27 @@ class echo_server : public std::enable_shared_from_this<echo_server> {
 
   void start();
   void shutdown() {
-    if (stopped_.exchange(true)) return;
-    stopping_ = true;
+    if (stopping_.exchange(true)) return;
     (void)acp_.close();
-    if (n_ == 0) ctx_.stop();
+    if (n_ == 0) stop_once();
   }
   void on_begin() noexcept { ++n_; }
   void on_end() noexcept {
-    if (--n_ == 0 && stopping_ && !stopped_.exchange(true)) ctx_.stop();
+    if (--n_ == 0 && stopping_) stop_once();
   }
 
  private:
   void do_accept();
+  // ctx_.stop() is issued exactly once, either by shutdown() when no
+  // sessions are pending or by the last draining session's on_end().
+  void stop_once() {
+    if (!stopped_.exchange(true)) ctx_.stop();
+  }
   bnio::io_context& ctx_;
   bnio::tcp_acceptor acp_;
   op_registry reg_;
   unsigned n_ = 0;
-  bool stopping_ = false;
+  std::atomic<bool> stopping_{false};
   std::atomic<bool> stopped_{false};
 };
 

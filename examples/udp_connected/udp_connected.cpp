@@ -1,4 +1,6 @@
-// UDP echo — send a datagram and receive the reply.
+// UDP connected mode — connect() fixes the default peer, then async_send /
+// async_receive exchange a datagram without passing an endpoint each time.
+// Counterpart to udp_echo, which uses the unconnected *_to/*_from forms.
 // main thread runs context.run(). An op_registry keeps every operation
 // state alive until its completion has been delivered (the operations
 // are non-movable).
@@ -52,11 +54,10 @@ struct state : std::enable_shared_from_this<state> {
   op_registry reg;
   std::string msg;
   std::array<char, kB> buf{};
-  bnio::ip::endpoint peer{};
 
   state(bnio::io_context& c, bnio::udp_socket s) : ctx(c), so(std::move(s)) {}
 
-  void send(bnio::ip::endpoint to, std::string m) {
+  void send(std::string m) {
     msg = std::move(m);  // the send buffer must outlive the operation
     struct R {
       std::shared_ptr<state> s;
@@ -70,9 +71,8 @@ struct state : std::enable_shared_from_this<state> {
       }
       void set_stopped() noexcept { s->done(); }
     };
-    reg.spawn(so.async_send_to(ctx.get_post_scheduler(),
-                               bnio::const_buffer(msg.data(), msg.size()), to,
-                               0),
+    reg.spawn(so.async_send(ctx.get_post_scheduler(),
+                            bnio::const_buffer(msg.data(), msg.size()), 0),
               R{shared_from_this()});
   }
 
@@ -91,8 +91,7 @@ struct state : std::enable_shared_from_this<state> {
       }
       void set_stopped() noexcept { s->done(); }
     };
-    reg.spawn(so.async_receive_from(ctx.get_post_scheduler(),
-                                    bnio::buffer(buf), peer, 0),
+    reg.spawn(so.async_receive(ctx.get_post_scheduler(), bnio::buffer(buf), 0),
               R{shared_from_this()});
   }
 
@@ -109,7 +108,7 @@ int main(int argc, char** argv) {
     std::cerr << "usage: " << argv[0] << " <host> <port> [msg]\n";
     return 2;
   }
-  std::string host = argv[1], port = argv[2];
+  std::string port = argv[2];
   std::string msg = (argc > 3) ? argv[3] : "hello";
 
   bnio::io_context ctx;
@@ -119,15 +118,17 @@ int main(int argc, char** argv) {
   }
 
   bnio::udp_socket so;
-  if (auto ec = so.open(bnio::ip::udp::v4())) {
+  std::error_code ec;
+  if ((ec = so.open(bnio::ip::udp::v4())) ||
+      (ec = so.connect(
+           bnio::ip::endpoint(bnio::ip::address::loopback_v4(),
+                              static_cast<std::uint16_t>(std::stoi(port)))))) {
     std::cerr << ec.message() << '\n';
     return 1;
   }
 
   auto s = std::make_shared<state>(ctx, std::move(so));
-  s->send(bnio::ip::endpoint(bnio::ip::address::loopback_v4(),
-                             static_cast<std::uint16_t>(std::stoi(port))),
-          msg);
+  s->send(msg);
   ctx.run();
   return 0;
 }

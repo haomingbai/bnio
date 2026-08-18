@@ -1,5 +1,7 @@
 // TCP client with timeout — resolve → connect → send → receive.
 // main thread runs context.run(). steady_timer aborts on timeout (10s).
+// An op_registry keeps every operation state alive until its completion
+// has been delivered (the operations are non-movable).
 
 #include <bnio/bnio.h>
 
@@ -13,10 +15,38 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace {
 
 constexpr std::size_t kN = 8, kB = 4096;
+
+// Minimal type-erased operation holder.
+struct op_base {
+  virtual ~op_base() = default;
+};
+class op_registry {
+ public:
+  template <class Sender, class Receiver>
+  void spawn(Sender&& s, Receiver&& r) {
+    using op_t = decltype(bexec::connect(std::declval<Sender>(),
+                                         std::declval<Receiver>()));
+    struct H final : op_base {
+      op_t op;
+      H(Sender&& ss, Receiver&& rr)
+          : op(bexec::connect(std::forward<Sender>(ss),
+                              std::forward<Receiver>(rr))) {}
+    };
+    auto h =
+        std::make_unique<H>(std::forward<Sender>(s), std::forward<Receiver>(r));
+    bexec::start(h->op);
+    ops_.push_back(std::move(h));
+  }
+  void clear() noexcept { ops_.clear(); }
+
+ private:
+  std::vector<std::unique_ptr<op_base>> ops_;
+};
 
 struct client : std::enable_shared_from_this<client> {
   bnio::io_context& ctx;
@@ -24,6 +54,7 @@ struct client : std::enable_shared_from_this<client> {
   std::string msg;
   std::array<bnio::ip::endpoint, kN> ep{};
   std::array<char, kB> buf{};
+  op_registry reg;
   std::unique_ptr<bnio::steady_timer> tm;
 
   client(bnio::io_context& c, bnio::tcp_socket s, std::string m)
@@ -39,8 +70,7 @@ struct client : std::enable_shared_from_this<client> {
       }
       void set_stopped() noexcept {}
     };
-    auto op = bexec::connect(tm->async_wait(), R{shared_from_this()});
-    bexec::start(op);
+    reg.spawn(tm->async_wait(), R{shared_from_this()});
   }
 
   void cancel_timeout() {
@@ -77,9 +107,8 @@ struct client : std::enable_shared_from_this<client> {
       }
       void set_stopped() noexcept { c->done(); }
     };
-    auto op = bexec::connect(so.async_connect(ctx.get_post_scheduler(), e),
-                             R{shared_from_this()});
-    bexec::start(op);
+    reg.spawn(so.async_connect(ctx.get_post_scheduler(), e),
+              R{shared_from_this()});
   }
 
   void send() {
@@ -94,12 +123,10 @@ struct client : std::enable_shared_from_this<client> {
       }
       void set_stopped() noexcept { c->done(); }
     };
-    auto op = bexec::connect(
-        so.async_write(ctx.get_post_scheduler(),
-                       bnio::const_buffer(msg.data(), msg.size()),
-                       MSG_NOSIGNAL),
-        R{shared_from_this()});
-    bexec::start(op);
+    reg.spawn(so.async_write(ctx.get_post_scheduler(),
+                             bnio::const_buffer(msg.data(), msg.size()),
+                             MSG_NOSIGNAL),
+              R{shared_from_this()});
   }
 
   void recv() {
@@ -122,10 +149,8 @@ struct client : std::enable_shared_from_this<client> {
       }
       void set_stopped() noexcept { c->done(); }
     };
-    auto op = bexec::connect(
-        so.async_read_some(ctx.get_post_scheduler(), bnio::buffer(buf)),
-        R{shared_from_this()});
-    bexec::start(op);
+    reg.spawn(so.async_read_some(ctx.get_post_scheduler(), bnio::buffer(buf)),
+              R{shared_from_this()});
   }
 
   void fail(std::string_view s, std::error_code e = {}) {

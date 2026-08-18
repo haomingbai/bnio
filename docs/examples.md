@@ -173,7 +173,8 @@ prints each resolved endpoint and calls `context.stop()`.
 `examples/tcp_client/` — TCP client with timeout. Full lifecycle:
 resolve → connect → send → receive. A `steady_timer` watchdog (10 s)
 aborts the request on timeout. Demonstrates sender/receiver chaining
-through shared state.
+through shared state; an `op_registry` keeps every operation state alive
+until its completion is delivered.
 
 ## timer_chain
 
@@ -182,11 +183,26 @@ Only the first timer is started before `run()`. Each receiver spawns the next
 timer's sender, so the chain unfolds inside the event loop. The last receiver
 calls `context.stop()`.
 
+## timer_cancel
+
+`examples/timer_cancel/` — timer cancellation on the normal path. A 100ms
+timer cancels a pending 10s timer; the canceled wait completes with
+`operation_canceled`, the receiver observes that error, and the context
+stops for a clean, immediate exit.
+
 ## udp_echo
 
 `examples/udp_echo/` — UDP send-and-receive. Opens a `udp_socket`, sends a
 datagram with `async_send_to`, then waits for a reply with
-`async_receive_from`. Completion stops the context.
+`async_receive_from`. Completion stops the context. An `op_registry` keeps
+the operation states alive until their completions are delivered.
+
+## udp_connected
+
+`examples/udp_connected/` — UDP connected mode. `udp::socket::connect()`
+fixes the default peer, then `async_send` / `async_receive` exchange a
+datagram without passing an endpoint each time — the counterpart to
+`udp_echo`'s unconnected `*_to` / `*_from` forms.
 
 ## poll_fd
 

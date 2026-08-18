@@ -1,0 +1,3 @@
+add_executable(bnio_udp_connected udp_connected.cpp)
+target_link_libraries(bnio_udp_connected PRIVATE bnio::bnio)
+bnio_set_project_warnings(bnio_udp_connected)

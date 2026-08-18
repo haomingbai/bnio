@@ -1,0 +1,3 @@
+add_executable(bnio_timer_cancel timer_cancel.cpp)
+target_link_libraries(bnio_timer_cancel PRIVATE bnio::bnio)
+bnio_set_project_warnings(bnio_timer_cancel)
