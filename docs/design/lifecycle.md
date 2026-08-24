@@ -374,6 +374,19 @@ could observe `life_state == 1`, drain the still-empty `timers_.ready` in
 `finish()`, and exit before the abort moves the operations — permanently
 stranding them with no worker left to drain.
 
+### Abnormal close delivers every completion
+
+`queue_exit()` no longer discards pending work. It marks the context
+finishing and runs the same abort-and-deliver path as `finish()`: inflight
+and shared-queued I/O is aborted with `-ECANCELED`, completed via
+`set_stopped`, and executed synchronously on the calling thread before the
+ring closes. Forced/abnormal close therefore reaches a terminal receiver
+call for every operation that was published to the context — nothing is
+silently dropped, even when `run()` never drained the queues. The same
+delivery guarantee covers fatal run-loop errors, which route through the
+`finish_drain` phase (drain → abort → deliver) instead of exiting the loop
+directly.
+
 ### Native context single-owner guarantee
 
 `io_uring_context` and `kqueue_context` are **single-owner, non-reentrant**

@@ -125,8 +125,55 @@ one sleeping worker through its per-worker wake channel (`wake_one_sleeping`),
 falling back to the shared broadcast channel only when nobody is suspended.
 This supplies low-load progress while busy workloads form batches naturally.
 
-`io_uring_context_options::event_fd` may name a caller-owned eventfd. A
-negative value, the default, makes the context create and own a private eventfd.
+Wake channels come from two places: a per-worker channel opened by
+`queue_init()` (`local_state()->wake_channel_`) for directed wakeups, and the
+shared broadcast channel owned by the task queue state
+(`io_uring_task_queue_state::wake_channel_`), used for stop and native
+cross-thread publication. The `io_uring_context_options::event_fd` field is
+retained for API compatibility but is not consulted by the implementation.
+
+#### Internal submission contract
+
+`post()` and `publish_io()` are internal submission APIs. They perform no
+lifecycle gating at this layer: neither consults the shared `life_state`, and
+both always enqueue. Gating happens one layer up, in the `io_context` queue
+(`bnio::io_context::publish_io` / `publish_cpu`): it serializes against
+`begin_stop()` / `~io_context()` with `submit_lock`, checks `life_state`, and
+refuses work once stopping begins — the caller then completes the operation
+inline, so a submission through that layer never strands.
+
+The async_io layer omits the gate because these are internal interfaces: it
+assumes a correctly driven lifecycle. Anyone calling `post()` or
+`publish_io()` directly must guarantee the context keeps running until every
+submitted operation reaches a terminal receiver call (`set_value` with an
+error, or `set_stopped`).
+
+#### Error routing and delivery guarantees
+
+Run-loop failures never strand operations. The phase machine routes fatal
+errors — a failed wake-poll re-arm, a fatal `io_uring_enter` error, or a
+failed `enter_run()` setup — through `finish_drain` (or, in `enter_run()`,
+directly into `finish()`): drain ready CQEs and CPU tasks, abort remaining
+inflight and shared-queued I/O, and deliver every completion
+(`complete_submit_error` → `set_value(ec, ...)`,
+`complete_submit_stopped` → `set_stopped`) before the context reaches
+`finished`. A fatal ring or wake-channel error therefore cannot exit the
+loop with receivers left silent.
+
+Transient `-EAGAIN` from a wake-poll re-arm is not fatal. It means the SQ is
+under pressure (typically SQPOLL, where only the kernel poll thread frees SQ
+slots) and the poll is not armed: the run loop returns to the ready-tasks
+phase instead of blocking, and a later pass re-arms once the kernel consumes
+the queued SQEs. The collect path applies the same policy: a re-arm failure
+while collecting an eventfd CQE is ignored and re-handled by the single
+policy point in `wait_for_io_work()`, so transient pressure never
+half-closes the context.
+
+`queue_exit()` delivers as well: it marks the context finishing and runs the
+same abort-and-deliver path as `finish()` before closing the ring, so a
+forced/abnormal close (e.g. destruction without `run()`) completes every
+inflight and queued operation with `-ECANCELED`/`set_stopped` instead of
+discarding it.
 
 ### `io_uring_context_options`
 

@@ -50,11 +50,13 @@ struct read_receiver {
     }
   }
 
-  // set_stopped is emitted ONLY by io_context::stop() aborting an inflight
-  // operation. User stop-token cancellation goes through set_value(ec)
-  // above with ec == operation_canceled, not through set_stopped.
+  // set_stopped is emitted when the context aborts an inflight operation:
+  // io_context::stop(), abnormal close / teardown, or a fatal run-loop error
+  // routed through the abort-deliver path. User stop-token cancellation goes
+  // through set_value(ec) above with ec == operation_canceled, not through
+  // set_stopped.
   void set_stopped() noexcept {
-    // io_context::stop() aborted this operation while it was inflight.
+    // The context aborted this operation while it was inflight.
   }
 };
 ```
@@ -91,10 +93,11 @@ leading `std::error_code` distinguishing the case. bnio's native operations
 are `noexcept`, and the sender/receiver contract uses only two completion
 channels: `set_value(ec, ...)` and `set_stopped()`. `set_error` is not part
 of the contract — no bnio `completion_signatures` include it, and no bnio
-receiver implements it. `set_stopped()` is emitted exclusively by
-`io_context::stop()` aborting an inflight operation. Receivers may also
-expose `get_env()` when they need to provide stop tokens or other receiver
-environment queries.
+receiver implements it. `set_stopped()` is emitted when the context aborts
+an inflight operation — `io_context::stop()`, abnormal close / teardown, or
+a fatal run-loop error routed through the abort-deliver path. Receivers may
+also expose `get_env()` when they need to provide stop tokens or other
+receiver environment queries.
 
 Schedulers are lightweight handles produced by `io_context`:
 
@@ -130,11 +133,12 @@ what work they start and what value they send on success.
 
 All of these senders complete with `set_value(std::error_code, ...)` as the
 universal exit (the leading `ec` distinguishes success, recoverable failure,
-and user stop-token cancellation). `set_stopped()` is emitted exclusively by
-`io_context::stop()` aborting an inflight operation. The bnio sender/receiver
-contract uses only these two completion channels; `set_error` is not part of
-it — no bnio `completion_signatures` include it, and no bnio receiver
-implements it.
+and user stop-token cancellation). `set_stopped()` is emitted when the
+context aborts an inflight operation — `io_context::stop()`, abnormal close
+/ teardown, or a fatal run-loop error routed through the abort-deliver
+path. The bnio sender/receiver contract uses only these two completion
+channels; `set_error` is not part of it — no bnio `completion_signatures`
+include it, and no bnio receiver implements it.
 
 Read and write names are intentionally precise:
 

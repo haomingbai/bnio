@@ -188,11 +188,12 @@ The `set_value` column lists only the success payload. The actual signature is
 All senders complete with `set_value(std::error_code, ...)` as the universal
 observable exit: the leading `ec` distinguishes success (`ec == {}`),
 recoverable failure (`ec == <errno-derived>`), and user stop-token
-cancellation (`ec == operation_canceled`). `set_stopped()` is emitted
-exclusively by `io_context::stop()` aborting an inflight operation. The bnio
-sender/receiver contract uses only these two completion channels; `set_error`
-is not part of it — no bnio `completion_signatures` include it, and no bnio
-receiver implements it.
+cancellation (`ec == operation_canceled`). `set_stopped()` is emitted when
+the context aborts an inflight operation — `io_context::stop()`, abnormal
+close / teardown, or a fatal run-loop error routed through the abort-deliver
+path. The bnio sender/receiver contract uses only these two completion
+channels; `set_error` is not part of it — no bnio `completion_signatures`
+include it, and no bnio receiver implements it.
 
 #### Eager Immediate-Completion Toggle
 
@@ -266,7 +267,7 @@ stateDiagram-v2
     Advance --> Done: transferred == buffer.size
     Advance --> SubmitSome: transferred < buffer.size
     SubmitSome --> ValueError: set_value(ec, bytes) — recoverable failure or cancel
-    SubmitSome --> Stopped: set_stopped() — io_context::stop() only
+    SubmitSome --> Stopped: set_stopped() — context abort (stop / teardown / fatal error)
     SubmitSome --> ValueError: set_value(ec, 0) — EOF / invariant violation
     Done --> [*]: set_value(empty ec, total)
     ValueError --> [*]: set_value(ec, transferred)

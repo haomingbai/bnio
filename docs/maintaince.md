@@ -24,6 +24,20 @@
   in `src/base/bsd/`.
 - Keep system call return semantics: successful values are non-negative and
   failures are negative `errno` values.
+- **I1 — no stranded operations.** Every operation handed to a context
+  (`post()` / `publish_io()`) eventually reaches a terminal receiver call
+  (`set_value` with an error, or `set_stopped`), regardless of ring/wake-channel
+  errors or which thread shuts down. Fatal run-loop errors route through the
+  finish drain (drain → abort → deliver), and `queue_exit()` delivers aborted
+  completions instead of discarding them.
+- **I3 — no unbounded block without a wake source.** The run loop never enters
+  an unbounded blocking `io_uring_enter` unless an eventfd poll is armed, a
+  bounded timeout bounds the wait, or inflight kernel operations will wake it
+  under graceful-stop semantics. Wake-poll re-arms classify `-EAGAIN` as
+  transient (retry, never block) and any other failure as fatal (finish drain).
+- Base-layer zero-logic transparency audits continue to pass: `bnio::base`
+  remains a pure liburing/kqueue wrapper with no scheduling or error policy —
+  the run-loop guarantees above are implemented entirely in the async_io layer.
 - Do not throw exceptions from base wrapper calls.
 - Do not add executors, coroutines, schedulers, or higher-level async models to
   the base layer.

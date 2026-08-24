@@ -483,9 +483,10 @@ I/O batch at once. Batch unfairness for I/O is accepted: io_uring and kqueue
 are batch-capable, and a worker that cannot handle a batch simply leaves it
 for the next fetch pass. There is no I/O stealing.
 
-Standalone native contexts (no `global_state_`) keep a private `local_io_head_`
+Standalone kqueue contexts (no `global_state_`) keep a private `local_io_head_`
 as a fallback drained by `consume_io_tasks()`; this path is not used by
-`io_context`.
+`io_context`. The io_uring backend has no such fallback — its
+`consume_io_tasks()` returns immediately when `global_state_` is null.
 
 ## 9. Why the registry structure is shaped this way
 
@@ -545,3 +546,36 @@ was running, so a second attempt while marked sleeping would only take the
 run list's lock to find nothing — `begin_wait()` has already placed the worker
 on the suspend list, where a stealer cannot reach its (empty) local queue
 anyway.
+
+### 10.1 Wake-poll re-arm policy and the no-unbounded-block invariant
+
+Both wake polls are re-armed immediately before the blocking native wait, and
+the armed/not-armed distinction is explicit. On io_uring,
+`submit_eventfd_poll()` / `submit_local_eventfd_poll()` return 1 when the poll
+is armed (newly submitted or already pending), 0 when it is **not** armed
+because the context is stopping, and a negative errno on submission failure. A
+`0` tells the caller the ring must not be entered unless another wake source
+exists.
+
+Re-arm failures are classified at the single policy point in
+`wait_for_io_work()` (a re-arm failure while collecting an eventfd CQE is
+deliberately not terminal there — it is re-handled by that same point, so
+transient pressure never half-closes the context):
+
+- `-EAGAIN` is transient SQ pressure (typically SQPOLL, where only the kernel
+  poll thread frees SQ slots): the poll is not armed, so the worker never
+  blocks — it returns to the ready-tasks phase and a later pass re-arms
+  successfully.
+- Any other negative return is a fatal re-arm failure (e.g. a closed wake
+  channel) and routes through the finish drain, which aborts and delivers
+  every operation before the loop exits.
+- A `0` (poll skipped because the context is stopping) permits blocking only
+  under graceful-stop semantics — inflight kernel operations whose CQEs will
+  wake the worker, or a bounded timeout. `should_finish()` is re-evaluated
+  after the re-arms so a completion racing the stop transition can never leave
+  the worker parked without a wake source.
+
+Together these guarantee the invariant that the blocking native wait
+(`io_uring_enter` / `kevent()`) is never entered unbounded without a wake
+source: an armed eventfd poll, a bounded timeout, or inflight kernel
+operations being grace-waited.
