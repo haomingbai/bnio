@@ -187,10 +187,30 @@ class BNIO_EXPORT io_uring_context {
 
   /**
    * Posts an operation for execution by the context run loop.
+   *
+   * Internal submission API. Unlike the posix io_context queue, this
+   * function does not gate on the shared life_state; it always enqueues
+   * and never refuses work. Lifecycle gating is the caller's job: the
+   * io_context layer refuses submissions while stopping so nothing
+   * strands, and direct callers must guarantee the context keeps
+   * running until the operation reaches a terminal receiver call.
+   *
+   * @see bnio::io_context::publish_cpu
    */
   int post(io_uring_operation_base& operation) noexcept;
 
-  /** Publishes I/O for passive preparation by the context run loop. */
+  /**
+   * Publishes I/O for passive preparation by the context run loop.
+   *
+   * Internal submission API. Unlike the posix io_context queue, this
+   * function does not gate on the shared life_state; it always enqueues
+   * and never refuses work. Lifecycle gating is the caller's job: the
+   * io_context layer refuses submissions while stopping so nothing
+   * strands, and direct callers must guarantee the context keeps
+   * running until the operation reaches a terminal receiver call.
+   *
+   * @see bnio::io_context::publish_io
+   */
   void publish_io(io_uring_io_operation_base& operation) noexcept;
 
   /**
@@ -252,6 +272,13 @@ class BNIO_EXPORT io_uring_context {
   struct cqe_data;
 
   /**
+   * Callable that consumes one ready CQE for collect_cqe_tasks(): classifies
+   * it (shared/per-worker wake poll vs operation) and enqueues operations
+   * into the caller-provided queue, counting them.
+   */
+  struct cqe_collector;
+
+  /**
    * Lifecycle state for the context run loop.
    */
   enum class context_state {
@@ -306,6 +333,13 @@ class BNIO_EXPORT io_uring_context {
 
   /**
    * Submits the internal eventfd poll request.
+   *
+   * @return 1 when the wake poll is armed (newly submitted or already
+   *         pending), 0 when it is not armed because the context is no
+   *         longer running (stopping; the caller must not block on the
+   *         ring without an independent wake source), or a negative
+   *         errno on submission failure (-EAGAIN is transient SQ
+   *         pressure; anything else is fatal for the channel).
    */
   [[nodiscard]] int submit_eventfd_poll() noexcept;
 
@@ -316,6 +350,13 @@ class BNIO_EXPORT io_uring_context {
 
   /**
    * Submits the per-worker local wake channel poll request.
+   *
+   * @return 1 when the wake poll is armed (newly submitted or already
+   *         pending), 0 when it is not armed because the context is no
+   *         longer running (stopping; the caller must not block on the
+   *         ring without an independent wake source), or a negative
+   *         errno on submission failure (-EAGAIN is transient SQ
+   *         pressure; anything else is fatal for the channel).
    */
   [[nodiscard]] int submit_local_eventfd_poll() noexcept;
 
@@ -380,8 +421,22 @@ class BNIO_EXPORT io_uring_context {
 
   /**
    * Drains work and marks the context finished.
+   *
+   * Tolerates a broken or closed ring/wake channel: every drain step
+   * guards its ring state and fails operations through delivery, so all
+   * operations reach a terminal receiver call.
    */
   void finish() noexcept;
+
+  /**
+   * Aborts remaining inflight and shared-queued I/O and delivers every
+   * completion, looping until no further work appears.
+   *
+   * Shared by finish() (run-loop shutdown) and queue_exit() (teardown
+   * without a run) so both paths own one abort-and-deliver policy.
+   * Receivers run synchronously on the calling thread.
+   */
+  void abort_and_deliver_completions() noexcept;
 
   /**
    * Waits for at least one CQE event on the native ring descriptor.

@@ -52,13 +52,17 @@ bool io_uring_context::enter_run() noexcept {
     return false;
   }
 
-  assert(global_state_ != nullptr &&
-         "set_global_state() must be called before run()");
-
   // With SINGLE_ISSUER | R_DISABLED, this call makes the run-loop thread the
   // designated issuer before any SQE can be submitted.
   if (enable_ring() < 0) {
-    run_state_.state.store(context_state::finished, std::memory_order_release);
+    // run() must not return while operations already posted to the
+    // shared queues still owe their receivers a terminal call. Deliver
+    // them through finish()'s abort path (receivers run on this, the
+    // run()-caller, thread) before bailing out. finish() tolerates the
+    // broken ring: collect_ready_cqes() and consume_io_tasks() guard the
+    // ring state and fail prepared operations through delivery.
+    run_state_.state.store(context_state::finishing, std::memory_order_release);
+    finish();
     run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
@@ -68,7 +72,9 @@ bool io_uring_context::enter_run() noexcept {
   global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   const int poll_result = submit_eventfd_poll();
   if (poll_result < 0) {
-    run_state_.state.store(context_state::finished, std::memory_order_release);
+    // same stranding risk as the enable_ring failure above.
+    run_state_.state.store(context_state::finishing, std::memory_order_release);
+    finish();
     global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
     run_state_.run_active.store(false, std::memory_order_release);
     return false;
@@ -77,7 +83,9 @@ bool io_uring_context::enter_run() noexcept {
   // Arm the per-worker wake channel for directed wakeups and publish this
   // worker's local state so remote threads can steal CPU work.
   if (submit_local_eventfd_poll() < 0) {
-    run_state_.state.store(context_state::finished, std::memory_order_release);
+    // Same stranding risk as the enable_ring failure above.
+    run_state_.state.store(context_state::finishing, std::memory_order_release);
+    finish();
     global_state_->awake_workers.fetch_sub(1, std::memory_order_acq_rel);
     run_state_.run_active.store(false, std::memory_order_release);
     return false;
@@ -144,7 +152,7 @@ bool io_uring_context::is_in_context() const noexcept {
 }
 
 bool io_uring_context::consume_timeout_operations() noexcept {
-  if (global_state_ == nullptr || global_state_->timeout_heap == nullptr ||
+  if (global_state_->timeout_heap == nullptr ||
       global_state_->try_fetch_timeout_operations == nullptr) {
     return false;
   }
@@ -240,18 +248,48 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   }
 
   // Rearm both wake polls before blocking so a concurrent publisher can
-  // always wake this worker.
+  // always wake this worker. Return codes: 1 = armed (newly or already
+  // pending), 0 = not armed because the context is stopping, negative =
+  // submission failure.
   const int poll_result = submit_eventfd_poll();
   if (poll_result < 0) {
     end_wait();
-    run_state_.state.store(context_state::finished, std::memory_order_release);
-    return run_phase::finished;
+    if (poll_result == -EAGAIN) {
+      // Transient SQ pressure (typically SQPOLL, where only the kernel
+      // poll thread frees SQ slots): the poll is not armed, so never
+      // block here. Retry the collect/submit cycle; the kernel consumes
+      // the queued SQEs and a later pass re-arms successfully.
+      return run_phase::run_ready_tasks;
+    }
+    // Fatal re-arm failure (e.g. the wake channel was closed): route
+    // through the finish drain so inflight and queued operations reach
+    // terminal receiver calls instead of being stranded.
+    return run_phase::finish_drain;
   }
-  if (submit_local_eventfd_poll() < 0) {
+  const int local_poll_result = submit_local_eventfd_poll();
+  if (local_poll_result < 0) {
     end_wait();
-    run_state_.state.store(context_state::finished, std::memory_order_release);
-    return run_phase::finished;
+    if (local_poll_result == -EAGAIN) {
+      // Transient SQ pressure; see the -EAGAIN branch above.
+      return run_phase::run_ready_tasks;
+    }
+    // Fatal re-arm failure; see the finish_drain branch above.
+    return run_phase::finish_drain;
   }
+  // A 0 return means a poll was skipped because the context is stopping.
+  // Blocking is then allowed only under graceful-stop semantics: the
+  // should_finish() checks above ran with inflight I/O whose CQEs will
+  // wake this worker (or a timeout bounds the wait). Re-evaluate it here
+  // so the last inflight completion racing between those checks and the
+  // re-arm can never leave the worker blocked without a wake source.
+  if ((poll_result == 0 || local_poll_result == 0) && should_finish()) {
+    end_wait();
+    return run_phase::finish_drain;
+  }
+
+  // Invariant: io_uring_enter below is never entered unbounded without a
+  // wake source — an eventfd poll is armed, a timeout bounds the wait, or
+  // inflight kernel operations are being grace-waited.
   const int wait_result = wait_for_cqe_event(timeout_pointer);
   end_wait();
 
@@ -260,8 +298,10 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   // logic below, which either finishes (stop requested) or waits again.
   if (wait_result < 0 && wait_result != -ETIME && wait_result != -EINTR &&
       !should_finish()) {
-    run_state_.state.store(context_state::finished, std::memory_order_release);
-    return run_phase::finished;
+    // Fatal ring error: route through the finish drain so inflight and
+    // queued operations reach terminal receiver calls instead of being
+    // stranded by a direct exit to finished.
+    return run_phase::finish_drain;
   }
 
   if (collect_ready_cqes() || run_cpu_batch() || consume_timeout_operations() ||
@@ -346,18 +386,19 @@ void io_uring_context::drain_local_tasks(bool include_cqe) noexcept {
   }
 }
 
-void io_uring_context::finish() noexcept {
-  // Phase 1: drain already-ready CQEs, CPU tasks, and timer abort ops.
-  drain_local_tasks(/*include_cqe=*/true);
-
+void io_uring_context::abort_and_deliver_completions() noexcept {
   // Phase 2: safety net for abnormal shutdown (closing flag) where
   // inflight I/O was not fully drained by the run loop.  Normal
   // stop()-driven shutdown never reaches here with inflight operations
   // because should_finish() waits for inflight_io_head_ == nullptr.
+  // This also aborts anything left in the shared I/O queue (e.g. a
+  // queue_exit() on a context whose run() never drained it).
   abort_inflight_io();
 
   // Phase 3: execute CPU tasks generated by the abort phase, plus any
-  // timer abort ops that arrived after Phase 1.
+  // timer abort ops that arrived after the caller's first drain (and,
+  // when entered from queue_exit(), operations that were posted without
+  // an intervening run()).
   drain_local_tasks(/*include_cqe=*/false);
 
   // Phase 3b: drain any new I/O operations generated by Phase 3
@@ -372,6 +413,20 @@ void io_uring_context::finish() noexcept {
     abort_inflight_io();
     drain_local_tasks(/*include_cqe=*/false);
   }
+}
+
+void io_uring_context::finish() noexcept {
+  // Phase 1: drain already-ready CQEs, CPU tasks, and timer abort ops.
+  // Tolerates a broken or closed ring and wake channel: every step
+  // guards its channel/ring state and fails operations through delivery
+  // (complete_submit_error / complete_submit_stopped), so no path
+  // silently drops a completion.
+  drain_local_tasks(/*include_cqe=*/true);
+
+  // Phases 2–3b: abort remaining I/O and deliver every completion, so
+  // each operation reaches a terminal receiver call (I1) even when
+  // finish() is entered from a fatal re-arm or wait error.
+  abort_and_deliver_completions();
 
   run_state_.state.store(context_state::finished, std::memory_order_release);
 }

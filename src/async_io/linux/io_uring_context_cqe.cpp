@@ -48,54 +48,63 @@ io_uring_context::cqe_user_data_kind io_uring_context::classify_cqe_user_data(
   return cqe_user_data_kind::operation;
 }
 
+struct io_uring_context::cqe_collector {
+  io_uring_context& context;
+  operation_queue& tasks;
+  unsigned count = 0;
+
+  void operator()(bnio::base::completion_queue_entry cqe) noexcept {
+    cqe_data data;
+    data.user_data = cqe.get_data();
+    data.result = cqe.res();
+    data.flags = cqe.flags();
+
+    switch (context.classify_cqe_user_data(data.user_data)) {
+      case cqe_user_data_kind::eventfd:
+        // Self-pipe notification: the eventfd poll CQE arrived.
+        // Drain all queued eventfd notifications and re-arm the poll
+        // so the ring can wake us again when new work arrives.
+        context.poll_state_.eventfd_poll_pending = false;
+        context.drain_eventfd();
+        // Re-arm failures are deliberately not terminal here: a
+        // transient -EAGAIN under SQ pressure must not half-close the
+        // context, and a fatal failure (e.g. a closed wake channel) is
+        // handled by the single re-arm policy point in
+        // wait_for_io_work(), which retries transient failures and
+        // routes fatal ones through the finish drain. Storing
+        // finishing here used to leave the poll unarmed while the
+        // state check above kept reporting "stopping", letting the
+        // worker park in io_uring_enter with no wake source.
+        (void)context.submit_eventfd_poll();
+        return;
+
+      case cqe_user_data_kind::local_eventfd:
+        // Directed wake: only this worker is signalled. Drain the
+        // per-worker channel and re-arm its poll. Re-arm failures
+        // follow the same policy as the shared channel above.
+        context.poll_state_.local_eventfd_poll_pending = false;
+        (void)context.local_state_.wake_channel_.drain();
+        (void)context.submit_local_eventfd_poll();
+        return;
+
+      case cqe_user_data_kind::operation:
+        if (context.enqueue_cqe_task(data, tasks)) {
+          ++count;
+        }
+        return;
+    }
+  }
+};
+
 unsigned io_uring_context::collect_cqe_tasks(
     operation_queue& cqe_tasks) noexcept {
   if (!ring_.is_open()) {
     return 0;
   }
 
-  unsigned task_count = 0;
-  (void)ring_.consume_ready_cqes(
-      options_.cqe_batch_window,
-      [this, &cqe_tasks,
-       &task_count](bnio::base::completion_queue_entry cqe) noexcept {
-        cqe_data data;
-        data.user_data = cqe.get_data();
-        data.result = cqe.res();
-        data.flags = cqe.flags();
-
-        switch (classify_cqe_user_data(data.user_data)) {
-          case cqe_user_data_kind::eventfd:
-            // Self-pipe notification: the eventfd poll CQE arrived.
-            // Drain all queued eventfd notifications and re-arm the poll
-            // so the ring can wake us again when new work arrives.
-            poll_state_.eventfd_poll_pending = false;
-            drain_eventfd();
-            if (submit_eventfd_poll() < 0) {
-              run_state_.state.store(context_state::finishing,
-                                     std::memory_order_release);
-            }
-            return;
-
-          case cqe_user_data_kind::local_eventfd:
-            // Directed wake: only this worker is signalled. Drain the
-            // per-worker channel and re-arm its poll.
-            poll_state_.local_eventfd_poll_pending = false;
-            (void)local_state_.wake_channel_.drain();
-            if (submit_local_eventfd_poll() < 0) {
-              run_state_.state.store(context_state::finishing,
-                                     std::memory_order_release);
-            }
-            return;
-
-          case cqe_user_data_kind::operation:
-            if (enqueue_cqe_task(data, cqe_tasks)) {
-              ++task_count;
-            }
-            return;
-        }
-      });
-  return task_count;
+  cqe_collector collector{*this, cqe_tasks};
+  (void)ring_.consume_ready_cqes(options_.cqe_batch_window, collector);
+  return collector.count;
 }
 
 void io_uring_context::dispatch_cqe_tasks(operation_queue& cqe_tasks,

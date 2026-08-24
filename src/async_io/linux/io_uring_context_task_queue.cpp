@@ -206,9 +206,6 @@ void io_uring_context::end_wait() noexcept {
 }
 
 int io_uring_context::signal_eventfd() noexcept {
-  if (global_state_ == nullptr) {
-    return -EINVAL;
-  }
   // Bind the shared wake-channel write to the submit lock so the
   // io_context destructor's close (under the same lock) can never race
   // it. Re-check after acquiring the lock: the channel may have been
@@ -221,20 +218,23 @@ int io_uring_context::signal_eventfd() noexcept {
 }
 
 void io_uring_context::drain_eventfd() noexcept {
-  if (global_state_ != nullptr) {
-    (void)global_state_->wake_channel_.drain();
-  }
+  (void)global_state_->wake_channel_.drain();
 }
 
 int io_uring_context::submit_eventfd_poll() noexcept {
-  const int wake_fd =
-      global_state_ != nullptr ? global_state_->wake_channel_.read_fd() : -1;
+  const int wake_fd = global_state_->wake_channel_.read_fd();
   if (!ring_.is_open() || wake_fd < 0) {
     return -EINVAL;
   }
-  if (poll_state_.eventfd_poll_pending ||
-      run_state_.state.load(std::memory_order_acquire) !=
-          context_state::running) {
+  if (poll_state_.eventfd_poll_pending) {
+    return 1;
+  }
+  if (run_state_.state.load(std::memory_order_acquire) !=
+      context_state::running) {
+    // Distinguishable from "already armed": the poll is NOT armed here
+    // because the context is stopping. Callers must not block on the
+    // ring without another wake source (inflight completions or a
+    // bounded timeout) after seeing this return value.
     return 0;
   }
 
@@ -259,7 +259,7 @@ int io_uring_context::submit_eventfd_poll() noexcept {
     }
 
     poll_state_.eventfd_poll_pending = true;
-    return submit_result;
+    return 1;
   }
 
   return -EAGAIN;
@@ -277,9 +277,13 @@ int io_uring_context::submit_local_eventfd_poll() noexcept {
   if (!ring_.is_open() || local_fd < 0) {
     return -EINVAL;
   }
-  if (poll_state_.local_eventfd_poll_pending ||
-      run_state_.state.load(std::memory_order_acquire) !=
-          context_state::running) {
+  if (poll_state_.local_eventfd_poll_pending) {
+    return 1;
+  }
+  if (run_state_.state.load(std::memory_order_acquire) !=
+      context_state::running) {
+    // Distinguishable from "already armed": the poll is NOT armed here
+    // because the context is stopping; see submit_eventfd_poll().
     return 0;
   }
 
@@ -304,7 +308,7 @@ int io_uring_context::submit_local_eventfd_poll() noexcept {
     }
 
     poll_state_.local_eventfd_poll_pending = true;
-    return submit_result;
+    return 1;
   }
 
   return -EAGAIN;

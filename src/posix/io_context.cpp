@@ -91,38 +91,47 @@ std::error_code io_context::run() noexcept {
     return std::make_error_code(std::errc::operation_canceled);
   }
 
-  detail::native_context ctx(native_options_);
-  if (!ctx.is_open()) {
-    release_worker_slot();
-    return std::error_code(ENOMEM, std::generic_category());
-  }
-  ctx.set_global_state(&global_state_);
+  // The native context is bound to the shared state before any check so
+  // its destructor (queue_exit) always has the state it was wired to.
+  // The context's lifetime is scoped to this function: the destructor
+  // runs before release_worker_slot() below, so running_workers never
+  // reaches zero while queue_exit may still touch global_state_ —
+  // stop() and ~io_context() can therefore never race the teardown.
+  std::error_code result;
+  {
+    detail::native_context ctx(native_options_);
+    ctx.set_global_state(&global_state_);
 
-  // A close may have been requested after the initial checks but before
-  // the native context was fully opened.
-  if (global_state_.life_state.load(std::memory_order_acquire)) {
-    (void)ctx.stop();
-    ctx.set_global_state(nullptr);
-    release_worker_slot();
-    return std::make_error_code(std::errc::operation_canceled);
-  }
+    if (!ctx.is_open()) {
+      result = std::error_code(ENOMEM, std::generic_category());
+    } else if (global_state_.life_state.load(std::memory_order_acquire)) {
+      // A close may have been requested after the initial checks but
+      // before the native context was fully opened.
+      (void)ctx.stop();
+      result = std::make_error_code(std::errc::operation_canceled);
+    } else {
+      io_context* previous_context = current_context_;
+      detail::native_context* previous_worker_native = current_worker_native_;
+      current_context_ = this;
+      current_worker_native_ = &ctx;
+      ctx.run();
+      // Restore both thread-local slots symmetrically. current_context_
+      // and current_worker_native_ are thread-local fast-path pointers:
+      // without the save/restore, a run() re-entered from inside this
+      // loop (an outer worker driving a second context's loop) would
+      // clobber them, and on return the outer worker's fast path would
+      // point at the already-destroyed inner context — breaking
+      // is_in_context() and the in-context submission fast paths. The
+      // previous_* save makes nested run() transparent to the outer
+      // worker (anti-recurrence).
+      current_worker_native_ = previous_worker_native;
+      current_context_ = previous_context;
+      result = std::error_code{};
+    }
+  }  // native context (and its queue_exit teardown) completes here
 
-  io_context* previous_context = current_context_;
-  detail::native_context* previous_worker_native = current_worker_native_;
-  current_context_ = this;
-  current_worker_native_ = &ctx;
-  ctx.run();
-  // Clear the pointer so the native context destructor does not
-  // access global_state_ after stop() returns and the caller
-  // destroys the io_context.
-  ctx.set_global_state(nullptr);
   release_worker_slot();
-  // Restore both thread-local slots symmetrically so nested run() calls
-  // (an outer worker running a second context's loop) leave the worker's
-  // fast-path state pointing back at the outer context.
-  current_worker_native_ = previous_worker_native;
-  current_context_ = previous_context;
-  return std::error_code{};
+  return result;
 }
 
 int io_context::stop() noexcept {

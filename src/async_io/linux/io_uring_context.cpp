@@ -117,15 +117,29 @@ int io_uring_context::init_ring_params(
 }
 
 void io_uring_context::queue_exit() noexcept {
-  // Abort any remaining inflight I/O before closing the ring.
-  // Normal shutdown cleans these up in finish(), but forced/abnormal
-  // shutdown (e.g. closing flag, destruction without run) may leave
-  // operations in-flight.
-  abort_inflight_io();
+  // Abort-and-deliver runs only when the context did not already finish
+  // cleanly: run()/finish() drain every operation on the way out, so a
+  // finished context has nothing left to deliver and must not touch the
+  // shared queues that sibling workers still own.  A context torn down
+  // without a clean finish (never run, fatal error, forced close) still
+  // owes its receivers terminal calls.
+  //
+  // The delivery assumes global_state_ is wired: io_context::run() keeps
+  // its native context bound to the shared state until the context's
+  // destructor has completed.
+  if (run_state_.state.load(std::memory_order_acquire) !=
+      context_state::finished) {
+    // Mark the context finishing (not finished) so operations completed
+    // during the abort delivery observe a coherent stopping state, then
+    // deliver every aborted completion through the same abort path
+    // finish() uses: the aborted operations used to be discarded by a
+    // plain pop_cpu_all(), leaving their receivers forever silent.
+    // Receivers run synchronously on the calling thread.
+    run_state_.state.store(context_state::finishing, std::memory_order_release);
+    abort_and_deliver_completions();
+    run_state_.state.store(context_state::finished, std::memory_order_release);
+  }
 
-  run_state_.state.store(context_state::finished, std::memory_order_release);
-
-  (void)local_state_.pop_cpu_all();
   poll_state_.eventfd_poll_pending = false;
   poll_state_.local_eventfd_poll_pending = false;
   local_state_.wake_channel_.close();

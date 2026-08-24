@@ -193,17 +193,15 @@ void io_uring_context::abort_inflight_io() noexcept {
     local_state_.push_cpu(*op);
   }
 
-  if (global_state_ != nullptr) {
-    io_uring_io_operation_base* ops = global_state_->pop_io_all();
-    while (ops != nullptr) {
-      io_uring_io_operation_base* next =
-          static_cast<io_uring_io_operation_base*>(ops->next);
-      ops->next = nullptr;
-      ops->result = -ECANCELED;
-      ops->complete_submit_stopped();
-      local_state_.push_cpu(*ops);
-      ops = next;
-    }
+  io_uring_io_operation_base* ops = global_state_->pop_io_all();
+  while (ops != nullptr) {
+    io_uring_io_operation_base* next =
+        static_cast<io_uring_io_operation_base*>(ops->next);
+    ops->next = nullptr;
+    ops->result = -ECANCELED;
+    ops->complete_submit_stopped();
+    local_state_.push_cpu(*ops);
+    ops = next;
   }
 }
 
