@@ -18,6 +18,12 @@ if(BNIO_PLATFORM_LINUX)
   bnio_add_integration_async_io_test(io_uring_sender
                                      io_uring_sender_test.cpp
                                      PROPERTIES TIMEOUT 10)
+  bnio_add_integration_async_io_test(io_uring_error_routing
+                                     io_uring_error_routing_test.cpp
+                                     PROPERTIES TIMEOUT 30)
+  bnio_add_integration_async_io_test(io_uring_error_branch
+                                     io_uring_error_branch_test.cpp
+                                     PROPERTIES TIMEOUT 30)
   bnio_add_integration_async_io_test(udp_io_uring udp_io_uring_test.cpp
                                      PROPERTIES TIMEOUT 10)
 endif()

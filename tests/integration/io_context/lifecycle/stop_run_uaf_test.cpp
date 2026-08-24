@@ -83,9 +83,9 @@ TEST(LifecycleTest, stop_run_uaf_stress) {
     ctx->stop();
 
     // Safe: stop() is guaranteed to have waited for the worker.
-    // Safe: native_context destructor won't access global_state_
-    //       because set_global_state(nullptr) was called before
-    //       running_workers_.fetch_sub(1).
+    // Safe: the native context was destroyed inside run() before
+    //       running_workers_.fetch_sub(1), so its queue_exit teardown
+    //       completed before stop() returned and ~io_context() ran.
     ctx.reset();
 
     worker.join();
