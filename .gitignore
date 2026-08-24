@@ -25,3 +25,4 @@ coverage/
 
 # Exclude vim swap files
 *.swp
+.codebuddy/
