@@ -62,8 +62,7 @@ void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {
   notify_one_waiter();
 }
 
-kqueue_operation_base* kqueue_context::fetch_cpu_task(
-    bool allow_steal) noexcept {
+kqueue_operation_base* kqueue_context::fetch_cpu_task() noexcept {
   // 1. Worker-local queue first: fastest and preserves locality.
   if (kqueue_operation_base* operations = local_state_.pop_cpu_all()) {
     return reverse_tasks(operations);
@@ -78,110 +77,29 @@ kqueue_operation_base* kqueue_context::fetch_cpu_task(
     return reverse_tasks(operations);
   }
 
-  // 3. Steal from another worker's local queue. Only reached when both
-  //    local and shared queues are empty, so a stealing worker is by
-  //    definition relatively idle. Suppressed when allow_steal is false
-  //    (e.g. the re-checks after begin_wait), since the worker already
-  //    tried a steal while running and another one would only pay the
-  //    run list's lock for nothing.
-  if (!allow_steal) {
-    return nullptr;
-  }
-  return steal_cpu_tasks();
+  return nullptr;
 }
 
-bool kqueue_context::run_cpu_batch(bool allow_steal) noexcept {
-  if (kqueue_operation_base* operations = fetch_cpu_task(allow_steal)) {
+bool kqueue_context::run_cpu_batch() noexcept {
+  if (kqueue_operation_base* operations = fetch_cpu_task()) {
     execute_tasks(operations);
     return true;
   }
   return false;
 }
 
-kqueue_operation_base* kqueue_context::steal_cpu_tasks() noexcept {
-  if (global_state_ == nullptr) {
-    return nullptr;
-  }
-
-  // Conservative gate: only attempt a steal while MORE workers are active
-  // than suspended (active > suspend  <=>  2*active > running). A worker
-  // suspends only after finding no work, so when the majority are suspended
-  // the remaining active workers' local queues are likely empty too, and
-  // scanning the run list would just pay run.lock contention for nothing.
-  // The two loads are deliberately not coordinated — this is a racy,
-  // relaxed heuristic that only decides whether the scan is worth the lock;
-  // the actual steal below stays correct regardless of the gate's accuracy.
-  // running_workers is the run()-level counter (incremented before
-  // enter_run()), so it may transiently exceed active + suspended; the gate
-  // then errs on the conservative side, which is fine.
-  const std::size_t active =
-      global_state_->awake_workers.load(std::memory_order_relaxed);
-  const std::size_t running =
-      global_state_->running_workers.load(std::memory_order_relaxed);
-  if (active * 2 <= running) {
-    return nullptr;
-  }
-
-  if (!options_.enable_steal) {
-    return nullptr;
-  }
-
-  // Single-probe steal: only inspect the run-list head (one peer).  The
-  // lock guards both the probe and the lifetime of the target node — a
-  // worker unregisters under the same lock before its context is destroyed,
-  // so the probed node is never freed while we touch it (UAF protection).
-  kqueue_worker_state_list& run = global_state_->workers.run;
-  std::lock_guard<std::mutex> guard(run.lock);
-
-  kqueue_local_task_queue_state* const target = run.head;
-  if (target == nullptr || target == &local_state_) {
-    return nullptr;
-  }
-
-  if (target->has_cpu_tasks()) {
-    if (kqueue_operation_base* operations = target->pop_cpu_all()) {
-      // Rotate the victim to the tail so the head advances for the next
-      // stealer — all workers share one global probe order.
-      kqueue_rotate_local_state_to_tail(run, target);
-      return reverse_tasks(operations);
-    }
-  }
-
-  // Head was empty — rotate it to the tail anyway so the next stealer
-  // probes a different node instead of hitting the same empty one.
-  kqueue_rotate_local_state_to_tail(run, target);
-  return nullptr;
-}
-
-void kqueue_context::register_local_state() noexcept {
-  if (global_state_ == nullptr) {
-    return;
-  }
-  kqueue_worker_state_list& run = global_state_->workers.run;
-  std::lock_guard<std::mutex> guard(run.lock);
-  kqueue_link_local_state(run, &local_state_);
-}
-
 void kqueue_context::unregister_local_state() noexcept {
   if (global_state_ == nullptr) {
     return;
   }
-  // Unlink from whichever list the worker currently resides in. Only one
-  // list is touched here; a worker is never on both at once.
-  {
-    kqueue_worker_state_list& run = global_state_->workers.run;
-    std::lock_guard<std::mutex> guard(run.lock);
-    if (kqueue_local_state_in_list(run, &local_state_)) {
-      kqueue_unlink_local_state(run, &local_state_);
-      return;
-    }
-  }
-  {
-    kqueue_worker_state_list& suspend = global_state_->workers.suspend;
-    std::lock_guard<std::mutex> guard(suspend.lock);
-    if (kqueue_local_state_in_list(suspend, &local_state_)) {
-      kqueue_unlink_local_state(suspend, &local_state_);
-    }
+  // Unlink from the suspend list if the worker is still linked there (a
+  // run() that exits through the normal wait path already unlinked in
+  // end_wait()). Only the suspend list exists now: without stealing no
+  // remote thread ever touches a worker's local state while it runs.
+  kqueue_worker_state_list& suspend = global_state_->workers;
+  std::lock_guard<std::mutex> guard(suspend.lock);
+  if (kqueue_local_state_in_list(suspend, &local_state_)) {
+    kqueue_unlink_local_state(suspend, &local_state_);
   }
 }
 
@@ -200,16 +118,11 @@ void kqueue_context::begin_wait() noexcept {
   if (global_state_ == nullptr) {
     return;
   }
-  // Move from the run list to the suspend list. The two list locks are
-  // taken separately (never nested) to avoid deadlock between a waking
-  // and a sleeping worker.
+  // Link into the suspend list so a publisher can find and wake this
+  // worker. No run list exists anymore (stealing was removed), so this is
+  // a single locked insertion.
   {
-    kqueue_worker_state_list& run = global_state_->workers.run;
-    std::lock_guard<std::mutex> guard(run.lock);
-    kqueue_unlink_local_state(run, &local_state_);
-  }
-  {
-    kqueue_worker_state_list& suspend = global_state_->workers.suspend;
+    kqueue_worker_state_list& suspend = global_state_->workers;
     std::lock_guard<std::mutex> guard(suspend.lock);
     kqueue_link_local_state(suspend, &local_state_);
   }
@@ -220,17 +133,11 @@ void kqueue_context::begin_wait() noexcept {
 
 void kqueue_context::end_wait() noexcept {
   if (global_state_ != nullptr) {
-    // Move back from the suspend list to the run list, again without
-    // nesting the two list locks.
+    // Unlink from the suspend list; the worker is awake again.
     {
-      kqueue_worker_state_list& suspend = global_state_->workers.suspend;
+      kqueue_worker_state_list& suspend = global_state_->workers;
       std::lock_guard<std::mutex> guard(suspend.lock);
       kqueue_unlink_local_state(suspend, &local_state_);
-    }
-    {
-      kqueue_worker_state_list& run = global_state_->workers.run;
-      std::lock_guard<std::mutex> guard(run.lock);
-      kqueue_link_local_state(run, &local_state_);
     }
     global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   }

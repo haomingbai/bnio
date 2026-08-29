@@ -80,8 +80,7 @@ bool io_uring_context::enter_run() noexcept {
     return false;
   }
 
-  // Arm the per-worker wake channel for directed wakeups and publish this
-  // worker's local state so remote threads can steal CPU work.
+  // Arm the per-worker wake channel for directed wakeups.
   if (submit_local_eventfd_poll() < 0) {
     // Same stranding risk as the enable_ring failure above.
     run_state_.state.store(context_state::finishing, std::memory_order_release);
@@ -90,7 +89,6 @@ bool io_uring_context::enter_run() noexcept {
     run_state_.run_active.store(false, std::memory_order_release);
     return false;
   }
-  register_local_state();
 
   return true;
 }
@@ -126,8 +124,9 @@ void io_uring_context::run() noexcept {
     }
   }
 
-  // Unregister before the context (and its local state) is destroyed so a
-  // concurrent stealer can never observe a dangling local_state.
+  // Unregister the local state (from the suspend list, if the worker still
+  // sits there) before the context and its local state are destroyed, so a
+  // concurrent directed wakeup can never touch a dangling local_state.
   unregister_local_state();
 
   current_context_ = previous_context;
@@ -177,9 +176,9 @@ io_uring_context::handle_run_ready_tasks() noexcept {
   // Always drain CQEs first to keep the ring backlog small under load.
   (void)collect_ready_cqes();
 
-  // Run one batch of CPU tasks, trying local → shared → steal in that
-  // order. Stopping after one batch keeps work from piling up on this
-  // thread's stack, so other workers can steal it instead.
+  // Run one batch of CPU tasks, trying local → shared in that order.
+  // Stopping after one batch keeps work from piling up on this thread's
+  // stack; the shared queue distributes the rest fairly.
   if (run_cpu_batch()) {
     return run_phase::run_ready_tasks;
   }
@@ -231,7 +230,7 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   // publishers can detect a sleeping worker and wake it via eventfd.
   begin_wait();
 
-  if (collect_ready_cqes() || run_cpu_batch(/*allow_steal=*/false) ||
+  if (collect_ready_cqes() || run_cpu_batch() ||
       consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
@@ -335,10 +334,8 @@ io_uring_context::run_phase io_uring_context::prepare_wait_timeout(
     local_state_.push_cpu(timeout_operations);
   }
   // Runs while the worker is marked sleeping (only called from
-  // wait_for_io_work() after begin_wait()), so skip the run-list steal —
-  // the pre-sleep steal already found nothing, and taking run.lock here
-  // would just add contention.
-  if (timeout_operations != nullptr || run_cpu_batch(/*allow_steal=*/false) ||
+  // wait_for_io_work() after begin_wait()).
+  if (timeout_operations != nullptr || run_cpu_batch() ||
       consume_io_tasks() || should_finish()) {
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;

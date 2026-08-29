@@ -81,9 +81,8 @@ std::error_code io_context::run() noexcept {
   // the use-after-free window: if stop() destroys the io_context while a
   // worker is inside run(), the worker would access freed memory.
   // The counter lives in global_state_ so the native backends' advisory
-  // heuristics (steal gate, wake fast path) share the same count; the
-  // increment itself stays here, before any check, never inside
-  // enter_run().
+  // wake fast path shares the same count; the increment itself stays here,
+  // before any check, never inside enter_run().
   global_state_.running_workers.fetch_add(1, std::memory_order_acq_rel);
 
   if (!can_start_run()) {

@@ -665,15 +665,14 @@ struct counting_poll_receiver {
 // Three poll completions arriving while the worker is parked are
 // collected as one CQE batch; with a zero inline threshold and a local
 // budget of two, the batch exceeds the budget and spills to the shared
-// CPU queue (dispatch tier 3). Stealing is disabled so the empty-queue
-// path reaches the enable_steal check.
+// CPU queue (dispatch tier 3). Stealing no longer exists, so the fetch
+// path is just local → shared.
 TEST(IoUringErrorBranchTest, multi_cqe_batch_spills_to_shared_cpu_queue) {
   io_uring_task_queue_state global_tasks;
   io_uring_context context;
   io_uring_context_options options;
   options.cqe_inline_completion_threshold = 0;
   options.local_queue_threshold = 2;
-  options.enable_steal = false;
   if (!queue_init_shared_or_skip(context, global_tasks, options)) {
     GTEST_SKIP() << "io_uring is unavailable";
   }

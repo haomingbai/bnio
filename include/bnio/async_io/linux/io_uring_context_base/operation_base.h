@@ -26,13 +26,16 @@ class io_uring_io_operation_base;
 
 /** Per-worker local CPU queue and wake channel.
  *
- * Each worker is linked into exactly one of the shared state's two
- * intrusive doubly-linked lists at a time: the run list while it is
- * processing work, or the suspend list while it sleeps in the native
- * poller.  A worker moves itself between the lists under the
- * corresponding list lock when it begins/ends a wait; remote threads
- * only touch a node while holding that node's list lock, which also
- * keeps the owning worker from being destroyed (UAF protection).
+ * The local CPU queue is owned exclusively by its worker thread: it is
+ * pushed only by the worker itself and popped only by the worker during
+ * fetch. No remote thread ever touches it — work stealing was removed — so
+ * the head is a plain pointer and push/pop need no atomics.
+ *
+ * The node is linked into the shared state's suspend list only while the
+ * worker sleeps in the native poller, so a publisher can wake it.  A
+ * remote thread touches the node only while holding that list's lock,
+ * which also keeps the owning worker from being destroyed (UAF
+ * protection).
  */
 struct BNIO_EXPORT io_uring_local_task_queue_state {
   void push_cpu(io_uring_operation_base& operation) noexcept;
@@ -41,18 +44,12 @@ struct BNIO_EXPORT io_uring_local_task_queue_state {
    *  reversed FIFO). */
   void push_cpu(io_uring_operation_base* operations) noexcept;
 
-  /** Removes the whole CPU queue in bulk; used by fetch and stealing. */
+  /** Removes the whole CPU queue in bulk; used by fetch. */
   [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
 
-  /** Returns whether the local CPU queue is non-empty. Relaxed peek; the
-   *  caller must hold the owner list's lock so the node cannot be freed. */
-  [[nodiscard]] bool has_cpu_tasks() const noexcept {
-    return cpu_head.load(std::memory_order_relaxed) != nullptr;
-  }
+  io_uring_operation_base* cpu_head = nullptr;
 
-  std::atomic<io_uring_operation_base*> cpu_head{nullptr};
-
-  /** Doubly-linked list links for the shared run/suspend lists. */
+  /** Doubly-linked list links for the shared suspend list. */
   io_uring_local_task_queue_state* prev = nullptr;
   io_uring_local_task_queue_state* next = nullptr;
 
@@ -60,29 +57,20 @@ struct BNIO_EXPORT io_uring_local_task_queue_state {
   bnio::base::wake_channel wake_channel_;
 };
 
-/** One doubly-linked list of worker local states guarded by its own lock.
+/** One doubly-linked list of sleeping worker local states guarded by its
+ * own lock.
  *
  * The list head and its guard lock are kept together so every operation on
- * the list takes exactly the lock that owns it; a worker resides in at most
- * one of the two lists at any time. */
+ * the list takes exactly the lock that owns it; the lock also guards node
+ * lifetime (a node is unlinked under it before its owner is destroyed). */
 struct BNIO_EXPORT io_uring_worker_state_list {
   /** Guards the list and the lifetime of its nodes. */
   std::mutex lock;
   /** Head of the intrusive list. */
   io_uring_local_task_queue_state* head = nullptr;
-  /** Tail of the intrusive list; kept so rotation to the tail is O(1). */
-  io_uring_local_task_queue_state* tail = nullptr;
-  /** Round-robin cursor; points into the list. Only the suspend list uses
-   *  it (for wake_one_sleeping()). */
+  /** Round-robin cursor; points into the list so repeated wake-ups rotate
+   *  fairly (wake_one_sleeping()). */
   io_uring_local_task_queue_state* cursor = nullptr;
-};
-
-/** Worker-local-state registry split into running and suspended lists. */
-struct BNIO_EXPORT io_uring_worker_state_registry {
-  /** Workers currently processing work (steal targets). */
-  io_uring_worker_state_list run;
-  /** Workers sleeping in the native poller (directed-wake targets). */
-  io_uring_worker_state_list suspend;
 };
 
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
@@ -111,17 +99,18 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
   std::atomic<io_uring_io_operation_base*> io_head{nullptr};
   /** Workers not blocked in the native poller (active workers). Incremented
-   *  by enter_run(), decremented by begin_wait(), restored by end_wait(). */
+   *  by enter_run(), decremented by begin_wait(), restored by end_wait().
+   *  Feeds the wake fast path and the all-sleeping timer wake check. */
   std::atomic<std::size_t> awake_workers{0};
   /** Total workers currently inside io_context::run() (active + suspended +
    *  entering). Incremented by io_context::run() before any check,
    *  decremented on every run() return path; the native backends never touch
-   *  it. Feeds two racy advisory heuristics (steal gate, wake fast path). */
+   *  it. Feeds the wake fast path. */
   std::atomic<std::size_t> running_workers{0};
 
-  /** Running/suspended worker local states, each list guarded by its own
-   *  lock. */
-  io_uring_worker_state_registry workers;
+  /** Sleeping worker local states (directed-wake targets), guarded by its
+   *  own lock. */
+  io_uring_worker_state_list workers;
 
   std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
 
@@ -239,11 +228,9 @@ class BNIO_EXPORT io_uring_io_operation_base : public io_uring_operation_base {
 
 inline void io_uring_local_task_queue_state::push_cpu(
     io_uring_operation_base& operation) noexcept {
-  io_uring_operation_base* head = cpu_head.load(std::memory_order_relaxed);
-  do {
-    operation.next = head;
-  } while (!cpu_head.compare_exchange_weak(
-      head, &operation, std::memory_order_release, std::memory_order_relaxed));
+  // Owner-only access (no stealing), so this is a plain LIFO head insert.
+  operation.next = cpu_head;
+  cpu_head = &operation;
 }
 
 inline void io_uring_local_task_queue_state::push_cpu(
@@ -258,7 +245,9 @@ inline void io_uring_local_task_queue_state::push_cpu(
 
 inline io_uring_operation_base*
 io_uring_local_task_queue_state::pop_cpu_all() noexcept {
-  return cpu_head.exchange(nullptr, std::memory_order_acquire);
+  io_uring_operation_base* operations = cpu_head;
+  cpu_head = nullptr;
+  return operations;
 }
 
 inline void io_uring_task_queue_state::push_cpu(
@@ -298,8 +287,6 @@ inline void io_uring_link_local_state(
   node->next = list.head;
   if (list.head != nullptr) {
     list.head->prev = node;
-  } else {
-    list.tail = node;  // list was empty; node is both head and tail
   }
   list.head = node;
 }
@@ -316,8 +303,6 @@ inline void io_uring_unlink_local_state(
   }
   if (node->next != nullptr) {
     node->next->prev = node->prev;
-  } else {
-    list.tail = node->prev;  // node was the tail
   }
   node->prev = nullptr;
   node->next = nullptr;
@@ -331,27 +316,8 @@ inline bool io_uring_local_state_in_list(
   return node->prev != nullptr || list.head == node;
 }
 
-/** Moves node to the tail of the worker list (round-robin rotation), O(1)
- *  thanks to the maintained tail pointer. Caller holds the list's lock. Used
- *  by stealing so the probe order rotates globally instead of per-thread
- *  cursors. */
-inline void io_uring_rotate_local_state_to_tail(
-    io_uring_worker_state_list& list,
-    io_uring_local_task_queue_state* node) noexcept {
-  io_uring_unlink_local_state(list, node);
-  if (list.tail != nullptr) {
-    list.tail->next = node;
-    node->prev = list.tail;
-  } else {  // list became empty; node is the only element again
-    list.head = node;
-    node->prev = nullptr;
-  }
-  node->next = nullptr;
-  list.tail = node;
-}
-
 inline bool io_uring_task_queue_state::wake_one_sleeping() noexcept {
-  io_uring_worker_state_list& suspend = workers.suspend;
+  io_uring_worker_state_list& suspend = workers;
   std::lock_guard<std::mutex> guard(suspend.lock);
   // Validate the saved cursor is still in the list; otherwise restart from
   // the head. The cursor advances so repeated wake-ups rotate fairly.

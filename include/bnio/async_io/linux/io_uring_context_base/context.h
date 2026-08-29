@@ -216,9 +216,9 @@ class BNIO_EXPORT io_uring_context {
   /**
    * Returns the worker-local task queue state.
    *
-   * The state is linked into the shared task queue state's local_states
-   * list while the worker is running. Remote threads must hold the run
-   * list's lock (workers.run.lock) while touching it (see steal_cpu_tasks).
+   * The state is linked into the shared task queue state's suspend list
+   * while the worker sleeps in the native poller. Its CPU queue is owned
+   * exclusively by the worker thread (no stealing).
    */
   [[nodiscard]] io_uring_local_task_queue_state* local_state() noexcept {
     return &local_state_;
@@ -226,14 +226,13 @@ class BNIO_EXPORT io_uring_context {
 
   /**
    * Fetches a batch of CPU tasks, trying the local queue first, then the
-   * shared queue, then remote stealing. Stops at the first source that
-   * yields tasks so work never accumulates on this thread's stack.
+   * shared queue. Stops at the first source that yields tasks so work never
+   * accumulates on this thread's stack.
    */
-  [[nodiscard]] io_uring_operation_base* fetch_cpu_task(
-      bool allow_steal = true) noexcept;
+  [[nodiscard]] io_uring_operation_base* fetch_cpu_task() noexcept;
 
   /** Fetches and executes a batch of CPU tasks. Returns true if work ran. */
-  [[nodiscard]] bool run_cpu_batch(bool allow_steal = true) noexcept;
+  [[nodiscard]] bool run_cpu_batch() noexcept;
 
  private:
   struct operation_queue {
@@ -245,16 +244,6 @@ class BNIO_EXPORT io_uring_context {
 
     io_uring_operation_base* head = nullptr;
   };
-
-  /**
-   * Attempts to steal a batch of CPU tasks from another worker's local
-   * queue. Holds the run list's lock for the whole traversal; the lock also
-   * keeps the visited worker from being destroyed mid-steal.
-   */
-  [[nodiscard]] io_uring_operation_base* steal_cpu_tasks() noexcept;
-
-  /** Registers this worker's local state in the shared list (head insert). */
-  void register_local_state() noexcept;
 
   /** Unregisters this worker's local state from the shared list. */
   void unregister_local_state() noexcept;

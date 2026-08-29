@@ -74,9 +74,6 @@ bool kqueue_context::enter_run() noexcept {
     (void)queue_.control(&local_wake_event, 1, nullptr, 0, nullptr);
   }
 
-  // Publish this worker's local state so remote threads can steal CPU work.
-  register_local_state();
-
   return true;
 }
 
@@ -106,8 +103,9 @@ void kqueue_context::run() noexcept {
     }
   }
 
-  // Unregister before the context (and its local state) is destroyed so a
-  // concurrent stealer can never observe a dangling local_state.
+  // Unregister the local state (from the suspend list, if the worker still
+  // sits there) before the context and its local state are destroyed, so a
+  // concurrent directed wakeup can never touch a dangling local_state.
   unregister_local_state();
 
   current_context_ = previous_context;
@@ -163,9 +161,9 @@ kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
     (void)collect_ready_events(false);
   }
 
-  // 2. Run one batch of CPU tasks, trying local → shared → steal in that
-  //    order. Stopping after one batch keeps work from piling up on this
-  //    thread's stack, so other workers can steal it instead.
+  // 2. Run one batch of CPU tasks, trying local → shared in that order.
+  //    Stopping after one batch keeps work from piling up on this thread's
+  //    stack; the shared queue distributes the rest fairly.
   if (run_cpu_batch()) {
     return run_phase::run_ready_tasks;
   }
@@ -219,7 +217,7 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   // worker and wake it via EVFILT_USER trigger.
   begin_wait();
 
-  if (collect_ready_events(false) || run_cpu_batch(/*allow_steal=*/false) ||
+  if (collect_ready_events(false) || run_cpu_batch() ||
       consume_timeout_operations() || consume_io_tasks() || should_finish()) {
     end_wait();
     return should_finish() ? run_phase::finish_drain
@@ -266,10 +264,8 @@ bool kqueue_context::compute_io_wait_timeout(
     local_state_.push_cpu(timeout_operations);
   }
   // Runs while the worker is marked sleeping (only called from
-  // wait_for_io_work() after begin_wait()), so skip the run-list steal —
-  // the pre-sleep steal already found nothing, and taking run.lock here
-  // would just add contention.
-  if (timeout_operations != nullptr || run_cpu_batch(/*allow_steal=*/false) ||
+  // wait_for_io_work() after begin_wait()).
+  if (timeout_operations != nullptr || run_cpu_batch() ||
       consume_io_tasks() || should_finish()) {
     return true;
   }
