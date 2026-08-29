@@ -20,7 +20,7 @@ cohesive `detail` state objects rather than defining all internal data inline:
 | State / Detail Type | Header | Responsibility |
 |---------------------|--------|----------------|
 | `detail::native_context` and related aliases | `detail/posix/io_context/native_context.h` | Select the native context, options, operation bases, and shared task state. |
-| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake/running worker counts, run/suspend worker-state registry, submit lock, and worker-group stopping state (`life_state`). |
+| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake/running worker counts, suspend worker-state list, submit lock, and worker-group stopping state (`life_state`). |
 | `detail::timer_state_data` | `detail/posix/io_context/timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
 
 The aggregate `detail/posix/io_context/native_io.h` is included after the complete
@@ -102,8 +102,8 @@ on the high-level context, but native workers consume its deadline passively
 while choosing their blocking timeout. Timer-ready completions bypass the
 shared CPU queue: the worker that performs the timer check links them directly
 into its local CPU queue. No reusable timer SQE or timer-update request
-exists. Worker scheduling (CPU-task stealing, run/suspend lists, directed
-wakeup) is documented in
+exists. Worker scheduling (suspend-list sleep/wake, directed wakeup) is
+documented in
 [`worker-scheduling.md`](worker-scheduling.md).
 
 The shared state is owned by `io_context`, not by any native context. Worker

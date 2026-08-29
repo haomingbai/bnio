@@ -171,7 +171,7 @@ High-level async runtime, stream owners, and buffer types.
   - `io_uring_context_cqe.cpp` — CQE dispatch.
   - `io_uring_context_run_loop.cpp` — main run loop.
   - `io_uring_context_io_tasks.cpp` — run-loop-only local/global I/O queue consumption and SQE preparation.
-  - `io_uring_context_task_queue.cpp` — shared CPU/I/O publication, worker local-state registry, CPU-task stealing, and wake channel I/O.
+  - `io_uring_context_task_queue.cpp` — shared CPU/I/O publication, worker suspend-list registry, and wake channel I/O.
   - `io_uring_context_internal.h` — internal context state.
 - `src/async_io/bsd/` — BSD-specific async_io implementations:
   - `address.cpp`, `dns.cpp`, `socket_address.cpp`, `socket_view.cpp` — BSD-native address, DNS, and socket adapters.
@@ -179,7 +179,7 @@ High-level async runtime, stream owners, and buffer types.
   - `kqueue_context_events.cpp` — readiness collection and completion dispatch.
   - `kqueue_context_io_tasks.cpp` — run-loop-only passive I/O preparation and registration.
   - `kqueue_context_run_loop.cpp` — main run loop.
-  - `kqueue_context_task_queue.cpp` — shared CPU/I/O publication, worker local-state registry, CPU-task stealing, and per-worker/shared wake channels.
+  - `kqueue_context_task_queue.cpp` — shared CPU/I/O publication, worker suspend-list registry, and per-worker/shared wake channels.
   - `kqueue_context_internal.h` — internal local task queue helpers.
   - `kqueue_helper.cpp` — readiness registration builder implementation.
 - `src/posix/io_context.cpp`, `src/posix/io_context_queue.cpp`, `src/posix/io_context_timer.cpp`,

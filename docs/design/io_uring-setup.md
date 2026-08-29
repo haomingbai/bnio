@@ -93,9 +93,6 @@ struct io_uring_context_options {
 
   /// Optional non-owning eventfd used to wake the context run loop.
   int event_fd = -1;
-
-  /// Enables single-probe CPU-task stealing from a peer worker (default true).
-  bool enable_steal = true;
 };
 ```
 
