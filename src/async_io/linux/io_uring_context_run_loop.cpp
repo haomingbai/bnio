@@ -70,7 +70,9 @@ bool io_uring_context::enter_run() noexcept {
   current_context_ = this;
   run_state_.waiting.store(false, std::memory_order_release);
   global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
-  const int poll_result = submit_eventfd_poll();
+  const int poll_result =
+      arm_wake_poll(global_state_->wake_channel_.read_fd(), eventfd_user_data(),
+                    poll_state_.eventfd_poll_pending);
   if (poll_result < 0) {
     // same stranding risk as the enable_ring failure above.
     run_state_.state.store(context_state::finishing, std::memory_order_release);
@@ -81,7 +83,9 @@ bool io_uring_context::enter_run() noexcept {
   }
 
   // Arm the per-worker wake channel for directed wakeups.
-  if (submit_local_eventfd_poll() < 0) {
+  if (arm_wake_poll(local_state_.wake_channel_.read_fd(),
+                    local_eventfd_user_data(),
+                    poll_state_.local_eventfd_poll_pending) < 0) {
     // Same stranding risk as the enable_ring failure above.
     run_state_.state.store(context_state::finishing, std::memory_order_release);
     finish();
@@ -250,7 +254,9 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
   // always wake this worker. Return codes: 1 = armed (newly or already
   // pending), 0 = not armed because the context is stopping, negative =
   // submission failure.
-  const int poll_result = submit_eventfd_poll();
+  const int poll_result =
+      arm_wake_poll(global_state_->wake_channel_.read_fd(), eventfd_user_data(),
+                    poll_state_.eventfd_poll_pending);
   if (poll_result < 0) {
     end_wait();
     if (poll_result == -EAGAIN) {
@@ -265,7 +271,9 @@ io_uring_context::run_phase io_uring_context::wait_for_io_work() noexcept {
     // terminal receiver calls instead of being stranded.
     return run_phase::finish_drain;
   }
-  const int local_poll_result = submit_local_eventfd_poll();
+  const int local_poll_result = arm_wake_poll(
+      local_state_.wake_channel_.read_fd(), local_eventfd_user_data(),
+      poll_state_.local_eventfd_poll_pending);
   if (local_poll_result < 0) {
     end_wait();
     if (local_poll_result == -EAGAIN) {

@@ -135,12 +135,14 @@ void io_uring_context::drain_eventfd() noexcept {
   (void)global_state_->wake_channel_.drain();
 }
 
-int io_uring_context::submit_eventfd_poll() noexcept {
-  const int wake_fd = global_state_->wake_channel_.read_fd();
-  if (!ring_.is_open() || wake_fd < 0) {
+int io_uring_context::arm_wake_poll(int fd, void* user_data,
+                                    bool& pending_flag) noexcept {
+  // read_fd() is -1 once the channel is closed, so this also covers a
+  // channel that was torn down underneath the run loop.
+  if (!ring_.is_open() || fd < 0) {
     return -EINVAL;
   }
-  if (poll_state_.eventfd_poll_pending) {
+  if (pending_flag) {
     return 1;
   }
   if (run_state_.state.load(std::memory_order_acquire) !=
@@ -152,80 +154,28 @@ int io_uring_context::submit_eventfd_poll() noexcept {
     return 0;
   }
 
-  // 2-attempt retry: when the SQ is full, submit and try again. After two
-  // failures, return EAGAIN so the caller can retry later.
-  for (unsigned attempt = 0; attempt < 2; ++attempt) {
-    bnio::base::submission_queue_entry sqe = ring_.get_sqe();
-    if (sqe.raw() == nullptr) {
-      const int submit_result = submit_ring();
-      if (submit_result < 0) {
-        return submit_result;
-      }
-      continue;
-    }
-
-    sqe.prep_poll_add(wake_fd, static_cast<unsigned>(POLLIN));
-    sqe.set_data(eventfd_user_data());
-
-    const int submit_result = submit_ring();
-    if (submit_result <= 0) {
-      return submit_result < 0 ? submit_result : -EAGAIN;
-    }
-
-    poll_state_.eventfd_poll_pending = true;
-    return 1;
+  bnio::base::submission_queue_entry sqe = ring_.get_sqe();
+  if (sqe.raw() == nullptr) {
+    // SQ is full. There is no inline retry: the caller's -EAGAIN path
+    // re-enters the run loop, which re-arms on the next pass.
+    return -EAGAIN;
   }
 
-  return -EAGAIN;
+  sqe.prep_poll_add(fd, static_cast<unsigned>(POLLIN));
+  sqe.set_data(user_data);
+
+  const int submit_result = submit_ring();
+  if (submit_result <= 0) {
+    return submit_result < 0 ? submit_result : -EAGAIN;
+  }
+
+  pending_flag = true;
+  return 1;
 }
 
 void* io_uring_context::eventfd_user_data() noexcept {
   static int eventfd_sentinel = 0;
   return &eventfd_sentinel;
-}
-
-int io_uring_context::submit_local_eventfd_poll() noexcept {
-  const int local_fd = local_state_.wake_channel_.is_open()
-                           ? local_state_.wake_channel_.read_fd()
-                           : -1;
-  if (!ring_.is_open() || local_fd < 0) {
-    return -EINVAL;
-  }
-  if (poll_state_.local_eventfd_poll_pending) {
-    return 1;
-  }
-  if (run_state_.state.load(std::memory_order_acquire) !=
-      context_state::running) {
-    // Distinguishable from "already armed": the poll is NOT armed here
-    // because the context is stopping; see submit_eventfd_poll().
-    return 0;
-  }
-
-  // 2-attempt retry: when the SQ is full, submit and try again. After two
-  // failures, return EAGAIN so the caller can retry later.
-  for (unsigned attempt = 0; attempt < 2; ++attempt) {
-    bnio::base::submission_queue_entry sqe = ring_.get_sqe();
-    if (sqe.raw() == nullptr) {
-      const int submit_result = submit_ring();
-      if (submit_result < 0) {
-        return submit_result;
-      }
-      continue;
-    }
-
-    sqe.prep_poll_add(local_fd, static_cast<unsigned>(POLLIN));
-    sqe.set_data(local_eventfd_user_data());
-
-    const int submit_result = submit_ring();
-    if (submit_result <= 0) {
-      return submit_result < 0 ? submit_result : -EAGAIN;
-    }
-
-    poll_state_.local_eventfd_poll_pending = true;
-    return 1;
-  }
-
-  return -EAGAIN;
 }
 
 void* io_uring_context::local_eventfd_user_data() noexcept {

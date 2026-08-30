@@ -75,7 +75,9 @@ struct io_uring_context::cqe_collector {
         // finishing here used to leave the poll unarmed while the
         // state check above kept reporting "stopping", letting the
         // worker park in io_uring_enter with no wake source.
-        (void)context.submit_eventfd_poll();
+        (void)context.arm_wake_poll(
+            context.global_state_->wake_channel_.read_fd(), eventfd_user_data(),
+            context.poll_state_.eventfd_poll_pending);
         return;
 
       case cqe_user_data_kind::local_eventfd:
@@ -84,7 +86,10 @@ struct io_uring_context::cqe_collector {
         // follow the same policy as the shared channel above.
         context.poll_state_.local_eventfd_poll_pending = false;
         (void)context.local_state_.wake_channel_.drain();
-        (void)context.submit_local_eventfd_poll();
+        (void)context.arm_wake_poll(
+            context.local_state_.wake_channel_.read_fd(),
+            local_eventfd_user_data(),
+            context.poll_state_.local_eventfd_poll_pending);
         return;
 
       case cqe_user_data_kind::operation:

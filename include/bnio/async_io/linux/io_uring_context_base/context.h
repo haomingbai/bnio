@@ -321,33 +321,35 @@ class BNIO_EXPORT io_uring_context {
   void drain_eventfd() noexcept;
 
   /**
-   * Submits the internal eventfd poll request.
+   * Arms the IORING_POLL_ADD that lets one wake channel wake this worker.
    *
+   * Shared by the shared wake channel and the per-worker wake channel:
+   * the caller passes that channel's read fd, its CQE user-data sentinel,
+   * and its "already armed" flag.
+   *
+   * There is deliberately no retry here. When the submission queue is
+   * full the call returns -EAGAIN and the run loop re-arms on its next
+   * pass, which keeps SQ pressure handling in one place.
+   *
+   * @param fd           Read fd of the wake channel to poll.
+   * @param user_data    Sentinel identifying this channel's poll CQEs.
+   * @param pending_flag Per-channel flag set once the poll is armed and
+   *                     cleared when its CQE is collected.
    * @return 1 when the wake poll is armed (newly submitted or already
    *         pending), 0 when it is not armed because the context is no
    *         longer running (stopping; the caller must not block on the
    *         ring without an independent wake source), or a negative
    *         errno on submission failure (-EAGAIN is transient SQ
-   *         pressure; anything else is fatal for the channel).
+   *         pressure; -EINVAL means the wake channel is closed; anything
+   *         else is fatal for the channel).
    */
-  [[nodiscard]] int submit_eventfd_poll() noexcept;
+  [[nodiscard]] int arm_wake_poll(int fd, void* user_data,
+                                  bool& pending_flag) noexcept;
 
   /**
    * Returns the sentinel user data used for eventfd poll SQEs.
    */
   [[nodiscard]] static void* eventfd_user_data() noexcept;
-
-  /**
-   * Submits the per-worker local wake channel poll request.
-   *
-   * @return 1 when the wake poll is armed (newly submitted or already
-   *         pending), 0 when it is not armed because the context is no
-   *         longer running (stopping; the caller must not block on the
-   *         ring without an independent wake source), or a negative
-   *         errno on submission failure (-EAGAIN is transient SQ
-   *         pressure; anything else is fatal for the channel).
-   */
-  [[nodiscard]] int submit_local_eventfd_poll() noexcept;
 
   /**
    * Returns the sentinel user data used for local wake channel poll SQEs.

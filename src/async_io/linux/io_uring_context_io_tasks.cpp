@@ -22,8 +22,9 @@ bool io_uring_context::consume_io_tasks() noexcept {
 
   io_uring_io_operation_base* prepared = nullptr;
   // Prepare SQEs in a batch. If the SQ is full (EAGAIN), submit the
-  // prepared entries and retry the current operation. On any submission
-  // error, fail all prepared and remaining operations.
+  // prepared entries and requeue the remaining operations instead of
+  // retrying inline. On any submission error, fail all prepared and
+  // remaining operations.
   const auto release_prepared = [&prepared]() noexcept {
     while (prepared != nullptr) {
       io_uring_io_operation_base* operation = prepared;
@@ -60,26 +61,46 @@ bool io_uring_context::consume_io_tasks() noexcept {
     }
     return result;
   };
+  // Requeue a list of operations on the shared I/O queue so the next
+  // run-loop pass retries them from the front.
+  const auto requeue_io_tasks =
+      [this](io_uring_io_operation_base* head) noexcept {
+        while (head != nullptr) {
+          io_uring_io_operation_base* operation = head;
+          head = static_cast<io_uring_io_operation_base*>(operation->next);
+          operation->next = nullptr;
+          global_state_->push_io(*operation);
+        }
+      };
+  const auto fail_remaining = [this](io_uring_io_operation_base* head,
+                                     int result) noexcept {
+    while (head != nullptr) {
+      io_uring_io_operation_base* operation = head;
+      head = static_cast<io_uring_io_operation_base*>(operation->next);
+      operation->next = nullptr;
+      operation->complete_submit_error(result);
+      local_state_.push_cpu(*operation);
+    }
+  };
 
   // Prepare each I/O operation into an SQE. Either batch it into the
-  // prepared list or, on EAGAIN, flush pending SQEs and retry.  A submit
-  // failure fails all remaining operations inline.
+  // prepared list or, on EAGAIN, hand the prepared SQEs to the kernel and
+  // requeue the rest. A submit failure fails all remaining operations
+  // inline.
   while (operations != nullptr) {
     io_uring_io_operation_base* operation = operations;
     const int prepare_result = prepare_io(*operation);
     if (prepare_result == -EAGAIN) {
+      // SQ is full: hand the prepared SQEs to the kernel, then requeue
+      // this operation and everything behind it instead of retrying
+      // inline. The next run-loop pass picks them up from the queue.
       const int submit_result = submit_and_track_prepared();
-      if (submit_result >= 0) {
-        continue;
+      if (submit_result < 0) {
+        fail_prepared(submit_result);
+        fail_remaining(operations, submit_result);
+        return true;
       }
-      fail_prepared(submit_result);
-      while (operations != nullptr) {
-        operation = operations;
-        operations = static_cast<io_uring_io_operation_base*>(operation->next);
-        operation->next = nullptr;
-        operation->complete_submit_error(submit_result);
-        local_state_.push_cpu(*operation);
-      }
+      requeue_io_tasks(operations);
       return true;
     }
 

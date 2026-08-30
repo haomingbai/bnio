@@ -6,11 +6,11 @@
  * Defect under test (pre-fix behavior):
  *   When the eventfd poll CQE is collected while the submission queue is
  *   full (tiny ring + SQPOLL, so io_uring_submit() cannot free SQ slots
- *   synchronously), the in-collect re-arm submit_eventfd_poll() returns
+ *   synchronously), the in-collect re-arm arm_wake_poll() returns
  *   -EAGAIN and collect_cqe_tasks() immediately stores
  *   context_state::finishing.  The half-closed state conflates "poll
- *   already armed" with "poll not armed" in submit_eventfd_poll()/submit_
- *   local_eventfd_poll() (both return 0 when state != running), so the
+ *   already armed" with "poll not armed" in arm_wake_poll(), which
+ *   returns 0 when state != running for both wake channels, so the
  *   worker later parks in io_uring_enter(GETEVENTS) with no pending wake
  *   poll.  An io_context::stop() then writes the shared wake channel but
  *   no poll SQE exists to turn that write into a CQE: the enter never
