@@ -109,16 +109,39 @@ Each context stores one normalized `io_uring_context_options` value instead of
 copying its fields into separate members. Its single run thread is the only
 owner of SQ preparation, submission, and CQ collection, so the Linux async-io
 layer contains no ring mutex. Low-level senders publish an
-`io_uring_io_operation_base` to the shared I/O queue. There is no
+`io_uring_io_operation_base` to one of the two I/O queues. There is no
 public raw prepare, submit, or batch-submit interface. Only the run loop takes
 I/O operations, fills SQEs, and calls the private ring-submission helper.
-The unused ring-local I/O queue remains reserved for a future cache-locality
-path but receives no operations today. It uses the same queue type and
-intrusive `next` link as the local CPU queue.
+
+Every worker owns a **local I/O queue** next to its local CPU queue
+(`io_uring_local_task_queue_state::io_head`). `publish_io()` takes the same
+worker-local fast path as `post()`: an operation published from a callback
+running on this context's run loop goes to the worker's own queue, and every
+other publication goes to the shared MPSC I/O queue and wakes a worker.
+`consume_io_tasks()` pops the local queue first and falls back to the shared
+queue only when the local one is empty. The local queue needs no lock, no
+atomic, and no wakeup: the only thread that can push to it is the thread that
+drains it — the publisher is the consumer — and no other worker ever touches
+it (there is no I/O stealing). The queue links operations through the `next`
+field inherited from `io_uring_operation_base`, the same intrusive link the
+local CPU queue and the shared I/O queue use, because on io_uring
+`io_next`/`io_prev` belong exclusively to the inflight doubly-linked list. The
+kqueue backend links its I/O queues through `io_next` instead: an operation is
+either queued or inflight, never both, so there `io_next` is free to double as
+the queue link while `io_next`/`io_prev` together carry the inflight list.
+
+SQ pressure is transient and is never retried inline. `prepare_io()` returns
+`-EAGAIN` when `get_sqe()` finds no free slot; `consume_io_tasks()` then
+submits the SQEs it already prepared and pushes the operations it could not
+prepare back onto the local I/O queue — reversed, so the next run-loop pass
+retries them in the original order. `arm_wake_poll()` follows the same rule: a
+full SQ makes it return `-EAGAIN` immediately, and the run loop re-enters the
+ready-tasks phase, which re-arms the poll on a later pass.
 
 Each ready-task pass first drains CQEs to keep the completion ring from
-overflowing, then checks local and shared CPU work before atomically taking
-every operation in the shared I/O queue. Before eventfd wait it publishes the
+overflowing, then checks local and shared CPU work before consuming I/O — the
+worker's own local I/O queue first, the shared I/O queue only when the local
+one is empty. Before eventfd wait it publishes the
 local waiting flag, decrements the shared awake count, and repeats the
 CQE/CPU/I/O checks. A producer publishing after that transition wakes exactly
 one sleeping worker through its per-worker wake channel (`wake_one_sleeping`),
@@ -244,8 +267,9 @@ including a worker racing with late registration. Workers check
 `closing_requested()` (life_state != 0) in `should_finish()`.
 
 Ready CQEs are collected at the beginning of every ready-task pass. The run
-loop then drains its local CPU list and the shared CPU queue before atomically
-taking every operation currently published to the shared I/O queue.
+loop then drains its local CPU list and the shared CPU queue before consuming
+I/O — its own local I/O queue first, the shared I/O queue only when the local
+one is empty.
 
 Parking is a two-stage publication. The worker first marks its local state as
 waiting, then decrements `awake_workers`. It rechecks CQEs and CPU work and
@@ -265,9 +289,8 @@ The BSD backend uses the same CPU/I/O publication split. A
 `kqueue_task_queue_state` owns separate MPSC heads, `awake_workers` /
 `running_workers` (the latter maintained by `io_context::run()`), the
 suspend worker-state list, and the
-worker-group `life_state` flag (std::atomic<int>, 0=running, 1=stopping). Local CPU queues are non-atomic
-in all modes — they are owned exclusively by the worker thread. With no shared state selected, a standalone
-`kqueue_context` additionally keeps a private non-atomic local I/O queue.
+worker-group `life_state` flag (std::atomic<int>, 0=running, 1=stopping). Local CPU and I/O queues are
+non-atomic in all modes — both are owned exclusively by the worker thread.
 
 ```cpp
 class kqueue_context {

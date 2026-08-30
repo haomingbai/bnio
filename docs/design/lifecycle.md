@@ -335,7 +335,8 @@ submission and the shutdown paths.
 parts of every submission with the shutdown / destruction state
 transitions:
 
-- `publish_cpu()` and `publish_io()` (non-worker paths) run
+- `publish_cpu()` and `publish_io()` (their shared-queue path, taken whenever
+  the caller is not a worker of this context) run
   **lock → check the shutdown state → enqueue → wake** inside the critical
   section. The critical section contains only state-involving work; the
   caller executes the operation afterwards.
@@ -352,6 +353,13 @@ and atomic with the enqueue. When the context is already stopping they do
 not enqueue (the queue may no longer be drained) and return `false`; the
 caller then completes the operation inline (e.g. `set_stopped`). This
 closes both previously-documented shutdown races:
+
+Only the shared-queue path can return `false`. A caller that is itself a
+worker of this context publishes to its own local queue without the lock and
+without the shutdown check, and always reports success: the publisher is the
+thread that drains that queue, and native `finish()` keeps consuming and
+aborting I/O until both queues stay empty, so such an operation is still
+delivered — as a stop, not as a strand — even while the context is stopping.
 
 - an operation submitted after the last worker's final drain completes
   inline instead of stranding in a queue no worker ever drains again;

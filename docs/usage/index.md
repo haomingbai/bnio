@@ -239,10 +239,12 @@ auto read = socket.async_read(scheduler, bnio::buffer(bytes));
 auto write = socket.async_write(scheduler, bnio::buffer(payload));
 ```
 
-Operations enter the shared, lower-priority I/O queue. A worker always handles
-CPU work first, then takes every I/O operation currently published and prepares
-the SQEs on its own io_uring. There is no queue-length threshold, manual flush,
-queue-size query, or `_direct` variant.
+Operations enter an I/O queue: the publishing worker's own queue when the
+operation is started from a callback running on that worker, otherwise the
+shared, lower-priority I/O queue. A worker always handles CPU work first, then
+takes every I/O operation currently published — its own queue first, the shared
+queue next — and prepares the SQEs on its own io_uring. There is no
+queue-length threshold, manual flush, queue-size query, or `_direct` variant.
 
 Under concurrency, operations accumulate naturally while a worker handles CPU
 work and the preceding batch. Under light load, the worker's pre-sleep handshake

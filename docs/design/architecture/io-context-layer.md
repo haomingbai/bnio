@@ -11,8 +11,9 @@ worker ownership, timers, and source implementation live under
 1. **Event loop host** — `run()` drives the selected io_uring or kqueue loop.
    Each thread calling `run()` creates a native context directly.
 2. **Scheduler factory** — produces dispatch and post schedulers.
-3. **Passive I/O backend** — publishes scheduler I/O to a shared queue that a
-   worker drains on its owning native-context thread.
+3. **Passive I/O backend** — publishes scheduler I/O to the running worker's
+   own queue or, for every other producer, to the shared queue that a worker
+   drains on its owning native-context thread.
 
 The public class is intentionally a coordinator. It owns a small set of
 cohesive `detail` state objects rather than defining all internal data inline:
@@ -36,22 +37,38 @@ two native backends.
 ```mermaid
 graph LR
     I["operation"] --> E["publish_io()"]
-    E --> Q["shared lower-priority I/O queue"]
-    Q --> W["native context run loop takes all I/O"]
+    E --> L["worker-local I/O queue (caller is a worker of this io_context)"]
+    E --> Q["shared lower-priority I/O queue (all other producers)"]
+    L --> W["native context run loop takes all I/O"]
+    Q --> W
     W --> U["prepare SQEs or readiness registrations"]
 ```
 
-There is one publication policy. Producers publish I/O and wake a worker when
-the shared awake count indicates that a worker is sleeping. Workers give the
-CPU queue priority, then atomically take the complete I/O list. Busy workloads
-naturally form larger kernel submission batches; idle workloads reach the same
-drain during the pre-sleep recheck. No count, threshold, explicit flush, or
-direct variant is involved.
+There are two publication paths, mirroring `publish_cpu()`. When the caller is
+a worker of this `io_context` — `current_worker_native_ != nullptr` and its
+`get_global_state() == &global_state_` — `publish_io()` posts straight to that
+worker's local I/O queue: no lock, no atomic, and no wakeup, because the
+publisher is the thread that drains the queue, and the operation stays on the
+worker that owns the connection. Any other producer publishes to the shared I/O
+queue and wakes one sleeping worker when the shared awake count indicates that
+a worker is sleeping.
 
-Layer 3 does not select or post through a specific native context. It wraps
-platform request objects in high-level senders, publishes CPU or I/O work to
-the shared queues, and lets whichever `run()` worker takes the work own the
-native preparation. On BSD, each socket request first attempts its
+The bound-state check is required, not redundant: under a nested `run()` an
+outer worker's handler may publish to a different context while
+`current_worker_native_` still points at the OUTER worker's native context, and
+the inner run loop never drains the outer worker's local queue. The check
+routes that publication to the shared queue instead of stranding it.
+
+Workers give the CPU queue priority, then consume I/O: the local I/O queue
+first, the shared queue only when the local one is empty, taking the complete
+list. Busy workloads naturally form larger kernel submission batches; idle
+workloads reach the same drain during the pre-sleep recheck. No count,
+threshold, or explicit flush is involved.
+
+Layer 3 does not implement native submission. It wraps platform request objects
+in high-level senders, publishes CPU or I/O work through the two paths above,
+and lets whichever `run()` worker takes the work own the native preparation.
+On BSD, each socket request first attempts its
 nonblocking call and registers the matching kqueue filter only when it would
 block. The request repeats the call after readiness. On Linux, immediate
 attempts and SQE preparation likewise remain platform-native implementation
@@ -92,13 +109,16 @@ When single-issuer mode is available, each lazily created Linux ring is
 initially disabled. The same thread that calls its `run()` enables the ring
 before preparing or submitting SQEs, becoming that ring's designated issuer.
 
-High-level CPU work is published to the shared CPU queue. Wakeup targets one
-sleeping worker through its per-worker wake channel (`wake_one_sleeping`),
-falling back to the shared broadcast channel when nobody is suspended. I/O is
-published to the lower-priority shared I/O queue. The worker that removes an
-I/O batch owns all SQ preparation and submission for that batch, so high-level
-queue code does not need native ring synchronization. Timer bookkeeping remains
-on the high-level context, but native workers consume its deadline passively
+High-level CPU work follows the same two paths as I/O: `publish_cpu()` posts to
+the running worker's own CPU queue when the caller is a worker of this context
+and to the shared CPU queue otherwise. Wakeup targets one sleeping worker
+through its per-worker wake channel (`wake_one_sleeping`), falling back to the
+shared broadcast channel when nobody is suspended. I/O uses the worker-local
+I/O queue when the caller is a worker of this context and the lower-priority
+shared I/O queue otherwise. The worker that removes an I/O batch owns all SQ
+preparation and submission for that batch, so high-level queue code does not
+need native ring synchronization. Timer bookkeeping remains on the high-level
+context, but native workers consume its deadline passively
 while choosing their blocking timeout. Timer-ready completions bypass the
 shared CPU queue: the worker that performs the timer check links them directly
 into its local CPU queue. No reusable timer SQE or timer-update request
@@ -330,10 +350,10 @@ sequenceDiagram
     User->>Op: connect(receiver) → start()
     Op->>Ctx: publish_io(*this)
 
-    Note over Ctx: publish to shared lower-priority I/O queue
-    Ctx->>Worker: notify one worker if sleeping
+    Note over Ctx: local I/O queue if the caller is a worker, else shared
+    Ctx->>Worker: notify one worker if sleeping (shared path only)
     Worker->>UCtx: run(): CPU queue first
-    UCtx->>UCtx: consume_io_tasks(): global_state_->pop_io_all()
+    UCtx->>UCtx: consume_io_tasks(): local_state_.pop_io_all(), then global_state_->pop_io_all()
     UCtx->>Ring: get_sqe() + operation.prepare(sqe)
     Ring->>K: io_uring_submit()
 

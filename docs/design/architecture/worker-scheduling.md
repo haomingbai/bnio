@@ -45,7 +45,12 @@ owning worker has exited — otherwise it dereferences freed memory.
 struct kqueue_local_task_queue_state {
   void push_cpu(kqueue_operation_base& operation) noexcept;
   [[nodiscard]] kqueue_operation_base* pop_cpu_all() noexcept;
-  kqueue_operation_base* cpu_head;   // plain pointer, not atomic
+  kqueue_operation_base* cpu_head;                 // plain pointer, not atomic
+
+  void push_io(kqueue_io_operation_base& operation) noexcept;
+  [[nodiscard]] kqueue_io_operation_base* pop_io_all() noexcept;
+  kqueue_io_operation_base* io_head;               // plain pointer, not atomic
+
   kqueue_local_task_queue_state* prev;            // doubly-linked list links
   kqueue_local_task_queue_state* next;
   bnio::base::wake_channel wake_channel_;         // per-worker directed wake
@@ -58,6 +63,16 @@ completion staging inside the run loop) and popped only by the same worker
 during fetch. No remote thread ever touches it, so push is a plain head
 insert and `pop_cpu_all()` is a plain read-and-clear — no CAS, no `exchange`,
 no acquire/release fences on the hot path.
+
+The local I/O queue is the same kind of plain LIFO head pointer (see §7):
+`publish_io()` pushes to it only when the caller is this worker's own run-loop
+thread, and `consume_io_tasks()` is its only popper. That is what makes it
+safe without a lock, an atomic, or a wakeup — the publisher is the thread that
+drains the queue — and what keeps an operation on the worker that owns the
+connection. The two backends link it through different fields: kqueue uses
+`io_next`, io_uring uses the `next` field inherited from
+`io_uring_operation_base`, because on io_uring `io_next`/`io_prev` belong
+exclusively to the inflight doubly-linked list.
 
 ### 2.2 `worker_state_list` — the suspend list
 
@@ -375,9 +390,18 @@ handle_run_ready_tasks:
     collect ready native events (non-blocking)
     run_cpu_batch()                    → local → shared, one batch
     consume_timeout_operations()
-    consume_io_tasks()
+    consume_io_tasks()                 → local → shared, one batch
     wait for work (spin, then block)
 ```
+
+I/O follows the same local-then-shared order as CPU work: `consume_io_tasks()`
+pops the worker's own I/O queue first and falls back to the shared I/O queue
+only when the local one is empty. A batch the worker cannot prepare (io_uring
+SQ full) is pushed back onto the local queue and retried by the next pass
+rather than retried inline. On stop, `abort_inflight_io()` drains **both** I/O
+queues and completes everything left with `-ECANCELED` /
+`complete_submit_stopped()`, so operations parked locally — including those a
+`finish()` callback published — are delivered instead of leaked.
 
 The blocking wait path is:
 
@@ -397,18 +421,22 @@ it; `end_wait()` unlinks the worker before it processes any work.
 
 ### 9.1 Wake-poll re-arm policy and the no-unbounded-block invariant
 
-Both wake polls are re-armed immediately before the blocking native wait, and
-the armed/not-armed distinction is explicit. On io_uring,
-`submit_eventfd_poll()` / `submit_local_eventfd_poll()` return 1 when the poll
-is armed (newly submitted or already pending), 0 when it is **not** armed
-because the context is stopping, and a negative errno on submission failure. A
-`0` tells the caller the ring must not be entered unless another wake source
-exists.
+Both wake polls are armed by a single helper,
+`arm_wake_poll(fd, user_data, pending_flag)`, and the armed/not-armed
+distinction is explicit. It returns 1 when the poll is armed — either it just
+submitted the `IORING_POLL_ADD` SQE (setting `pending_flag`) or `pending_flag`
+was already set — 0 when it is **not** armed because the context is stopping,
+and a negative errno on submission failure (`-EINVAL` for a closed ring or
+channel, `-EAGAIN` when the submission queue has no free slot or the submit
+fails). A `0` tells the caller the ring must not be entered unless another wake
+source exists. Both polls are armed once in `enter_run()` and re-armed
+immediately before the blocking native wait.
 
-Re-arm failures are classified at the single policy point in
-`wait_for_io_work()` (a re-arm failure while collecting an eventfd CQE is
-deliberately not terminal there — it is re-handled by that same point, so
-transient pressure never half-closes the context):
+There is no inline retry anywhere: `arm_wake_poll()` returns as soon as
+submission fails. Every failure in the wait path is classified at the single
+policy point in `wait_for_io_work()` (a re-arm failure while collecting an
+eventfd CQE is deliberately not terminal there — it is re-handled by that same
+point, so transient pressure never half-closes the context):
 
 - `-EAGAIN` is transient SQ pressure (typically SQPOLL, where only the kernel
   poll thread frees SQ slots): the poll is not armed, so the worker never
