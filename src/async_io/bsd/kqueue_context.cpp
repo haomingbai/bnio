@@ -62,7 +62,6 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
   (void)local_state_.wake_channel_.open();
 
   (void)local_state_.pop_cpu_all();
-  local_io_head_ = nullptr;
   scheduling_state_.next_registration_sequence = 0;
   event_buffer_ = std::move(events);
   run_state_.run_active.store(false, std::memory_order_release);
@@ -82,7 +81,6 @@ void kqueue_context::queue_exit() noexcept {
   run_state_.state.store(context_state::finished, std::memory_order_release);
 
   (void)local_state_.pop_cpu_all();
-  local_io_head_ = nullptr;
   scheduling_state_.next_registration_sequence = 0;
 
   local_state_.wake_channel_.close();

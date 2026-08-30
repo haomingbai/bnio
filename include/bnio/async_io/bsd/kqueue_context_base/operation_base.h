@@ -67,13 +67,20 @@ struct kqueue_registration_state {
   kqueue_registration_state* wait_prev = nullptr;
 };
 
-/** Per-worker local CPU queue and wake channel.
+/** Per-worker local CPU and I/O queues, and wake channel.
  *
- * The local CPU queue is owned exclusively by its worker thread: it is
+ * Both local queues are owned exclusively by their worker thread: they are
  * pushed only by the worker itself (or, in standalone mode, before/after
  * a run on the same thread) and popped only by the worker during fetch.
- * No remote thread ever touches it — work stealing was removed — so the
- * head is a plain pointer and push/pop need no atomics.
+ * No remote thread ever touches them — work stealing was removed — so the
+ * heads are plain pointers and push/pop need no atomics.
+ *
+ * The local I/O queue is safe without a wakeup for the same reason: an
+ * operation reaches it only from a callback running on this worker's own
+ * run loop, so the publisher is the thread that will drain it. That is
+ * what distinguishes it from the shared I/O queue, which is MPSC and
+ * therefore needs every publication to pair the push with a wakeup of a
+ * possibly sleeping worker.
  *
  * The node is linked into the shared state's suspend list only while the
  * worker sleeps in the native poller, so a publisher can wake it.  A
@@ -92,6 +99,17 @@ struct BNIO_EXPORT kqueue_local_task_queue_state {
   [[nodiscard]] kqueue_operation_base* pop_cpu_all() noexcept;
 
   kqueue_operation_base* cpu_head = nullptr;
+
+  void push_io(kqueue_io_operation_base& operation) noexcept;
+
+  /** Pushes a linked list of I/O tasks (the caller's order is preserved
+   *  relative to the reversed FIFO the consumer re-establishes). */
+  void push_io(kqueue_io_operation_base* operations) noexcept;
+
+  /** Removes the whole I/O queue in bulk; used by consume_io_tasks(). */
+  [[nodiscard]] kqueue_io_operation_base* pop_io_all() noexcept;
+
+  kqueue_io_operation_base* io_head = nullptr;
 
   /** Doubly-linked list links for the shared suspend list. */
   kqueue_local_task_queue_state* prev = nullptr;
@@ -281,6 +299,30 @@ inline kqueue_operation_base*
 kqueue_local_task_queue_state::pop_cpu_all() noexcept {
   kqueue_operation_base* operations = cpu_head;
   cpu_head = nullptr;
+  return operations;
+}
+
+inline void kqueue_local_task_queue_state::push_io(
+    kqueue_io_operation_base& operation) noexcept {
+  // Owner-only access (no stealing), so this is a plain LIFO head insert.
+  operation.io_next = io_head;
+  io_head = &operation;
+}
+
+inline void kqueue_local_task_queue_state::push_io(
+    kqueue_io_operation_base* operations) noexcept {
+  while (operations != nullptr) {
+    kqueue_io_operation_base* operation = operations;
+    operations = operations->io_next;
+    operation->io_next = nullptr;
+    push_io(*operation);
+  }
+}
+
+inline kqueue_io_operation_base*
+kqueue_local_task_queue_state::pop_io_all() noexcept {
+  kqueue_io_operation_base* operations = io_head;
+  io_head = nullptr;
   return operations;
 }
 

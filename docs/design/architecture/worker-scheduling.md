@@ -328,16 +328,21 @@ no longer reachable).
 
 ## 7. I/O handling
 
-Local I/O queues were removed. All I/O publications contend on the shared I/O
-queue (`global_state_->push_io()`), and `consume_io_tasks()` takes the whole
-I/O batch at once. Batch unfairness for I/O is accepted: io_uring and kqueue
-are batch-capable, and a worker that cannot handle a batch simply leaves it
-for the next fetch pass. There is no I/O stealing.
+`publish_io()` mirrors `post()`: an operation published from a callback that is
+running on this context's run loop goes to the worker's own I/O queue
+(`local_state_.push_io()`); anything else goes to the shared I/O queue
+(`global_state_->push_io()`) and wakes a worker. `consume_io_tasks()` drains the
+local I/O queue first and only then the shared one, taking the whole batch at
+once — the same "first non-empty source wins" order `fetch_cpu_task()` uses.
+Batch unfairness for the shared queue is accepted: io_uring and kqueue are
+batch-capable, and a worker that cannot handle a batch simply leaves it for the
+next fetch pass. There is no I/O stealing, on either queue.
 
-Standalone kqueue contexts (no `global_state_`) keep a private `local_io_head_`
-as a fallback drained by `consume_io_tasks()`; this path is not used by
-`io_context`. The io_uring backend has no such fallback — its
-`consume_io_tasks()` returns immediately when `global_state_` is null.
+Standalone kqueue contexts (no `global_state_`) always take the local path; the
+io_uring backend has no standalone mode. When the io_uring submission queue is
+full, `consume_io_tasks()` also parks the operations it could not prepare on the
+local I/O queue, so the next run-loop pass retries them from the front instead
+of retrying inline or contending on the shared queue.
 
 ## 8. Why the structure is shaped this way
 

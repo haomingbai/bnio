@@ -12,7 +12,6 @@
 #include <bnio/async_io/bsd/kqueue_context.h>
 
 #include <cerrno>
-#include <utility>
 
 #include "kqueue_context_internal.h"
 
@@ -35,17 +34,19 @@ namespace {
 }  // namespace
 
 bool kqueue_context::consume_io_tasks() noexcept {
-  kqueue_io_operation_base* operations = nullptr;
-  if (global_state_ != nullptr) {
+  // Worker-local queue first (fastest, keeps the operation on the worker
+  // that owns the connection), then the shared queue — stop at the first
+  // non-empty source, exactly like fetch_cpu_task().
+  kqueue_io_operation_base* operations = local_state_.pop_io_all();
+  if (operations == nullptr && global_state_ != nullptr) {
     operations = global_state_->pop_io_all();
-  } else {
-    operations = std::exchange(local_io_head_, nullptr);
   }
   if (operations == nullptr) {
     return false;
   }
 
-  // MPSC publication is LIFO; restore producer order before registering.
+  // Publication is LIFO on both queues; restore producer order before
+  // registering.
   operations = reverse_io_tasks(operations);
 
   while (operations != nullptr) {
@@ -341,12 +342,14 @@ void kqueue_context::abort_inflight_io() noexcept {
     local_state_.push_cpu(*op);
   }
 
-  // Drain unregistered I/O from the global queue and the standalone local
-  // buffer so they are completed instead of leaked.
+  // Drain the still-unregistered I/O from both queues — this worker's local
+  // I/O queue and the shared one — so they are completed instead of
+  // leaked. Callbacks running here may have published I/O that never
+  // reached a consume_io_tasks() pass.
+  drain_io_list_complete_stopped(local_state_.pop_io_all());
   if (global_state_ != nullptr) {
     drain_io_list_complete_stopped(global_state_->pop_io_all());
   }
-  drain_io_list_complete_stopped(std::exchange(local_io_head_, nullptr));
 }
 
 void kqueue_context::drain_io_list_complete_stopped(

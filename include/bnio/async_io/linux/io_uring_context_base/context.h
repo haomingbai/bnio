@@ -303,6 +303,11 @@ class BNIO_EXPORT io_uring_context {
   /** Aborts all inflight I/O operations during shutdown. */
   void abort_inflight_io() noexcept;
 
+  /** Completes a linked list of unregistered I/O operations as stopped and
+   *  pushes them to the local CPU queue. */
+  void drain_io_list_complete_stopped(
+      io_uring_io_operation_base* head) noexcept;
+
   /** Moves due passive-timer completions into the local CPU queue. */
   [[nodiscard]] bool consume_timeout_operations() noexcept;
 

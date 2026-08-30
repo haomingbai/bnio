@@ -61,9 +61,12 @@ struct first_receiver {
     // Phase 3 bug repro: start a new I/O operation from within
     // set_stopped(). When this is called from finish() Phase 3
     // (via abort_inflight_io -> push_cpu -> execute_tasks), the new
-    // operation goes to local_state_.io via the worker-local fast
-    // path in publish_io(). Phase 3 never calls consume_io_tasks(),
-    // so this operation is never consumed.
+    // operation lands in this worker's local I/O queue via the
+    // worker-local fast path in publish_io() (we are on the run-loop
+    // thread of this context). Phase 3 only drains the CPU queue, so
+    // the operation is only consumed — and its receiver completed —
+    // because Phase 3b keeps calling consume_io_tasks() until both
+    // I/O queues stay empty.
     auto sched = ctx->get_post_scheduler();
     auto view = bnio::async_io::stream_socket_view(fd);
     auto sender =

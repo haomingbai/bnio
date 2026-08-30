@@ -29,18 +29,18 @@ int kqueue_context::post(kqueue_operation_base& operation) noexcept {
 void kqueue_context::publish_io(kqueue_io_operation_base& operation) noexcept {
   assert_running();
 
-  // Experimental: worker-local fast path removed so all I/O publications
-  // contend on the global queue, breaking connection affinity.
-  if (global_state_ != nullptr) {
-    global_state_->push_io(operation);
-    notify_one_waiter();
+  // Worker-local fast path: I/O published by a callback running on this
+  // worker goes to the worker's own queue. The publisher is the thread
+  // that will drain the queue, so this needs no lock, no atomic, and no
+  // wakeup — and it keeps the operation on the worker that owns the
+  // connection. Standalone mode (no shared state) always takes this path.
+  if (current_context_ == this || global_state_ == nullptr) {
+    local_state_.push_io(operation);
     return;
   }
 
-  // Standalone mode (no shared state): keep a local IO queue drained by
-  // consume_io_tasks(). IO stealing is intentionally unsupported.
-  operation.io_next = local_io_head_;
-  local_io_head_ = &operation;
+  global_state_->push_io(operation);
+  notify_one_waiter();
 }
 
 void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {

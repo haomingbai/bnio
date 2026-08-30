@@ -378,8 +378,6 @@ class BNIO_EXPORT kqueue_context {
   static thread_local kqueue_context* current_context_;
   kqueue_task_queue_state* global_state_ = nullptr;
   kqueue_local_task_queue_state local_state_;
-  /** Standalone-mode IO queue (no global state); unused in multi-worker. */
-  kqueue_io_operation_base* local_io_head_ = nullptr;
   kqueue_io_operation_base* inflight_io_head_ = nullptr;
 };
 

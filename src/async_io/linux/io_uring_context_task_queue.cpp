@@ -30,6 +30,13 @@ int io_uring_context::post(io_uring_operation_base& operation) noexcept {
 void io_uring_context::publish_io(
     io_uring_io_operation_base& operation) noexcept {
   assert_running();
+
+  // Worker-local fast path; see kqueue_context::publish_io().
+  if (current_context_ == this) {
+    local_state_.push_io(operation);
+    return;
+  }
+
   global_state_->push_io(operation);
   notify_one_waiter();
 }
