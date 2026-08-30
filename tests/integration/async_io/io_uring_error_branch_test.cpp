@@ -90,7 +90,7 @@ struct terminal_poll_receiver {
 };
 
 // When the per-worker LOCAL wake channel is closed before
-// run(), enter_run()'s submit_local_eventfd_poll() fails and run() must
+// run(), enter_run()'s local eventfd arm_wake_poll() fails and run() must
 // still deliver every operation already posted to the shared CPU queue
 // and published to the shared I/O queue through finish()'s abort path.
 TEST(IoUringErrorBranchTest, enter_run_local_channel_close_delivers_ops) {

@@ -74,9 +74,9 @@ struct terminal_poll_receiver {
 
 // Which wake channel a channel_closing_post_receiver closes in-context.
 enum class close_target {
-  // Shared io_context-wide wake channel (submit_eventfd_poll site).
+  // Shared io_context-wide wake channel (global eventfd arm_wake_poll site).
   shared_channel,
-  // Per-worker local wake channel (submit_local_eventfd_poll site).
+  // Per-worker local wake channel (local eventfd arm_wake_poll site).
   local_channel,
 };
 
@@ -125,7 +125,7 @@ struct channel_closing_post_receiver {
 
 // wait_for_io_work() re-arms the shared eventfd poll before blocking.
 // When the shared wake channel is closed while a poll operation is
-// inflight, submit_eventfd_poll() fails (-EINVAL: read_fd() is -1) and
+// inflight, arm_wake_poll() fails (-EINVAL: read_fd() is -1) and
 // the run loop jumps straight to run_phase::finished, skipping finish():
 // the inflight operation is stranded with no terminal receiver call even
 // though run() returns.
@@ -200,7 +200,7 @@ TEST(IoUringErrorRoutingTest,
 
 // Sibling branch: same scenario, but the posted receiver closes the
 // per-worker LOCAL wake channel so the failure comes from
-// submit_local_eventfd_poll() (the second pre-block re-arm site in
+// arm_wake_poll() (the second pre-block re-arm site in
 // wait_for_io_work()). The shared-channel re-arm still succeeds (its poll
 // is already pending), so only the local re-arm fails.
 TEST(IoUringErrorRoutingTest,
@@ -260,8 +260,9 @@ TEST(IoUringErrorRoutingTest,
 }
 
 // When the shared wake channel is closed BEFORE run(),
-// enter_run()'s submit_eventfd_poll() fails and run() returns false-side
-// immediately, stranding every operation already posted to the shared
+// enter_run()'s global eventfd arm_wake_poll() fails and run() returns
+// false-side immediately, stranding every operation already posted to the
+// shared
 // CPU queue and published to the shared I/O queue.
 TEST(IoUringErrorRoutingTest,
      enter_run_failure_strands_posted_and_published_ops) {
