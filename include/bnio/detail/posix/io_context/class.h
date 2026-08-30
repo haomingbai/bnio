@@ -638,27 +638,36 @@ class BNIO_EXPORT io_context {
   /**
    * Publishes an operation for passive native submission by a worker.
    *
-   * Mirrors publish_cpu: checks the shutdown state under the submit lock
-   * and, only while the context is not stopping, enqueues the operation
-   * and wakes a sleeping worker as needed. The wake-channel write is bound
-   * to the submit lock (see wake_locked), so it can never race the
-   * destructor's close.
+   * Takes the worker-local fast path when this thread is a worker of this
+   * context (see running_worker_native()): the operation is pushed onto
+   * that worker's own I/O queue without taking submit_lock, which also
+   * keeps it on the worker that owns the connection. Otherwise it falls
+   * through to the shared path, which mirrors the old behaviour: check the
+   * shutdown state under the submit lock and, only while the context is
+   * not stopping, enqueue the operation and wake a sleeping worker as
+   * needed. The wake-channel write is bound to the submit lock (see
+   * wake_locked), so it can never race the destructor's close.
    *
    * @return true if the operation was published; false if the context is
    *         already stopping and the operation was NOT enqueued — the
    *         caller must complete it inline (set_stopped), mirroring the
-   *         abort path.
+   *         abort path. Only the shared path can return false: the local
+   *         path always publishes, because the publisher is the thread
+   *         that will drain that queue (see running_worker_native()).
    */
   [[nodiscard]] bool publish_io(operation_base& operation) noexcept;
 
   /**
    * Publishes CPU work for execution by one context run-loop worker.
    *
-   * Checks the shutdown state under the submit lock and, only while the
-   * context is not stopping, enqueues the operation and wakes a sleeping
-   * worker as needed. publish_cpu assumes the publish happens against a
-   * running context; the in-lock state check makes that assumption explicit
-   * and atomic with the enqueue.
+   * Takes the worker-local fast path when this thread is a worker of this
+   * context (see running_worker_native()), posting to that worker's own
+   * queue without taking submit_lock. Otherwise it falls through to the
+   * shared path, which checks the shutdown state under the submit lock
+   * and, only while the context is not stopping, enqueues the operation
+   * and wakes a sleeping worker as needed. publish_cpu assumes the publish
+   * happens against a running context; the in-lock state check makes that
+   * assumption explicit and atomic with the enqueue.
    *
    * @return true if the operation was published (enqueued, or posted to the
    *         worker-local queue); false if the context is already stopping
@@ -670,6 +679,32 @@ class BNIO_EXPORT io_context {
    */
   [[nodiscard]] bool publish_cpu(
       detail::native_operation_base& operation) noexcept;
+
+  /**
+   * Returns the native context this thread is running as a worker of, or
+   * nullptr when this thread is not a worker of THIS io_context.
+   *
+   * Shared by the publish_io() and publish_cpu() local fast paths.
+   * current_worker_native_ is only non-null while this thread is inside
+   * io_context::run(), which sets it on entry and restores it on every
+   * return path, so a non-null bound pointer also guarantees the native
+   * context is alive for the duration of the call.
+   *
+   * The bound-state check matters for nested run(): an outer worker's
+   * handler may post to a different context, and current_worker_native_
+   * then still points at the OUTER worker's native context. Posting to
+   * the wrong local queue would strand the operation — the inner run loop
+   * never drains the outer worker's local queue — so both publish paths
+   * fall through to the shared queue for any context other than this one.
+   *
+   * A non-null result is also what makes the local path safe to take
+   * without the lock and without the life_state check, even while the
+   * context is already stopping: the caller is the worker that will drain
+   * the queue. Native finish() keeps calling consume_io_tasks() →
+   * abort_inflight_io() until both I/O queues stay empty, and
+   * abort_inflight_io() completes the leftovers with stopped.
+   */
+  [[nodiscard]] detail::native_context* running_worker_native() const noexcept;
 
   /** Wakes one worker only when every published worker is sleeping. */
   void wake_one_if_all_workers_sleeping() noexcept;

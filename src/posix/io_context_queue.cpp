@@ -10,10 +10,48 @@
 
 namespace bnio {
 
-bool io_context::publish_io(operation_base& operation) noexcept {
-  // Experimental: worker-local fast path removed so all I/O publications
-  // contend on the global queue, breaking connection affinity.
+detail::native_context* io_context::running_worker_native() const noexcept {
+  // The bound-state check matters for nested run(): an outer worker's
+  // handler may post to a different context, and current_worker_native_
+  // then still points at the OUTER worker's native context. Posting to the
+  // wrong local queue would strand the operation — the inner run loop
+  // never drains the outer worker's local queue. Fall through to the
+  // shared-queue path for any context other than this one.
   //
+  // current_worker_native_ is only non-null while this thread is inside
+  // io_context::run(), which sets it on entry and restores it on every
+  // return path, so a non-null bound pointer also guarantees the native
+  // context is alive for the duration of the caller's use of it.
+  if (current_worker_native_ != nullptr &&
+      current_worker_native_->get_global_state() == &global_state_) {
+    return current_worker_native_;
+  }
+  return nullptr;
+}
+
+bool io_context::publish_io(operation_base& operation) noexcept {
+  // Worker-local fast path: post directly to the running native context's
+  // local I/O queue, the way publish_cpu posts CPU work. The publisher is
+  // the thread that will drain that queue, so this needs no lock, no
+  // atomic, and no wakeup — and it keeps the operation on the worker that
+  // owns the connection.
+  //
+  // That same fact is why returning true here is safe even while the
+  // context is already stopping, without the shared path's life_state
+  // check: the publisher IS the draining thread. Native finish()'s Phase
+  // 3b loop keeps calling consume_io_tasks() → abort_inflight_io() until
+  // both I/O queues stay empty, and abort_inflight_io() completes the
+  // leftovers with stopped — see
+  // src/async_io/bsd/kqueue_context_run_loop.cpp and
+  // src/async_io/linux/io_uring_context_run_loop.cpp. This is exactly the
+  // guarantee publish_cpu's local path already relies on: it also skips
+  // both the lock and the life_state check.
+  detail::native_context* worker = running_worker_native();
+  if (worker != nullptr) {
+    worker->publish_io(operation);
+    return true;
+  }
+
   // Critical section, ordered against begin_stop() / ~io_context() by the
   // same submit_lock. Contains only state-involving work: check the shutdown
   // state, enqueue, and decide whether a sleeping worker must be woken.
@@ -32,16 +70,11 @@ bool io_context::publish_cpu(
   // Worker-local fast path: post directly to the running native context's
   // local queue. The worker always drains its local queue during finish(),
   // so the operation is guaranteed to complete even during shutdown.
-  //
-  // The bound-state check matters for nested run(): an outer worker's
-  // handler may post to a different context, and current_worker_native_
-  // then still points at the OUTER worker's native context. Posting to the
-  // wrong local queue would strand the operation — the inner run loop
-  // never drains the outer worker's local queue. Fall through to the
-  // shared-queue path for any context other than this one.
-  if (current_worker_native_ != nullptr &&
-      current_worker_native_->get_global_state() == &global_state_) {
-    current_worker_native_->post(operation);
+  // See running_worker_native() for the bound-state check that keeps a
+  // nested run() from posting into another worker's local queue.
+  detail::native_context* worker = running_worker_native();
+  if (worker != nullptr) {
+    worker->post(operation);
     return true;
   }
 
