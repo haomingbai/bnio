@@ -355,9 +355,13 @@ next fetch pass. There is no I/O stealing, on either queue.
 
 Standalone kqueue contexts (no `global_state_`) always take the local path; the
 io_uring backend has no standalone mode. When the io_uring submission queue is
-full, `consume_io_tasks()` also parks the operations it could not prepare on the
-local I/O queue, so the next run-loop pass retries them from the front instead
-of retrying inline or contending on the shared queue.
+full, `consume_io_tasks()` stashes the operations it could not prepare in a
+retry slot owned by the run-loop thread (`pending_io_retry_`), so the next
+run-loop pass retries them before popping any queue instead of retrying inline
+or pushing them back onto the local I/O queue. Note the ordering consequence:
+the retry slot takes strict priority over I/O published after the SQ filled —
+with the old local-queue parking, operations pushed onto the local queue behind
+the parked batch would have been handled first.
 
 ## 8. Why the structure is shaped this way
 
@@ -397,11 +401,12 @@ handle_run_ready_tasks:
 I/O follows the same local-then-shared order as CPU work: `consume_io_tasks()`
 pops the worker's own I/O queue first and falls back to the shared I/O queue
 only when the local one is empty. A batch the worker cannot prepare (io_uring
-SQ full) is pushed back onto the local queue and retried by the next pass
-rather than retried inline. On stop, `abort_inflight_io()` drains **both** I/O
+SQ full) is stashed in the run-loop retry slot and retried by the next pass
+before any queue is popped, rather than retried inline. On stop,
+`abort_inflight_io()` drains the retry slot and **both** I/O
 queues and completes everything left with `-ECANCELED` /
-`complete_submit_stopped()`, so operations parked locally — including those a
-`finish()` callback published — are delivered instead of leaked.
+`complete_submit_stopped()`, so operations still held anywhere — including
+those a `finish()` callback published — are delivered instead of leaked.
 
 The blocking wait path is:
 

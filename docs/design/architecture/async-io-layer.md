@@ -132,11 +132,14 @@ the queue link while `io_next`/`io_prev` together carry the inflight list.
 
 SQ pressure is transient and is never retried inline. `prepare_io()` returns
 `-EAGAIN` when `get_sqe()` finds no free slot; `consume_io_tasks()` then
-submits the SQEs it already prepared and pushes the operations it could not
-prepare back onto the local I/O queue — reversed, so the next run-loop pass
-retries them in the original order. `arm_wake_poll()` follows the same rule: a
-full SQ makes it return `-EAGAIN` immediately, and the run loop re-enters the
-ready-tasks phase, which re-arms the poll on a later pass.
+submits the SQEs it already prepared and leaves the operations it could not
+prepare in the run-loop-owned retry slot (`pending_io_retry_`), kept outside
+every queue. The next run-loop pass retries that list in the original order
+before popping any queue — no reversal, no re-push. On stop,
+`abort_inflight_io()` drains the retry slot together with the two I/O queues.
+`arm_wake_poll()` follows the same rule: a full SQ makes it return `-EAGAIN`
+immediately, and the run loop re-enters the ready-tasks phase, which re-arms
+the poll on a later pass.
 
 Each ready-task pass first drains CQEs to keep the completion ring from
 overflowing, then checks local and shared CPU work before consuming I/O — the
