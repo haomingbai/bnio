@@ -91,9 +91,8 @@ bool kqueue_context::try_rearm_operation(
   return false;
 }
 
-bool kqueue_context::perform_io_step(
-    kqueue_io_operation_base& operation,
-    kqueue_registration_state& node) noexcept {
+bool kqueue_context::perform_io_step(kqueue_io_operation_base& operation,
+                                     kqueue_registration_state& node) noexcept {
   // Performs the native I/O step and returns whether the operation completed.
   // A false return means the operation was re-armed after EAGAIN and must
   // stay inflight.
@@ -190,8 +189,7 @@ kqueue_registration_state* kqueue_context::find_fired_node(
     kqueue_io_operation_base& operation, std::int16_t filter) noexcept {
   // Locate the registration node matching this event's filter (an
   // operation owns at most two nodes: READ + WRITE).
-  for (std::uint8_t index = 0; index < operation.registration_count;
-       ++index) {
+  for (std::uint8_t index = 0; index < operation.registration_count; ++index) {
     kqueue_registration_state& candidate = operation.registrations[index];
     if (candidate.operation != nullptr && candidate.filter == filter) {
       return &candidate;
@@ -211,8 +209,7 @@ bool kqueue_context::process_event(const bnio::base::event& event,
     return false;
   }
 
-  kqueue_registration_state* node =
-      find_fired_node(*operation, event.filter());
+  kqueue_registration_state* node = find_fired_node(*operation, event.filter());
   if (node == nullptr) {
     return false;
   }

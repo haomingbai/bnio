@@ -30,9 +30,8 @@
 //   (the per-worker local wake channel) is covered by
 //   local_wake_channel_close_in_context_strands_inflight_io.
 
-#include <gtest/gtest.h>
-
 #include <fcntl.h>
+#include <gtest/gtest.h>
 #include <poll.h>
 #include <unistd.h>
 
@@ -112,8 +111,9 @@ struct channel_closing_post_receiver {
 
 // Asserts that an operation reached a terminal receiver call: never
 // signal_kind::none. Returns true when the signal is terminal.
-::testing::AssertionResult reached_terminal(
-    const char* name, signal_kind signal, const char* defect) {
+::testing::AssertionResult reached_terminal(const char* name,
+                                            signal_kind signal,
+                                            const char* defect) {
   if (signal == signal_kind::none) {
     return ::testing::AssertionFailure()
            << defect << ": operation \"" << name
@@ -166,9 +166,9 @@ TEST(IoUringErrorRoutingTest,
   post_recv.context = &context;
   post_recv.target = close_target::shared_channel;
   auto post_state = post_recv.state;
-  post_op = std::make_unique<
-      io_uring_post_operation<channel_closing_post_receiver>>(
-      context, std::move(post_recv));
+  post_op =
+      std::make_unique<io_uring_post_operation<channel_closing_post_receiver>>(
+          context, std::move(post_recv));
   bexec::start(*post_op);
 
   // (c) run() on the test thread. Pre-fix it returns through the broken
@@ -231,9 +231,9 @@ TEST(IoUringErrorRoutingTest,
   post_recv.context = &context;
   post_recv.target = close_target::local_channel;
   auto post_state = post_recv.state;
-  post_op = std::make_unique<
-      io_uring_post_operation<channel_closing_post_receiver>>(
-      context, std::move(post_recv));
+  post_op =
+      std::make_unique<io_uring_post_operation<channel_closing_post_receiver>>(
+          context, std::move(post_recv));
   bexec::start(*post_op);
 
   bool run_completed = false;
@@ -285,9 +285,8 @@ TEST(IoUringErrorRoutingTest,
     recv.context = &context;
     recv.stop_on_completion = false;
     post_states.push_back(recv.state);
-    post_ops.push_back(
-        std::make_unique<io_uring_post_operation<receiver>>(
-            context, std::move(recv)));
+    post_ops.push_back(std::make_unique<io_uring_post_operation<receiver>>(
+        context, std::move(recv)));
     bexec::start(*post_ops.back());
   }
 
@@ -309,7 +308,8 @@ TEST(IoUringErrorRoutingTest,
   EXPECT_TRUE(run_completed) << "run() must return";
 
   for (unsigned index = 0; index < k_posts; ++index) {
-    EXPECT_TRUE(reached_terminal("post", post_states[index]->signal, "enter-run"))
+    EXPECT_TRUE(
+        reached_terminal("post", post_states[index]->signal, "enter-run"))
         << "posted task " << index << " stranded";
   }
   EXPECT_TRUE(reached_terminal("poll", poll_state->signal, "enter-run"));
@@ -360,7 +360,8 @@ TEST(IoUringErrorRoutingTest, queue_exit_discards_aborted_io_completions) {
   EXPECT_TRUE(reached_terminal("poll", poll_state->signal, "queue-exit"));
   EXPECT_TRUE(poll_state->signal == signal_kind::stopped ||
               poll_state->signal == signal_kind::error)
-      << "queue-exit: expected aborted poll op to be delivered with set_stopped "
+      << "queue-exit: expected aborted poll op to be delivered with "
+         "set_stopped "
          "or set_value(error) before queue_exit() returned";
 
   if (descriptors[0] >= 0) {

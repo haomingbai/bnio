@@ -23,9 +23,8 @@
 //   - queue_init() validation branches (entries==0, flags==0 retry,
 //     double init, zero CQE window).
 
-#include <gtest/gtest.h>
-
 #include <fcntl.h>
+#include <gtest/gtest.h>
 #include <poll.h>
 #include <pthread.h>
 #include <signal.h>
@@ -44,9 +43,9 @@ namespace {
 using namespace bnio_async_io_io_uring_test;
 
 using bnio::async_io::clock;
+using bnio::async_io::time_point;
 using bnio::async_io::linux_native::io_uring_io_operation_base;
 using bnio::async_io::linux_native::io_uring_poll_sender_operation;
-using bnio::async_io::time_point;
 
 // Bounded wait for every synchronization point: a healthy run loop reacts
 // within milliseconds; only a regression can exceed this bound.
@@ -591,8 +590,7 @@ TEST(IoUringErrorBranchTest, queue_exit_delivers_op_published_on_abort) {
   io_uring_task_queue_state global_tasks;
   std::unique_ptr<io_uring_poll_sender_operation<terminal_poll_receiver>>
       follow_up_op;
-  std::unique_ptr<
-      io_uring_poll_sender_operation<republishing_poll_receiver>>
+  std::unique_ptr<io_uring_poll_sender_operation<republishing_poll_receiver>>
       initial_op;
   io_uring_context context;
   if (!queue_init_shared_or_skip(context, global_tasks)) {
@@ -618,8 +616,8 @@ TEST(IoUringErrorBranchTest, queue_exit_delivers_op_published_on_abort) {
   auto initial_state = initial_recv.state;
   initial_op = std::make_unique<
       io_uring_poll_sender_operation<republishing_poll_receiver>>(
-      context, descriptor_view(first_pipe[0]),
-      static_cast<unsigned>(POLLIN), std::move(initial_recv));
+      context, descriptor_view(first_pipe[0]), static_cast<unsigned>(POLLIN),
+      std::move(initial_recv));
   bexec::start(*initial_op);
 
   context.queue_exit();
@@ -678,8 +676,8 @@ TEST(IoUringErrorBranchTest, multi_cqe_batch_spills_to_shared_cpu_queue) {
   }
 
   constexpr unsigned k_ops = 3;
-  std::vector<std::unique_ptr<
-      io_uring_poll_sender_operation<counting_poll_receiver>>>
+  std::vector<
+      std::unique_ptr<io_uring_poll_sender_operation<counting_poll_receiver>>>
       ops;
   auto state = std::make_shared<batch_state>();
   std::vector<int> read_fds;
@@ -696,8 +694,8 @@ TEST(IoUringErrorBranchTest, multi_cqe_batch_spills_to_shared_cpu_queue) {
     recv.state = state;
     ops.push_back(std::make_unique<
                   io_uring_poll_sender_operation<counting_poll_receiver>>(
-        context, descriptor_view(descriptors[0]),
-        static_cast<unsigned>(POLLIN), std::move(recv)));
+        context, descriptor_view(descriptors[0]), static_cast<unsigned>(POLLIN),
+        std::move(recv)));
     bexec::start(*ops.back());
   }
 
@@ -745,8 +743,8 @@ TEST(IoUringErrorBranchTest, queue_init_rejects_zero_entries) {
     probe.set_global_state(&probe_state);
     const int probe_result = probe.queue_init(io_uring_context_options{});
     if (is_unsupported_ring_error(probe_result)) {
-      GTEST_SKIP() << "io_uring is unavailable (queue_init="
-                   << probe_result << ")";
+      GTEST_SKIP() << "io_uring is unavailable (queue_init=" << probe_result
+                   << ")";
     }
   }
 

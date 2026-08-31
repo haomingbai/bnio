@@ -93,7 +93,7 @@ struct accept_sink {
   bexec::start(holder->op);
 
   g_child_ctx = &ctx;
-  struct sigaction sa {};
+  struct sigaction sa{};
   sa.sa_handler = &on_sigusr1;
   sigemptyset(&sa.sa_mask);
   sa.sa_flags = 0;

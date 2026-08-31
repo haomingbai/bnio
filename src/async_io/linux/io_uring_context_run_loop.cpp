@@ -357,8 +357,8 @@ io_uring_context::run_phase io_uring_context::prepare_wait_timeout(
   }
   // Runs while the worker is marked sleeping (only called from
   // wait_for_io_work() after begin_wait()).
-  if (timeout_operations != nullptr || run_cpu_batch() ||
-      consume_io_tasks() || should_finish()) {
+  if (timeout_operations != nullptr || run_cpu_batch() || consume_io_tasks() ||
+      should_finish()) {
     return should_finish() ? run_phase::finish_drain
                            : run_phase::run_ready_tasks;
   }

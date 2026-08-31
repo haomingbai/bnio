@@ -334,9 +334,8 @@ class BNIO_EXPORT kqueue_context {
    * completed. A false return means the operation was re-armed after
    * EAGAIN and must stay inflight.
    */
-  [[nodiscard]] bool perform_io_step(
-      kqueue_io_operation_base& operation,
-      kqueue_registration_state& node) noexcept;
+  [[nodiscard]] bool perform_io_step(kqueue_io_operation_base& operation,
+                                     kqueue_registration_state& node) noexcept;
   /** Resolves a fired write event: kevent errno, EOF, or the I/O step. */
   [[nodiscard]] bool dispatch_write_result(
       kqueue_io_operation_base& operation, kqueue_registration_state& node,

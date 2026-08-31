@@ -76,8 +76,7 @@ struct op_holder : op_holder_base {
 template <typename Op>
 struct direct_op_holder : op_holder_base {
   template <typename... Args>
-  explicit direct_op_holder(Args&&... args)
-      : op(std::forward<Args>(args)...) {}
+  explicit direct_op_holder(Args&&... args) : op(std::forward<Args>(args)...) {}
   void start() override { bexec::start(op); }
   Op op;
 };
@@ -100,9 +99,9 @@ struct flood_receiver {
 };
 
 struct round_outcome {
-  bool hung = false;         // worker never exited within kWorkerJoinBound
-  unsigned started = 0;      // operations handed to the context
-  unsigned terminal = 0;     // operations that reached a receiver call
+  bool hung = false;      // worker never exited within kWorkerJoinBound
+  unsigned started = 0;   // operations handed to the context
+  unsigned terminal = 0;  // operations that reached a receiver call
 };
 
 // Owns one round's whole lifetime.  Heap-allocated so a hung round can be
@@ -135,8 +134,7 @@ struct round_owner {
 
 round_outcome run_stop_round(const io_uring_context_options& options,
                              unsigned poll_ops, unsigned post_ops,
-                             unsigned producer_count,
-                             unsigned wake_stride) {
+                             unsigned producer_count, unsigned wake_stride) {
   round_outcome outcome;
 
   auto owner = std::make_unique<round_owner>();
@@ -160,18 +158,17 @@ round_outcome run_stop_round(const io_uring_context_options& options,
 
   // Pre-create every operation so producer threads only ever call start().
   for (unsigned i = 0; i < poll_ops; ++i) {
-    auto sender =
-        owner->context.async_poll(descriptor_view(owner->never_ready_fd),
-                                  static_cast<unsigned>(POLLIN));
-    using poll_op_t =
-        decltype(bexec::connect(sender, flood_receiver{nullptr}));
+    auto sender = owner->context.async_poll(
+        descriptor_view(owner->never_ready_fd), static_cast<unsigned>(POLLIN));
+    using poll_op_t = decltype(bexec::connect(sender, flood_receiver{nullptr}));
     owner->ops.push_back(std::make_unique<op_holder<poll_op_t>>(
         sender, flood_receiver{&owner->terminal}));
   }
   for (unsigned i = 0; i < post_ops; ++i) {
-    owner->ops.push_back(std::make_unique<
-        direct_op_holder<io_uring_post_operation<flood_receiver>>>(
-        owner->context, flood_receiver{&owner->terminal}));
+    owner->ops.push_back(
+        std::make_unique<
+            direct_op_holder<io_uring_post_operation<flood_receiver>>>(
+            owner->context, flood_receiver{&owner->terminal}));
   }
   const unsigned total_ops = poll_ops + post_ops;
 
@@ -184,30 +181,30 @@ round_outcome run_stop_round(const io_uring_context_options& options,
 
   std::vector<std::thread> producers;
   for (unsigned p = 0; p < producer_count; ++p) {
-    producers.emplace_back([owner_ptr = owner.get(), p, producer_count,
-                            wake_stride, total_ops]() {
-      unsigned published = 0;
-      for (unsigned i = p; i < total_ops; i += producer_count) {
-        // Stop publishing once the worker has exited.  Publishing into a
-        // fully finished context is outside this test's scope (the
-        // internal submission contract) and would trip assert_running()
-        // in debug builds.
-        if (owner_ptr->worker_done.load(std::memory_order_acquire)) {
-          break;
-        }
-        owner_ptr->started.fetch_add(1, std::memory_order_acq_rel);
-        owner_ptr->ops[i]->start();
-        ++published;
-        // External wake pressure: io_context::stop_internal() writes the
-        // shared wake channel unconditionally (not gated on is_waiting()),
-        // so eventfd poll CQEs must be re-armed while the submission queue
-        // is under pressure, not only while the worker happens to wait.
-        if (wake_stride != 0 && published % wake_stride == 0) {
-          (void)owner_ptr->global_tasks.wake_channel_.wake();
-        }
-        std::this_thread::yield();
-      }
-    });
+    producers.emplace_back(
+        [owner_ptr = owner.get(), p, producer_count, wake_stride, total_ops]() {
+          unsigned published = 0;
+          for (unsigned i = p; i < total_ops; i += producer_count) {
+            // Stop publishing once the worker has exited.  Publishing into a
+            // fully finished context is outside this test's scope (the
+            // internal submission contract) and would trip assert_running()
+            // in debug builds.
+            if (owner_ptr->worker_done.load(std::memory_order_acquire)) {
+              break;
+            }
+            owner_ptr->started.fetch_add(1, std::memory_order_acq_rel);
+            owner_ptr->ops[i]->start();
+            ++published;
+            // External wake pressure: io_context::stop_internal() writes the
+            // shared wake channel unconditionally (not gated on is_waiting()),
+            // so eventfd poll CQEs must be re-armed while the submission queue
+            // is under pressure, not only while the worker happens to wait.
+            if (wake_stride != 0 && published % wake_stride == 0) {
+              (void)owner_ptr->global_tasks.wake_channel_.wake();
+            }
+            std::this_thread::yield();
+          }
+        });
   }
   for (auto& producer : producers) {
     producer.join();
@@ -219,8 +216,7 @@ round_outcome run_stop_round(const io_uring_context_options& options,
   owner->global_tasks.life_state.store(1, std::memory_order_release);
   (void)owner->context.stop();
 
-  const auto deadline =
-      std::chrono::steady_clock::now() + kWorkerJoinBound;
+  const auto deadline = std::chrono::steady_clock::now() + kWorkerJoinBound;
   while (!owner->worker_done.load(std::memory_order_acquire) &&
          std::chrono::steady_clock::now() < deadline) {
     (void)owner->global_tasks.wake_channel_.wake();
@@ -252,13 +248,12 @@ struct stress_summary {
 };
 
 stress_summary run_rounds(const io_uring_context_options& options,
-                          unsigned rounds, unsigned poll_ops,
-                          unsigned post_ops, unsigned producer_count,
-                          unsigned wake_stride) {
+                          unsigned rounds, unsigned poll_ops, unsigned post_ops,
+                          unsigned producer_count, unsigned wake_stride) {
   stress_summary summary;
   for (unsigned round = 0; round < rounds; ++round) {
-    const round_outcome outcome = run_stop_round(
-        options, poll_ops, post_ops, producer_count, wake_stride);
+    const round_outcome outcome = run_stop_round(options, poll_ops, post_ops,
+                                                 producer_count, wake_stride);
     ++summary.rounds;
     const bool bad = outcome.hung || outcome.terminal != outcome.started;
     if (!bad) {
@@ -318,9 +313,8 @@ TEST(RearmStopStressTest, stop_completes_all_ops_under_sqpoll_rearm_pressure) {
   constexpr unsigned kProducers = 4;
   constexpr unsigned kWakeStride = 2;
 
-  const stress_summary summary = run_rounds(options, kRounds, kPollOps,
-                                            kPostOps, kProducers,
-                                            kWakeStride);
+  const stress_summary summary =
+      run_rounds(options, kRounds, kPollOps, kPostOps, kProducers, kWakeStride);
 
   EXPECT_EQ(summary.hang_rounds, 0u)
       << "worker parked in io_uring_enter without an armed wake poll; the "
@@ -331,8 +325,7 @@ TEST(RearmStopStressTest, stop_completes_all_ops_under_sqpoll_rearm_pressure) {
   EXPECT_EQ(summary.stranded_rounds, 0u)
       << "worker exited but started operations never reached a terminal "
       << "receiver call (stranded operations). First bad round "
-      << summary.first_bad_round << ": started="
-      << summary.first_bad_started
+      << summary.first_bad_round << ": started=" << summary.first_bad_started
       << ", terminal=" << summary.first_bad_terminal;
 }
 
@@ -366,9 +359,8 @@ TEST(RearmStopStressTest, stop_completes_all_ops_fallback_no_sqpoll) {
   constexpr unsigned kProducers = 4;
   constexpr unsigned kWakeStride = 2;
 
-  const stress_summary summary = run_rounds(options, kRounds, kPollOps,
-                                            kPostOps, kProducers,
-                                            kWakeStride);
+  const stress_summary summary =
+      run_rounds(options, kRounds, kPollOps, kPostOps, kProducers, kWakeStride);
 
   EXPECT_EQ(summary.hang_rounds, 0u)
       << "worker parked in io_uring_enter without an armed wake poll "
@@ -378,8 +370,7 @@ TEST(RearmStopStressTest, stop_completes_all_ops_fallback_no_sqpoll) {
   EXPECT_EQ(summary.stranded_rounds, 0u)
       << "worker exited but started operations never reached a terminal "
       << "receiver call (stranded operations). First bad round "
-      << summary.first_bad_round << ": started="
-      << summary.first_bad_started
+      << summary.first_bad_round << ": started=" << summary.first_bad_started
       << ", terminal=" << summary.first_bad_terminal;
 }
 
