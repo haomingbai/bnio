@@ -31,6 +31,15 @@ void compute_wait_timespec(async_io::time_point deadline,
 
 }  // namespace
 
+void kqueue_context::register_wake_poll(int fd, void* udata) noexcept {
+  // EV_CLEAR makes the event edge-triggered: it re-fires only on the next
+  // write after the channel is drained. `udata` tags the event so
+  // process_event() filters it out of operation dispatch.
+  bnio::base::event wake_event(static_cast<std::uintptr_t>(fd), EVFILT_READ,
+                               EV_ADD | EV_CLEAR, 0, 0, udata);
+  (void)queue_.control(&wake_event, 1, nullptr, 0, nullptr);
+}
+
 bool kqueue_context::enter_run() noexcept {
   bool expected_active = false;
   if (!run_state_.run_active.compare_exchange_strong(
@@ -54,24 +63,18 @@ bool kqueue_context::enter_run() noexcept {
     global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   }
 
-  // Register the shared wake fd (EVFILT_READ | EV_CLEAR) so io_context
-  // can wake this worker via a write to the shared wake channel. The
-  // event carries wakeup_user_data() as its udata so it is filtered out
-  // in process_event().
+  // Register the shared wake fd so io_context can wake this worker via a
+  // write to the shared wake channel.
   if (global_state_ != nullptr && global_state_->wake_channel_.is_open()) {
-    bnio::base::event wake_fd_event(
-        static_cast<std::uintptr_t>(global_state_->wake_channel_.read_fd()),
-        EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, wakeup_user_data());
-    (void)queue_.control(&wake_fd_event, 1, nullptr, 0, nullptr);
+    register_wake_poll(global_state_->wake_channel_.read_fd(),
+                       wakeup_user_data());
   }
 
   // Register the per-worker wake channel so a directed wake can target
   // this worker without waking the whole group.
   if (local_state_.wake_channel_.is_open()) {
-    bnio::base::event local_wake_event(
-        static_cast<std::uintptr_t>(local_state_.wake_channel_.read_fd()),
-        EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, local_wakeup_user_data());
-    (void)queue_.control(&local_wake_event, 1, nullptr, 0, nullptr);
+    register_wake_poll(local_state_.wake_channel_.read_fd(),
+                       local_wakeup_user_data());
   }
 
   return true;

@@ -291,8 +291,41 @@ class BNIO_EXPORT io_uring_context {
    */
   void push_cpu_tasks(operation_queue& operations) noexcept;
 
-  /** Consumes ring-local control I/O and all shared I/O after CPU work. */
+  /**
+   * Takes and consumes the SQ-full retry slot, the worker-local queue,
+   * and the shared queue in priority order, then submits once before
+   * returning. Stops taking new sources as soon as the SQ fills up so
+   * backpressured work stays in its own queue.
+   */
   [[nodiscard]] bool consume_io_tasks() noexcept;
+
+  /**
+   * Prepares each operation in the list into an SQE, batching successes
+   * into prepared (LIFO) and failing non-EAGAIN prepare errors inline.
+   *
+   * @return nullptr when the whole list was consumed, or the remaining
+   *         list headed by the current operation when the SQ is full
+   *         (-EAGAIN); the caller submits prepared and stashes the
+   *         remainder in the retry slot.
+   */
+  [[nodiscard]] io_uring_io_operation_base* prepare_io_batch(
+      io_uring_io_operation_base* operations,
+      io_uring_io_operation_base*& prepared) noexcept;
+
+  /**
+   * Submits the prepared SQEs. On success, registers every prepared
+   * operation in the inflight list and clears the next pointers; on
+   * failure the list stays linked for the caller to fail. Returns 0
+   * without a syscall when prepared is null.
+   */
+  [[nodiscard]] int submit_and_track_prepared(
+      io_uring_io_operation_base* prepared) noexcept;
+
+  /**
+   * Fails every operation in the list with a submission error and pushes
+   * it to the local CPU queue.
+   */
+  void fail_io_list(io_uring_io_operation_base* head, int result) noexcept;
 
   /** Adds an I/O operation to the inflight doubly-linked list. */
   void add_inflight(io_uring_io_operation_base& operation) noexcept;
@@ -385,6 +418,22 @@ class BNIO_EXPORT io_uring_context {
    * Waits for io_uring completion events.
    */
   [[nodiscard]] run_phase wait_for_io_work() noexcept;
+
+  /**
+   * Collects work that became ready without blocking: ready CQEs, one
+   * CPU batch, due timers, and queued I/O.
+   */
+  [[nodiscard]] bool collect_pending_work() noexcept;
+
+  /**
+   * Rearms both wake polls before a blocking wait.
+   *
+   * @return run_phase::wait_for_work when the caller may block;
+   *         run_phase::run_ready_tasks on transient -EAGAIN SQ pressure;
+   *         run_phase::finish_drain on a fatal re-arm failure or when the
+   *         context is stopping.
+   */
+  [[nodiscard]] run_phase rearm_wake_polls_for_wait() noexcept;
 
   /**
    * Fetches due timeout operations and, when none becomes ready, fills the
@@ -493,6 +542,14 @@ class BNIO_EXPORT io_uring_context {
    * On failure the caller must exit early after restoring current_context_.
    */
   [[nodiscard]] bool enter_run() noexcept;
+
+  /**
+   * Common rollback for enter_run() failures: delivers queued operations
+   * through finish()'s abort path so no receiver is stranded, undoes the
+   * awake-worker count when it was already incremented, and clears
+   * run_active.
+   */
+  bool fail_enter_run(bool awake_worker_added) noexcept;
 
   /**
    * Repeatedly drains CPU tasks, timer expirations, and optionally CQEs

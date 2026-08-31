@@ -733,6 +733,12 @@ class BNIO_EXPORT io_context {
    */
   void release_worker_slot() noexcept;
 
+  /**
+   * Drives the native run loop for one worker: constructs the native
+   * context, binds it to the shared state, and blocks in ctx.run().
+   */
+  std::error_code run_native_loop() noexcept;
+
   void register_timer(detail::timer_slot& timer) noexcept;
 
   void unregister_timer(detail::timer_slot& timer) noexcept;

@@ -86,33 +86,14 @@ class native_io_operation : public io_context::operation_base {
       error_ = std::make_error_code(std::errc::operation_canceled);
       this->result = 0;
       this->flags = 0;
-      if (!context_->publish_cpu(*this)) {
-        // Context already stopping: complete inline instead of stranding.
-        execute();
-      }
+      publish_cpu_or_complete_inline();
       return;
     }
 
-    if (control_()) {
-      this->result = request_.start_io();
-    } else {
-      this->result = request_.perform_io();
-    }
+    this->result = control_() ? request_.start_io() : request_.perform_io();
     this->flags = 0;
     if (async_io::bsd_native::detail::should_wait(request_, this->result)) {
-      // EAGAIN/EWOULDBLOCK: register with kqueue for readiness. Leave
-      // completion_ as `value`; the kevent path will update this->result via
-      // perform_io(), and execute()'s value branch re-derives ec from result
-      // (§9.2 guard). Eagerly setting value_with_ec here would leak a stale
-      // EAGAIN ec when the eventual perform_io() succeeds.
-      completion_ = completion_kind::value;
-      if (!context_->publish_io(*this)) {
-        // Context already stopping: complete inline with stopped (the same
-        // completion abort_inflight_io would deliver) instead of publishing
-        // into a context that is shutting down.
-        complete_submit_stopped();
-        execute();
-      }
+      publish_io_or_complete_stopped();
     } else {
       // Immediate completion (success or non-EAGAIN errno).
       if (this->result < 0) {
@@ -121,10 +102,7 @@ class native_io_operation : public io_context::operation_base {
       } else {
         completion_ = completion_kind::value;
       }
-      if (!context_->publish_cpu(*this)) {
-        // Context already stopping: complete inline instead of stranding.
-        execute();
-      }
+      publish_cpu_or_complete_inline();
     }
   }
 
@@ -156,6 +134,29 @@ class native_io_operation : public io_context::operation_base {
   }
 
  private:
+  void publish_cpu_or_complete_inline() noexcept {
+    if (!context_->publish_cpu(*this)) {
+      // Context already stopping: complete inline instead of stranding.
+      execute();
+    }
+  }
+
+  void publish_io_or_complete_stopped() noexcept {
+    // EAGAIN/EWOULDBLOCK: register with kqueue for readiness. Leave
+    // completion_ as `value`; the kevent path will update this->result via
+    // perform_io(), and execute()'s value branch re-derives ec from result
+    // (§9.2 guard). Eagerly setting value_with_ec here would leak a stale
+    // EAGAIN ec when the eventual perform_io() succeeds.
+    completion_ = completion_kind::value;
+    if (!context_->publish_io(*this)) {
+      // Context already stopping: complete inline with stopped (the same
+      // completion abort_inflight_io would deliver) instead of publishing
+      // into a context that is shutting down.
+      complete_submit_stopped();
+      execute();
+    }
+  }
+
   enum class completion_kind {
     value,          // success, ec={}
     value_with_ec,  // errno / cancel / register failure -> set_value(ec, ...)

@@ -90,11 +90,17 @@ std::error_code io_context::run() noexcept {
     return std::make_error_code(std::errc::operation_canceled);
   }
 
+  const std::error_code result = run_native_loop();
+  release_worker_slot();
+  return result;
+}
+
+std::error_code io_context::run_native_loop() noexcept {
   // The native context is bound to the shared state before any check so
   // its destructor (queue_exit) always has the state it was wired to.
   // The context's lifetime is scoped to this function: the destructor
-  // runs before release_worker_slot() below, so running_workers never
-  // reaches zero while queue_exit may still touch global_state_ —
+  // runs before release_worker_slot() in the caller, so running_workers
+  // never reaches zero while queue_exit may still touch global_state_ —
   // stop() and ~io_context() can therefore never race the teardown.
   std::error_code result;
   {
@@ -129,7 +135,6 @@ std::error_code io_context::run() noexcept {
     }
   }  // native context (and its queue_exit teardown) completes here
 
-  release_worker_slot();
   return result;
 }
 

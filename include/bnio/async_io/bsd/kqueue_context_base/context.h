@@ -206,6 +206,15 @@ class BNIO_EXPORT kqueue_context {
   [[nodiscard]] bool enter_run() noexcept;
 
   /**
+   * Registers one wake-channel read fd with the kqueue as
+   * EVFILT_READ | EV_ADD | EV_CLEAR. EV_CLEAR makes the event edge-triggered
+   * so it re-fires only on the next write after the channel is drained;
+   * `udata` tags the event so process_event() filters it out of operation
+   * dispatch. The control result is intentionally ignored.
+   */
+  void register_wake_poll(int fd, void* udata) noexcept;
+
+  /**
    * Repeatedly drains timer expirations and local CPU tasks until the
    * CPU queue is empty. Used by finish() to drain abort-generated tasks.
    */
@@ -300,12 +309,41 @@ class BNIO_EXPORT kqueue_context {
   [[nodiscard]] bool process_event(const bnio::base::event& event,
                                    operation_queue& tasks) noexcept;
   /**
+   * Drains the wake channel identified by `udata`.
+   *
+   * @return true if `udata` names a wake channel (shared or per-worker) and
+   *         the event carries no operation; false for operation udata.
+   */
+  [[nodiscard]] bool drain_wake_channel(void* udata) noexcept;
+  /**
+   * Finds the registration node of `operation` matching `filter`, or null.
+   */
+  [[nodiscard]] kqueue_registration_state* find_fired_node(
+      kqueue_io_operation_base& operation, std::int16_t filter) noexcept;
+  /**
    * Resolves the result of a fired event on `operation`/`node` (poll mask,
    * kevent errno, write EOF, or the native I/O step with EAGAIN retry).
    * @return true if the operation should be completed; false if it was
    *         re-armed after EAGAIN and must stay inflight.
    */
   [[nodiscard]] bool dispatch_event_result(
+      kqueue_io_operation_base& operation, kqueue_registration_state& node,
+      const bnio::base::event& event) noexcept;
+  /**
+   * Performs the native I/O step and returns whether the operation
+   * completed. A false return means the operation was re-armed after
+   * EAGAIN and must stay inflight.
+   */
+  [[nodiscard]] bool perform_io_step(
+      kqueue_io_operation_base& operation,
+      kqueue_registration_state& node) noexcept;
+  /** Resolves a fired write event: kevent errno, EOF, or the I/O step. */
+  [[nodiscard]] bool dispatch_write_result(
+      kqueue_io_operation_base& operation, kqueue_registration_state& node,
+      const bnio::base::event& event) noexcept;
+  /** Resolves a fired read (or fallback) event: kevent errno or the I/O
+   *  step. */
+  [[nodiscard]] bool dispatch_read_result(
       kqueue_io_operation_base& operation, kqueue_registration_state& node,
       const bnio::base::event& event) noexcept;
 

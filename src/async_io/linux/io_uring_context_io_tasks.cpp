@@ -15,97 +15,73 @@
 namespace bnio::async_io::linux_native {
 
 bool io_uring_context::consume_io_tasks() noexcept {
-  // A pending SQ-full retry comes first: the unsubmitted remainder of
-  // the previous batch is retried before any queue is popped. Only with
-  // no retry outstanding, take the worker-local queue first (fastest,
-  // keeps the operation on the worker that owns the connection), then
-  // the shared queue — stop at the first non-empty source, exactly like
-  // fetch_cpu_task().
+  io_uring_io_operation_base* prepared = nullptr;
+  io_uring_io_operation_base* remaining = nullptr;
+  bool found_work = false;
+
+  // Take and consume the three sources in priority order: the SQ-full
+  // retry slot first (the unsubmitted remainder of the previous batch),
+  // then the worker-local queue (keeps the operation on the worker that
+  // owns the connection), then the shared queue. Once the SQ fills up
+  // (prepare_io_batch returns a remainder), stop taking: the sources
+  // not yet taken stay in their own queues instead of piling into this
+  // worker's retry slot — under backpressure, shared-queue entries in
+  // particular remain visible to other workers.
   io_uring_io_operation_base* operations = pending_io_retry_;
   pending_io_retry_ = nullptr;
-  if (operations == nullptr) {
+  if (operations != nullptr) {
+    found_work = true;
+    remaining = prepare_io_batch(operations, prepared);
+  }
+  if (remaining == nullptr) {
     operations = local_state_.pop_io_all();
-    if (operations == nullptr) {
-      operations = global_state_->pop_io_all();
+    if (operations != nullptr) {
+      found_work = true;
+      remaining = prepare_io_batch(operations, prepared);
     }
   }
-  if (operations == nullptr) {
+  if (remaining == nullptr) {
+    operations = global_state_->pop_io_all();
+    if (operations != nullptr) {
+      found_work = true;
+      remaining = prepare_io_batch(operations, prepared);
+    }
+  }
+  if (!found_work) {
     return false;
   }
 
-  io_uring_io_operation_base* prepared = nullptr;
-  // Prepare SQEs in a batch. If the SQ is full (EAGAIN), submit the
-  // prepared entries and stash the remaining operations in the retry
-  // slot instead of retrying inline. On any submission error, fail all
-  // prepared and remaining operations.
-  const auto release_prepared = [&prepared]() noexcept {
-    while (prepared != nullptr) {
-      io_uring_io_operation_base* operation = prepared;
-      prepared = static_cast<io_uring_io_operation_base*>(operation->next);
-      operation->next = nullptr;
-    }
-  };
-  const auto fail_prepared = [this, &prepared](int result) noexcept {
-    while (prepared != nullptr) {
-      io_uring_io_operation_base* operation = prepared;
-      prepared = static_cast<io_uring_io_operation_base*>(operation->next);
-      operation->next = nullptr;
-      operation->complete_submit_error(result);
-      local_state_.push_cpu(*operation);
-    }
-  };
-  // Submit the prepared SQEs. On success, register every prepared
-  // operation in the inflight list before release_prepared clears
-  // their next pointers; on failure the caller decides how to fail
-  // the operations.
-  const auto submit_and_track_prepared = [this, &prepared,
-                                          &release_prepared]() noexcept -> int {
-    const int result = submit_ring();
-    if (result >= 0) {
-      // Add every prepared operation to the inflight list before
-      // release_prepared clears their next pointers.
-      auto* current = prepared;
-      while (current != nullptr) {
-        auto* next_op = static_cast<io_uring_io_operation_base*>(current->next);
-        add_inflight(*current);
-        current = next_op;
-      }
-      release_prepared();
-    }
-    return result;
-  };
-  const auto fail_remaining = [this](io_uring_io_operation_base* head,
-                                     int result) noexcept {
-    while (head != nullptr) {
-      io_uring_io_operation_base* operation = head;
-      head = static_cast<io_uring_io_operation_base*>(operation->next);
-      operation->next = nullptr;
-      operation->complete_submit_error(result);
-      local_state_.push_cpu(*operation);
-    }
-  };
+  // One submit before the control flow exits, covering the SQEs
+  // prepared from every source consumed above.
+  const int submit_result = submit_and_track_prepared(prepared);
+  if (submit_result < 0) {
+    fail_io_list(prepared, submit_result);
+    fail_io_list(remaining, submit_result);
+    return true;
+  }
+  // SQ-full remainder (nullptr when fully consumed): retried first on
+  // the next run-loop pass.
+  pending_io_retry_ = remaining;
+  return true;
+}
 
+io_uring_io_operation_base* io_uring_context::prepare_io_batch(
+    io_uring_io_operation_base* operations,
+    io_uring_io_operation_base*& prepared) noexcept {
   // Prepare each I/O operation into an SQE. Either batch it into the
-  // prepared list or, on EAGAIN, hand the prepared SQEs to the kernel and
-  // stash the rest in the run-loop retry slot. A submit failure fails all
-  // remaining operations inline.
+  // prepared list or, on EAGAIN, hand the rest back to the caller, which
+  // submits the prepared SQEs and stashes the remainder in the run-loop
+  // retry slot. Any other prepare error fails the operation inline.
   while (operations != nullptr) {
     io_uring_io_operation_base* operation = operations;
     const int prepare_result = prepare_io(*operation);
     if (prepare_result == -EAGAIN) {
-      // SQ is full: hand the prepared SQEs to the kernel, then stash
-      // this operation and everything behind it in the retry slot
-      // instead of retrying inline. The next run-loop pass picks the
-      // list up before touching any queue — no reversal, no re-push,
-      // and no wakeup (the publisher is the consumer).
-      const int submit_result = submit_and_track_prepared();
-      if (submit_result < 0) {
-        fail_prepared(submit_result);
-        fail_remaining(operations, submit_result);
-        return true;
-      }
-      pending_io_retry_ = operations;
-      return true;
+      // SQ is full: return this operation and everything behind it so
+      // the caller can stash the list in the retry slot instead of
+      // retrying inline. The next run-loop pass picks the list up
+      // before touching any queue — no reversal, no re-push, and no
+      // wakeup (the publisher is the consumer).
+      return operations;
     }
 
     operations = static_cast<io_uring_io_operation_base*>(operation->next);
@@ -118,14 +94,46 @@ bool io_uring_context::consume_io_tasks() noexcept {
       prepared = operation;
     }
   }
+  return nullptr;
+}
 
-  if (prepared != nullptr) {
-    const int submit_result = submit_and_track_prepared();
-    if (submit_result < 0) {
-      fail_prepared(submit_result);
+int io_uring_context::submit_and_track_prepared(
+    io_uring_io_operation_base* prepared) noexcept {
+  if (prepared == nullptr) {
+    return 0;
+  }
+  // Submit the prepared SQEs. On success, register every prepared
+  // operation in the inflight list before clearing their next pointers;
+  // on failure the list stays linked and the caller decides how to fail
+  // the operations.
+  const int result = submit_ring();
+  if (result >= 0) {
+    // Add every prepared operation to the inflight list before
+    // clearing their next pointers.
+    auto* current = prepared;
+    while (current != nullptr) {
+      auto* next_op = static_cast<io_uring_io_operation_base*>(current->next);
+      add_inflight(*current);
+      current = next_op;
+    }
+    while (prepared != nullptr) {
+      io_uring_io_operation_base* operation = prepared;
+      prepared = static_cast<io_uring_io_operation_base*>(operation->next);
+      operation->next = nullptr;
     }
   }
-  return true;
+  return result;
+}
+
+void io_uring_context::fail_io_list(io_uring_io_operation_base* head,
+                                    int result) noexcept {
+  while (head != nullptr) {
+    io_uring_io_operation_base* operation = head;
+    head = static_cast<io_uring_io_operation_base*>(operation->next);
+    operation->next = nullptr;
+    operation->complete_submit_error(result);
+    local_state_.push_cpu(*operation);
+  }
 }
 
 int io_uring_context::prepare_io(
