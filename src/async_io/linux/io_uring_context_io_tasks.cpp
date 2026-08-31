@@ -1,6 +1,6 @@
 /**
  * @file io_uring_context_io_tasks.cpp
- * @brief I/O task submission: batch prepare, submit on SQ full, and error
+ * @brief I/O task submission: batch prepare, SQ-full retry slot, and error
  * handling.
  */
 
@@ -13,32 +13,21 @@
 #include "io_uring_context_internal.h"
 
 namespace bnio::async_io::linux_native {
-namespace {
-
-// Publication is LIFO; reversing restores producer order when a list has
-// to be pushed back onto a queue.
-[[nodiscard]] io_uring_io_operation_base* reverse_io_tasks(
-    io_uring_io_operation_base* tasks) noexcept {
-  io_uring_io_operation_base* reversed = nullptr;
-  while (tasks != nullptr) {
-    io_uring_io_operation_base* next =
-        static_cast<io_uring_io_operation_base*>(tasks->next);
-    tasks->next = reversed;
-    reversed = tasks;
-    tasks = next;
-  }
-  return reversed;
-}
-
-}  // namespace
 
 bool io_uring_context::consume_io_tasks() noexcept {
-  // Worker-local queue first (fastest, keeps the operation on the worker
-  // that owns the connection), then the shared queue — stop at the first
-  // non-empty source, exactly like fetch_cpu_task().
-  io_uring_io_operation_base* operations = local_state_.pop_io_all();
+  // A pending SQ-full retry comes first: the unsubmitted remainder of
+  // the previous batch is retried before any queue is popped. Only with
+  // no retry outstanding, take the worker-local queue first (fastest,
+  // keeps the operation on the worker that owns the connection), then
+  // the shared queue — stop at the first non-empty source, exactly like
+  // fetch_cpu_task().
+  io_uring_io_operation_base* operations = pending_io_retry_;
+  pending_io_retry_ = nullptr;
   if (operations == nullptr) {
-    operations = global_state_->pop_io_all();
+    operations = local_state_.pop_io_all();
+    if (operations == nullptr) {
+      operations = global_state_->pop_io_all();
+    }
   }
   if (operations == nullptr) {
     return false;
@@ -46,9 +35,9 @@ bool io_uring_context::consume_io_tasks() noexcept {
 
   io_uring_io_operation_base* prepared = nullptr;
   // Prepare SQEs in a batch. If the SQ is full (EAGAIN), submit the
-  // prepared entries and requeue the remaining operations instead of
-  // retrying inline. On any submission error, fail all prepared and
-  // remaining operations.
+  // prepared entries and stash the remaining operations in the retry
+  // slot instead of retrying inline. On any submission error, fail all
+  // prepared and remaining operations.
   const auto release_prepared = [&prepared]() noexcept {
     while (prepared != nullptr) {
       io_uring_io_operation_base* operation = prepared;
@@ -98,27 +87,24 @@ bool io_uring_context::consume_io_tasks() noexcept {
 
   // Prepare each I/O operation into an SQE. Either batch it into the
   // prepared list or, on EAGAIN, hand the prepared SQEs to the kernel and
-  // park the rest on the local I/O queue. A submit failure fails all
+  // stash the rest in the run-loop retry slot. A submit failure fails all
   // remaining operations inline.
   while (operations != nullptr) {
     io_uring_io_operation_base* operation = operations;
     const int prepare_result = prepare_io(*operation);
     if (prepare_result == -EAGAIN) {
-      // SQ is full: hand the prepared SQEs to the kernel, then park this
-      // operation and everything behind it instead of retrying inline.
+      // SQ is full: hand the prepared SQEs to the kernel, then stash
+      // this operation and everything behind it in the retry slot
+      // instead of retrying inline. The next run-loop pass picks the
+      // list up before touching any queue — no reversal, no re-push,
+      // and no wakeup (the publisher is the consumer).
       const int submit_result = submit_and_track_prepared();
       if (submit_result < 0) {
         fail_prepared(submit_result);
         fail_remaining(operations, submit_result);
         return true;
       }
-      // Park them on this worker's own I/O queue so the next run-loop pass
-      // retries them from the front: no inline retry, no contention on the
-      // shared queue, and no wakeup (the publisher is the consumer).
-      // `operations` is in processing order, so reverse it first: the queue
-      // is LIFO, and the head insert below then leaves the front of the
-      // queue pointing at the operation that came first.
-      local_state_.push_io(reverse_io_tasks(operations));
+      pending_io_retry_ = operations;
       return true;
     }
 
@@ -232,10 +218,13 @@ void io_uring_context::abort_inflight_io() noexcept {
     local_state_.push_cpu(*op);
   }
 
-  // Drain the still-unregistered I/O from both queues — this worker's local
-  // I/O queue and the shared one — so they are completed instead of
-  // leaked. Callbacks running here may have published I/O that never
-  // reached a consume_io_tasks() pass.
+  // Drain the still-unregistered I/O — the SQ-full retry slot first
+  // (it was logically next in line), then this worker's local I/O queue
+  // and the shared one — so they are completed instead of leaked.
+  // Callbacks running here may have published I/O that never reached a
+  // consume_io_tasks() pass.
+  drain_io_list_complete_stopped(pending_io_retry_);
+  pending_io_retry_ = nullptr;
   drain_io_list_complete_stopped(local_state_.pop_io_all());
   drain_io_list_complete_stopped(global_state_->pop_io_all());
 }

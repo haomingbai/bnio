@@ -536,6 +536,17 @@ class BNIO_EXPORT io_uring_context {
   io_uring_local_task_queue_state local_state_;
   io_uring_io_operation_base* inflight_io_head_ = nullptr;
 
+  /**
+   * Unsubmitted remainder of the current I/O batch, set when the
+   * submission queue is full. Owned by the run-loop thread and kept
+   * outside every queue: a non-null value means the previous pass hit a
+   * full SQ, so this list is retried before any queue is popped — no
+   * list reversal, no re-push, no wakeup (the publisher is the
+   * consumer). abort_inflight_io() drains it exactly like the two I/O
+   * queues.
+   */
+  io_uring_io_operation_base* pending_io_retry_ = nullptr;
+
   /** Run-loop scheduling budget. */
   struct scheduling_state {
     unsigned local_task_budget = 0;
