@@ -21,14 +21,13 @@
  * also for the descriptor paths where a -EAGAIN CQE can be delivered.
  */
 
-#include <gtest/gtest.h>
-
 #include <bnio/async_io/buffer_view.h>
 #include <bnio/async_io/ip/address.h>
 #include <bnio/async_io/ip/endpoint.h>
 #include <bnio/async_io/linux/io_uring_context_base/context.h>
 #include <bnio/async_io/linux/io_uring_operations/socket.h>
 #include <bnio/async_io/socket_view.h>
+#include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -67,9 +66,7 @@ class nonblocking_socket_pair {
   nonblocking_socket_pair(const nonblocking_socket_pair&) = delete;
   nonblocking_socket_pair& operator=(const nonblocking_socket_pair&) = delete;
 
-  [[nodiscard]] int operator[](std::size_t index) const {
-    return fds_[index];
-  }
+  [[nodiscard]] int operator[](std::size_t index) const { return fds_[index]; }
 
   [[nodiscard]] bool valid() const { return fds_[0] >= 0 && fds_[1] >= 0; }
 
@@ -77,8 +74,7 @@ class nonblocking_socket_pair {
   std::array<int, 2> fds_{-1, -1};
 };
 
-TEST(IoUringEagainRearmTest,
-     recv_on_empty_socket_completes_after_late_data) {
+TEST(IoUringEagainRearmTest, recv_on_empty_socket_completes_after_late_data) {
   io_uring_context context;
   if (!queue_init_or_skip(context)) {
     GTEST_SKIP() << "io_uring is unavailable";
@@ -185,15 +181,17 @@ TEST(IoUringEagainRearmTest,
   listener_address.sin_family = AF_INET;
   listener_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   listener_address.sin_port = 0;
-  ASSERT_EQ(::bind(listener_fd, reinterpret_cast<const sockaddr*>(
-                                       &listener_address),
-                   sizeof(listener_address)), 0);
+  ASSERT_EQ(
+      ::bind(listener_fd, reinterpret_cast<const sockaddr*>(&listener_address),
+             sizeof(listener_address)),
+      0);
   ASSERT_EQ(::listen(listener_fd, 16), 0);
   sockaddr_in bound_address{};
   socklen_t bound_size = sizeof(bound_address);
-  ASSERT_EQ(::getsockname(listener_fd, reinterpret_cast<sockaddr*>(
-                                             &bound_address),
-                          &bound_size), 0);
+  ASSERT_EQ(
+      ::getsockname(listener_fd, reinterpret_cast<sockaddr*>(&bound_address),
+                    &bound_size),
+      0);
 
   auto state = std::make_shared<shared_state>();
   bnio::async_io::ip::endpoint remote;
@@ -207,15 +205,15 @@ TEST(IoUringEagainRearmTest,
   // The accept is submitted while no connection is pending.
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  const int connector_fd =
-      ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  const int connector_fd = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
   ASSERT_GE(connector_fd, 0);
   sockaddr_in target{};
   target.sin_family = AF_INET;
   target.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   target.sin_port = bound_address.sin_port;
   ASSERT_EQ(::connect(connector_fd, reinterpret_cast<const sockaddr*>(&target),
-                      sizeof(target)), 0);
+                      sizeof(target)),
+            0);
 
   worker.join();
 

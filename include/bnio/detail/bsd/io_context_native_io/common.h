@@ -292,9 +292,9 @@ class native_poll_operation : public io_context::operation_base {
         if (stop_requested(receiver_)) {
           bexec::set_stopped(std::move(receiver_));
         } else {
-          bexec::set_value(
-              std::move(receiver_),
-              std::make_error_code(std::errc::operation_canceled), 0U);
+          bexec::set_value(std::move(receiver_),
+                           std::make_error_code(std::errc::operation_canceled),
+                           0U);
         }
         break;
     }
@@ -392,8 +392,7 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
 class resolve_sender {
  public:
   using completion_signatures = bexec::completion_signatures<
-      bexec::set_value_t(std::error_code, std::size_t),
-      bexec::set_stopped_t()>;
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   resolve_sender(io_context& context, async_io::dns_query query,
                  async_io::dns_result_view result)

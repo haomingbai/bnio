@@ -319,8 +319,7 @@ class BNIO_EXPORT io_uring_context {
    * holding a prepared SQE, and a transient -EAGAIN CQE re-enters the
    * pipeline by re-running prepare + submit + track on the same operation.
    */
-  void track_prepared_batch(
-      io_uring_io_operation_base*& prepared) noexcept;
+  void track_prepared_batch(io_uring_io_operation_base*& prepared) noexcept;
 
   /**
    * Submits the prepared SQEs. Every prepared operation is registered in

@@ -145,8 +145,7 @@ class kqueue_resolve_sender {
    * set_value(operation_canceled) payload is produced here.
    */
   using completion_signatures = bexec::completion_signatures<
-      bexec::set_value_t(std::error_code, std::size_t),
-      bexec::set_stopped_t()>;
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   /**
    * Creates a DNS sender for a context and query.

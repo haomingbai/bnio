@@ -349,7 +349,8 @@ TEST(SteadyTimerTest, steady_timer_pre_stopped_token_stops_wait) {
   context.run();
 
   // Contract: a stop token already canceled at start() is observed by the
-  // timer wait and completes via set_stopped (not set_value(operation_canceled)).
+  // timer wait and completes via set_stopped (not
+  // set_value(operation_canceled)).
   EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 

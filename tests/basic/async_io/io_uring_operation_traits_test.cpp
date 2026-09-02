@@ -207,11 +207,10 @@ TEST(IoUringOperationTraitsTest, eagain_rearm_classification) {
   io_uring_accept_operation accept_with_endpoint_operation(
       context, listener, remote_endpoint, 0, receiver{});
   EXPECT_TRUE(accept_with_endpoint_operation.rearm_on_eagain());
-  io_uring_accept_operation accept_operation(
-      context, listener, 0, receiver{});
+  io_uring_accept_operation accept_operation(context, listener, 0, receiver{});
   EXPECT_TRUE(accept_operation.rearm_on_eagain());
-  io_uring_connect_operation connect_operation(
-      context, stream, remote_endpoint, receiver{});
+  io_uring_connect_operation connect_operation(context, stream, remote_endpoint,
+                                               receiver{});
   EXPECT_TRUE(connect_operation.rearm_on_eagain());
   io_uring_recv_operation recv_operation(context, stream, buffer, 0,
                                          receiver{});
@@ -228,33 +227,33 @@ TEST(IoUringOperationTraitsTest, eagain_rearm_classification) {
   io_uring_receive_from_operation receive_from_operation(
       context, datagram, buffer, remote_endpoint, 0, receiver{});
   EXPECT_TRUE(receive_from_operation.rearm_on_eagain());
-  io_uring_send_to_operation send_to_operation(
-      context, datagram, buffer, remote_endpoint, 0, receiver{});
+  io_uring_send_to_operation send_to_operation(context, datagram, buffer,
+                                               remote_endpoint, 0, receiver{});
   EXPECT_TRUE(send_to_operation.rearm_on_eagain());
-  io_uring_recvmsg_operation recvmsg_operation(
-      context, stream, receive_message, 0, receiver{});
+  io_uring_recvmsg_operation recvmsg_operation(context, stream, receive_message,
+                                               0, receiver{});
   EXPECT_TRUE(recvmsg_operation.rearm_on_eagain());
-  io_uring_sendmsg_operation sendmsg_operation(
-      context, stream, send_message, 0, receiver{});
+  io_uring_sendmsg_operation sendmsg_operation(context, stream, send_message, 0,
+                                               receiver{});
   EXPECT_TRUE(sendmsg_operation.rearm_on_eagain());
-  io_uring_read_operation read_operation(
-      context, descriptor, buffer, 0, receiver{});
+  io_uring_read_operation read_operation(context, descriptor, buffer, 0,
+                                         receiver{});
   EXPECT_TRUE(read_operation.rearm_on_eagain());
-  io_uring_write_operation write_operation(
-      context, descriptor, buffer, 0, receiver{});
+  io_uring_write_operation write_operation(context, descriptor, buffer, 0,
+                                           receiver{});
   EXPECT_TRUE(write_operation.rearm_on_eagain());
-  io_uring_readv_operation readv_operation(
-      context, descriptor, vectors, 0, receiver{});
+  io_uring_readv_operation readv_operation(context, descriptor, vectors, 0,
+                                           receiver{});
   EXPECT_TRUE(readv_operation.rearm_on_eagain());
-  io_uring_writev_operation writev_operation(
-      context, descriptor, vectors, 0, receiver{});
+  io_uring_writev_operation writev_operation(context, descriptor, vectors, 0,
+                                             receiver{});
   EXPECT_TRUE(writev_operation.rearm_on_eagain());
 
   // Non-I/O or event-class operations keep the default: a -EAGAIN CQE is
   // not a would-block outcome for them and stays a terminal error.
   bnio::async_io::duration timeout{};
-  io_uring_timeout_operation timeout_operation(
-      context, timeout, 0, 0, receiver{});
+  io_uring_timeout_operation timeout_operation(context, timeout, 0, 0,
+                                               receiver{});
   EXPECT_FALSE(timeout_operation.rearm_on_eagain());
   io_uring_poll_operation poll_operation(context, descriptor, 0, receiver{});
   EXPECT_FALSE(poll_operation.rearm_on_eagain());

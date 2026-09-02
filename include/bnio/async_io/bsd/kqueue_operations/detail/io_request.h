@@ -116,9 +116,9 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
       if (detail::stop_requested(receiver_)) {
         bexec::set_stopped(std::move(receiver_));
       } else {
-        request_.set_value(
-            std::move(receiver_),
-            std::make_error_code(std::errc::operation_canceled), 0, 0);
+        request_.set_value(std::move(receiver_),
+                           std::make_error_code(std::errc::operation_canceled),
+                           0, 0);
       }
       return;
     }

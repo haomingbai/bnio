@@ -149,8 +149,7 @@ class io_uring_resolve_sender {
    * io_context::stop() does not abort.
    */
   using completion_signatures = bexec::completion_signatures<
-      bexec::set_value_t(std::error_code, std::size_t),
-      bexec::set_stopped_t()>;
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   /**
    * Creates a DNS sender for a context and query.

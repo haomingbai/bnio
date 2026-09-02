@@ -150,9 +150,7 @@ class native_io_operation : public io_context::operation_base {
   /** io_context I/O runs through the io_uring submission pipeline; a
    *  transient -EAGAIN CQE re-submits instead of terminating (kqueue
    *  parity, mirroring kqueue_context::perform_io_step()). */
-  [[nodiscard]] bool rearm_on_eagain() const noexcept override {
-    return true;
-  }
+  [[nodiscard]] bool rearm_on_eagain() const noexcept override { return true; }
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
@@ -209,9 +207,9 @@ class native_io_operation : public io_context::operation_base {
         if (stop_requested(receiver_)) {
           bexec::set_stopped(std::move(receiver_));
         } else {
-          model_.set_value(
-              std::move(receiver_),
-              std::make_error_code(std::errc::operation_canceled), 0, 0);
+          model_.set_value(std::move(receiver_),
+                           std::make_error_code(std::errc::operation_canceled),
+                           0, 0);
         }
         break;
     }
@@ -356,8 +354,7 @@ class resolve_operation
 class resolve_sender {
  public:
   using completion_signatures = bexec::completion_signatures<
-      bexec::set_value_t(std::error_code, std::size_t),
-      bexec::set_stopped_t()>;
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   resolve_sender(io_context& context, async_io::dns_query query,
                  async_io::dns_result_view result)

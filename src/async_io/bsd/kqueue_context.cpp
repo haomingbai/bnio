@@ -92,16 +92,14 @@ void kqueue_context::queue_exit() noexcept {
     // calling thread.  The delivery assumes global_state_ is wired:
     // io_context::run() keeps its native context bound to the shared
     // state until the context's destructor has completed.
-    run_state_.state.store(context_state::finishing,
-                           std::memory_order_release);
+    run_state_.state.store(context_state::finishing, std::memory_order_release);
     abort_inflight_io();
     drain_local_cpu_tasks();
     while (consume_io_tasks()) {
       abort_inflight_io();
       drain_local_cpu_tasks();
     }
-    run_state_.state.store(context_state::finished,
-                           std::memory_order_release);
+    run_state_.state.store(context_state::finished, std::memory_order_release);
   }
 
   scheduling_state_.next_registration_sequence = 0;
