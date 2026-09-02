@@ -117,6 +117,13 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
 
   void complete_submit_stopped() noexcept override { complete_with_stopped(); }
 
+  /** Returns whether a -EAGAIN CQE re-submits this operation instead of
+   *  terminating it. Opted in by read/write-class operations through
+   *  enable_eagain_rearm(). */
+  [[nodiscard]] bool rearm_on_eagain() const noexcept override {
+    return rearm_on_eagain_;
+  }
+
  protected:
   /**
    * Creates a receiver operation associated with an io_uring context.
@@ -132,6 +139,15 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
     auto token = bexec::query(env, bexec::get_stop_token);
     return token.stop_requested();
   }
+
+  /**
+   * Opts this operation into -EAGAIN re-submission. Read/write-class
+   * operations on sockets and files call this from their constructor so a
+   * transient would-block CQE is re-submitted through the I/O queue
+   * (mirroring kqueue_context::perform_io_step()) instead of being
+   * delivered as a terminal error.
+   */
+  void enable_eagain_rearm() noexcept { rearm_on_eagain_ = true; }
 
   /**
    * Selects set_value(empty ec, ...) completion for this operation.
@@ -200,6 +216,12 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
    * completion_ is value_with_ec. Empty for the value channel.
    */
   std::error_code error_;
+
+  /**
+   * Whether a -EAGAIN CQE re-submits this operation (read/write-class
+   * operations only; see enable_eagain_rearm()).
+   */
+  bool rearm_on_eagain_ = false;
 };
 
 }  // namespace detail

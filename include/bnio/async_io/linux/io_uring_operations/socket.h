@@ -39,7 +39,9 @@ class io_uring_accept_operation
                                                       std::move(receiver)),
         socket_(socket),
         remote_endpoint_(&remote_endpoint),
-        accept_flags_(accept_flags) {}
+        accept_flags_(accept_flags) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Stores an accepted socket without collecting its remote endpoint.
@@ -50,7 +52,9 @@ class io_uring_accept_operation
       : detail::io_uring_receiver_operation<Receiver>(context,
                                                       std::move(receiver)),
         socket_(socket),
-        accept_flags_(accept_flags) {}
+        accept_flags_(accept_flags) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the accept SQE.
@@ -119,7 +123,9 @@ class io_uring_connect_operation
       : detail::io_uring_receiver_operation<Receiver>(context,
                                                       std::move(receiver)),
         socket_(socket),
-        address_(remote_endpoint) {}
+        address_(remote_endpoint) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the connect SQE.
@@ -157,7 +163,9 @@ class io_uring_recv_operation
                                                       std::move(receiver)),
         socket_(socket),
         buffer_(buffer),
-        recv_flags_(recv_flags) {}
+        recv_flags_(recv_flags) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the recv SQE.
@@ -197,7 +205,9 @@ class io_uring_send_operation
                                                       std::move(receiver)),
         socket_(socket),
         buffer_(buffer),
-        send_flags_(send_flags) {}
+        send_flags_(send_flags) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the send SQE.
@@ -235,7 +245,9 @@ class io_uring_datagram_receive_operation
                                                       std::move(receiver)),
         socket_(socket),
         buffer_(buffer),
-        receive_flags_(receive_flags) {}
+        receive_flags_(receive_flags) {
+    this->enable_eagain_rearm();
+  }
 
   void prepare(bnio::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_recv(socket_.native_handle(), buffer_.data,
@@ -265,7 +277,9 @@ class io_uring_datagram_send_operation
                                                       std::move(receiver)),
         socket_(socket),
         buffer_(buffer),
-        send_flags_(send_flags) {}
+        send_flags_(send_flags) {
+    this->enable_eagain_rearm();
+  }
 
   void prepare(bnio::base::submission_queue_entry& sqe) noexcept override {
     sqe.prep_send(socket_.native_handle(), buffer_.data,
@@ -298,7 +312,9 @@ class io_uring_recvmsg_operation
                                                       std::move(receiver)),
         socket_(socket),
         message_(message),
-        message_flags_(message_flags) {}
+        message_flags_(message_flags) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the recvmsg SQE.
@@ -339,7 +355,9 @@ class io_uring_sendmsg_operation
                                                       std::move(receiver)),
         socket_(socket),
         message_(message),
-        message_flags_(message_flags) {}
+        message_flags_(message_flags) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the sendmsg SQE.
@@ -379,7 +397,9 @@ class io_uring_receive_from_operation
         socket_(socket),
         buffer_(buffer),
         remote_endpoint_(&remote_endpoint),
-        receive_flags_(receive_flags) {}
+        receive_flags_(receive_flags) {
+    this->enable_eagain_rearm();
+  }
 
   void prepare(bnio::base::submission_queue_entry& sqe) noexcept override {
     remote_address_ = {};
@@ -436,7 +456,9 @@ class io_uring_send_to_operation
         socket_(socket),
         buffer_(buffer),
         remote_address_(remote_endpoint),
-        send_flags_(send_flags) {}
+        send_flags_(send_flags) {
+    this->enable_eagain_rearm();
+  }
 
   void prepare(bnio::base::submission_queue_entry& sqe) noexcept override {
     buffer_entry_ = {buffer_.data, detail::bounded_io_size(buffer_.size)};

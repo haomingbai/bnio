@@ -313,17 +313,28 @@ class BNIO_EXPORT io_uring_context {
       io_uring_io_operation_base*& prepared) noexcept;
 
   /**
-   * Submits the prepared SQEs. On success, registers every prepared
-   * operation in the inflight list and clears the next pointers; on
-   * failure the list stays linked for the caller to fail. Returns 0
+   * Registers every prepared operation in the inflight list and clears
+   * the next pointers. Deliberately separate from submit_ring(): inflight
+   * registration is a bookkeeping step that must cover every operation
+   * holding a prepared SQE, and a transient -EAGAIN CQE re-enters the
+   * pipeline by re-running prepare + submit + track on the same operation.
+   */
+  void track_prepared_batch(
+      io_uring_io_operation_base*& prepared) noexcept;
+
+  /**
+   * Submits the prepared SQEs. Every prepared operation is registered in
+   * the inflight list before the submit call, so a submit failure fails
+   * them through fail_io_list() (which also unregisters them). Returns 0
    * without a syscall when prepared is null.
    */
   [[nodiscard]] int submit_and_track_prepared(
       io_uring_io_operation_base* prepared) noexcept;
 
   /**
-   * Fails every operation in the list with a submission error and pushes
-   * it to the local CPU queue.
+   * Unregisters every operation in the list from the inflight list, fails
+   * each with the given submission error, and pushes it to the local CPU
+   * queue.
    */
   void fail_io_list(io_uring_io_operation_base* head, int result) noexcept;
 

@@ -151,6 +151,22 @@ bool io_uring_context::enqueue_cqe_task(const cqe_data& data,
 
   operation->result = data.result;
   operation->flags = data.flags;
+
+  // Transient would-block: the kernel delivers a -EAGAIN CQE only when the
+  // request was marked REQ_F_NOWAIT (RWF_NOWAIT, or an O_NONBLOCK file that
+  // does not support nowait); socket operations are converted into an
+  // armed poll internally and never reach this point. Re-enter the
+  // submission pipeline instead of delivering EAGAIN as a terminal error,
+  // mirroring kqueue_context::perform_io_step(). The operation was
+  // unregistered above and re-runs prepare + submit + track on the next
+  // consume_io_tasks() pass; its completion state is still the pending
+  // value channel, so nothing to reset. Errors other than -EAGAIN are
+  // terminal and fall through.
+  if (data.result == -EAGAIN && io_op->rearm_on_eagain()) {
+    local_state_.push_io(*io_op);
+    return false;
+  }
+
   tasks.push(*operation);
   return true;
 }

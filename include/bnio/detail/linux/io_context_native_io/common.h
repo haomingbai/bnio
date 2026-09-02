@@ -145,6 +145,13 @@ class native_io_operation : public io_context::operation_base {
     completion_ = completion_kind::stopped;
   }
 
+  /** io_context I/O runs through the io_uring submission pipeline; a
+   *  transient -EAGAIN CQE re-submits instead of terminating (kqueue
+   *  parity, mirroring kqueue_context::perform_io_step()). */
+  [[nodiscard]] bool rearm_on_eagain() const noexcept override {
+    return true;
+  }
+
   void start() noexcept {
     if (stop_requested(receiver_)) {
       // stop-token cancel: route through set_value(operation_canceled, ...).

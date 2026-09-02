@@ -36,7 +36,9 @@ class io_uring_read_operation
                                                       std::move(receiver)),
         descriptor_(descriptor),
         buffer_(buffer),
-        offset_(offset) {}
+        offset_(offset) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the read SQE.
@@ -77,7 +79,9 @@ class io_uring_write_operation
                                                       std::move(receiver)),
         descriptor_(descriptor),
         buffer_(buffer),
-        offset_(offset) {}
+        offset_(offset) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the write SQE.
@@ -118,7 +122,9 @@ class io_uring_readv_operation
                                                       std::move(receiver)),
         descriptor_(descriptor),
         buffers_(buffers),
-        offset_(offset) {}
+        offset_(offset) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the readv SQE.
@@ -159,7 +165,9 @@ class io_uring_writev_operation
                                                       std::move(receiver)),
         descriptor_(descriptor),
         buffers_(buffers),
-        offset_(offset) {}
+        offset_(offset) {
+    this->enable_eagain_rearm();
+  }
 
   /**
    * Prepares the writev SQE.

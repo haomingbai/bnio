@@ -97,32 +97,35 @@ io_uring_io_operation_base* io_uring_context::prepare_io_batch(
   return nullptr;
 }
 
+void io_uring_context::track_prepared_batch(
+    io_uring_io_operation_base*& prepared) noexcept {
+  // Register every prepared operation in the inflight list before their
+  // next pointers are cleared. Registration precedes submission, so an
+  // operation holding a prepared SQE is always reachable by the abort
+  // path (abort_inflight_io) regardless of the submit outcome.
+  auto* current = prepared;
+  while (current != nullptr) {
+    auto* next_op = static_cast<io_uring_io_operation_base*>(current->next);
+    add_inflight(*current);
+    current = next_op;
+  }
+  while (prepared != nullptr) {
+    io_uring_io_operation_base* operation = prepared;
+    prepared = static_cast<io_uring_io_operation_base*>(operation->next);
+    operation->next = nullptr;
+  }
+}
+
 int io_uring_context::submit_and_track_prepared(
     io_uring_io_operation_base* prepared) noexcept {
   if (prepared == nullptr) {
     return 0;
   }
-  // Submit the prepared SQEs. On success, register every prepared
-  // operation in the inflight list before clearing their next pointers;
-  // on failure the list stays linked and the caller decides how to fail
-  // the operations.
-  const int result = submit_ring();
-  if (result >= 0) {
-    // Add every prepared operation to the inflight list before
-    // clearing their next pointers.
-    auto* current = prepared;
-    while (current != nullptr) {
-      auto* next_op = static_cast<io_uring_io_operation_base*>(current->next);
-      add_inflight(*current);
-      current = next_op;
-    }
-    while (prepared != nullptr) {
-      io_uring_io_operation_base* operation = prepared;
-      prepared = static_cast<io_uring_io_operation_base*>(operation->next);
-      operation->next = nullptr;
-    }
-  }
-  return result;
+  // Inflight registration is deliberately separated from the submit
+  // syscall: every prepared operation is tracked before io_uring_submit,
+  // and a failed submit untracks them through fail_io_list().
+  track_prepared_batch(prepared);
+  return submit_ring();
 }
 
 void io_uring_context::fail_io_list(io_uring_io_operation_base* head,
@@ -131,6 +134,9 @@ void io_uring_context::fail_io_list(io_uring_io_operation_base* head,
     io_uring_io_operation_base* operation = head;
     head = static_cast<io_uring_io_operation_base*>(operation->next);
     operation->next = nullptr;
+    // Undo the registration performed by track_prepared_batch(); a no-op
+    // for operations that failed before they were ever registered.
+    remove_inflight(*operation);
     operation->complete_submit_error(result);
     local_state_.push_cpu(*operation);
   }

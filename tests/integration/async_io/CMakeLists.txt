@@ -26,6 +26,9 @@ if(BNIO_PLATFORM_LINUX)
                                      PROPERTIES TIMEOUT 30)
   bnio_add_integration_async_io_test(udp_io_uring udp_io_uring_test.cpp
                                      PROPERTIES TIMEOUT 10)
+  bnio_add_integration_async_io_test(io_uring_eagain_rearm
+                                     io_uring_eagain_rearm_test.cpp
+                                     PROPERTIES TIMEOUT 30)
 endif()
 if(BNIO_PLATFORM_BSD)
   bnio_add_integration_async_io_test(kqueue_run_loop kqueue_run_loop_test.cpp)

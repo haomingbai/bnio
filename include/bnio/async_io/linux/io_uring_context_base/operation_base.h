@@ -239,6 +239,14 @@ class BNIO_EXPORT io_uring_io_operation_base : public io_uring_operation_base {
    * I/O. */
   virtual void complete_submit_stopped() noexcept = 0;
 
+  /** Returns whether a CQE carrying -EAGAIN is a transient would-block
+   *  outcome that must be re-submitted through the I/O queue instead of
+   *  being delivered as a terminal error. Read/write-class operations on
+   *  sockets and files return true, mirroring kqueue_context::
+   *  perform_io_step(); poll/nop/timeout-class operations keep the default
+   *  (false). */
+  [[nodiscard]] virtual bool rearm_on_eagain() const noexcept { return false; }
+
   /** Intrusive links for the inflight doubly-linked list. */
   io_uring_io_operation_base* io_next = nullptr;
   io_uring_io_operation_base* io_prev = nullptr;
