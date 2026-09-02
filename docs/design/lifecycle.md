@@ -351,7 +351,11 @@ transitions:
 (non-stopped) context**; the in-lock check makes that assumption explicit
 and atomic with the enqueue. When the context is already stopping they do
 not enqueue (the queue may no longer be drained) and return `false`; the
-caller then completes the operation inline (e.g. `set_stopped`). This
+caller then completes the operation inline, and the final channel of that
+inline completion is decided by the operation's observation-point
+arbitration (see "Stop-channel arbitration" below): a cancelled receiver
+stop token delivers `set_stopped`, while a publish rejected by context stop
+with no token race delivers `set_value(operation_canceled)`. This
 closes both previously-documented shutdown races:
 
 Only the shared-queue path can return `false`. A caller that is itself a
@@ -359,7 +363,9 @@ worker of this context publishes to its own local queue without the lock and
 without the shutdown check, and always reports success: the publisher is the
 thread that drains that queue, and native `finish()` keeps consuming and
 aborting I/O until both queues stay empty, so such an operation is still
-delivered — as a stop, not as a strand — even while the context is stopping.
+delivered — through the stop channel as `set_value(operation_canceled)`
+when no stop token races, not stranded — even while the context is
+stopping.
 
 - an operation submitted after the last worker's final drain completes
   inline instead of stranding in a queue no worker ever drains again;
@@ -384,16 +390,88 @@ stranding them with no worker left to drain.
 
 ### Abnormal close delivers every completion
 
-`queue_exit()` no longer discards pending work. It marks the context
-finishing and runs the same abort-and-deliver path as `finish()`: inflight
-and shared-queued I/O is aborted with `-ECANCELED`, completed via
-`set_stopped`, and executed synchronously on the calling thread before the
-ring closes. Forced/abnormal close therefore reaches a terminal receiver
-call for every operation that was published to the context — nothing is
-silently dropped, even when `run()` never drained the queues. The same
-delivery guarantee covers fatal run-loop errors, which route through the
-`finish_drain` phase (drain → abort → deliver) instead of exiting the loop
-directly.
+`queue_exit()` no longer discards pending work on either platform. It marks
+the context finishing and runs the same abort-and-deliver path as
+`finish()`: inflight and shared-queued I/O is aborted with `-ECANCELED`,
+completed via the stop channel, and executed synchronously on the calling
+thread before the native backend closes; with no stop token racing, each
+completion is then delivered as `set_value(operation_canceled)`. On Linux
+this is `io_uring_context`'s existing abort-and-deliver sequence; on BSD
+`kqueue_context::queue_exit()` (`src/async_io/bsd/kqueue_context.cpp`) now
+mirrors it — guarded by a not-already-finished precondition, it marks
+finishing, aborts inflight I/O, drains local CPU tasks, and consumes I/O
+tasks (re-aborting after each batch) until both queues stay empty. Forced
+or abnormal close therefore reaches a terminal receiver call for every
+operation that was published to the context — nothing is silently dropped,
+even when `run()` never drained the queues. The same delivery guarantee
+covers fatal run-loop errors, which route through the `finish_drain` phase
+(drain → abort → deliver) instead of exiting the loop directly.
+
+### Stop-channel arbitration
+
+The unified stop contract decouples the internal stopped marker from the
+final receiver signal. `complete_submit_stopped()` — the pure virtual every
+abort path calls
+(`include/bnio/async_io/linux/io_uring_context_base/operation_base.h:240`,
+`include/bnio/async_io/bsd/kqueue_context_base/operation_base.h:266`) —
+only tags the completion as stopped; the abort machinery itself
+(`abort_inflight_io()`, `drain_io_list_complete_stopped()`, publish
+rejection) is unchanged. Arbitration lives at a single point, each
+operation's `execute()`: the `stopped` branch queries the receiver's stop
+token — a cancelled token wins and delivers `set_stopped()`, otherwise the
+abort delivers `set_value(operation_canceled)` with the operation's payload
+(e.g. zero bytes transferred). The `value` / `value_with_ec` branches never
+query the token: real results and kernel `ECANCELED` are delivered
+untouched. See the io_uring I/O operation
+(`include/bnio/detail/linux/io_context_native_io/common.h:204`) and its
+kqueue mirrors (`include/bnio/detail/bsd/io_context_native_io/common.h:131`
+and `:288`). `start()` applies the same rule proactively: its token
+pre-check no longer produces `value(operation_canceled)` directly but tags
+the completion stopped and routes through the same arbitration
+(`include/bnio/detail/linux/io_context_native_io/common.h:157`).
+
+`schedule_sender::complete()` arbitrates in the order token →
+`context_->is_stopped()` → `value({})`
+(`include/bnio/detail/posix/io_context/class.h:176`), which makes both
+"queued CPU work that never ran delivers `value(operation_canceled)`" and
+"the token wins the race" hold at the single delivery point.
+`resolve_operation::execute()` is three-way: token cancelled →
+`set_stopped()`; context stopped → `set_value(operation_canceled, 0)` with
+DNS skipped (queued work that never executed); otherwise run the resolver
+and deliver the real result
+(`include/bnio/detail/bsd/io_context_native_io/common.h:359`, Linux mirror
+`include/bnio/detail/linux/io_context_native_io/common.h:303`). The
+async_io-layer resolve senders arbitrate the token only and never observe
+io_context stop (`include/bnio/async_io/bsd/kqueue_operations/resolve.h:89`,
+Linux mirror `include/bnio/async_io/linux/io_uring_operations/resolve.h`),
+matching the post-operation layering difference documented below.
+
+Two teardown rules complete the picture. `io_uring_context::consume_io_tasks()`
+checks `stop_requested() || closing_requested()` up front and routes any
+I/O operation consumed in that state straight through the stop channel
+instead of preparing and submitting it — a submit failure on a dying ring
+(e.g. `EBADFD`) must not surface as a generic error where the contract
+requires the cancellation channel; this also implements the
+not-yet-executed queued-work rule
+(`src/async_io/linux/io_uring_context_io_tasks.cpp:17`). kqueue needs no
+such guard — `EV_ADD` still succeeds while the kqueue fd is open, so
+consumed operations reach the inflight → abort path naturally — and
+instead `kqueue_context::queue_exit()` was aligned with the io_uring
+abort-and-deliver pattern (see "Abnormal close delivers every
+completion"). Timer aborts do not arbitrate at all:
+`abort_pending_timer_waits()` stages `timer_completion_kind::canceled` on
+the stopping thread, the kind is fixed at staging time, and `execute()`
+maps it directly to `set_value(operation_canceled)`
+(`include/bnio/detail/posix/io_context/class.h:800`,
+`include/bnio/detail/posix/io_context/timer_wait.h:40`; see
+[`timer.md`](timer.md)).
+
+One deliberate layering difference remains: the async_io-layer post
+operations (`kqueue_post_operation` / `io_uring_post_operation`) keep
+delivering `set_value({})` when a posted task is never executed because
+the context stopped — the async_io layer does not observe io_context
+lifecycle state, so a queued-but-unexecuted post is not reported as
+`operation_canceled`.
 
 ### Native context single-owner guarantee
 

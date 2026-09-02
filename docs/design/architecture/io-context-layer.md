@@ -223,6 +223,71 @@ transferred so far through the `set_value(operation_canceled, ...)` payload;
 only these two completion channels; `set_error` is not part of it — no bnio
 `completion_signatures` include it, and no bnio receiver implements it.
 
+#### Completion Arbitration Design
+
+The contract above is implemented with one arbitration point per
+operation; the abort machinery itself is untouched.
+
+- **Arbitration in `execute()`, aborts unchanged.** Every operation's
+  `execute()` has a `stopped` branch, and that branch arbitrates: it
+  queries the stop token in the receiver environment — cancelled delivers
+  `set_stopped()`, otherwise it delivers
+  `set_value(operation_canceled, ...)` with the operation's cancellation
+  payload. The `value`/`value_with_ec` branches never consult the token,
+  so real results and kernel-level `ECANCELED` are delivered unchanged.
+  `complete_submit_stopped()` in both backends still only marks a
+  completion as stopped (the stop channel); all abort paths
+  (`abort_inflight_io()`, `drain_io_list_complete_stopped()`, publish
+  rejection) are unchanged, keeping the risk surface minimal. On io_uring,
+  a teardown guard at the top of `consume_io_tasks()` routes I/O consumed
+  in the stopping/closing state through the stop channel instead of
+  preparing SQEs the dying ring could no longer submit.
+- **`start()` pre-checks flipped to the stop channel.** Operations that
+  pre-checked the token in `start()` and used to deliver
+  `value(operation_canceled)` now mark the stopped channel, so the same
+  `execute()` arbitration delivers `set_stopped()` — at that point the
+  token necessarily wins. Write-all does this inline
+  (`detail/posix/io_context/write_all.h:247`).
+- **Schedule observes once, in order.** The schedule sender's completion
+  arbitrates token → `context_->is_stopped()` → `set_value({})` at its
+  single observation point (`detail/posix/io_context/class.h:176`), so
+  "queued CPU work drained at stop delivers
+  `set_value(operation_canceled)`" and "the token wins the race" hold
+  together at one point.
+- **Timers stage the channel; `execute()` maps it.** The timer-wait
+  `start()` token pre-check stages `timer_completion_kind::stopped`
+  (`detail/posix/io_context/timer_wait.h:24`); `abort_pending_timer_waits()`
+  on context stop and the timer object API stage `::canceled`. `execute()`
+  maps stopped → `set_stopped()` and canceled →
+  `set_value(operation_canceled)`. Timer aborts do not re-check the token:
+  the kind is fixed when staged on the stopping thread.
+- **Composite layers simplified.** Under the new contract a `set_stopped()`
+  arriving at a composed receiver can only originate from a token, so
+  write-all's repeat receiver forwards it unconditionally
+  (`detail/posix/io_context/write_all.h:216`) and the old
+  token-vs-context double branch and `complete_canceled` are gone; the SSL
+  read/write handlers do the same
+  (`detail/ssl/async_operations/read_write/operation.h:58`,
+  `step.h:97`). The SSL state machine's post receiver was also fixed to
+  override a stale staged completion with `complete_stopped()` before
+  delivering the terminal call
+  (`detail/ssl/async_operations/state_machine.h:131`) — otherwise a token
+  stop delivered by the schedule could be swallowed by an older pending
+  value; the `set_value(ec)` overwrite for context-stop
+  `value(operation_canceled)` delivery is retained
+  (`detail/ssl/async_operations/state_machine.h:118`).
+- **Resolve is three-stage with a source-incompatible signature.** The
+  posix resolve `execute()` checks the token (`set_stopped()`), then
+  `context_->is_stopped()` (`set_value(operation_canceled, 0)` with DNS
+  skipped — the not-yet-executed queued-work rule), then runs the resolver
+  and delivers the real result
+  (`detail/linux/io_context_native_io/common.h:323`,
+  `detail/bsd/io_context_native_io/common.h:359`). Resolve sender
+  signatures gained `set_stopped_t()`. The async_io-layer resolve mirrors
+  the token arbitration and signature change but does not check context
+  stop — that layer does not observe `life_state` (see
+  [`async-io-layer.md`](async-io-layer.md)).
+
 #### Eager Immediate-Completion Toggle
 
 The eager switch is a runtime `io_context_options` field:

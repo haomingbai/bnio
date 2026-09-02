@@ -46,8 +46,8 @@ Each `steady_timer` owns one `detail::timer_slot`.
 | `active` | `true` only while the slot belongs to the active time heap. |
 
 `timer_state_data::ready` is a separate intrusive list of waits that have
-already selected value or stopped completion. It is drained only by a native
-worker's passive timer check.
+already selected value, canceled, or stopped completion. It is drained only
+by a native worker's passive timer check.
 
 The topology metadata is three pointers and one Boolean:
 
@@ -141,9 +141,9 @@ timer.submitted.head = &operation;
 ```
 
 This removes tail maintenance and preserves the timer subsystem's intrusive,
-allocation-free registration path. An expired, stopped, or cancelled operation
-first enters the timer-ready list; a native worker transfers that list to its
-own local CPU queue during its next loop check.
+allocation-free registration path. An expired, token-cancelled, or aborted
+operation first enters the timer-ready list; a native worker transfers that
+list to its own local CPU queue during its next loop check.
 
 ## Expiry Replacement and Cancellation
 
@@ -152,7 +152,8 @@ own local CPU queue during its next loop check.
 1. Remove the slot from its current heap/list container.
 2. Store the new expiry.
 3. Detach the one submitted head-linked queue.
-4. Mark the detached operations stopped and link them into the timer-ready
+4. Mark the detached operations canceled (they deliver
+   `set_value(operation_canceled)`) and link them into the timer-ready
    list.
 5. Insert it into the active heap or inactive list according to the new time.
 6. Release the mutex.
@@ -208,7 +209,9 @@ next loop check will select the new deadline.
 ## Destruction and Debug Builds
 
 Unregistration removes a timer from its heap/list and places only actual
-pending waits on the timer-ready list with stopped completion. It does not
+pending waits on the timer-ready list with canceled completion
+(unregistration is a timer-object abort, so those waits deliver
+`set_value(operation_canceled)`). It does not
 submit a native timer operation merely to recompute a deadline, because
 passive deadline selection happens naturally on the next worker loop check.
 
@@ -216,12 +219,14 @@ When `io_context::stop()` is called, `begin_stop()` first calls
 `abort_pending_timer_waits()` — **before** taking `submit_lock` and
 publishing `life_state = 1`.  The abort iterates every active and
 inactive timer slot, detaches each slot's pending submitted waits, marks
-them `timer_completion_kind::stopped`, and enqueues them into
+them `timer_completion_kind::canceled`, and enqueues them into
 `timers_.ready`.  Only then is the stopping state published, so every
 native worker that later observes `life_state != 0` and enters its
 `finish()` path sees a fully populated `timers_.ready` and drains those
-stopped completions via `consume_timeout_operations()` during its Phase 1
-drain loop.  Every receiver waiting on a timer receives `set_stopped()`.
+canceled completions via `consume_timeout_operations()` during its Phase 1
+drain loop.  Every receiver waiting on a timer receives
+`set_value(operation_canceled)` — a context-stop abort is not token
+cancellation.
 
 This ordering — abort before the stopping-state publication — is the
 happens-before guarantee: the release store of `life_state` on the stop
@@ -234,6 +239,32 @@ closing the window where a worker could observe the stopping state,
 drain the still-empty `timers_.ready`, and exit before the abort staged
 the operations — which would permanently strand them with no worker left
 to drain.
+
+## Completion Kinds and Channels
+
+Timer completions carry one of three kinds, and
+`timer_wait_operation::execute()` maps each kind to exactly one receiver
+call (`include/bnio/detail/posix/io_context/timer_wait.h:40`):
+
+| Kind | Staged by | Delivered as |
+|---|---|---|
+| `stopped` | `start()` token pre-check: the receiver's stop token is already cancelled (`include/bnio/detail/posix/io_context/timer_wait.h:24`) | `set_stopped()` |
+| `canceled` | `cancel()`, expiry replacement, destruction unregistration, and the context-stop abort `abort_pending_timer_waits()` | `set_value(operation_canceled)` |
+| `value` | expiry processing | `set_value({})` |
+
+`set_stopped` is therefore reserved for observed token cancellation; every
+timer-object abort and every context-stop abort delivers
+`value(operation_canceled)`, matching the unified stop contract documented
+in [`lifecycle.md`](lifecycle.md).
+
+Timer aborts do not re-arbitrate at `execute()` time — unlike I/O
+operations, whose `execute()` arbitrates between the token and a
+context-stop abort. The kind is fixed when the completion is staged: under
+the timer mutex for object-API cancellation, and on the stopping thread for
+`abort_pending_timer_waits()`, which runs before `life_state` is
+published. No staging site can race a later channel decision, so the
+delivery channel is decided exactly once, at the observation point where
+the abort happened.
 
 ## Invariants
 

@@ -171,8 +171,19 @@ inline, so a submission through that layer never strands.
 The async_io layer omits the gate because these are internal interfaces: it
 assumes a correctly driven lifecycle. Anyone calling `post()` or
 `publish_io()` directly must guarantee the context keeps running until every
-submitted operation reaches a terminal receiver call (`set_value` with an
-error, or `set_stopped`).
+submitted operation reaches a terminal receiver call (a `set_value` —
+success, error, or `operation_canceled` — or a `set_stopped` on token
+cancellation).
+
+This layer also does not observe `io_context` stop. Token cancellation is
+honored everywhere (a stopped branch that sees a cancelled receiver token
+delivers `set_stopped()`), but a posted CPU task drained during a stop
+delivers `set_value({})`, and `async_resolve()` runs and delivers its real
+result. This is the intentional layering difference from the `io_context`
+schedule sender, whose single observation point arbitrates the receiver
+token first and otherwise reports `set_value(operation_canceled)` when the
+context stopped. Only the high-level layer, which owns `life_state`, can
+implement that not-yet-executed-work rule.
 
 #### Error routing and delivery guarantees
 
@@ -180,11 +191,20 @@ Run-loop failures never strand operations. The phase machine routes fatal
 errors — a failed wake-poll re-arm, a fatal `io_uring_enter` error, or a
 failed `enter_run()` setup — through `finish_drain` (or, in `enter_run()`,
 directly into `finish()`): drain ready CQEs and CPU tasks, abort remaining
-inflight and shared-queued I/O, and deliver every completion
-(`complete_submit_error` → `set_value(ec, ...)`,
-`complete_submit_stopped` → `set_stopped`) before the context reaches
-`finished`. A fatal ring or wake-channel error therefore cannot exit the
-loop with receivers left silent.
+inflight and shared-queued I/O, and deliver every completion before the
+context reaches `finished`. A fatal ring or wake-channel error therefore
+cannot exit the loop with receivers left silent.
+
+Delivery through the stop path is two-stage. `complete_submit_error`
+delivers `set_value(ec, ...)` directly. `complete_submit_stopped()` only
+marks the completion as stopped (the stop channel); the final signal is
+decided by the token arbitration in each operation's `execute()` stopped
+branch: if the receiver's stop token is cancelled, the operation delivers
+`set_stopped()`; otherwise it delivers
+`set_value(operation_canceled, ...)` — the not-yet-executed queued-work
+rule of `io_context::stop()`. The `value`/`value_with_ec` branches of
+`execute()` never consult the token, so already-completed results and
+kernel-level `ECANCELED` are delivered unchanged.
 
 Transient `-EAGAIN` from a wake-poll re-arm is not fatal. It means the SQ is
 under pressure (typically SQPOLL, where only the kernel poll thread frees SQ
@@ -195,11 +215,24 @@ while collecting an eventfd CQE is ignored and re-handled by the single
 policy point in `wait_for_io_work()`, so transient pressure never
 half-closes the context.
 
+A teardown guard at the top of `consume_io_tasks()` protects the
+cancellation contract once the context is stopping or closing: I/O
+operations consumed from the SQ-full retry slot or either I/O queue are
+then routed straight through `drain_io_list_complete_stopped()` instead of
+being prepared and submitted — with the ring going away, a submit failure
+such as `EBADFD` would surface as a generic error where the contract
+requires the stop channel, and the guard also implements the
+not-yet-executed queued-work rule. The guard gates only the
+stopping/closing state; the normal run path is unchanged. kqueue needs no
+counterpart: `EV_ADD` still succeeds before the kqueue fd closes, so its
+operations reach the inflight→abort path and its correct channel.
+
 `queue_exit()` delivers as well: it marks the context finishing and runs the
 same abort-and-deliver path as `finish()` before closing the ring, so a
-forced/abnormal close (e.g. destruction without `run()`) completes every
-inflight and queued operation with `-ECANCELED`/`set_stopped` instead of
-discarding it.
+forced/abnormal close (e.g. destruction without `run()`) marks every
+inflight and queued operation through the stop channel instead of
+discarding it, and each operation's `execute()` arbitration then delivers
+`set_stopped()` (token cancelled) or `set_value(operation_canceled, ...)`.
 
 ### `io_uring_context_options`
 
