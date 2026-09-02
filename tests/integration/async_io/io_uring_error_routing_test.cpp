@@ -185,10 +185,12 @@ TEST(IoUringErrorRoutingTest,
 
   // The inflight poll operation must reach a terminal signal.
   EXPECT_TRUE(reached_terminal("poll", poll_state->signal, "shared-wake"));
-  EXPECT_TRUE(poll_state->signal == signal_kind::stopped ||
-              poll_state->signal == signal_kind::error)
+  // Context stop aborts inflight work through set_value(operation_canceled).
+  EXPECT_EQ(poll_state->signal, signal_kind::error);
+  EXPECT_EQ(poll_state->error,
+            std::make_error_code(std::errc::operation_canceled))
       << "shared-wake: expected aborted inflight poll to complete with "
-         "set_stopped or set_value(error)";
+         "set_value(operation_canceled)";
 
   if (descriptors[0] >= 0) {
     (void)::close(descriptors[0]);
@@ -246,10 +248,12 @@ TEST(IoUringErrorRoutingTest,
          "reached";
 
   EXPECT_TRUE(reached_terminal("poll", poll_state->signal, "shared-wake"));
-  EXPECT_TRUE(poll_state->signal == signal_kind::stopped ||
-              poll_state->signal == signal_kind::error)
+  // Context stop aborts inflight work through set_value(operation_canceled).
+  EXPECT_EQ(poll_state->signal, signal_kind::error);
+  EXPECT_EQ(poll_state->error,
+            std::make_error_code(std::errc::operation_canceled))
       << "shared-wake: expected aborted inflight poll to complete with "
-         "set_stopped or set_value(error)";
+         "set_value(operation_canceled)";
 
   if (descriptors[0] >= 0) {
     (void)::close(descriptors[0]);
@@ -313,10 +317,13 @@ TEST(IoUringErrorRoutingTest,
         << "posted task " << index << " stranded";
   }
   EXPECT_TRUE(reached_terminal("poll", poll_state->signal, "enter-run"));
-  EXPECT_TRUE(poll_state->signal == signal_kind::stopped ||
-              poll_state->signal == signal_kind::error)
+  // Context stop aborts never-run queued work through
+  // set_value(operation_canceled).
+  EXPECT_EQ(poll_state->signal, signal_kind::error);
+  EXPECT_EQ(poll_state->error,
+            std::make_error_code(std::errc::operation_canceled))
       << "enter-run: expected published poll op to complete with "
-         "set_stopped or set_value(error)";
+         "set_value(operation_canceled)";
 
   if (descriptors[0] >= 0) {
     (void)::close(descriptors[0]);
@@ -358,11 +365,13 @@ TEST(IoUringErrorRoutingTest, queue_exit_discards_aborted_io_completions) {
   context.queue_exit();
 
   EXPECT_TRUE(reached_terminal("poll", poll_state->signal, "queue-exit"));
-  EXPECT_TRUE(poll_state->signal == signal_kind::stopped ||
-              poll_state->signal == signal_kind::error)
+  // Context stop aborts never-run queued work through
+  // set_value(operation_canceled).
+  EXPECT_EQ(poll_state->signal, signal_kind::error);
+  EXPECT_EQ(poll_state->error,
+            std::make_error_code(std::errc::operation_canceled))
       << "queue-exit: expected aborted poll op to be delivered with "
-         "set_stopped "
-         "or set_value(error) before queue_exit() returned";
+         "set_value(operation_canceled) before queue_exit() returned";
 
   if (descriptors[0] >= 0) {
     (void)::close(descriptors[0]);

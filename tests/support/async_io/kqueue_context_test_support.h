@@ -68,7 +68,8 @@ struct receiver {
   }
 
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop()
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // in-flight work through set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     complete();
   }
@@ -98,7 +99,8 @@ struct poll_receiver {
   }
 
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop()
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // in-flight work through set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     complete();
   }

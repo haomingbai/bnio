@@ -109,7 +109,8 @@ struct receiver {
   }
 
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop()
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // in-flight work through set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     state->in_context = (context != nullptr && context->is_in_context());
     if (stop_on_completion && context != nullptr) {
@@ -137,7 +138,8 @@ struct poll_receiver {
   }
 
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop()
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // in-flight work through set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     state->in_context = (context != nullptr && context->is_in_context());
     if (context != nullptr) {
@@ -174,7 +176,8 @@ struct resolve_receiver {
   }
 
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop()
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // in-flight work through set_value(operation_canceled)
     if (state != nullptr) {
       state->signal = signal_kind::stopped;
       state->in_context = (context != nullptr && context->is_in_context());

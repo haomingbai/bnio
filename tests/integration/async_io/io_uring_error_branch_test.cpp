@@ -15,7 +15,7 @@
 //   - -EINTR spurious wakeup propagation (never fatal);
 //   - timer-heap deadline wait (-ETIME expiry) and empty-heap park;
 //   - local directed wake (wake_one_sleeping) CQE collection;
-//   - queue_exit() delivery of an operation published from a stopped
+//   - queue_exit() delivery of an operation published from an aborted
 //     receiver (abort_and_deliver_completions' consume loop);
 //   - CQE dispatch tiers 2/3 (local budget / shared-queue spill);
 //   - timer-heap fetch returning true without a deadline
@@ -137,8 +137,11 @@ TEST(IoUringErrorBranchTest, enter_run_local_channel_close_delivers_ops) {
     EXPECT_EQ(post_states[index]->signal, signal_kind::value)
         << "posted task " << index << " stranded by the enter_run failure";
   }
-  EXPECT_TRUE(poll_state->signal == signal_kind::stopped ||
-              poll_state->signal == signal_kind::error)
+  // Context stop aborts never-run queued work through
+  // set_value(operation_canceled).
+  EXPECT_EQ(poll_state->signal, signal_kind::error);
+  EXPECT_EQ(poll_state->error,
+            std::make_error_code(std::errc::operation_canceled))
       << "published poll op stranded by the enter_run failure";
   EXPECT_TRUE(poll_state->in_context)
       << "aborted completion must be delivered on the run()-caller thread";
@@ -568,24 +571,25 @@ struct republishing_poll_receiver {
       state->result = static_cast<int>(events);
     }
     state->in_context = (context != nullptr && context->is_in_context());
-  }
-
-  void set_stopped() noexcept {
-    state->signal = signal_kind::stopped;
-    state->in_context = (context != nullptr && context->is_in_context());
-    if (context != nullptr && follow_up != nullptr) {
+    if (context != nullptr && follow_up != nullptr &&
+        ec == std::make_error_code(std::errc::operation_canceled)) {
       // publish_io() is legal here: the context is finishing (not yet
       // finished) during queue_exit()'s delivery phase.
       context->publish_io(*follow_up);
     }
   }
+
+  void set_stopped() noexcept {
+    state->signal = signal_kind::stopped;
+    state->in_context = (context != nullptr && context->is_in_context());
+  }
 };
 
 // queue_exit() on a context whose published I/O was never run: the
-// abort delivers set_stopped synchronously, and a follow-up operation
-// published from that receiver must itself be consumed, aborted, and
-// delivered by the abort_and_deliver_completions() loop (never
-// silently dropped).
+// abort delivers set_value(operation_canceled) synchronously, and a
+// follow-up operation published from that receiver must itself be
+// consumed, aborted, and delivered by the abort_and_deliver_completions()
+// loop (never silently dropped).
 TEST(IoUringErrorBranchTest, queue_exit_delivers_op_published_on_abort) {
   io_uring_task_queue_state global_tasks;
   std::unique_ptr<io_uring_poll_sender_operation<terminal_poll_receiver>>
@@ -622,10 +626,15 @@ TEST(IoUringErrorBranchTest, queue_exit_delivers_op_published_on_abort) {
 
   context.queue_exit();
 
-  EXPECT_EQ(initial_state->signal, signal_kind::stopped)
+  // Context stop aborts never-run queued work through
+  // set_value(operation_canceled).
+  EXPECT_EQ(initial_state->signal, signal_kind::error);
+  EXPECT_EQ(initial_state->error,
+            std::make_error_code(std::errc::operation_canceled))
       << "initial published op must be aborted and delivered";
-  EXPECT_TRUE(follow_up_state->signal == signal_kind::stopped ||
-              follow_up_state->signal == signal_kind::error)
+  EXPECT_EQ(follow_up_state->signal, signal_kind::error);
+  EXPECT_EQ(follow_up_state->error,
+            std::make_error_code(std::errc::operation_canceled))
       << "follow-up op published from the aborted receiver was dropped "
          "instead of being aborted and delivered";
 

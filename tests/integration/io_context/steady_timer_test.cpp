@@ -348,8 +348,9 @@ TEST(SteadyTimerTest, steady_timer_pre_stopped_token_stops_wait) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  // Contract: a stop token already canceled at start() is observed by the
+  // timer wait and completes via set_stopped (not set_value(operation_canceled)).
+  EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
 TEST(SteadyTimerTest, passive_timer_wakes_workers_for_an_earlier_deadline) {
@@ -446,11 +447,11 @@ TEST(SteadyTimerTest, passive_timer_wakes_workers_for_an_earlier_deadline) {
   EXPECT_EQ(first_order.load(std::memory_order_acquire), 2);
 }
 
-// Positive coverage for set_stopped: io_context::stop() interrupting an
-// inflight timer wait must produce set_stopped on the receiver.  All other
-// tests in this file only assert stopped==0 or rely on cancel()/expires_after
-// which produce ec=operation_canceled via set_value.  This test exercises the
-// pure io_context::stop() path.
+// Contract coverage for io_context::stop() aborting an inflight timer wait:
+// the completion must be set_value(operation_canceled), not set_stopped.
+// Timer-object API cancellations (cancel()/expires_after()) also complete
+// via set_value(operation_canceled); this test exercises the pure
+// io_context::stop() path.
 TEST(SteadyTimerTest, inflight_timer_wait_aborted_by_io_context_stop) {
   bnio::io_context context;
   if (!context_available(context)) {
@@ -507,7 +508,10 @@ TEST(SteadyTimerTest, inflight_timer_wait_aborted_by_io_context_stop) {
   EXPECT_GE(context.stop(), 0);
   worker.join();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  // Contract: context stop aborting an inflight timer wait completes via
+  // set_value(operation_canceled), not set_stopped.
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
 }
 
 TEST(SteadyTimerTest, steady_timer_move_assignment) {

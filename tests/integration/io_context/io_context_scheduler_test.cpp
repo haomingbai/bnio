@@ -125,7 +125,9 @@ TEST(IoContextSchedulerTest, scheduler_schedule_pre_stopped_token_stops) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
+  // Contract: a stop token already canceled at start() is observed by the
+  // schedule operation and completes via set_stopped.
+  EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
 TEST(IoContextSchedulerTest, default_context_runs_on_a_different_thread) {

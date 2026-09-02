@@ -65,7 +65,8 @@ struct byte_receiver {
   }
 
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop()
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // in-flight work through set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     if (context != nullptr) {
       (void)context->stop();
@@ -186,7 +187,8 @@ struct poll_receiver {
   }
 
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop()
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // in-flight work through set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     if (context != nullptr) {
       (void)context->stop();
@@ -232,8 +234,8 @@ struct schedule_receiver {
   }
 
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop(); former stop_token cancellation now
-    // goes through set_value(operation_canceled)
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // queued work through set_value(operation_canceled)
     state->signal = signal_kind::stopped;
     ++state->completions;
     if (context != nullptr && state->completions == target) {

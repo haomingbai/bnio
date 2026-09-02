@@ -154,8 +154,8 @@ TEST(IoUringSenderTest, stop_token_completes_stopped_before_submit) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  // User stop-token cancellation completes through set_stopped().
+  EXPECT_EQ(state->signal, signal_kind::stopped);
   EXPECT_TRUE(state->in_context);
 }
 
@@ -188,8 +188,8 @@ TEST(IoUringSenderTest, accept_cancel_preserves_remote_endpoint) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  // User stop-token cancellation completes through set_stopped().
+  EXPECT_EQ(state->signal, signal_kind::stopped);
   EXPECT_TRUE(remote_endpoint.address().is_v4());
   EXPECT_EQ(remote_endpoint.address().to_v4(),
             initial_endpoint.address().to_v4());
@@ -231,8 +231,8 @@ TEST(IoUringSenderTest, receive_from_cancel_preserves_remote_endpoint) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  // User stop-token cancellation completes through set_stopped().
+  EXPECT_EQ(state->signal, signal_kind::stopped);
   EXPECT_TRUE(remote_endpoint.address().is_v4());
   EXPECT_EQ(remote_endpoint.address().to_v4(),
             initial_endpoint.address().to_v4());

@@ -18,6 +18,8 @@ struct pair_byte_receiver {
     if (ec) {
       state->signal = signal_kind::error;
       state->error = ec;
+      // Canceled completions carry the transferred byte count in the payload.
+      state->size = size;
     } else {
       state->signal = signal_kind::value;
       state->size = size;
@@ -436,7 +438,7 @@ TEST(IoContextReadWriteTest,
   EXPECT_EQ(state->error, std::error_code(EBADF, std::generic_category()));
 }
 
-TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_reports_canceled) {
+TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_stops) {
   bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
@@ -458,11 +460,12 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_read_reports_canceled) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  // Contract: a stop token already canceled at start() is observed by the
+  // operation and completes via set_stopped (not set_value(operation_canceled)).
+  EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
-TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_reports_canceled) {
+TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_stops) {
   bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
@@ -484,8 +487,9 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_reports_canceled) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  // Contract: a stop token already canceled at start() is observed by the
+  // operation and completes via set_stopped (not set_value(operation_canceled)).
+  EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
 TEST(IoContextReadWriteTest, file_write_and_read) {
@@ -630,14 +634,14 @@ TEST(IoContextReadWriteTest, socketpair_70kb_write_all) {
               0);
 }
 
-// Positive coverage for set_stopped: io_context::stop() interrupting an
-// inflight blocking socket read must produce set_stopped on the receiver.
-// async_read is read-all; with the peer never writing, the composite
-// operation parks on its first child read. io_context::stop() aborts the
-// inflight child and propagates set_stopped through the read-all loop to
-// the receiver. All other tests in this file complete reads via data arrival
-// or cancel paths (ec=operation_canceled via set_value); this test exercises
-// the pure io_context::stop() interruption path.
+// Contract coverage for io_context::stop() aborting an inflight blocking
+// socket read: the completion must be set_value(operation_canceled, 0), not
+// set_stopped. async_read is read-all; with the peer never writing, the
+// composite operation parks on its first child read. io_context::stop()
+// aborts the inflight child and the read-all loop reports
+// set_value(operation_canceled, bytes_so_far) to the receiver. All other
+// tests in this file complete reads via data arrival or stop-token paths;
+// this test exercises the pure io_context::stop() interruption path.
 TEST(IoContextReadWriteTest, inflight_socket_read_aborted_by_io_context_stop) {
   bnio::io_context context;
   if (!context_available(context)) {
@@ -702,16 +706,19 @@ TEST(IoContextReadWriteTest, inflight_socket_read_aborted_by_io_context_stop) {
   EXPECT_GE(context.stop(), 0);
   worker.join();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  // Contract: context stop aborting inflight I/O completes via
+  // set_value(operation_canceled, n); no bytes were read before the stop.
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  EXPECT_EQ(state->size, 0u);
 }
 
-// Verifies the set_stopped contract propagates through the write_all
-// composite operation: io_context::stop() aborts an inflight write-all loop
-// and the outer receiver observes set_stopped (not set_value(ec)).
-// The peer never reads, so after the kernel send buffer fills the write_some
-// child parks on EVFILT_WRITE; stop() drains inflight I/O via
-// complete_submit_stopped, repeat_receiver::set_stopped fires, and the
-// write_all_operation forwards set_stopped to its downstream receiver.
+// Contract coverage for io_context::stop() aborting an inflight write-all:
+// the completion must be set_value(operation_canceled, n) where n preserves
+// the byte count transferred before the stop. The peer never reads, so after
+// the kernel send buffer fills the write_some child parks on EVFILT_WRITE;
+// stop() aborts the inflight I/O and the write_all loop reports
+// set_value(operation_canceled, transferred) to the downstream receiver.
 TEST(IoContextReadWriteTest, inflight_write_all_aborted_by_io_context_stop) {
   bnio::io_context context;
   if (!context_available(context)) {
@@ -774,7 +781,13 @@ TEST(IoContextReadWriteTest, inflight_write_all_aborted_by_io_context_stop) {
   EXPECT_GE(context.stop(), 0);
   worker.join();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  // Contract: context stop aborting inflight I/O completes via
+  // set_value(operation_canceled, n). The eager first write_all iterations
+  // filled the kernel send buffer before the child parked, so n must
+  // preserve the partial transfer; the exact count is kernel-dependent.
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  EXPECT_GT(state->size, 0u);
 }
 
 // Covers write_all_operation::start() empty-buffer path (write_all.h:291-294):
@@ -807,20 +820,18 @@ TEST(IoContextReadWriteTest, zero_size_buffer_write_reports_success) {
   EXPECT_EQ(state->size, 0u);
 }
 
-// Covers write_all_operation::repeat_receiver::set_stopped
-// (write_all.h:245-246) and complete_canceled (write_all.h:293-310): when the
-// user stop-token is requested mid-loop and io_context::stop() interrupts the
-// inflight write_some, the repeat_receiver sees stop_requested == true and
-// calls complete_canceled, which reports set_value(operation_canceled,
-// transferred) to the downstream receiver instead of set_stopped.
+// Covers the race rule of the cancellation contract: when the user stop
+// token is requested mid-loop and io_context::stop() interrupts the inflight
+// write_some, the token cancellation wins and the write_all operation
+// completes via set_stopped (not set_value(operation_canceled, transferred)).
 //
 // Setup: fill the sender's send buffer so write_some parks on EVFILT_WRITE.
 // The receiver exposes an inplace_stop_token from a source that is NOT yet
 // requested. After the worker is confirmed active and the write is parked,
 // request stop on the source, then call context.stop() to interrupt the
-// inflight I/O. The stop_requested check in repeat_receiver::set_stopped
-// sees true -> complete_canceled -> set_value(operation_canceled, bytes).
-TEST(IoContextReadWriteTest, write_all_stop_token_mid_loop_canceled) {
+// inflight I/O. Because the token was canceled before the context stop
+// interrupt is observed, the completion channel is set_stopped.
+TEST(IoContextReadWriteTest, write_all_stop_token_mid_loop_stops) {
   bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
@@ -909,7 +920,7 @@ TEST(IoContextReadWriteTest, write_all_stop_token_mid_loop_canceled) {
   EXPECT_GE(context.stop(), 0);
   worker.join();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_TRUE(state->error ==
-              std::make_error_code(std::errc::operation_canceled));
+  // Contract race rule: token cancellation wins over the context stop
+  // interrupt, so the completion channel is set_stopped.
+  EXPECT_EQ(state->signal, signal_kind::stopped);
 }

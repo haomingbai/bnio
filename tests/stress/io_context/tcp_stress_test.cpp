@@ -35,7 +35,8 @@ struct tcp_stress_receiver {
   void set_value(std::error_code ec, int) noexcept { handle(ec); }
   void set_value(std::error_code ec, bnio::tcp_socket) noexcept { handle(ec); }
   void set_stopped() noexcept {
-    // Triggered only by io_context::stop()
+    // Triggered by stop-token cancellation; io_context::stop() aborts
+    // in-flight work through set_value(operation_canceled)
     state->stopped.fetch_add(1, std::memory_order_relaxed);
     complete();
   }

@@ -56,11 +56,16 @@ struct op_holder : op_holder_base {
   Op op;
 };
 
-// Records how the pending accept completed: 1 = set_value, 2 = set_stopped.
+// Records how the pending accept completed: 1 = set_value(operation_canceled),
+// 2 = set_stopped, 4 = set_value with an unexpected error code.
 struct accept_sink {
   std::atomic<int>* outcome;
-  void set_value(std::error_code, bnio::tcp_socket) noexcept {
-    outcome->store(1, std::memory_order_relaxed);
+  void set_value(std::error_code ec, bnio::tcp_socket) noexcept {
+    // Contract: context stop aborting inflight I/O completes via
+    // set_value(operation_canceled).
+    const int result =
+        ec == std::make_error_code(std::errc::operation_canceled) ? 1 : 4;
+    outcome->store(result, std::memory_order_relaxed);
   }
   void set_stopped() noexcept { outcome->store(2, std::memory_order_relaxed); }
 };
@@ -112,8 +117,8 @@ struct accept_sink {
 
   (void)ctx.run();
   // run() returned: the pending accept must have been drained via
-  // set_stopped through finish() -> abort_inflight_io().
-  _exit(accept_outcome.load(std::memory_order_relaxed) == 2 ? 0 : 2);
+  // set_value(operation_canceled) through finish() -> abort_inflight_io().
+  _exit(accept_outcome.load(std::memory_order_relaxed) == 1 ? 0 : 2);
 }
 
 TEST(LifecycleTest, stop_from_signal_handler_unblocks_kernel_wait) {
@@ -151,8 +156,8 @@ TEST(LifecycleTest, stop_from_signal_handler_unblocks_kernel_wait) {
       << "child terminated abnormally (status=0x" << std::hex << status << ")";
   EXPECT_EQ(WEXITSTATUS(status), 0)
       << "child exit " << WEXITSTATUS(status)
-      << " (2 = run() returned but the pending accept was not set_stopped; "
-         "3 = child setup failed)";
+      << " (2 = run() returned but the pending accept did not complete via "
+         "set_value(operation_canceled); 3 = child setup failed)";
 }
 
 }  // namespace

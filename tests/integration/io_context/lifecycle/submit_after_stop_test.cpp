@@ -21,9 +21,9 @@ struct counting_recv {
 // Issue 1 (stranded operations): a schedule() operation submitted after
 // stop() has drained the workers must still complete. publish_cpu rejects
 // the enqueue when the context is stopping (documented: publish assumes a
-// non-stopped context) and the caller completes the operation inline with
-// set_stopped. The lock-free baseline enqueues into a queue that no worker
-// ever drains again, so the receiver never completes.
+// non-stopped context) and the caller completes the operation inline with a
+// canceled completion. The lock-free baseline enqueues into a queue that no
+// worker ever drains again, so the receiver never completes.
 TEST(LifecycleTest, post_schedule_after_stop_completes_inline) {
   auto ctx = std::make_unique<bnio::io_context>();
   if (!ctx->is_open()) {

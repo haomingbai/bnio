@@ -632,7 +632,7 @@ void invalid_descriptor_errors() {
 }
 
 template <bool Eager>
-void pre_stopped_token_canceled() {
+void pre_stopped_token_stops() {
   bnio::io_context context(eager_options<Eager>());
   auto scheduler = context.get_post_scheduler();
 
@@ -655,8 +655,9 @@ void pre_stopped_token_canceled() {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
+  // Contract: a stop token already canceled at start() is observed by the
+  // operation and completes via set_stopped (not set_value(operation_canceled)).
+  EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
 template <bool Eager>
@@ -719,7 +720,10 @@ void io_context_stop_aborts_inflight_read() {
   EXPECT_GE(context.stop(), 0);
   worker.join();
 
-  EXPECT_EQ(state->signal, signal_kind::stopped);
+  // Contract: context stop aborting inflight I/O completes via
+  // set_value(operation_canceled), not set_stopped.
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
 }
 
 template <bool Eager>
@@ -880,13 +884,13 @@ TEST(IoContextEagerOptionalTest, invalid_descriptor_eager_on_and_off) {
   invalid_descriptor_errors<false>();
 }
 
-TEST(IoContextEagerOptionalTest, pre_stopped_token_canceled_eager_on_and_off) {
+TEST(IoContextEagerOptionalTest, pre_stopped_token_stops_eager_on_and_off) {
   bnio::io_context probe;
   if (!context_available(probe)) {
     GTEST_SKIP() << "native I/O context is unavailable";
   }
-  pre_stopped_token_canceled<true>();
-  pre_stopped_token_canceled<false>();
+  pre_stopped_token_stops<true>();
+  pre_stopped_token_stops<false>();
 }
 
 TEST(IoContextEagerOptionalTest,

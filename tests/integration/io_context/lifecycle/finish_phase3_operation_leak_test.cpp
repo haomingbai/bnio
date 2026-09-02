@@ -41,7 +41,10 @@ struct second_receiver {
 };
 
 // Receiver for the first async_read_some that will be aborted by stop().
-// In set_stopped(), it starts a second async_read_some on the same fd.
+// Contract: context stop aborting inflight I/O completes via
+// set_value(operation_canceled), so the Phase 3 repro hook below lives in
+// set_value's error path. In that completion, it starts a second
+// async_read_some on the same fd.
 struct first_receiver {
   bnio::io_context* ctx = nullptr;
   int fd = -1;
@@ -51,15 +54,15 @@ struct first_receiver {
   std::size_t second_buf_size = 0;
   std::vector<std::unique_ptr<op_holder_base>>* ops = nullptr;
 
-  void set_value(std::error_code /*ec*/, std::size_t /*n*/) noexcept {
-    if (first_counter) first_counter->fetch_add(1, std::memory_order_relaxed);
-  }
-
-  void set_stopped() noexcept {
+  void set_value(std::error_code ec, std::size_t /*n*/) noexcept {
     if (first_counter) first_counter->fetch_add(1, std::memory_order_relaxed);
 
-    // Phase 3 bug repro: start a new I/O operation from within
-    // set_stopped(). When this is called from finish() Phase 3
+    if (!ec) {
+      return;  // Normal delivery: the repro only runs on the cancel path.
+    }
+
+    // Phase 3 bug repro: start a new I/O operation from within the canceled
+    // completion. When this is called from finish() Phase 3
     // (via abort_inflight_io -> push_cpu -> execute_tasks), the new
     // operation lands in this worker's local I/O queue via the
     // worker-local fast path in publish_io() (we are on the run-loop
@@ -77,6 +80,10 @@ struct first_receiver {
         sender, second_receiver{second_counter});
     bexec::start(holder->op);
     if (ops) ops->push_back(std::move(holder));
+  }
+
+  void set_stopped() noexcept {
+    if (first_counter) first_counter->fetch_add(1, std::memory_order_relaxed);
   }
 };
 
@@ -123,7 +130,9 @@ TEST(LifecycleTest, finish_phase3_operation_leak) {
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   // Stop the context — triggers Phase 2 (abort_inflight_io) ->
-  // Phase 3 (execute CPU tasks -> first_receiver::set_stopped).
+  // Phase 3 (execute CPU tasks -> first_receiver::set_value(
+  // operation_canceled) and, from inside that completion, the second
+  // async_read_some).
   ctx->stop();
 
   worker.join();

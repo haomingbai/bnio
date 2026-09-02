@@ -154,8 +154,8 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
       busy_ops.push_back(std::move(h));
     }
 
-    // Submit burst timers with far-future expiry — these should be
-    // completed (stopped) by stop().
+    // Submit burst timers with far-future expiry — stop() aborts these
+    // pending waits through set_value(operation_canceled).
     auto far = std::chrono::steady_clock::now() + std::chrono::hours(24);
     for (auto& timer : burst_timers) {
       (void)timer.expires_at(far);

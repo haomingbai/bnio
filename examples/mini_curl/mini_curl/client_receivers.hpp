@@ -89,13 +89,13 @@ struct mini_curl_client::timer_receiver {
   std::shared_ptr<mini_curl_client> client;
 
   void set_value(std::error_code ec) noexcept {
-    // New timer semantics: success ec={}, cancellation ec=operation_canceled
-    // Successful expiry -> on_timeout; canceled by successful completion -> do
-    // nothing
+    // Timer semantics: successful expiry ec={} -> on_timeout; aborted by a
+    // non-token source (io_context::stop(), timer object-API cancellation)
+    // ec=operation_canceled -> do nothing
     if (!ec) client->on_timeout();
   }
   void set_stopped() noexcept {
-    // io_context::stop() — do nothing
+    // Stop-token cancellation — nothing to do
   }
 };
 

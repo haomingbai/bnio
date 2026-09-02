@@ -156,15 +156,12 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
   EXPECT_TRUE(error_state->error == std::errc::connection_reset);
 }
 
-// Covers ssl_io_operation::repeat_receiver::set_stopped (operation.h:57-68)
-// and complete_stopped (operation.h:147): io_context::stop() interrupting an
-// inflight SSL read must produce set_stopped on the downstream receiver.
-// The peer never writes, so the SSL read parks on EVFILT_READ via the
-// transport layer; context.stop() drains the inflight I/O, the transport
-// child_receiver::set_stopped propagates through repeat_until, and
-// ssl_io_operation::repeat_receiver::set_stopped sees ssl_stop_requested ==
-// false (no user stop-token), so it calls complete_stopped which forwards
-// set_stopped to the transfer_receiver.
+// Contract coverage for io_context::stop() aborting an inflight SSL read:
+// the completion must be set_value(operation_canceled, ...) on the
+// downstream receiver, not set_stopped. The peer never writes, so the SSL
+// read parks on EVFILT_READ via the transport layer; context.stop() aborts
+// the inflight I/O and the SSL read-all loop reports
+// set_value(operation_canceled, transferred) to the transfer_receiver.
 TEST(SslTransferTest, inflight_ssl_read_aborted_by_io_context_stop) {
   test_certificate_files files;
 
@@ -271,16 +268,20 @@ TEST(SslTransferTest, inflight_ssl_read_aborted_by_io_context_stop) {
   EXPECT_GE(context.stop(), 0);
   worker.join();
 
-  EXPECT_EQ(state->stopped, 1u);
+  // Contract: context stop aborting inflight I/O completes via
+  // set_value(operation_canceled), not set_stopped.
+  EXPECT_EQ(state->stopped, 0u);
   EXPECT_EQ(state->values, 0u);
-  EXPECT_EQ(state->errors, 0u);
+  EXPECT_EQ(state->errors, 1u);
+  EXPECT_TRUE(state->error ==
+              std::make_error_code(std::errc::operation_canceled));
 }
 
-// Covers ssl_io_operation::start() stop-token early return
-// (operation.h:95-97): when the receiver's stop token is already requested
-// before start(), the operation completes synchronously with
-// set_value(operation_canceled, 0) without entering the repeat_until loop.
-TEST(SslTransferTest, pre_stopped_ssl_read_reports_canceled) {
+// Contract coverage for the stop-token early check in
+// ssl_io_operation::start(): when the receiver's stop token is already
+// requested before start(), the operation observes it and completes via
+// set_stopped without entering the repeat_until loop.
+TEST(SslTransferTest, pre_stopped_ssl_read_stops) {
   test_certificate_files files;
 
   bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
@@ -358,11 +359,11 @@ TEST(SslTransferTest, pre_stopped_ssl_read_reports_canceled) {
   bexec::start(operation);
   context.run();
 
-  EXPECT_EQ(state->errors, 1u);
+  // Contract: a stop token already canceled at start() is observed by the
+  // SSL read and completes via set_stopped (not set_value(operation_canceled)).
+  EXPECT_EQ(state->errors, 0u);
   EXPECT_EQ(state->values, 0u);
-  EXPECT_EQ(state->stopped, 0u);
-  EXPECT_TRUE(state->error ==
-              std::make_error_code(std::errc::operation_canceled));
+  EXPECT_EQ(state->stopped, 1u);
 }
 
 // Covers ssl_io_operation::start() empty-buffer early return
