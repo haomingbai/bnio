@@ -120,11 +120,11 @@ class ssl_io_step_operation {
 
   void start() noexcept {
     if (ssl_stop_requested(receiver_)) {
-      // stop-token cancellation: delivered via set_value(operation_canceled,
-      // bytes), consistent with state_machine.h/operation.h/native_io; does
-      // not use the set_stopped channel.
-      complete_value(std::make_error_code(std::errc::operation_canceled),
-                     state_->bytes);
+      // Token canceled at start: deliver set_stopped (unified contract).
+      // Context-stop aborts surface as value(operation_canceled, bytes) from
+      // the transport layer's token arbitration instead, so no distinction is
+      // needed here.
+      complete_stopped();
       return;
     }
 

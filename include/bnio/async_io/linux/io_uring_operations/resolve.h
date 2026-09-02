@@ -68,13 +68,14 @@ class io_uring_resolve_operation : public io_uring_operation_base {
   /**
    * Posts this operation to the context run loop.
    *
-   * A stop-token cancel routes through set_value(operation_canceled, 0);
-   * set_stopped is not produced here because resolve runs on the CPU
-   * queue, which io_context::stop() does not abort.
+   * A stop-token cancel (observed at start) completes through
+   * set_stopped(); resolve runs on the CPU queue, which
+   * io_context::stop() does not abort, so no other path produces a
+   * stopped completion.
    */
   void start() noexcept {
     if (stop_requested()) {
-      completion_ = completion_kind::canceled;
+      completion_ = completion_kind::stopped;
       (void)context_->post(*this);
       return;
     }
@@ -85,16 +86,18 @@ class io_uring_resolve_operation : public io_uring_operation_base {
 
   /**
    * Executes the synchronous resolver and completes the receiver.
+   *
+   * The `stopped` branch is reached only for a stop-token cancel
+   * observed at start(); stop tokens are monotonic, so it completes
+   * with set_stopped without further arbitration.
    */
   void execute() noexcept override {
     switch (completion_) {
       case completion_kind::value:
         complete_resolve();
         break;
-      case completion_kind::canceled:
-        bexec::set_value(std::move(receiver_),
-                         std::make_error_code(std::errc::operation_canceled),
-                         std::size_t{0});
+      case completion_kind::stopped:
+        bexec::set_stopped(std::move(receiver_));
         break;
     }
   }
@@ -102,7 +105,7 @@ class io_uring_resolve_operation : public io_uring_operation_base {
  private:
   enum class completion_kind {
     value,
-    canceled,
+    stopped,
   };
 
   /**
@@ -140,12 +143,14 @@ class io_uring_resolve_sender {
   /**
    * Completion signatures produced by a DNS resolution sender.
    *
-   * set_value(ec, count) is the universal exit (success, resolver failure,
-   * stop-token cancel); set_stopped is not produced because resolve runs on
-   * the CPU queue, which io_context::stop() does not abort.
+   * set_value(ec, count) is the universal exit (success, resolver
+   * failure); set_stopped is emitted when the receiver's stop token was
+   * already cancelled at start(). resolve runs on the CPU queue, which
+   * io_context::stop() does not abort.
    */
-  using completion_signatures = bexec::completion_signatures<bexec::set_value_t(
-      std::error_code, std::size_t)>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t),
+      bexec::set_stopped_t()>;
 
   /**
    * Creates a DNS sender for a context and query.

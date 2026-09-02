@@ -23,14 +23,20 @@ class timer_wait_operation : public timer_operation_base {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
+      // Token cancelled before start: stage a stopped completion so
+      // execute() delivers set_stopped (token cancellation wins).
       this->timer_context_->queue_timer_completion(
-          *this, timer_completion_kind::canceled);
+          *this, timer_completion_kind::stopped);
       return;
     }
 
     this->timer_context_->start_timer_wait(*this, *timer_);
   }
 
+  // Completion mapping per the unified stop contract: stopped ->
+  // set_stopped (token cancellation), canceled ->
+  // set_value(operation_canceled) (context-stop abort or timer object API
+  // cancellation), value -> normal completion delivered untouched.
   void execute() noexcept override {
     switch (this->timer_completion()) {
       case timer_completion_kind::stopped:

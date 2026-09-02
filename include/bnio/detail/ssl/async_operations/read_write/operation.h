@@ -56,17 +56,13 @@ class ssl_io_operation {
     }
 
     void set_stopped() noexcept {
-      // Distinguish stop-token cancellation from io_context::stop().
-      // repeat_until::drain() checks the stop_token before each round and
-      // sends set_stopped if true — that is stop-token cancellation reaching
-      // step::child_receiver::set_stopped(). An io_context::stop() interruption
-      // from the transport layer is the case where set_stopped should be
-      // preserved.
-      if (ssl_stop_requested(operation_->receiver_)) {
-        operation_->complete_canceled();
-      } else {
-        operation_->complete_stopped();
-      }
+      // Under the unified contract, set_stopped only reaches this receiver
+      // when the stop token visible to the operation was observed canceled
+      // (step start pre-check, transport execute() arbitration, or
+      // repeat_until's per-round token check). io_context::stop() aborts
+      // deliver value(operation_canceled, bytes) via set_value instead, so no
+      // token re-check is needed here.
+      operation_->complete_stopped();
     }
 
    private:
@@ -95,7 +91,8 @@ class ssl_io_operation {
 
   void start() noexcept {
     if (ssl_stop_requested(receiver_)) {
-      complete_value(std::make_error_code(std::errc::operation_canceled), 0);
+      // Token canceled before start: deliver set_stopped (unified contract).
+      complete_stopped();
       return;
     }
     if (empty_buffer()) {
@@ -124,14 +121,6 @@ class ssl_io_operation {
     } else {
       bexec::set_value(std::move(receiver_), ec, state_.bytes);
     }
-  }
-
-  void complete_canceled() noexcept {
-    // stop-token cancellation: report ec=operation_canceled with the bytes
-    // transferred so far
-    bexec::set_value(std::move(receiver_),
-                     std::make_error_code(std::errc::operation_canceled),
-                     state_.bytes);
   }
 
   void complete_stopped() noexcept { bexec::set_stopped(std::move(receiver_)); }

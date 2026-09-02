@@ -15,6 +15,32 @@
 namespace bnio::async_io::linux_native {
 
 bool io_uring_context::consume_io_tasks() noexcept {
+  // Teardown guard: once the context is stopping or closing, operations
+  // consumed here must be aborted, not prepared — the ring is going away
+  // and a submit failure (e.g. EBADFD) would report a generic error where
+  // the completion contract requires the stop channel.  Routing the
+  // drained operations through complete_submit_stopped() lets execute()'s
+  // token arbitration deliver set_value(operation_canceled, ...) (or
+  // set_stopped when the receiver token raced the stop).  This also
+  // implements the not-yet-executed queued-work rule of io_context::stop().
+  if (stop_requested() || closing_requested()) {
+    bool found = false;
+    if (pending_io_retry_ != nullptr) {
+      found = true;
+      drain_io_list_complete_stopped(pending_io_retry_);
+      pending_io_retry_ = nullptr;
+    }
+    if (io_uring_io_operation_base* operations = local_state_.pop_io_all()) {
+      found = true;
+      drain_io_list_complete_stopped(operations);
+    }
+    if (io_uring_io_operation_base* operations = global_state_->pop_io_all()) {
+      found = true;
+      drain_io_list_complete_stopped(operations);
+    }
+    return found;
+  }
+
   io_uring_io_operation_base* prepared = nullptr;
   io_uring_io_operation_base* remaining = nullptr;
   bool found_work = false;

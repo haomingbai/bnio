@@ -112,16 +112,17 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
   }
 
   /**
-   * Starts the poll or posts an immediate canceled/stopped completion.
+   * Starts the poll or posts an immediate stopped completion.
    *
-   * A user-requested cancel (stop_token) completes through
-   * set_value(operation_canceled, ...) rather than set_stopped; the
-   * latter is reserved for io_context::stop().
+   * A stop token cancelled at start marks the completion stopped;
+   * execute()'s token arbitration then delivers set_stopped.
+   * io_context::stop() aborts are delivered through
+   * set_value(operation_canceled, ...) unless the stop token won the
+   * race.
    */
   void start() noexcept {
     if (stop_requested()) {
-      completion_ = completion_kind::value_with_ec;
-      error_ = std::error_code(ECANCELED, std::generic_category());
+      completion_ = completion_kind::stopped;
       (void)context_->post(*this);
       return;
     }
@@ -145,7 +146,10 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
    * The `value` branch preserves the `result < 0` guard: a poll CQE may
    * report a negative errno (e.g. EBADF) while completion_ is still
    * `value`; that errno must surface through set_value(ec, ...) rather
-   * than being lost.
+   * than being lost. The `stopped` branch runs the token arbitration:
+   * set_stopped only for a cancelled receiver stop token; an
+   * io_context::stop() abort without one exits through
+   * set_value(operation_canceled, 0).
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -164,7 +168,17 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
                          static_cast<unsigned>(result));
         break;
       case completion_kind::stopped:
-        bexec::set_stopped(std::move(receiver_));
+        // Token arbitration: set_stopped is emitted only when the
+        // receiver's stop token is cancelled; an io_context::stop()
+        // abort without a cancelled token delivers
+        // set_value(operation_canceled, 0) instead.
+        if (stop_requested()) {
+          bexec::set_stopped(std::move(receiver_));
+        } else {
+          bexec::set_value(std::move(receiver_),
+                           std::error_code(ECANCELED, std::generic_category()),
+                           0);
+        }
         break;
     }
   }
@@ -198,8 +212,8 @@ class io_uring_poll_sender {
    * Completion signatures produced by a poll sender.
    *
    * set_value(ec, unsigned) is the universal observable exit (success,
-   * cancel, recoverable failure); set_stopped is reserved for
-   * io_context::stop().
+   * cancel, recoverable failure); set_stopped is emitted only when the
+   * receiver's stop token is cancelled.
    */
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, unsigned), bexec::set_stopped_t()>;

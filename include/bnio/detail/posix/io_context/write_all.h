@@ -214,17 +214,13 @@ class write_all_operation {
     }
 
     void set_stopped() noexcept {
-      // Distinguish stop-token cancellation from io_context::stop().
-      // repeat_until::drain() checks the stop_token before each round and
-      // sends set_stopped if true — that is stop-token cancellation reaching
-      // step::child_receiver::set_stopped(). An io_context::stop() interruption
-      // from the transport layer is the case where set_stopped should be
-      // preserved.
-      if (detail::stop_requested(operation_->receiver_)) {
-        operation_->complete_canceled();
-      } else {
-        operation_->complete_stopped();
-      }
+      // set_stopped now exclusively means the receiver's stop token was
+      // observed cancelled (repeat_until::drain() checks it before each
+      // round), so it is forwarded unconditionally. io_context::stop()
+      // aborts without token cancellation complete the step with
+      // set_value(operation_canceled, transferred) instead and never reach
+      // this receiver as a token/context distinction.
+      operation_->complete_stopped();
     }
 
    private:
@@ -250,10 +246,9 @@ class write_all_operation {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      // Stop token already requested before start: cancel, reporting bytes
-      // written (=0)
-      complete_value(std::make_error_code(std::errc::operation_canceled),
-                     state_.transferred);
+      // Stop token already requested before start: deliver set_stopped
+      // (token cancellation wins over value delivery).
+      complete_stopped();
       return;
     }
     if (state_.empty()) {
@@ -268,14 +263,6 @@ class write_all_operation {
  private:
   void complete_value(std::error_code ec, std::size_t bytes_written) noexcept {
     bexec::set_value(std::move(receiver_), ec, bytes_written);
-  }
-
-  void complete_canceled() noexcept {
-    // stop-token cancellation: report ec=operation_canceled with the bytes
-    // written so far
-    bexec::set_value(std::move(receiver_),
-                     std::make_error_code(std::errc::operation_canceled),
-                     state_.transferred);
   }
 
   void complete_stopped() noexcept { bexec::set_stopped(std::move(receiver_)); }

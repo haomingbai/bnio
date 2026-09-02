@@ -11,7 +11,6 @@
 
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
-#include <cerrno>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -22,15 +21,20 @@ namespace bnio::async_io::bsd_native::detail {
  * Completion channel selected for receiver delivery.
  *
  * Per completion-semantics contract: set_value(ec, ...) is the universal
- * observable exit (success, cancel, recoverable failure); set_stopped is
- * reserved exclusively for io_context::stop() aborting inflight I/O.
+ * observable exit (success, recoverable failure, and an abort observed
+ * without a canceled stop token). `stopped` marks the stop channel —
+ * io_context::stop() aborting inflight I/O, or a stop-token cancel
+ * observed at start time — and execute() arbitrates its final signal:
+ * a canceled receiver token wins → set_stopped; otherwise
+ * set_value(operation_canceled, ...).
  */
 enum class kqueue_receiver_completion {
   /** set_value(empty ec, result, flags). */
   value,
   /** set_value(ec, result, flags) where ec carries a recoverable error. */
   value_with_ec,
-  /** set_stopped — ONLY when io_context::stop() aborts this op. */
+  /** Stop channel (abort or token-at-start); execute() arbitrates the
+   *  final signal. */
   stopped,
 };
 
@@ -73,7 +77,17 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
                          this->flags);
         break;
       case kqueue_receiver_completion::stopped:
-        bexec::set_stopped(std::move(receiver_));
+        // Token arbitration decides the stop channel's final signal: a
+        // canceled receiver token wins → set_stopped; an abort observed
+        // without a canceled token delivers
+        // set_value(operation_canceled, 0, 0).
+        if (stop_requested()) {
+          bexec::set_stopped(std::move(receiver_));
+        } else {
+          bexec::set_value(std::move(receiver_),
+                           std::make_error_code(std::errc::operation_canceled),
+                           0, 0);
+        }
         break;
     }
   }
@@ -100,8 +114,8 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
 
   /**
    * Selects set_value(ec, ...) where ec carries a recoverable error
-   * (user cancel via stop_token, or preparation/registration failure
-   * reported through complete_submit_error).
+   * (preparation/registration failure reported through
+   * complete_submit_error).
    */
   void complete_with_ec(int result_code) noexcept {
     completion_ = kqueue_receiver_completion::value_with_ec;
@@ -109,8 +123,11 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
   }
 
   /**
-   * Selects set_stopped. Reached only via complete_submit_stopped(),
-   * i.e. when io_context::stop() aborts this inflight I/O operation.
+   * Selects the stop channel. Reached via complete_submit_stopped()
+   * (io_context::stop() aborts this inflight I/O operation) or via
+   * start_io()'s stop-token pre-check. execute()'s token arbitration
+   * decides the final signal: token canceled → set_stopped, otherwise
+   * set_value(operation_canceled, ...).
    */
   void complete_with_stopped() noexcept {
     completion_ = kqueue_receiver_completion::stopped;
@@ -119,14 +136,15 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
   /**
    * Starts a kqueue operation or posts an immediate completion.
    *
-   * A user-requested cancel (stop_token) now completes through
-   * set_value(operation_canceled, ...) rather than set_stopped; the
-   * latter is reserved for io_context::stop().
+   * A stop-token cancel observed at start() selects the stop channel;
+   * execute()'s token arbitration then delivers set_stopped (token
+   * canceled) or set_value(operation_canceled, ...) (abort raced the
+   * token).
    */
   template <class Operation>
   void start_io(Operation& operation) noexcept {
     if (stop_requested()) {
-      complete_with_ec(-ECANCELED);
+      complete_with_stopped();
       (void)context_->post(operation);
       return;
     }

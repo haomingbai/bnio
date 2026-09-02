@@ -13,7 +13,6 @@
 #include <bexec/completion_signatures.hpp>
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
-#include <cerrno>
 #include <system_error>
 #include <type_traits>
 #include <utility>
@@ -88,16 +87,16 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
   }
 
   /**
-   * Starts the poll or posts an immediate canceled/stopped completion.
+   * Starts the poll or posts an immediate completion.
    *
-   * A user-requested cancel (stop_token) completes through
-   * set_value(operation_canceled, ...) rather than set_stopped; the
-   * latter is reserved for io_context::stop().
+   * A stop-token cancel observed at start() selects the stop channel;
+   * execute()'s token arbitration then delivers set_stopped (token
+   * canceled) or set_value(operation_canceled, ...) (abort raced the
+   * token).
    */
   void start() noexcept {
     if (stop_requested()) {
-      completion_ = completion_kind::value_with_ec;
-      error_ = std::error_code(ECANCELED, std::generic_category());
+      completion_ = completion_kind::stopped;
       (void)context_->post(*this);
       return;
     }
@@ -130,7 +129,17 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
                          static_cast<unsigned>(result));
         break;
       case completion_kind::stopped:
-        bexec::set_stopped(std::move(receiver_));
+        // Token arbitration decides the stop channel's final signal: a
+        // canceled receiver token wins → set_stopped; an abort observed
+        // without a canceled token delivers
+        // set_value(operation_canceled, 0).
+        if (stop_requested()) {
+          bexec::set_stopped(std::move(receiver_));
+        } else {
+          bexec::set_value(std::move(receiver_),
+                           std::make_error_code(std::errc::operation_canceled),
+                           0);
+        }
         break;
     }
   }
@@ -160,8 +169,9 @@ class kqueue_poll_sender {
  public:
   /**
    * set_value(ec, unsigned) is the universal observable exit (success,
-   * cancel, recoverable failure); set_stopped is reserved for
-   * io_context::stop().
+   * recoverable failure, and an abort observed without a canceled stop
+   * token); set_stopped is delivered when the receiver's stop token is
+   * observed canceled at the completion point.
    */
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, unsigned), bexec::set_stopped_t()>;

@@ -61,7 +61,10 @@ class ssl_async_operation_base {
 
   void start() noexcept {
     if (ssl_stop_requested(receiver_)) {
-      post_complete_value(std::make_error_code(std::errc::operation_canceled));
+      // Token canceled before start: deliver set_stopped (unified contract).
+      // Context-stop aborts take the value(operation_canceled) path instead,
+      // decided by the token arbitration in each operation's execute().
+      post_complete_stopped();
       return;
     }
 
@@ -115,14 +118,23 @@ class ssl_async_operation_base {
 
     void set_value(std::error_code ec) noexcept {
       if (ec) {
-        // schedule canceled by stop_token: terminate the operation, pass ec
-        // through to the receiver
+        // The schedule delivered a non-empty ec (e.g. value(operation_canceled)
+        // after an io_context::stop() abort): overwrite any stale staged
+        // completion and pass ec through to the receiver. Under the unified
+        // contract this overwrite is the allowed semantics for context-stop
+        // aborts.
         operation_->complete_value(ec);
       }
       operation_->deliver_terminal();
     }
 
-    void set_stopped() noexcept { operation_->deliver_terminal(); }
+    void set_stopped() noexcept {
+      // The schedule observed a canceled stop token (token arbitration in
+      // execute()): override any stale staged completion so an older pending
+      // value cannot swallow the token cancellation, then deliver stopped.
+      operation_->complete_stopped();
+      operation_->deliver_terminal();
+    }
 
    private:
     ssl_async_operation_base* operation_;

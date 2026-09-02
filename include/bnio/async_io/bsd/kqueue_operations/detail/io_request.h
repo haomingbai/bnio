@@ -49,10 +49,11 @@ concept has_start_io = requires(Request& req) {
 /** Operation for a request whose native call is attempted before readiness.
  *
  *  Per completion-semantics contract:
- *  - `stopped_` is set ONLY by complete_submit_stopped(), i.e. when
- *    io_context::stop() aborts this inflight operation → set_stopped.
- *  - `canceled_` is set when the user's stop_token is already requested
- *    at start() time → set_value(operation_canceled, ...).
+ *  - `stopped_` marks the stop channel: it is set by
+ *    complete_submit_stopped() (io_context::stop() aborting this inflight
+ *    operation) or by start() when the user's stop_token is already
+ *    requested. execute() arbitrates the final signal: token canceled →
+ *    set_stopped; otherwise set_value(operation_canceled, ...).
  *  - A negative `result` from perform_io() / kevent reports a recoverable
  *    errno through set_value(ec, ...).
  */
@@ -89,7 +90,7 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
 
   void start() noexcept {
     if (detail::stop_requested(receiver_)) {
-      canceled_ = true;
+      stopped_ = true;
       (void)context_->post(*this);
       return;
     }
@@ -104,20 +105,25 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
   /**
    * Delivers the completion.
    *
-   * `stopped_` (io_context::stop() abort) → set_stopped. Otherwise the
-   * universal exit is set_value(ec, result, flags): ec is empty on
-   * success, operation_canceled when the user stop_token fired before
-   * start, or the errno encoded by a negative `result`.
+   * `stopped_` marks the stop channel (io_context::stop() abort, or a
+   * stop-token cancel observed at start()); execute() arbitrates the
+   * final signal: token canceled → set_stopped, otherwise
+   * set_value(operation_canceled, 0, 0). All other completions deliver
+   * the real result through set_value(ec, result, flags) untouched.
    */
   void execute() noexcept override {
     if (stopped_) {
-      bexec::set_stopped(std::move(receiver_));
+      if (detail::stop_requested(receiver_)) {
+        bexec::set_stopped(std::move(receiver_));
+      } else {
+        request_.set_value(
+            std::move(receiver_),
+            std::make_error_code(std::errc::operation_canceled), 0, 0);
+      }
       return;
     }
     std::error_code ec;
-    if (canceled_) {
-      ec = std::make_error_code(std::errc::operation_canceled);
-    } else if (result < 0) {
+    if (result < 0) {
       ec = std::error_code(-result, std::generic_category());
     }
     request_.set_value(std::move(receiver_), ec, result, flags);
@@ -150,7 +156,6 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
   Request request_;
   std::remove_cvref_t<Receiver> receiver_;
   bool stopped_ = false;
-  bool canceled_ = false;
 };
 
 /** Sender for a readiness-backed nonblocking request. */

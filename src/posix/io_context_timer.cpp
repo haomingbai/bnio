@@ -397,13 +397,15 @@ std::size_t steady_timer::cancel() noexcept {
 
 void io_context::abort_pending_timer_waits() noexcept {
   std::lock_guard context_lock(timers_.mutex);
+  // io_context::stop() abort is not token cancellation: stage canceled
+  // completions; execute() delivers them as set_value(operation_canceled).
   // Drain all active timers from the heap.
   while (auto* slot = timers_.pop_heap()) {
     const detail::timer_operation_queue canceled =
         take_timer_operations_locked(*slot);
     slot->context = nullptr;
     enqueue_timer_operations_locked(canceled.head,
-                                    detail::timer_completion_kind::stopped);
+                                    detail::timer_completion_kind::canceled);
   }
   // Drain inactive (already-expired) timers.
   while (timers_.inactive != nullptr) {
@@ -413,7 +415,7 @@ void io_context::abort_pending_timer_waits() noexcept {
     const detail::timer_operation_queue canceled =
         take_timer_operations_locked(*slot);
     enqueue_timer_operations_locked(canceled.head,
-                                    detail::timer_completion_kind::stopped);
+                                    detail::timer_completion_kind::canceled);
   }
 }
 

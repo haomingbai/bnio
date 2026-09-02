@@ -67,13 +67,14 @@ class kqueue_resolve_operation : public kqueue_operation_base {
   /**
    * Posts this operation to the context run loop.
    *
-   * A stop-token cancel routes through set_value(operation_canceled, 0);
-   * set_stopped is not produced here because resolve runs on the CPU
-   * queue, which io_context::stop() does not abort.
+   * A stop-token cancel observed at start() selects the stopped channel
+   * → set_stopped. Resolve runs on the CPU queue, which io_context::stop()
+   * does not abort, so the stopped channel can only originate from this
+   * pre-check.
    */
   void start() noexcept {
     if (stop_requested()) {
-      completion_ = completion_kind::canceled;
+      completion_ = completion_kind::stopped;
       (void)context_->post(*this);
       return;
     }
@@ -90,10 +91,8 @@ class kqueue_resolve_operation : public kqueue_operation_base {
       case completion_kind::value:
         complete_resolve();
         break;
-      case completion_kind::canceled:
-        bexec::set_value(std::move(receiver_),
-                         std::make_error_code(std::errc::operation_canceled),
-                         std::size_t{0});
+      case completion_kind::stopped:
+        bexec::set_stopped(std::move(receiver_));
         break;
     }
   }
@@ -101,7 +100,7 @@ class kqueue_resolve_operation : public kqueue_operation_base {
  private:
   enum class completion_kind {
     value,
-    canceled,
+    stopped,
   };
 
   /**
@@ -139,12 +138,15 @@ class kqueue_resolve_sender {
   /**
    * Completion signatures produced by a DNS resolution sender.
    *
-   * set_value(ec, count) is the universal exit (success, resolver failure,
-   * stop-token cancel); set_stopped is not produced because resolve runs on
-   * the CPU queue, which io_context::stop() does not abort.
+   * set_value(ec, count) is the universal exit (success, resolver
+   * failure); set_stopped is delivered when the receiver's stop token is
+   * already requested at start() time. Resolve runs on the CPU queue,
+   * which io_context::stop() does not abort, so no abort-path
+   * set_value(operation_canceled) payload is produced here.
    */
-  using completion_signatures = bexec::completion_signatures<bexec::set_value_t(
-      std::error_code, std::size_t)>;
+  using completion_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t),
+      bexec::set_stopped_t()>;
 
   /**
    * Creates a DNS sender for a context and query.

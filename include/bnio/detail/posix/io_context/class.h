@@ -174,19 +174,23 @@ class BNIO_EXPORT io_context {
 
      private:
       void complete() noexcept {
-        // io_context::stop() is the sole source of set_stopped().
-        if (context_->is_stopped()) {
-          bexec::set_stopped(std::move(receiver_));
-          return;
-        }
+        // Abort delivery is decided by token arbitration at the observation
+        // point: a cancelled receiver stop token wins and delivers
+        // set_stopped(); without token cancellation, an io_context::stop()
+        // abort delivers set_value(operation_canceled); a normal completion
+        // delivers set_value({}) with the real result untouched.
         auto env = bexec::get_env(receiver_);
         auto token = bexec::query(env, bexec::get_stop_token);
         if (token.stop_requested()) {
+          bexec::set_stopped(std::move(receiver_));
+          return;
+        }
+        if (context_->is_stopped()) {
           bexec::set_value(std::move(receiver_),
                            std::make_error_code(std::errc::operation_canceled));
-        } else {
-          bexec::set_value(std::move(receiver_), std::error_code{});
+          return;
         }
+        bexec::set_value(std::move(receiver_), std::error_code{});
       }
 
       io_context* context_;
@@ -497,8 +501,11 @@ class BNIO_EXPORT io_context {
   /**
    * Returns whether stop() has been requested for this context.
    *
-   * schedule_sender uses this to decide between set_stopped() (sole exit
-   * for set_stopped) and set_value(ec) / set_value({}).
+   * schedule_sender's completion arbitration consults this after the
+   * receiver's stop token: a cancelled token delivers set_stopped(), a
+   * stopped context without token cancellation delivers
+   * set_value(operation_canceled), and otherwise the real result is
+   * delivered untouched.
    */
   [[nodiscard]] bool is_stopped() const noexcept {
     return global_state_.life_state.load(std::memory_order_acquire) != 0 ||
@@ -790,11 +797,13 @@ class BNIO_EXPORT io_context {
       detail::timer_operation_base* ready,
       detail::native_operation_base*& operations) noexcept;
 
-  /** Aborts all pending timer waits with set_stopped (io_context::stop only).
+  /** Aborts all pending timer waits for io_context::stop().
    *
    *  Drains every active and inactive timer slot's submitted queue, sets
-   *  each operation's completion to timer_completion_kind::stopped, and
-   *  pushes them to timers_.ready.  Called by begin_stop() BEFORE
+   *  each operation's completion to timer_completion_kind::canceled (a
+   *  context-stop abort is not token cancellation; execute() delivers it
+   *  as set_value(operation_canceled)), and pushes them to timers_.ready.
+   *  Called by begin_stop() BEFORE
    *  life_state is published so that workers entering finish() observe a
    *  fully populated timers_.ready — no worker can drain the ready list
    *  before the abort has staged the operations.

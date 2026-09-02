@@ -25,7 +25,8 @@ namespace detail {
  *
  * Per completion-semantics contract: set_value(ec, ...) is the universal
  * observable exit (success, cancel, recoverable failure); set_stopped is
- * reserved exclusively for io_context::stop() aborting inflight I/O.
+ * reserved exclusively for stop-token cancellation observed in the
+ * receiver environment.
  */
 enum class io_uring_receiver_completion {
   /**
@@ -40,8 +41,12 @@ enum class io_uring_receiver_completion {
   value_with_ec,
 
   /**
-   * Complete the receiver with set_stopped. Selected ONLY by
-   * complete_submit_stopped() when io_context::stop() aborts this op.
+   * Completion marked as stopped; the final signal is decided by
+   * execute()'s token arbitration: a cancelled receiver stop token
+   * completes with set_stopped, an abort without one (io_context::stop()
+   * aborting this op) completes with set_value(operation_canceled, 0, 0).
+   * Marked by complete_submit_stopped() and by start_io()'s stop-token
+   * pre-check.
    */
   stopped,
 };
@@ -84,8 +89,10 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
    *
    * Both `value` and `value_with_ec` exit through set_value; only the
    * leading std::error_code differs (empty for success). `stopped`
-   * exits through set_stopped and is reachable only when
-   * io_context::stop() aborted this inflight operation.
+   * runs the token arbitration: set_stopped is emitted if and only if
+   * the receiver's stop token is cancelled (including a token that
+   * raced and won against io_context::stop()); an abort without a
+   * cancelled token exits through set_value(operation_canceled, 0, 0).
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -106,7 +113,17 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
         bexec::set_value(std::move(receiver_), error_, result, flags);
         break;
       case io_uring_receiver_completion::stopped:
-        bexec::set_stopped(std::move(receiver_));
+        // Token arbitration: set_stopped is emitted only when the
+        // receiver's stop token is cancelled; an io_context::stop()
+        // abort without a cancelled token delivers
+        // set_value(operation_canceled, 0, 0) instead.
+        if (stop_requested()) {
+          bexec::set_stopped(std::move(receiver_));
+        } else {
+          bexec::set_value(std::move(receiver_),
+                           std::error_code(ECANCELED, std::generic_category()),
+                           0, 0);
+        }
         break;
     }
   }
@@ -158,8 +175,9 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
 
   /**
    * Selects set_value(ec, ...) completion where ec carries a recoverable
-   * error (user cancel via stop_token, or SQE preparation failure reported
-   * through complete_submit_error).
+   * error (SQE preparation failure reported through
+   * complete_submit_error). Stop-token cancellation no longer routes
+   * here; start_io() marks those completions stopped.
    */
   void complete_with_ec(int result_code) noexcept {
     completion_ = io_uring_receiver_completion::value_with_ec;
@@ -167,10 +185,12 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
   }
 
   /**
-   * Selects set_stopped completion for this operation.
+   * Marks this completion stopped; execute()'s token arbitration decides
+   * between set_stopped (cancelled receiver stop token) and
+   * set_value(operation_canceled, 0, 0) (io_context::stop() abort).
    *
-   * Reached only via complete_submit_stopped(), i.e. when
-   * io_context::stop() aborts this inflight I/O operation.
+   * Reached via complete_submit_stopped() (context aborting this
+   * inflight I/O operation) and via start_io()'s stop-token pre-check.
    */
   void complete_with_stopped() noexcept {
     completion_ = io_uring_receiver_completion::stopped;
@@ -179,14 +199,16 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
   /**
    * Starts an io_uring operation or posts an immediate completion.
    *
-   * A user-requested cancel (stop_token) now completes through
-   * set_value(operation_canceled, ...) rather than set_stopped; the
-   * latter is reserved for io_context::stop().
+   * A stop token cancelled at start marks the completion stopped;
+   * execute()'s token arbitration then delivers set_stopped.
+   * io_context::stop() aborts are delivered through
+   * set_value(operation_canceled, ...) unless the stop token won the
+   * race.
    */
   template <class Operation>
   void start_io(Operation& operation) noexcept {
     if (stop_requested()) {
-      complete_with_ec(-ECANCELED);
+      complete_with_stopped();
       (void)context_->post(operation);
       return;
     }

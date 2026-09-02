@@ -72,15 +72,38 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
 }
 
 void kqueue_context::queue_exit() noexcept {
-  // Abort any remaining inflight I/O before closing the queue.
-  // Normal shutdown cleans these up in finish(), but forced/abnormal
-  // shutdown (e.g. closing flag, destruction without run) may leave
-  // operations in-flight.
-  abort_inflight_io();
+  // Abort-and-deliver runs only when the context did not already finish
+  // cleanly: run()/finish() drain every operation on the way out, so a
+  // finished context has nothing left to deliver and must not touch the
+  // shared queues that sibling workers still own.  A context torn down
+  // without a clean finish (never run, fatal error, forced close) still
+  // owes its receivers terminal calls.  Mirrors io_uring_context.
+  if (run_state_.state.load(std::memory_order_acquire) !=
+      context_state::finished) {
+    // Mark the context finishing (not finished) so operations completed
+    // during the abort delivery observe a coherent stopping state, then
+    // deliver every aborted completion through the same abort path
+    // finish() uses: abort_inflight_io() marks each inflight/unregistered
+    // I/O operation stopped and pushes it to the CPU queue, the drain
+    // loop executes those completions, and the consume_io_tasks() loop
+    // closes the nested-publish window when set_stopped() receivers start
+    // new I/O.  Discarding with a plain pop_cpu_all() would leave those
+    // receivers forever silent.  Receivers run synchronously on the
+    // calling thread.  The delivery assumes global_state_ is wired:
+    // io_context::run() keeps its native context bound to the shared
+    // state until the context's destructor has completed.
+    run_state_.state.store(context_state::finishing,
+                           std::memory_order_release);
+    abort_inflight_io();
+    drain_local_cpu_tasks();
+    while (consume_io_tasks()) {
+      abort_inflight_io();
+      drain_local_cpu_tasks();
+    }
+    run_state_.state.store(context_state::finished,
+                           std::memory_order_release);
+  }
 
-  run_state_.state.store(context_state::finished, std::memory_order_release);
-
-  (void)local_state_.pop_cpu_all();
   scheduling_state_.next_registration_sequence = 0;
 
   local_state_.wake_channel_.close();
