@@ -40,23 +40,24 @@ struct read_receiver {
   // set_value carries the result. The leading std::error_code distinguishes
   // the outcomes that the operation can report itself:
   //   ec == {}       → success
-  //   ec == canceled → user stop-token requested before completion
+  //   ec == canceled → cancelled by a non-token source: io_context::stop()
+  //                    aborting the operation, a timer object-API
+  //                    cancellation, or a kernel-level cancel
   //   ec == <other>  → recoverable I/O failure (errno-derived)
   void set_value(std::error_code ec, std::size_t n) noexcept {
     if (ec) {
-      // Recoverable failure or cancellation. Inspect ec to tell them apart.
+      // Failure or non-token cancellation. Write-all/read-all senders
+      // still report the bytes transferred so far through n.
     } else {
       // n bytes were transferred.
     }
   }
 
-  // set_stopped is emitted when the context aborts an inflight operation:
-  // io_context::stop(), abnormal close / teardown, or a fatal run-loop error
-  // routed through the abort-deliver path. User stop-token cancellation goes
-  // through set_value(ec) above with ec == operation_canceled, not through
-  // set_stopped.
+  // set_stopped is emitted if and only if the operation observed that the
+  // stop token visible in its receiver environment was cancelled — the
+  // cooperative, user-driven cancellation channel. It carries no payload.
   void set_stopped() noexcept {
-    // The context aborted this operation while it was inflight.
+    // The stop token was cancelled; no result is reported.
   }
 };
 ```
@@ -87,17 +88,56 @@ int main() {
 }
 ```
 
-`set_value(ec, ...)` is the universal observable exit: success, recoverable
-failure, and user stop-token cancellation all flow through it with the
-leading `std::error_code` distinguishing the case. bnio's native operations
-are `noexcept`, and the sender/receiver contract uses only two completion
-channels: `set_value(ec, ...)` and `set_stopped()`. `set_error` is not part
-of the contract — no bnio `completion_signatures` include it, and no bnio
-receiver implements it. `set_stopped()` is emitted when the context aborts
-an inflight operation — `io_context::stop()`, abnormal close / teardown, or
-a fatal run-loop error routed through the abort-deliver path. Receivers may
-also expose `get_env()` when they need to provide stop tokens or other
-receiver environment queries.
+`set_value(ec, ...)` is the universal result exit: success, recoverable
+failure, and every non-token cancellation — `io_context::stop()` aborting
+inflight I/O or not-yet-executed queued work, `steady_timer` object-API
+cancellation, and kernel-level `ECANCELED` — all flow through it, with the
+leading `std::error_code` distinguishing the case. `set_stopped()` is
+reserved exclusively for cooperative cancellation: it is emitted if and only
+if the operation observed, at `start()` or at the delivery point of queued
+work, that the stop token visible in its receiver environment is cancelled —
+including tokens forwarded or injected by composite sender algorithms
+(`when_all`, `sync_wait`, repeat-style loops) in the standard cascading way.
+`set_stopped()` carries no payload; operations cancelled through the stop
+token report no byte counts. bnio's native operations are `noexcept`, and the
+sender/receiver contract uses only these two completion channels:
+`set_value(ec, ...)` and `set_stopped()`. `set_error` is not part of the
+contract — no bnio `completion_signatures` include it, and no bnio receiver
+implements it. Receivers may also expose `get_env()` when they need to
+provide stop tokens or other receiver environment queries.
+
+### Cancellation and stop
+
+Which channel a cancellation fires on depends only on its source:
+
+| Cancellation source | Completion |
+|---------------------|------------|
+| Stop token visible in the receiver environment (user-provided, or forwarded by a composite sender algorithm) | `set_stopped()` |
+| `io_context::stop()` aborting inflight I/O or not-yet-executed queued work | `set_value(operation_canceled, ...)` |
+| `steady_timer::cancel()`, `expires_after()`, timer destruction | `set_value(operation_canceled)` |
+| Kernel-level cancel (CQE / kevent reporting `ECANCELED`) | `set_value(ECANCELED, ...)` |
+
+Rules that follow from the table:
+
+- Both sources racing: when the stop token is cancelled and the context is
+  stopping at the same time, the token wins — the operation completes with
+  `set_stopped()`.
+- Already-completed results are delivered unchanged: work whose result exists
+  before a stop is not fabricated as cancelled.
+- Write-all and read-all senders report the bytes transferred so far when
+  they complete with `set_value(operation_canceled, ...)`; on
+  `set_stopped()` no byte count is reported.
+- `io_context::run()` keeps returning `operation_canceled` as its own
+  function result after a stop; that channel is unchanged.
+- With `bexec::sync_wait`, token cancellation yields `std::nullopt`, while a
+  context stop yields an engaged optional carrying `operation_canceled`.
+- `when_all` over children aborted by a context stop aggregates their
+  `set_value(operation_canceled, ...)` completions instead of
+  short-circuiting with `set_stopped()`.
+- DNS `async_resolve(...)` senders declare `set_stopped_t()` in their
+  completion signatures: receivers connected to them must handle
+  `set_stopped()` (source-breaking change; previously cancellation was
+  reported through `set_value` only).
 
 Schedulers are lightweight handles produced by `io_context`:
 
@@ -132,13 +172,12 @@ what work they start and what value they send on success.
 | TLS reads/writes | `ssl_stream::async_read(...)`, `async_write(...)` | `std::size_t` |
 
 All of these senders complete with `set_value(std::error_code, ...)` as the
-universal exit (the leading `ec` distinguishes success, recoverable failure,
-and user stop-token cancellation). `set_stopped()` is emitted when the
-context aborts an inflight operation — `io_context::stop()`, abnormal close
-/ teardown, or a fatal run-loop error routed through the abort-deliver
-path. The bnio sender/receiver contract uses only these two completion
-channels; `set_error` is not part of it — no bnio `completion_signatures`
-include it, and no bnio receiver implements it.
+universal result exit (the leading `ec` distinguishes success, recoverable
+failure, and non-token cancellation; see "Cancellation and stop" above).
+`set_stopped()` is emitted if and only if the stop token visible in the
+receiver environment is cancelled. The bnio sender/receiver contract uses
+only these two completion channels; `set_error` is not part of it — no bnio
+`completion_signatures` include it, and no bnio receiver implements it.
 
 Read and write names are intentionally precise:
 
@@ -155,7 +194,8 @@ when the caller wants manual framing or single-read behavior.
 
 `async_write()` is write-all for TCP streams, TLS streams, and file
 descriptors. It repeats bounded native writes until the entire buffer is
-transferred, or until an error or stopped completion occurs.
+transferred, or until an error, a non-token cancellation, or a stop-token
+cancellation occurs.
 
 `async_write_some()` performs one bounded write attempt and reports that
 attempt's byte count. Use it when the caller wants manual framing, retry, or

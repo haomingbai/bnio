@@ -206,14 +206,22 @@ The `set_value` column lists only the success payload. The actual signature is
 | `scheduler.async_poll(descriptor, mask)` | `descriptor_view` | `unsigned` ready-event mask |
 
 All senders complete with `set_value(std::error_code, ...)` as the universal
-observable exit: the leading `ec` distinguishes success (`ec == {}`),
-recoverable failure (`ec == <errno-derived>`), and user stop-token
-cancellation (`ec == operation_canceled`). `set_stopped()` is emitted when
-the context aborts an inflight operation — `io_context::stop()`, abnormal
-close / teardown, or a fatal run-loop error routed through the abort-deliver
-path. The bnio sender/receiver contract uses only these two completion
-channels; `set_error` is not part of it — no bnio `completion_signatures`
-include it, and no bnio receiver implements it.
+result exit: the leading `ec` distinguishes success (`ec == {}`), recoverable
+failure (`ec == <errno-derived>`), and every non-token cancellation
+(`ec == operation_canceled`): `io_context::stop()` aborting inflight I/O or
+not-yet-executed queued work, `steady_timer` object-API cancellation, and
+kernel-level `ECANCELED`. `set_stopped()` is reserved exclusively for
+cooperative cancellation: it is emitted if and only if the operation
+observed, at `start()` or at the delivery point of queued work, that the stop
+token visible in its receiver environment is cancelled — including tokens
+forwarded or injected by composite sender algorithms. When the stop token is
+cancelled and the context is stopping at the same time, the token wins and
+the operation completes with `set_stopped()`. Already-completed results are
+delivered unchanged by a stop. Write-all/read-all senders report the bytes
+transferred so far through the `set_value(operation_canceled, ...)` payload;
+`set_stopped()` carries no payload. The bnio sender/receiver contract uses
+only these two completion channels; `set_error` is not part of it — no bnio
+`completion_signatures` include it, and no bnio receiver implements it.
 
 #### Eager Immediate-Completion Toggle
 
@@ -282,12 +290,13 @@ slice:
 stateDiagram-v2
     [*] --> Start
     Start --> Done: buffer.size == 0
+    Start --> Stopped: set_stopped() — stop token already cancelled
     Start --> SubmitSome: remaining > 0
     SubmitSome --> Advance: set_value(empty ec, n > 0)
     Advance --> Done: transferred == buffer.size
     Advance --> SubmitSome: transferred < buffer.size
-    SubmitSome --> ValueError: set_value(ec, bytes) — recoverable failure or cancel
-    SubmitSome --> Stopped: set_stopped() — context abort (stop / teardown / fatal error)
+    SubmitSome --> ValueError: set_value(ec, transferred) — recoverable failure or context abort (ec == operation_canceled)
+    SubmitSome --> Stopped: set_stopped() — stop token cancelled between steps
     SubmitSome --> ValueError: set_value(ec, 0) — EOF / invariant violation
     Done --> [*]: set_value(empty ec, total)
     ValueError --> [*]: set_value(ec, transferred)

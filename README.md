@@ -31,7 +31,9 @@ A minimal example — a one-shot timer, the same on either backend:
 struct timer_receiver {
   // set_value carries the result, including a leading std::error_code:
   //   ec == {}       → success
-  //   ec == canceled → user stop-token was requested before completion
+  //   ec == canceled → cancelled by a non-token source: io_context::stop()
+  //                    aborting the wait, a timer object-API cancellation,
+  //                    or a kernel-level cancel
   //   ec == <other>  → recoverable failure (errno-derived)
   void set_value(std::error_code ec) noexcept {
     if (ec) {
@@ -41,12 +43,11 @@ struct timer_receiver {
     }
     ioc.stop();
   }
-  // set_stopped is emitted ONLY by io_context::stop() aborting an inflight
-  // operation — never for user stop-token cancellation (that goes through
-  // set_value(operation_canceled)). Here ioc.stop() runs inside set_value,
-  // so this branch is not reached.
+  // set_stopped is emitted if and only if the stop token visible in the
+  // receiver environment was cancelled (cooperative cancellation). This
+  // example uses no stop token, so this branch is not reached.
   void set_stopped() noexcept {
-    std::cout << "Context stopped while timer was inflight." << std::endl;
+    std::cout << "Timer wait cancelled through its stop token." << std::endl;
     ioc.stop();
   }
 
