@@ -14,6 +14,48 @@
 
 namespace bnio::async_io::linux_native {
 
+namespace {
+
+/**
+ * @brief Returns whether a submit error is one the next run-loop pass can
+ * plausibly clear, so the never-prepared SQ-full remainder may keep its
+ * retry-slot turn.
+ *
+ * A submit that fails with one of these errnos leaves the ring itself
+ * usable; re-queueing the remainder gives the next pass a chance to
+ * succeed. Any other error means the ring rejects submissions the same
+ * way every time, and unconditionally re-queueing would busy-spin the
+ * run loop instead of reaching the fatal-error routing.
+ *
+ * <ul>
+ * <li>-EINTR: io_uring_enter(2) was interrupted by a signal on a
+ *     get-events path. The signal says nothing about the ring's health;
+ *     the next submit succeeds once the storm passes.</li>
+ * <li>-EAGAIN: transient SQ/CQ backpressure (e.g. an SQPOLL kernel
+ *     thread that has not drained the SQ yet). The kernel consumes the
+ *     queued work and a later submit clears it.</li>
+ * <li>-EBUSY: the completion ring is temporarily unable to accept the
+ *     submission; draining ready CQEs resolves it without any action
+ *     against the ring itself.</li>
+ * <li>-ENOMEM: the kernel could not allocate resources for this enter
+ *     call. Memory pressure is by nature transient; the ring state is
+ *     untouched.</li>
+ * </ul>
+ */
+[[nodiscard]] bool is_transient_submit_error(int error) noexcept {
+  switch (error) {
+    case -EINTR:
+    case -EAGAIN:
+    case -EBUSY:
+    case -ENOMEM:
+      return true;
+    default:
+      return false;
+  }
+}
+
+}  // namespace
+
 bool io_uring_context::consume_io_tasks() noexcept {
   // Teardown guard: once the context is stopping or closing, operations
   // consumed here must be aborted, not prepared — the ring is going away
@@ -82,8 +124,19 @@ bool io_uring_context::consume_io_tasks() noexcept {
   const int submit_result = submit_and_track_prepared(prepared);
   if (submit_result < 0) {
     fail_io_list(prepared, submit_result);
-    fail_io_list(remaining, submit_result);
-    return true;
+    if (!is_transient_submit_error(submit_result)) {
+      // Fatal: the ring rejects submissions the same way every time, so
+      // re-queueing the remainder would busy-spin the run loop without
+      // ever reaching the fatal-error routing. Fail it with the same
+      // errno; fail_io_list() is a no-op unregistration for these
+      // never-registered operations.
+      fail_io_list(remaining, submit_result);
+      return true;
+    }
+    // Transient: the remainder never reached an SQE and took no part in
+    // the failed submit, so it keeps its retry-slot turn and is prepared
+    // again on the next pass — exactly like the same-batch operations a
+    // full SQ leaves behind in their source queues.
   }
   // SQ-full remainder (nullptr when fully consumed): retried first on
   // the next run-loop pass.
