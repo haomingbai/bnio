@@ -211,8 +211,19 @@ class ssl_io_step_operation {
         return;
       case SSL_ERROR_ZERO_RETURN:
         state_->done = true;
-        complete_value(std::make_error_code(std::errc::connection_reset),
-                       state_->bytes);
+        if constexpr (State::application == ssl_application_io::read) {
+          // Orderly TLS close (peer sent close_notify): complete the read
+          // successfully with the bytes so far — the same EOF encoding as a
+          // plain descriptor / TCP socket read (docs/usage/index.md).
+          complete_value(std::error_code{}, state_->bytes);
+        } else {
+          // A write step terminated by the orderly close: write-all reports
+          // it as broken_pipe, matching the TCP write-all zero-byte encoding.
+          // Never an empty ec: that would mask an interrupted write-all as a
+          // successful short write.
+          complete_value(std::make_error_code(std::errc::broken_pipe),
+                         state_->bytes);
+        }
         return;
       default:
         state_->done = true;
@@ -296,10 +307,20 @@ class ssl_io_step_operation {
     }
     if (bytes == 0) {
       // EOF (peer closed): transport returns 0 bytes with an empty ec.
-      // Terminate with connection_reset and set done=true so repeat_until
-      // exits; otherwise it would loop forever (SSL_read keeps returning
-      // WANT_READ, transport keeps returning 0).
+      // Terminate with done=true so repeat_until exits; otherwise it would
+      // loop forever (SSL_read keeps returning WANT_READ, transport keeps
+      // returning 0).
       state_->done = true;
+      if (state_->phase == ssl_io_phase::transport_write) {
+        // A 0-byte transport write mid-write-all: report broken_pipe,
+        // matching the TCP write-all zero-byte encoding.
+        complete_value(std::make_error_code(std::errc::broken_pipe),
+                       state_->bytes);
+        return;
+      }
+      // A 0-byte transport read: the peer closed the connection without
+      // close_notify — a truncated stream, reported as connection_reset
+      // (the same pass-through a TCP socket reports on ECONNRESET).
       complete_value(std::make_error_code(std::errc::connection_reset),
                      state_->bytes);
       return;
