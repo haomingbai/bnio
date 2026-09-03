@@ -19,8 +19,8 @@ namespace bnio {
 
 namespace detail {
 
-timer_operation_base::timer_operation_base(io_context& context) noexcept
-    : timer_context_(&context) {}
+timer_operation_base::timer_operation_base(io_context* context) noexcept
+    : timer_context_(context) {}
 
 }  // namespace detail
 
@@ -384,14 +384,30 @@ steady_timer& steady_timer::operator=(steady_timer&& other) noexcept {
 }
 
 steady_timer::time_point steady_timer::expiry() const noexcept {
+  // Unregistered slot (moved-from, or waits aborted by stop()): no context
+  // can mutate this expiry anymore, so return the saved value directly.
+  if (timer_.context == nullptr) {
+    return timer_.expiry;
+  }
   return timer_.context->timer_expiry(timer_);
 }
 
 std::size_t steady_timer::expires_at(time_point expiry) noexcept {
+  // Unregistered slot: there are no pending waits to cancel and no
+  // registration to re-schedule, so only the saved expiry is written
+  // through and zero waits are reported canceled.
+  if (timer_.context == nullptr) {
+    timer_.expiry = expiry;
+    return 0;
+  }
   return timer_.context->set_timer_expiry(timer_, expiry);
 }
 
 std::size_t steady_timer::cancel() noexcept {
+  // Unregistered slot: no context holds pending waits for this timer.
+  if (timer_.context == nullptr) {
+    return 0;
+  }
   return timer_.context->cancel_timer(timer_);
 }
 

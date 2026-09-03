@@ -39,7 +39,10 @@ enum class timer_completion_kind {
 
 class BNIO_EXPORT timer_operation_base : public native_operation_base {
  public:
-  explicit timer_operation_base(io_context& context) noexcept;
+  /** Accepts a null context for waits started on an unregistered timer
+   *  slot; such operations must never be staged on timers_.ready and
+   *  deliver inline from start() instead. */
+  explicit timer_operation_base(io_context* context) noexcept;
 
   timer_operation_base(const timer_operation_base&) = delete;
   timer_operation_base& operator=(const timer_operation_base&) = delete;

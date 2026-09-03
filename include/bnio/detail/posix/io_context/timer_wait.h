@@ -17,7 +17,7 @@ template <class Receiver>
 class timer_wait_operation : public timer_operation_base {
  public:
   timer_wait_operation(steady_timer& timer, Receiver receiver)
-      : timer_operation_base(timer.context()),
+      : timer_operation_base(timer.timer_.context),
         timer_(&timer.timer_),
         receiver_(std::move(receiver)) {}
 
@@ -25,8 +25,24 @@ class timer_wait_operation : public timer_operation_base {
     if (stop_requested(receiver_)) {
       // Token cancelled before start: stage a stopped completion so
       // execute() delivers set_stopped (token cancellation wins).
+      if (this->timer_context_ == nullptr) {
+        // Unregistered timer: no context remains to drain timers_.ready,
+        // so the completion must be delivered inline, never staged.
+        bexec::set_stopped(std::move(receiver_));
+        return;
+      }
       this->timer_context_->queue_timer_completion(
           *this, timer_completion_kind::stopped);
+      return;
+    }
+
+    if (this->timer_context_ == nullptr) {
+      // Unregistered timer (moved-from, or waits aborted by
+      // io_context::stop()): nothing will ever stage a completion for this
+      // wait, so deliver set_value(operation_canceled) inline per the
+      // usage contract — again without touching timers_.ready.
+      bexec::set_value(std::move(receiver_),
+                       std::make_error_code(std::errc::operation_canceled));
       return;
     }
 

@@ -86,14 +86,35 @@ class BNIO_EXPORT steady_timer {
 
   /**
    * Returns the context that owns this timer.
+   *
+   * @pre The timer is registered (has_context() is true). On a
+   * moved-from timer, or one whose waits were aborted by
+   * io_context::stop(), the slot is unregistered and this returns an
+   * empty reference — use has_context() to check first.
    */
   [[nodiscard]] io_context& context() noexcept { return *timer_.context; }
 
   /**
    * Returns the context that owns this timer.
+   *
+   * @pre The timer is registered (has_context() is true). On a
+   * moved-from timer, or one whose waits were aborted by
+   * io_context::stop(), the slot is unregistered and this returns an
+   * empty reference — use has_context() to check first.
    */
   [[nodiscard]] const io_context& context() const noexcept {
     return *timer_.context;
+  }
+
+  /**
+   * Returns whether this timer is currently registered with a context.
+   * A moved-from timer, or one whose pending waits were aborted by
+   * io_context::stop(), is unregistered and reports false; its object
+   * APIs (cancel(), expiry(), expires_at(), async_wait()) remain safe to
+   * call in that state.
+   */
+  [[nodiscard]] bool has_context() const noexcept {
+    return timer_.context != nullptr;
   }
 
   /**
