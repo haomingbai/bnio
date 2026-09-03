@@ -331,9 +331,15 @@ directly.
 The I/O API intentionally separates a native-attempt operation from a composed
 full-write operation:
 
-- `async_read()` and `async_read_some()` both mean "one read attempt". They
-  complete after one bounded kernel receive/read or one SSL plaintext read step.
-  Callers that need an exact byte count build their own parser/state loop.
+- For TCP streams and file descriptors, `async_read()` is read-all: it
+  repeats bounded native reads until the supplied buffer is full or EOF is
+  observed (EOF completes successfully with the bytes read so far).
+  `async_read_some()` means "one read attempt". Callers that need a different
+  byte count build their own parser/state loop.
+- For TLS streams, both `async_read()` and `async_read_some()` mean one
+  plaintext `SSL_read` step (read-some), because TLS records and application
+  protocol frames do not map cleanly to a caller's buffer size. The TLS
+  EOF/close encodings are documented in the usage guide.
 - `async_write_some()` means "one write attempt". It preserves native short
   write behavior and reports the bytes accepted by that attempt.
 - `async_write()` means "write the whole supplied buffer". It composes

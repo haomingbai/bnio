@@ -205,6 +205,24 @@ receiver environment is cancelled. The bnio sender/receiver contract uses
 only these two completion channels; `set_error` is not part of it — no bnio
 `completion_signatures` include it, and no bnio receiver implements it.
 
+TLS streams encode EOF and close results the same way as plain descriptors
+and TCP sockets:
+
+- `ssl_stream::async_read()` and `ssl_stream::async_read_some()` both mean
+  one plaintext `SSL_read` attempt. There is no read-all form for TLS: TLS
+  record boundaries do not map to a caller's buffer size, so a call reports
+  the bytes of a single `SSL_read` step.
+- An orderly TLS close (the peer sent `close_notify`) completes a read
+  successfully with `set_value({}, 0)` — the same EOF encoding as the
+  zero-byte read on a plain descriptor or TCP socket.
+- A transport-level close without `close_notify` is a truncated stream: the
+  read completes with `set_value(connection_reset, n)`, the same pass-through
+  a TCP socket reports on `ECONNRESET`.
+- `ssl_stream::async_write()` is write-all. If the peer disappears mid-write
+  (a transport write of 0 bytes, or `SSL_ERROR_ZERO_RETURN` during a write
+  step), the write completes with `set_value(broken_pipe, n)`, matching the
+  write-all zero-byte encoding for TCP.
+
 Read and write names are intentionally precise:
 
 `async_read()` is read-all for TCP streams and file descriptors. It repeats
