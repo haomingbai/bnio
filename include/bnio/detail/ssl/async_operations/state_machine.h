@@ -117,14 +117,17 @@ class ssl_async_operation_base {
     }
 
     void set_value(std::error_code ec) noexcept {
-      if (ec) {
-        // The schedule delivered a non-empty ec (e.g. value(operation_canceled)
-        // after an io_context::stop() abort): overwrite any stale staged
-        // completion and pass ec through to the receiver. Under the unified
-        // contract this overwrite is the allowed semantics for context-stop
-        // aborts.
-        operation_->complete_value(ec);
-      }
+      // The schedule handoff never overwrites a staged completion. Every
+      // submit_post() call site stages a completion (value, error, or
+      // stopped) before submitting, and ssl_completion_kind has no empty
+      // state, so there is always a staged result here; delivering it
+      // unchanged implements the "already-completed results are delivered
+      // unchanged" contract (docs/usage/index.md). A non-empty ec from the
+      // schedule (e.g. value(operation_canceled) after an io_context::stop()
+      // abort) is simply dropped when a completion is already staged. The
+      // set_stopped() branch below is the deliberate exception: token
+      // cancellation wins over everything, including a staged completion.
+      (void)ec;
       operation_->deliver_terminal();
     }
 
