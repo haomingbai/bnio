@@ -26,6 +26,9 @@ bnio_add_integration_io_context_test(io_context_scheduler
 bnio_add_integration_io_context_test(ssl_error_precedence
                                      ssl_error_precedence_test.cpp
                                      PROPERTIES TIMEOUT 10)
+bnio_add_integration_io_context_test(ssl_error_queue_hygiene
+                                     ssl_error_queue_hygiene_test.cpp
+                                     PROPERTIES TIMEOUT 10)
 bnio_add_integration_io_context_test(ssl_handshake ssl_handshake_test.cpp)
 bnio_add_integration_io_context_test(ssl_transfer ssl_transfer_test.cpp)
 bnio_add_integration_io_context_test(steady_timer steady_timer_test.cpp
