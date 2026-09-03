@@ -8,7 +8,9 @@
 //     machine straight to finished, skipping finish(): inflight ops
 //     are stranded with no terminal receiver call.
 //   - enter_run() re-arm failure makes run() return while ops posted
-//     to the shared queues are stranded.
+//     to the shared queues are stranded; io_context::run() must also
+//     report the failed enter through its returned error_code instead
+//     of reporting success (run_reports_native_enter_failure).
 //   - queue_exit() aborts inflight/shared-io ops but then discards
 //     the aborted completions (pop_cpu_all), so their receivers are
 //     never notified.
@@ -30,12 +32,17 @@
 //   (the per-worker local wake channel) is covered by
 //   local_wake_channel_close_in_context_strands_inflight_io.
 
+#include <bnio/io_context.h>
+
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <poll.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <memory>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -379,6 +386,52 @@ TEST(IoUringErrorRoutingTest, queue_exit_discards_aborted_io_completions) {
   if (descriptors[1] >= 0) {
     (void)::close(descriptors[1]);
   }
+}
+
+// io_context::run() must report a failed native enter-run through its
+// returned error_code. The trigger is deterministic: with RLIMIT_NOFILE
+// pinned so that no descriptor can be allocated, the io_context
+// constructor's wake-channel eventfd open fails and the shared channel
+// keeps a -1 read fd. After the limit is restored, run()'s native ring
+// setup succeeds and enter_run() fails arming the shared wake poll —
+// arm_wake_poll() returns -EINVAL for the closed channel and
+// fail_enter_run() delivers everything already published. Before the
+// fix run() returned an empty error_code here: a worker that never
+// started looked like a successful run.
+TEST(IoUringErrorRoutingTest, run_reports_native_enter_failure) {
+  // Probe the next descriptor number: dup(0) lands on the lowest free
+  // fd, so after closing the probe every descriptor below it is in use.
+  const int probe = ::dup(0);
+  ASSERT_GE(probe, 0);
+  const int descriptor_ceiling = probe;
+  ASSERT_EQ(::close(probe), 0);
+
+  rlimit saved{};
+  ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &saved), 0);
+  const rlimit pinned{descriptor_ceiling, saved.rlim_max};
+  if (::setrlimit(RLIMIT_NOFILE, &pinned) != 0) {
+    GTEST_SKIP() << "cannot pin RLIMIT_NOFILE to " << descriptor_ceiling;
+  }
+
+  // Verify the pin: an allocation attempt must fail.
+  const int pinned_probe = ::dup(0);
+  if (pinned_probe >= 0) {
+    (void)::close(pinned_probe);
+    (void)::setrlimit(RLIMIT_NOFILE, &saved);
+    GTEST_SKIP() << "RLIMIT_NOFILE pin does not exhaust the descriptor "
+                    "space";
+  }
+
+  // The constructor's wake-channel eventfd open fails; the shared
+  // channel stays closed underneath the context.
+  bnio::io_context context;
+  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &saved), 0);
+
+  const std::error_code result = context.run();
+  EXPECT_EQ(result, std::error_code(EINVAL, std::generic_category()))
+      << "run() must report the failed native enter (arm_wake_poll "
+         "returns -EINVAL for the closed shared wake channel), got: "
+      << result.message();
 }
 
 }  // namespace
