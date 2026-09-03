@@ -29,6 +29,9 @@ if(BNIO_PLATFORM_LINUX)
   bnio_add_integration_async_io_test(io_uring_eagain_rearm
                                      io_uring_eagain_rearm_test.cpp
                                      PROPERTIES TIMEOUT 30)
+  bnio_add_integration_async_io_test(io_uring_sq_full_submit_failure
+                                     io_uring_sq_full_submit_failure_test.cpp
+                                     PROPERTIES TIMEOUT 30)
 endif()
 if(BNIO_PLATFORM_BSD)
   bnio_add_integration_async_io_test(kqueue_run_loop kqueue_run_loop_test.cpp)
