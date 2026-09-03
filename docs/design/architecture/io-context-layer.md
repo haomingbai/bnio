@@ -426,6 +426,23 @@ This ordering works because every `submit_post()` call site stages a
 completion before submitting, so the post receiver always finds a staged
 result.
 
+TLS completion encodings follow the TCP precedent direction by direction:
+
+- `SSL_ERROR_ZERO_RETURN` on a plaintext read is an orderly close (the peer
+  sent `close_notify`): it completes with an empty ec, like the TCP
+  zero-byte read.
+- On a write step, and on any 0-byte transport write inside the write-all
+  loop, the completion is `broken_pipe`, matching the TCP write-all
+  zero-byte encoding; an interrupted write-all must never surface as a
+  successful short write.
+- A 0-byte transport read (the peer vanished without `close_notify`) keeps
+  `connection_reset`, the same pass-through a TCP socket reports on
+  `ECONNRESET`; `tests/integration/io_context/ssl_transfer_test.cpp` locks
+  this truncation behavior in.
+- The handshake/shutdown state machine keeps `connection_reset` for
+  `ZERO_RETURN`/EOF: a close_notify during the handshake is a failure, not
+  an orderly end of application data.
+
 ### Operation Flow Through Layers
 
 ```mermaid
