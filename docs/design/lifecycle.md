@@ -437,6 +437,62 @@ The normal multi-worker stop is unaffected: the last worker's `finish()`
 already drained everything, so this pass finds the queues empty and
 returns immediately.
 
+#### Why the stopping thread delivers inline
+
+Once `running_workers` reaches zero the shared queues are ownerless:
+their only consumers are workers (during the run loop and in `finish()`),
+and a late `run()` increments `running_workers` before checking
+`can_start_run()`, so it exits with `operation_canceled` without ever
+touching a queue. Delivering from the stopping thread is therefore the
+only available agent, and it mirrors the standing convention for
+abnormal teardown (`queue_exit()` already runs receiver callbacks
+synchronously on the calling thread). Reusing each operation's own
+`execute()` keeps the arbitration single-pointed — the same token →
+stop-channel logic that workers run decides the completion here, and the
+I/O operations are only *marked* stopped (`result = -ECANCELED`,
+`complete_submit_stopped()`) before `execute()`, so no SQE or kevent is
+ever prepared during the drain.
+
+Staging completions back into a queue is not an option: a queued
+completion has a consumer only if a worker exists, which is exactly the
+case the drain covers.
+
+#### Concurrency argument
+
+The drain never runs inside `submit_lock`. This is deliberate: receiver
+callbacks may re-enter context state — `wake_one_if_all_workers_sleeping()`
+takes `submit_lock`, `queue_timer_completion()` takes `timers_.mutex` —
+and holding the lock across `execute()` would self-deadlock. Lock-free
+operation is safe because exclusive access is already established:
+
+1. **Publish vs. drain.** `begin_stop()` stores `life_state = 1` inside
+   `submit_lock`, and the shared publish path checks the state and
+   enqueues inside the same lock, atomically. Any publish whose critical
+   section precedes the store has its operation enqueued and visible
+   (mutex ordering provides the happens-before edge); any publish after
+   the store is rejected and completes inline at its caller. The mutex
+   rules out the "in the lock but not yet enqueued" interleaving — the
+   drain and the store cannot overlap a publisher's critical section.
+2. **No competing consumer.** The drain runs only after the
+   `running_workers` spin, and the pre-increment in `run()` plus the
+   in-lock state check mean a worker either fully participates (drains
+   in `finish()` before releasing its slot) or never touches the queues.
+3. **Stability.** With no producer and no competing consumer, one full
+   pass over the three sources empties them; the loop-until-a-pass-is-
+   empty shape is retained as a conservative guard, not because an
+   unstable state is reachable.
+
+`timers_.ready` is the one source with its own lock (`timers_.mutex`):
+the drain holds it only for the pointer swap, then executes the taken
+list, so a receiver callback that queries timer state cannot deadlock.
+
+#### Why the destructor does not drain
+
+`~io_context()` publishes the terminal state and closes the wake channel
+without delivering completions. That remains a Rule 3 obligation: the
+caller must keep the context and operation storage alive until terminal
+completion, and `stop()` is the API that guarantees it.
+
 ### Stop-channel arbitration
 
 The unified stop contract decouples the internal stopped marker from the
