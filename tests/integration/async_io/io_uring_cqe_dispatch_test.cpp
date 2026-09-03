@@ -47,24 +47,6 @@ TEST(IoUringCqeDispatchTest, cqe_batch_window_drains_multiple_rounds) {
   EXPECT_TRUE(state->all_in_context);
 }
 
-// Minimal receiver that sets an atomic flag when the context run loop
-// processes a no-op CQE, signalling that the run loop is active.
-struct run_loop_signal_recv {
-  std::atomic<bool>* started = nullptr;
-
-  void set_value(std::error_code) noexcept {
-    if (started) started->store(true, std::memory_order_release);
-  }
-
-  void set_value(std::error_code, int, unsigned) noexcept {
-    if (started) started->store(true, std::memory_order_release);
-  }
-
-  void set_stopped() noexcept {
-    if (started) started->store(true, std::memory_order_release);
-  }
-};
-
 TEST(IoUringCqeDispatchTest, concurrent_start_uses_the_single_run_thread) {
   io_uring_task_queue_state global_tasks;
   io_uring_context context;
@@ -82,51 +64,75 @@ TEST(IoUringCqeDispatchTest, concurrent_start_uses_the_single_run_thread) {
   constexpr unsigned k_threads = 4;
   auto state = std::make_shared<concurrent_batch_state>();
 
-  // Post a no-op that sets an atomic flag when the run loop first
-  // processes a CQE, confirming the run loop is active.
-  std::atomic<bool> run_loop_started{false};
-  run_loop_signal_recv sig_recv;
-  sig_recv.started = &run_loop_started;
-  auto signal_op =
-      std::make_unique<io_uring_nop_operation<run_loop_signal_recv>>(
-          context, std::move(sig_recv));
-  bexec::start(*signal_op);
+  // Completion counter whose receiver never calls stop(): the context is
+  // stopped by the main thread only after every losing worker has
+  // returned from run(), so no worker's run_active CAS can ever land
+  // outside the run loop lifetime.
+  struct drain_only_recv {
+    std::shared_ptr<concurrent_batch_state> state;
 
+    void set_value(std::error_code ec, int result, unsigned) noexcept {
+      if (ec) {
+        state->errors.fetch_add(1, std::memory_order_acq_rel);
+      } else {
+        EXPECT_TRUE(result == 0);
+        state->completed.fetch_add(1, std::memory_order_acq_rel);
+      }
+    }
+
+    void set_stopped() noexcept {
+      state->stopped.fetch_add(1, std::memory_order_acq_rel);
+    }
+  };
+
+  // Start every operation before releasing the workers so the run loop
+  // enters with all k_count operations already inflight.
+  //
+  // Once the context reaches finished, calling run() again is not
+  // supported: a worker whose run_active CAS is delayed past the run
+  // loop's lifetime would win the CAS and hit the finished assertion.
+  // The receivers therefore never stop the context; the main thread
+  // waits until all operations completed and k_threads - 1 workers (the
+  // losers; the winner is still inside run()) have returned from run()
+  // before calling stop(). Until then run_active stays true, so every
+  // worker CAS lands inside the run loop lifetime.
+  std::vector<std::unique_ptr<io_uring_nop_operation<drain_only_recv>>>
+      operations;
+  operations.reserve(k_count);
+  for (unsigned index = 0; index < k_count; ++index) {
+    drain_only_recv recv;
+    recv.state = state;
+    operations.push_back(
+        std::make_unique<io_uring_nop_operation<drain_only_recv>>(
+            context, std::move(recv)));
+    bexec::start(*operations.back());
+  }
+
+  std::atomic<unsigned> workers_returned{0};
   std::barrier ready(static_cast<std::ptrdiff_t>(k_threads + 1));
   std::vector<std::thread> workers;
   workers.reserve(k_threads);
   for (unsigned index = 0; index < k_threads; ++index) {
-    workers.emplace_back([&context, &ready] {
+    workers.emplace_back([&context, &ready, &workers_returned] {
       ready.arrive_and_wait();
       context.run();
+      workers_returned.fetch_add(1, std::memory_order_acq_rel);
     });
   }
 
   ready.arrive_and_wait();
 
-  // Spin-wait for the run loop to be confirmed active (5-second timeout).
+  // Wait until every operation completed and the losing workers (all but
+  // the run-loop winner, which is still inside run()) have returned, so
+  // their CAS attempts are done, then stop the context (5-second timeout
+  // guards against an unexpected fatal run-loop exit).
   auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (!run_loop_started.load(std::memory_order_acquire)) {
-    if (std::chrono::steady_clock::now() > deadline) {
-      break;
-    }
+  while ((state->completed.load(std::memory_order_acquire) < k_count ||
+          workers_returned.load(std::memory_order_acquire) < k_threads - 1) &&
+         std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
   }
-
-  std::vector<
-      std::unique_ptr<io_uring_nop_operation<concurrent_batch_receiver>>>
-      operations;
-  operations.reserve(k_count);
-  for (unsigned index = 0; index < k_count; ++index) {
-    concurrent_batch_receiver recv;
-    recv.context = &context;
-    recv.target = k_count;
-    recv.state = state;
-    operations.push_back(
-        std::make_unique<io_uring_nop_operation<concurrent_batch_receiver>>(
-            context, std::move(recv)));
-    bexec::start(*operations.back());
-  }
+  (void)context.stop();
 
   for (auto& worker : workers) {
     worker.join();
