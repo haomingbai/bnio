@@ -52,6 +52,11 @@ bnio_add_integration_io_context_test(
   lifecycle_nested_run
   lifecycle/nested_run_test.cpp
   PROPERTIES TIMEOUT 10)
+# Closes/flips fd 0 on purpose, so it must not run alongside other tests.
+bnio_add_integration_io_context_test(
+  lifecycle_accept_abort_fd_zero
+  lifecycle/accept_abort_fd_zero_test.cpp
+  PROPERTIES RUN_SERIAL TRUE TIMEOUT 20)
 if(BNIO_PLATFORM_LINUX)
   # Signal-driven stop() regression test: uses SIGUSR1 and a forked child,
   # so it must not run concurrently with other tests. Linux-only because the
