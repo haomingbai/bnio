@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <memory>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -565,6 +566,102 @@ TEST(SteadyTimerTest, steady_timer_self_move_assignment) {
   context.run();
 
   EXPECT_EQ(state->signal, signal_kind::value);
+}
+
+// Contract (docs/usage/index.md, docs/design/timer.md): a timer whose slot
+// was unregistered (context == nullptr — moved-from, or waits aborted by
+// io_context::stop()) is legal to keep using. Its object APIs are safe
+// no-ops and its async_wait() completes with set_value(operation_canceled);
+// a cancelled receiver stop token wins with set_stopped().
+TEST(SteadyTimerTest, moved_from_timer_object_apis_are_safe) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  using clock = bnio::steady_timer::clock;
+  bnio::steady_timer t1(context);
+  const auto original = clock::now() + std::chrono::seconds(30);
+  EXPECT_EQ(t1.expires_at(original), 0U);
+
+  bnio::steady_timer t2(std::move(t1));
+
+  // t1 is moved-from: cancel reports zero canceled waits.
+  EXPECT_EQ(t1.cancel(), 0U);
+  // expiry() must not dereference a null context and returns the last
+  // expiry that was set on this object.
+  EXPECT_EQ(t1.expiry(), original);
+  // Expiry replacement on a moved-from timer cancels nothing and still
+  // updates the saved expiry (write-through).
+  EXPECT_EQ(t1.expires_after(std::chrono::milliseconds(1)), 0U);
+  const auto later = clock::now() + std::chrono::seconds(60);
+  EXPECT_EQ(t1.expires_at(later), 0U);
+  EXPECT_EQ(t1.expiry(), later);
+
+  // async_wait() on a moved-from timer completes inline with
+  // set_value(operation_canceled) (no token in this receiver's env).
+  void_receiver wait_receiver;
+  wait_receiver.context = nullptr;
+  auto wait_state = wait_receiver.state;
+  auto wait_sender = t1.async_wait();
+  auto wait_operation =
+      bexec::connect(std::move(wait_sender), std::move(wait_receiver));
+  bexec::start(wait_operation);
+  EXPECT_EQ(wait_state->signal, signal_kind::error);
+  EXPECT_EQ(wait_state->error,
+            std::make_error_code(std::errc::operation_canceled));
+
+  // Move-assigning a moved-from timer unregisters t2; the same four APIs
+  // must stay safe on t2 afterwards.
+  t2 = std::move(t1);
+  EXPECT_EQ(t2.cancel(), 0U);
+  EXPECT_EQ(t2.expiry(), original);
+  EXPECT_EQ(t2.expires_after(std::chrono::milliseconds(1)), 0U);
+
+  void_receiver t2_receiver;
+  t2_receiver.context = nullptr;
+  auto t2_state = t2_receiver.state;
+  auto t2_sender = t2.async_wait();
+  auto t2_operation =
+      bexec::connect(std::move(t2_sender), std::move(t2_receiver));
+  bexec::start(t2_operation);
+  EXPECT_EQ(t2_state->signal, signal_kind::error);
+  EXPECT_EQ(t2_state->error,
+            std::make_error_code(std::errc::operation_canceled));
+
+  // Both destructors must unregister nothing and not crash.
+}
+
+// Same contract through the context-stop window: after stop() returns, the
+// abort (abort_pending_timer_waits) has unregistered every surviving timer
+// slot, so the object APIs and async_wait() must stay null-safe.
+TEST(SteadyTimerTest, timer_object_apis_are_safe_after_context_stop) {
+  auto context = std::make_unique<bnio::io_context>();
+  if (!context_available(*context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  using clock = bnio::steady_timer::clock;
+  bnio::steady_timer timer(*context);
+  const auto original = clock::now() + std::chrono::seconds(30);
+  EXPECT_EQ(timer.expires_at(original), 0U);
+
+  EXPECT_GE(context->stop(), 0);
+
+  EXPECT_EQ(timer.cancel(), 0U);
+  EXPECT_EQ(timer.expiry(), original);
+  const auto later = clock::now() + std::chrono::seconds(60);
+  EXPECT_EQ(timer.expires_at(later), 0U);
+  EXPECT_EQ(timer.expiry(), later);
+
+  void_receiver receiver;
+  receiver.context = nullptr;
+  auto state = receiver.state;
+  auto sender = timer.async_wait();
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
 }
 
 }  // namespace
