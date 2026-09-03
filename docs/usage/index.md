@@ -229,6 +229,18 @@ and TCP sockets:
   step), the write completes with `set_value(broken_pipe, n)`, matching the
   write-all zero-byte encoding for TCP.
 
+TLS failure error codes are attributed to the failing OpenSSL call. bnio
+clears the calling thread's OpenSSL error queue immediately before every
+OpenSSL call whose failure is reported through the queue, so the `ec` a
+failed handshake, read, write, or shutdown completes with is the error that
+call recorded — never a leftover from earlier OpenSSL work on the same
+thread. When a failure path reports no OpenSSL error at all (for example, a
+handshake on an invalid stream never reaches OpenSSL), the operation
+completes with `bnio::make_no_ssl_error()`: a dedicated value in the OpenSSL
+error category whose message is "no OpenSSL error was recorded". It never
+collides with a real OpenSSL error code and does not represent any TLS-level
+failure.
+
 Read and write names are intentionally precise:
 
 `async_read()` is read-all for TCP streams and file descriptors. It repeats
