@@ -171,6 +171,12 @@ what work they start and what value they send on success.
 | TLS handshake/shutdown | `ssl_stream::async_handshake(...)`, `async_shutdown(...)` | `()` |
 | TLS reads/writes | `ssl_stream::async_read(...)`, `async_write(...)` | `std::size_t` |
 
+For `async_poll(...)`, the `unsigned` ready mask is meaningful only on success
+(`ec == {}`). When the operation fails or is cancelled the mask is delivered as
+`0`: the error itself is carried by the leading `ec`, never encoded into the
+mask. A negative native result is never converted to `unsigned`, so no wrapped
+value can reach a caller's `mask & POLLIN` test.
+
 All of these senders complete with `set_value(std::error_code, ...)` as the
 universal result exit (the leading `ec` distinguishes success, recoverable
 failure, and non-token cancellation; see "Cancellation and stop" above).
