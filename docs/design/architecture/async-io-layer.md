@@ -206,6 +206,20 @@ rule of `io_context::stop()`. The `value`/`value_with_ec` branches of
 `execute()` never consult the token, so already-completed results and
 kernel-level `ECANCELED` are delivered unchanged.
 
+The stopped branch of `execute()` carries no result: the request never ran,
+so it delivers `-1` as the native result and `0` as the flags instead of
+synthesizing a value. Byte-count models clamp with `std::max(0, result)`, so
+a cancelled read or write still observes `0` bytes, and `connect` ignores the
+result entirely. A descriptor-yielding model has no clamp available —
+`kqueue_accept_request` and `io_uring_accept_request` forward `result`
+verbatim, `0` is a legal descriptor, and `tcp::socket` owns whatever it is
+handed, so a synthesized `0` wrapped the process's stdin in an owning socket
+(`O_NONBLOCK` in the constructor, `close()` in the destructor). `-1` is the
+only value that can mean "no descriptor", and for the same reason it is the
+right value for the abort channel generally: all three sites —
+`native_io_operation` on both platforms and the kqueue `io_request` — deliver
+it.
+
 Transient `-EAGAIN` from a wake-poll re-arm is not fatal. It means the SQ is
 under pressure (typically SQPOLL, where only the kernel poll thread frees SQ
 slots) and the poll is not armed: the run loop returns to the ready-tasks
