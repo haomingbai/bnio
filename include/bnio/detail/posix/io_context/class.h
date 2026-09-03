@@ -815,9 +815,40 @@ class BNIO_EXPORT io_context {
    * Timer waits were already aborted by begin_stop() before life_state
    * was published, so this function only spins on the wake channel until
    * global_state_.running_workers drops to zero (or one, when called from
-   * a worker).
+   * a worker), then drains the shared queues that no worker will drain
+   * (see drain_shared_queues_for_stop()).
    */
   int stop_internal() noexcept;
+
+  /**
+   * Drains and delivers the shared queues after the stopping thread has
+   * waited for running_workers to reach zero.
+   *
+   * Concurrency contract: begin_stop() published life_state = 1 inside
+   * global_state_.submit_lock, and every shared-path publish checks
+   * life_state and enqueues inside the same lock. The two critical
+   * sections are therefore fully serialized — an operation enqueued
+   * before the store is visible to this drain, and any publish after the
+   * store observes the stopping state, does not enqueue, and completes
+   * inline at its caller. With running_workers at zero no concurrent
+   * consumer exists either: run() increments running_workers before any
+   * check, so a late run() that observes life_state != 0 exits without
+   * touching the queues, and earlier workers drained the shared queues in
+   * finish() before releasing their slot. The drain owns the queues
+   * exclusively; the loop runs until a full pass finds every source empty
+   * and then returns. On the normal multi-worker stop the last worker's
+   * finish() already emptied everything, so this pass is a no-op.
+   *
+   * Delivery never prepares or submits SQEs/kevents: CPU operations run
+   * inline (their execute() arbitration reports
+   * set_value(operation_canceled) for work the context aborted), I/O
+   * operations are marked stopped (result = -ECANCELED +
+   * complete_submit_stopped()) and executed inline, and the timer waits
+   * staged on timers_.ready by abort_pending_timer_waits() are taken
+   * under timers_.mutex and executed inline. Receiver callbacks run
+   * synchronously on the stopping thread.
+   */
+  void drain_shared_queues_for_stop() noexcept;
 
   /**
    * Elects this thread as the stopping thread, aborts pending timer

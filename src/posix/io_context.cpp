@@ -6,6 +6,7 @@
 #include <bnio/io_context.h>
 
 #include <atomic>
+#include <cerrno>
 #include <mutex>
 #include <thread>
 
@@ -205,7 +206,77 @@ int io_context::stop_internal() noexcept {
     std::this_thread::yield();
   }
 
+  // Workers drain the shared queues in finish(); with running_workers at
+  // zero nothing else will. Deliver every operation the stopping state
+  // was elected over, including the never-started-worker case where the
+  // queues were never touched by a run loop.
+  drain_shared_queues_for_stop();
+
   return 0;
+}
+
+void io_context::drain_shared_queues_for_stop() noexcept {
+  // The concurrency contract documented on the declaration (class.h)
+  // makes this drain the exclusive owner of the shared queues: publishes
+  // racing the stop are serialized against the life_state store by
+  // submit_lock and either landed in the queue before it (visible here,
+  // since the drain runs after the store was published and its spin
+  // completed) or were rejected and completed inline by their caller.
+  // Receiver callbacks must never run under submit_lock — they may call
+  // wake_one_if_all_workers_sleeping() or queue_timer_completion(), both
+  // of which take locks — so the drain pops without holding submit_lock
+  // and loops until a full pass finds all three sources empty.
+  bool had_work = true;
+  while (had_work) {
+    had_work = false;
+
+    // Shared CPU operations (posted schedules, resolves, ...). Their
+    // execute() arbitration (stop token, then is_stopped()) delivers
+    // set_value(operation_canceled) for work the stopping context never
+    // ran.
+    detail::native_operation_base* cpu = global_state_.pop_cpu_all();
+    while (cpu != nullptr) {
+      detail::native_operation_base* next = cpu->next;
+      cpu->next = nullptr;
+      had_work = true;
+      cpu->execute();
+      cpu = next;
+    }
+
+    // Shared I/O operations: mark stopped exactly like the native
+    // abort_and-deliver paths (drain_io_list_complete_stopped) and
+    // execute() inline — the stopped branch arbitrates via the receiver
+    // stop token. No SQE or kevent is ever prepared or submitted here.
+    detail::native_io_operation_base* io = global_state_.pop_io_all();
+    while (io != nullptr) {
+      detail::native_io_operation_base* next = io->io_next;
+      io->io_next = nullptr;
+      had_work = true;
+      io->result = -ECANCELED;
+      io->complete_submit_stopped();
+      io->execute();
+      io = next;
+    }
+
+    // Timer waits staged on timers_.ready by abort_pending_timer_waits()
+    // (or by a wait started on an already-unregistered timer). Normally a
+    // worker's finish() drains the ready list; take it under timers_.mutex
+    // and deliver inline — timer_wait_operation::execute() maps the
+    // staged canceled kind to set_value(operation_canceled).
+    detail::timer_operation_base* ready = nullptr;
+    {
+      std::lock_guard context_lock(timers_.mutex);
+      ready = timers_.ready;
+      timers_.ready = nullptr;
+    }
+    while (ready != nullptr) {
+      detail::timer_operation_base* next = ready->timer_next_;
+      ready->timer_next_ = nullptr;
+      had_work = true;
+      ready->execute();
+      ready = next;
+    }
+  }
 }
 
 io_context::join_sender io_context::join() noexcept {
