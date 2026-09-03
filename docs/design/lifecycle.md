@@ -559,6 +559,31 @@ the context stopped — the async_io layer does not observe io_context
 lifecycle state, so a queued-but-unexecuted post is not reported as
 `operation_canceled`.
 
+### A failed native enter is reported through run()'s result
+
+`io_context::run_native_loop()` can lose its native run loop before any
+worker starts: `io_uring_context::enter_run()` fails when the ring
+cannot be enabled or a wake poll cannot be armed. The failure precedes
+every concurrency hazard — running_workers was already incremented but
+no other thread can touch the fresh native context — so the context
+simply records the negative errno in `enter_run_error_` (a plain int
+owned by the run()-caller thread, reset by `queue_init()`) and
+`run_native_loop()` reads it back after `ctx.run()` returns, surfacing
+`std::error_code(-errno, std::generic_category())` as `run()`'s result.
+A zero converts to the empty error_code a normal run returns.
+
+The drain obligation is unchanged: `fail_enter_run()` still rolls the
+run through `finish()` so everything already published reaches a
+terminal receiver call before `run()` returns; the fix only closes the
+reporting gap that made a never-started worker look like a successful
+run (and left publish after the failed enter accepted work no one would
+drain — the one exception to the stop/publish closed-loop argument).
+The kqueue backend has no reachable enter failure past
+`run_native_loop()`'s `is_open()` pre-check, so its
+`enter_run_error()` is a documented constant zero that gives both
+backends the same `run()` error surface
+(`src/posix/io_context.cpp`, `include/bnio/detail/posix/io_context/native_context.h`).
+
 ### Native context single-owner guarantee
 
 `io_uring_context` and `kqueue_context` are **single-owner, non-reentrant**
