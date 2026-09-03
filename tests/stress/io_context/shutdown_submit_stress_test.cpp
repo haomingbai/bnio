@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -22,23 +23,36 @@ struct op_holder : op_holder_base {
   }
 };
 
+// Classifies terminal receiver calls.  The shutdown contract: a publish
+// rejected because the context already stopped completes inline via
+// set_value(operation_canceled), never via set_stopped.
 struct counting_recv {
-  std::atomic<int>* counter = nullptr;
-  void set_value(std::error_code) noexcept {
+  std::atomic<int>* counter = nullptr;   // every terminal call
+  std::atomic<int>* canceled = nullptr;  // set_value(operation_canceled)
+  std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
+  void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (canceled &&
+        ec == std::make_error_code(std::errc::operation_canceled)) {
+      canceled->fetch_add(1, std::memory_order_relaxed);
+    }
   }
   void set_stopped() noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (stopped) stopped->fetch_add(1, std::memory_order_relaxed);
   }
 };
 
+// The worker-entry probe completes normally while the context is still
+// running; a set_stopped here means the probe was never really serviced.
 struct probe_recv {
   std::atomic<bool>* done = nullptr;
+  std::atomic<bool>* stopped = nullptr;
   void set_value(std::error_code) noexcept {
     if (done) done->store(true, std::memory_order_release);
   }
   void set_stopped() noexcept {
-    if (done) done->store(true, std::memory_order_release);
+    if (stopped) stopped->store(true, std::memory_order_release);
   }
 };
 
@@ -63,8 +77,11 @@ TEST(ShutdownSubmitStressTest, concurrent_schedule_after_stop_all_complete) {
     }
 
     std::atomic<int> completed{0};
+    std::atomic<int> canceled{0};
+    std::atomic<int> stopped{0};
     std::atomic<int> posted{0};
     std::atomic<bool> worker_entered{false};
+    std::atomic<bool> probe_stopped{false};
     std::atomic<int> posters_started{0};
     std::atomic<bool> g_go{false};
     std::vector<std::vector<std::unique_ptr<op_holder_base>>> poster_ops(
@@ -75,7 +92,7 @@ TEST(ShutdownSubmitStressTest, concurrent_schedule_after_stop_all_complete) {
     // Prove the worker entered run() by round-tripping one probe op.
     {
       auto probe = bexec::connect(ctx->get_post_scheduler().schedule(),
-                                  probe_recv{&worker_entered});
+                                  probe_recv{&worker_entered, &probe_stopped});
       bexec::start(probe);
       while (!worker_entered.load(std::memory_order_acquire)) {
         std::this_thread::yield();
@@ -101,8 +118,8 @@ TEST(ShutdownSubmitStressTest, concurrent_schedule_after_stop_all_complete) {
         }
         for (int i = 0; i < kOpsPerPoster; ++i) {
           auto sender = scheduler.schedule();
-          auto h = std::make_unique<op_holder<Op>>(sender,
-                                                   counting_recv{&completed});
+          auto h = std::make_unique<op_holder<Op>>(
+              sender, counting_recv{&completed, &canceled, &stopped});
           bexec::start(h->op);
           ops.push_back(std::move(h));
         }
@@ -132,6 +149,15 @@ TEST(ShutdownSubmitStressTest, concurrent_schedule_after_stop_all_complete) {
     }
 
     if (completed.load(std::memory_order_acquire) != expected) {
+      ++rounds_with_strands;
+    }
+    // All publishes land after the worker fully exited, so every one is
+    // rejected and completes inline via set_value(operation_canceled).
+    if (canceled.load(std::memory_order_acquire) != expected) {
+      ++rounds_with_strands;
+    }
+    if (stopped.load(std::memory_order_acquire) != 0 ||
+        probe_stopped.load(std::memory_order_acquire)) {
       ++rounds_with_strands;
     }
     poster_ops.clear();
