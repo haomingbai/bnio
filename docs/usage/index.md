@@ -130,7 +130,12 @@ Rules that follow from the table:
   `async_wait()` completes inline with `set_value(operation_canceled)` — or
   `set_stopped()` when the receiver's stop token is already cancelled.
 - Already-completed results are delivered unchanged: work whose result exists
-  before a stop is not fabricated as cancelled.
+  before a stop is not fabricated as cancelled. For TLS streams this covers
+  staged completions too: a handshake or read/write result the SSL state
+  machine has already produced (a TLS failure, an orderly close, transferred
+  bytes) is delivered unchanged even when the context stopped before the
+  final post-handoff to the receiver runs; the post step never overwrites the
+  staged result with `operation_canceled`.
 - Write-all and read-all senders report the bytes transferred so far when
   they complete with `set_value(operation_canceled, ...)`; on
   `set_stopped()` no byte count is reported.
