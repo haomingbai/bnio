@@ -177,6 +177,14 @@ For `async_poll(...)`, the `unsigned` ready mask is meaningful only on success
 mask. A negative native result is never converted to `unsigned`, so no wrapped
 value can reach a caller's `mask & POLLIN` test.
 
+A descriptor-yielding operation never invents a descriptor.
+`tcp_acceptor::async_accept(...)` sends a `tcp_socket` that owns a descriptor
+only when the operation completes successfully; on failure or cancellation the
+socket is closed and `native_handle()` is `-1`. `-1` is the only value that can
+mean "no descriptor": `0` is a legal descriptor number, so unlike a byte count
+a negative native result cannot be made harmless by clamping it with
+`std::max(0, ...)`.
+
 All of these senders complete with `set_value(std::error_code, ...)` as the
 universal result exit (the leading `ec` distinguishes success, recoverable
 failure, and non-token cancellation; see "Cancellation and stop" above).
