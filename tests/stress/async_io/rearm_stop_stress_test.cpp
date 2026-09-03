@@ -43,6 +43,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -81,20 +82,32 @@ struct direct_op_holder : op_holder_base {
   Op op;
 };
 
-// Counts terminal receiver calls: both set_value variants and set_stopped.
+// Classifies terminal receiver calls.  The stop contract: aborting a
+// started operation completes via set_value(operation_canceled), never
+// via set_stopped, and no other error code may surface from the abort.
 struct flood_receiver {
-  std::atomic<unsigned>* terminal = nullptr;
+  std::atomic<unsigned>* terminal = nullptr;  // every terminal call
+  std::atomic<unsigned>* canceled = nullptr;  // set_value(operation_canceled)
+  std::atomic<unsigned>* stopped = nullptr;   // set_stopped (violation)
+  std::atomic<unsigned>* errors = nullptr;    // non-canceled error_code
 
-  void set_value(std::error_code) noexcept {
-    terminal->fetch_add(1, std::memory_order_acq_rel);
-  }
+  void set_value(std::error_code ec) noexcept { handle(ec); }
 
-  void set_value(std::error_code, unsigned) noexcept {
-    terminal->fetch_add(1, std::memory_order_acq_rel);
-  }
+  void set_value(std::error_code ec, unsigned) noexcept { handle(ec); }
 
   void set_stopped() noexcept {
-    terminal->fetch_add(1, std::memory_order_acq_rel);
+    if (stopped) stopped->fetch_add(1, std::memory_order_acq_rel);
+    if (terminal) terminal->fetch_add(1, std::memory_order_acq_rel);
+  }
+
+ private:
+  void handle(std::error_code ec) noexcept {
+    if (terminal) terminal->fetch_add(1, std::memory_order_acq_rel);
+    if (ec == std::make_error_code(std::errc::operation_canceled)) {
+      if (canceled) canceled->fetch_add(1, std::memory_order_acq_rel);
+    } else if (ec) {
+      if (errors) errors->fetch_add(1, std::memory_order_acq_rel);
+    }
   }
 };
 
@@ -102,6 +115,9 @@ struct round_outcome {
   bool hung = false;      // worker never exited within kWorkerJoinBound
   unsigned started = 0;   // operations handed to the context
   unsigned terminal = 0;  // operations that reached a receiver call
+  unsigned canceled = 0;  // terminal calls via set_value(operation_canceled)
+  unsigned stopped = 0;   // terminal calls via set_stopped (violation)
+  unsigned errors = 0;    // terminal calls with a non-canceled error_code
 };
 
 // Owns one round's whole lifetime.  Heap-allocated so a hung round can be
@@ -121,6 +137,9 @@ struct round_owner {
   std::atomic<bool> worker_done{false};
   std::atomic<unsigned> started{0};
   std::atomic<unsigned> terminal{0};
+  std::atomic<unsigned> canceled{0};
+  std::atomic<unsigned> stopped{0};
+  std::atomic<unsigned> errors{0};
 
   ~round_owner() {
     if (never_ready_fd >= 0) {
@@ -162,13 +181,15 @@ round_outcome run_stop_round(const io_uring_context_options& options,
         descriptor_view(owner->never_ready_fd), static_cast<unsigned>(POLLIN));
     using poll_op_t = decltype(bexec::connect(sender, flood_receiver{nullptr}));
     owner->ops.push_back(std::make_unique<op_holder<poll_op_t>>(
-        sender, flood_receiver{&owner->terminal}));
+        sender, flood_receiver{&owner->terminal, &owner->canceled,
+                               &owner->stopped, &owner->errors}));
   }
   for (unsigned i = 0; i < post_ops; ++i) {
     owner->ops.push_back(
         std::make_unique<
             direct_op_holder<io_uring_post_operation<flood_receiver>>>(
-            owner->context, flood_receiver{&owner->terminal}));
+            owner->context, flood_receiver{&owner->terminal, &owner->canceled,
+                                           &owner->stopped, &owner->errors}));
   }
   const unsigned total_ops = poll_ops + post_ops;
 
@@ -234,16 +255,22 @@ round_outcome run_stop_round(const io_uring_context_options& options,
     return outcome;
   }
   outcome.terminal = owner->terminal.load(std::memory_order_acquire);
+  outcome.canceled = owner->canceled.load(std::memory_order_acquire);
+  outcome.stopped = owner->stopped.load(std::memory_order_acquire);
+  outcome.errors = owner->errors.load(std::memory_order_acquire);
   return outcome;
 }
 
 struct stress_summary {
   unsigned rounds = 0;
-  unsigned hang_rounds = 0;      // worker never exited (worker hang)
-  unsigned stranded_rounds = 0;  // worker exited, ops left uncompleted
+  unsigned hang_rounds = 0;       // worker never exited (worker hang)
+  unsigned stranded_rounds = 0;   // worker exited, ops left uncompleted
+  unsigned violation_rounds = 0;  // set_stopped or non-canceled error seen
   int first_bad_round = -1;
   unsigned first_bad_started = 0;
   unsigned first_bad_terminal = 0;
+  unsigned first_bad_stopped = 0;
+  unsigned first_bad_errors = 0;
   bool first_bad_hung = false;
 };
 
@@ -255,19 +282,24 @@ stress_summary run_rounds(const io_uring_context_options& options,
     const round_outcome outcome = run_stop_round(options, poll_ops, post_ops,
                                                  producer_count, wake_stride);
     ++summary.rounds;
-    const bool bad = outcome.hung || outcome.terminal != outcome.started;
+    const bool bad = outcome.hung || outcome.terminal != outcome.started ||
+                     outcome.stopped != 0 || outcome.errors != 0;
     if (!bad) {
       continue;
     }
     if (outcome.hung) {
       ++summary.hang_rounds;
-    } else {
+    } else if (outcome.terminal != outcome.started) {
       ++summary.stranded_rounds;
+    } else {
+      ++summary.violation_rounds;
     }
     if (summary.first_bad_round < 0) {
       summary.first_bad_round = static_cast<int>(round);
       summary.first_bad_started = outcome.started;
       summary.first_bad_terminal = outcome.terminal;
+      summary.first_bad_stopped = outcome.stopped;
+      summary.first_bad_errors = outcome.errors;
       summary.first_bad_hung = outcome.hung;
     }
     if (outcome.hung) {
@@ -327,6 +359,15 @@ TEST(RearmStopStressTest, stop_completes_all_ops_under_sqpoll_rearm_pressure) {
       << "receiver call (stranded operations). First bad round "
       << summary.first_bad_round << ": started=" << summary.first_bad_started
       << ", terminal=" << summary.first_bad_terminal;
+  EXPECT_EQ(summary.violation_rounds, 0u)
+      << "worker exited and every operation completed, but a receiver got "
+      << "set_stopped or a non-canceled error_code, violating the stop "
+      << "contract (abort must deliver set_value(operation_canceled)). "
+      << "First bad round " << summary.first_bad_round
+      << ": started=" << summary.first_bad_started
+      << ", terminal=" << summary.first_bad_terminal
+      << ", stopped=" << summary.first_bad_stopped
+      << ", errors=" << summary.first_bad_errors;
 }
 
 // Fallback variant without SQPOLL: same shape with a heavier flood.  Runs
@@ -372,6 +413,15 @@ TEST(RearmStopStressTest, stop_completes_all_ops_fallback_no_sqpoll) {
       << "receiver call (stranded operations). First bad round "
       << summary.first_bad_round << ": started=" << summary.first_bad_started
       << ", terminal=" << summary.first_bad_terminal;
+  EXPECT_EQ(summary.violation_rounds, 0u)
+      << "worker exited and every operation completed, but a receiver got "
+      << "set_stopped or a non-canceled error_code, violating the stop "
+      << "contract (abort must deliver set_value(operation_canceled)). "
+      << "First bad round " << summary.first_bad_round
+      << ": started=" << summary.first_bad_started
+      << ", terminal=" << summary.first_bad_terminal
+      << ", stopped=" << summary.first_bad_stopped
+      << ", errors=" << summary.first_bad_errors;
 }
 
 }  // namespace
