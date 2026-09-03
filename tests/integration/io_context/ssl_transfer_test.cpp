@@ -445,4 +445,99 @@ TEST(SslTransferTest, empty_buffer_ssl_read_reports_success) {
   EXPECT_EQ(state->stopped, 0u);
 }
 
+// Contract coverage for the TLS orderly-close encoding: after both peers
+// have exchanged close_notify, an SSL read observes SSL_ERROR_ZERO_RETURN
+// and must complete successfully with set_value({}, 0) — the same EOF
+// encoding as a zero-byte read on a plain descriptor or TCP socket
+// (docs/usage/index.md, TLS EOF and close encodings). Before the fix it
+// completed with set_value(connection_reset, bytes).
+TEST(SslTransferTest, zero_return_read_completes_with_empty_ec) {
+  test_certificate_files files;
+
+  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  test_require(server_context.valid());
+  test_require(!server_context.use_certificate_chain_file(
+      files.certificate.string().c_str()));
+  test_require(
+      !server_context.use_private_key_file(files.private_key.string().c_str()));
+  test_require(!server_context.check_private_key());
+
+  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  test_require(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+
+  int sockets[2] = {-1, -1};
+  test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
+               0);
+  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+
+  // Handshake both directions first.
+  {
+    bnio::io_context context;
+    if (!context.is_open()) {
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+    auto state = std::make_shared<handshake_state>();
+    auto client_operation = bexec::connect(
+        client.async_handshake(scheduler, bnio::ssl_handshake_type::client),
+        handshake_receiver{state, &context});
+    auto server_operation = bexec::connect(
+        server.async_handshake(scheduler, bnio::ssl_handshake_type::server),
+        handshake_receiver{state, &context});
+    bexec::start(client_operation);
+    bexec::start(server_operation);
+    context.run();
+    EXPECT_EQ(state->values, 2);
+    EXPECT_EQ(state->errors, 0);
+    EXPECT_EQ(state->stopped, 0);
+  }
+
+  // Both sides exchange close_notify (socketpair_shutdown_exchanges_
+  // close_notify pattern): afterwards the server stream has observed the
+  // peer's orderly TLS close.
+  {
+    bnio::io_context context;
+    if (!context.is_open()) {
+      return;
+    }
+    auto scheduler = context.get_post_scheduler();
+    auto state = std::make_shared<handshake_state>();
+    auto client_operation = bexec::connect(client.async_shutdown(scheduler),
+                                           handshake_receiver{state, &context});
+    auto server_operation = bexec::connect(server.async_shutdown(scheduler),
+                                           handshake_receiver{state, &context});
+    bexec::start(client_operation);
+    bexec::start(server_operation);
+    context.run();
+    EXPECT_EQ(state->values, 2);
+    EXPECT_EQ(state->errors, 0);
+    EXPECT_EQ(state->stopped, 0);
+  }
+
+  // A read on the orderly-closed stream must succeed with 0 bytes (EOF),
+  // not fail with connection_reset.
+  bnio::io_context context;
+  if (!context.is_open()) {
+    return;
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  std::array<char, 16> bytes{};
+  auto state = std::make_shared<transfer_state>();
+  unsigned completions = 0;
+  transfer_receiver receiver{state, &context, &completions, 1};
+
+  auto sender = server.async_read(scheduler, bnio::buffer(bytes));
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->values, 1u);
+  EXPECT_EQ(state->bytes, 0u);
+  EXPECT_EQ(state->errors, 0u);
+  EXPECT_EQ(state->stopped, 0u);
+}
+
 }  // namespace
