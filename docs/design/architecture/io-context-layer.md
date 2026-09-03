@@ -402,6 +402,24 @@ SSL write step and their own retry policy. `ssl_stream::async_read()` remains a
 read-some operation because TLS records and application protocol frames do not
 map cleanly to a caller's buffer size.
 
+The SSL state machine delivers its final completion through a schedule handoff
+(`post_receiver`). The priority between what that handoff observes and what
+the state machine already staged is fixed:
+
+1. A receiver stop token that is cancelled wins over everything: the handoff
+   delivers `set_stopped()` even when a completion is staged (`set_stopped()`
+   overrides the staged result).
+2. A staged completion (value or error the state machine produced: a TLS
+   failure, an orderly close, transferred bytes) is delivered unchanged. The
+   schedule's own abort result (`value(operation_canceled)` when the context
+   stopped before the handoff ran) is dropped — a staged result is never
+   overwritten by a fabricated cancel, matching the usage contract that
+   already-completed results are delivered unchanged.
+
+This ordering works because every `submit_post()` call site stages a
+completion before submitting, so the post receiver always finds a staged
+result.
+
 ### Operation Flow Through Layers
 
 ```mermaid
