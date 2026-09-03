@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -27,16 +28,24 @@ struct op_holder : op_holder_base {
 // Receiver for the second (phantom) async_read_some.
 // Counts how many times it was completed — if the count was 0, the
 // Phase 3 leak would have been confirmed (the operation was never
-// consumed by any run-loop phase).
+// consumed by any run-loop phase).  set_stopped is recorded separately:
+// per the lifecycle contract a stop-aborted operation completes via
+// set_value(operation_canceled), never via set_stopped.
 struct second_receiver {
-  std::atomic<int>* counter = nullptr;
+  std::atomic<int>* counter = nullptr;   // every terminal call
+  std::atomic<int>* canceled = nullptr;  // set_value(operation_canceled)
+  std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
 
-  void set_value(std::error_code /*ec*/, std::size_t /*n*/) noexcept {
+  void set_value(std::error_code ec, std::size_t /*n*/) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (canceled && ec == std::make_error_code(std::errc::operation_canceled)) {
+      canceled->fetch_add(1, std::memory_order_relaxed);
+    }
   }
 
   void set_stopped() noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (stopped) stopped->fetch_add(1, std::memory_order_relaxed);
   }
 };
 
@@ -53,9 +62,16 @@ struct first_receiver {
   char* second_buf = nullptr;
   std::size_t second_buf_size = 0;
   std::vector<std::unique_ptr<op_holder_base>>* ops = nullptr;
+  std::atomic<int>* first_canceled = nullptr;
+  std::atomic<int>* first_stopped = nullptr;
+  std::atomic<int>* second_stopped = nullptr;
 
   void set_value(std::error_code ec, std::size_t /*n*/) noexcept {
     if (first_counter) first_counter->fetch_add(1, std::memory_order_relaxed);
+    if (ec == std::make_error_code(std::errc::operation_canceled)) {
+      if (first_canceled)
+        first_canceled->fetch_add(1, std::memory_order_relaxed);
+    }
 
     if (!ec) {
       return;  // Normal delivery: the repro only runs on the cancel path.
@@ -77,13 +93,14 @@ struct first_receiver {
 
     using Op = decltype(bexec::connect(sender, second_receiver{}));
     auto holder = std::make_unique<op_holder<Op>>(
-        sender, second_receiver{second_counter});
+        sender, second_receiver{second_counter, nullptr, second_stopped});
     bexec::start(holder->op);
     if (ops) ops->push_back(std::move(holder));
   }
 
   void set_stopped() noexcept {
     if (first_counter) first_counter->fetch_add(1, std::memory_order_relaxed);
+    if (first_stopped) first_stopped->fetch_add(1, std::memory_order_relaxed);
   }
 };
 
@@ -102,6 +119,9 @@ TEST(LifecycleTest, finish_phase3_operation_leak) {
 
   std::atomic<int> first_completed{0};
   std::atomic<int> second_completed{0};
+  std::atomic<int> first_canceled{0};
+  std::atomic<int> first_stopped{0};
+  std::atomic<int> second_stopped{0};
   char second_buf[64] = {};
   std::vector<std::unique_ptr<op_holder_base>> ops;
 
@@ -122,7 +142,8 @@ TEST(LifecycleTest, finish_phase3_operation_leak) {
   auto first_holder = std::make_unique<op_holder<FirstOp>>(
       first_sender,
       first_receiver{ctx.get(), sv[0], &first_completed, &second_completed,
-                     second_buf, sizeof(second_buf), &ops});
+                     second_buf, sizeof(second_buf), &ops, &first_canceled,
+                     &first_stopped, &second_stopped});
   bexec::start(first_holder->op);
   ops.push_back(std::move(first_holder));
 
@@ -141,8 +162,14 @@ TEST(LifecycleTest, finish_phase3_operation_leak) {
   int second = second_completed.load(std::memory_order_relaxed);
 
   EXPECT_EQ(first, 1);
-  // second receiver must receive at least one completion signal.
+  // The first read is inflight when stop() lands: its abort must come
+  // through set_value(operation_canceled), never set_stopped.
+  EXPECT_EQ(first_canceled.load(std::memory_order_relaxed), 1);
+  EXPECT_EQ(first_stopped.load(std::memory_order_relaxed), 0);
+  // second receiver must receive at least one completion signal, and no
+  // completion may arrive via set_stopped.
   EXPECT_GT(second, 0);
+  EXPECT_EQ(second_stopped.load(std::memory_order_relaxed), 0);
 
   ::close(sv[0]);
   ::close(sv[1]);
