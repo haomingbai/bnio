@@ -443,6 +443,43 @@ TLS completion encodings follow the TCP precedent direction by direction:
   `ZERO_RETURN`/EOF: a close_notify during the handshake is a failure, not
   an orderly end of application data.
 
+#### SSL Error Attribution Against the Thread-Local OpenSSL Queue
+
+OpenSSL reports a call's failure through a thread-local error queue
+(`ERR_get_error()` pops one entry). That queue outlives any single call, so
+reading it at the failure site without controlling what is in it attributes
+whatever the thread did earlier — or fabricates an error when the queue is
+empty. The state machine therefore binds the read to the call with two
+rules:
+
+1. Every OpenSSL call whose failure is reported through the queue
+   (`SSL_do_handshake`, `SSL_shutdown`, `SSL_read`, `SSL_write`, the
+   memory-BIO steps, and the `ssl_context` loaders) is immediately preceded
+   by `detail::clear_ssl_errors()`. The first entry popped after a failure
+   is then necessarily one the failing call itself enqueued. Clearing again
+   after `last_ssl_error()` pops its entry discards the rest of that
+   failure's error stack, so no entry can leak into a later queue reader.
+2. A failure path that never reaches OpenSSL — the handshake's `!valid()`
+   branch — completes with `make_no_ssl_error()` directly and never touches
+   the queue. On that path the queue can only hold stale entries, so
+   reading it at all is pure misattribution.
+
+An empty queue is no longer papered over with `protocol_error`:
+`make_no_ssl_error()` is `-1` in the OpenSSL error category (message: "no
+OpenSSL error was recorded"). Real OpenSSL error codes are non-negative —
+`ERR_get_error()` returns `0` only for an empty queue — so `-1` cannot
+collide with a genuine error code, and a different category makes the
+value unequal to every `std::errc` code.
+
+Clearing the queue introduces no concurrency hazard. The queue is
+thread-local and reflects only the calling thread's own OpenSSL activity,
+so cross-thread observations are impossible by construction; and each
+clear/read pair brackets exactly one OpenSSL call, which the state machine
+executes synchronously on one worker between suspensions. A suspension
+point (WANT_READ/WANT_WRITE) releases no unreported queue entries: those
+calls enqueue nothing, and an earlier failure's entries were already read
+and cleared at that failure's attribution site.
+
 ### Operation Flow Through Layers
 
 ```mermaid
