@@ -270,20 +270,30 @@ class native_poll_operation : public io_context::operation_base {
     }
   }
 
+  /**
+   * Delivers the typed poll completion.
+   *
+   * The ready mask is meaningful only on success. On every other channel the
+   * mask is `0U`: the error is carried by the leading `ec` (`errno_result()`
+   * here, the staged `error_` below), so no information is lost, and a
+   * negative native result is never converted to `unsigned` (that would wrap
+   * to ~4.29e9 and make a caller's `mask & POLLIN` test trip on a failure).
+   * The Linux io_context poll model expresses the same rule as
+   * `std::max(0, result)`, which is identical for every non-negative result.
+   */
   void execute() noexcept override {
     switch (completion_) {
       case completion_kind::value:
         if (this->result < 0) {
           bexec::set_value(std::move(receiver_), errno_result(this->result),
-                           static_cast<unsigned>(this->result));
+                           0U);
         } else {
           bexec::set_value(std::move(receiver_), std::error_code{},
                            static_cast<unsigned>(this->result));
         }
         break;
       case completion_kind::value_with_ec:
-        bexec::set_value(std::move(receiver_), error_,
-                         static_cast<unsigned>(this->result));
+        bexec::set_value(std::move(receiver_), error_, 0U);
         break;
       case completion_kind::stopped:
         // Abort or token-at-start marking. Arbitrate: a cancelled receiver

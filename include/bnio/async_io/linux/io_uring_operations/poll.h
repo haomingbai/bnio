@@ -150,6 +150,11 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
    * set_stopped only for a cancelled receiver stop token; an
    * io_context::stop() abort without one exits through
    * set_value(operation_canceled, 0).
+   *
+   * The ready mask is meaningful only on success; every other channel
+   * delivers `0U`. The errno is already carried by `ec`, so nothing is lost,
+   * and a negative result is never converted to `unsigned` (that would wrap
+   * to ~4.29e9 and make a caller's `mask & POLLIN` test trip on a failure).
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -157,15 +162,14 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
         if (result < 0) {
           bexec::set_value(std::move(receiver_),
                            std::error_code(-result, std::generic_category()),
-                           static_cast<unsigned>(result));
+                           0U);
         } else {
           bexec::set_value(std::move(receiver_), std::error_code{},
                            static_cast<unsigned>(result));
         }
         break;
       case completion_kind::value_with_ec:
-        bexec::set_value(std::move(receiver_), error_,
-                         static_cast<unsigned>(result));
+        bexec::set_value(std::move(receiver_), error_, 0U);
         break;
       case completion_kind::stopped:
         // Token arbitration: set_stopped is emitted only when the
@@ -177,7 +181,7 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
         } else {
           bexec::set_value(std::move(receiver_),
                            std::error_code(ECANCELED, std::generic_category()),
-                           0);
+                           0U);
         }
         break;
     }

@@ -111,6 +111,11 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
    * The `value` branch preserves the `result < 0` guard: a kevent may
    * report a negative errno while completion_ is still `value`; that
    * errno must surface through set_value(ec, ...) rather than being lost.
+   *
+   * The ready mask is meaningful only on success; every other channel
+   * delivers `0U`. The errno is already carried by `ec`, so nothing is lost,
+   * and a negative result is never converted to `unsigned` (that would wrap
+   * to ~4.29e9 and make a caller's `mask & POLLIN` test trip on a failure).
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -118,15 +123,14 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
         if (result < 0) {
           bexec::set_value(std::move(receiver_),
                            std::error_code(-result, std::generic_category()),
-                           static_cast<unsigned>(result));
+                           0U);
         } else {
           bexec::set_value(std::move(receiver_), std::error_code{},
                            static_cast<unsigned>(result));
         }
         break;
       case completion_kind::value_with_ec:
-        bexec::set_value(std::move(receiver_), error_,
-                         static_cast<unsigned>(result));
+        bexec::set_value(std::move(receiver_), error_, 0U);
         break;
       case completion_kind::stopped:
         // Token arbitration decides the stop channel's final signal: a
@@ -138,7 +142,7 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
         } else {
           bexec::set_value(std::move(receiver_),
                            std::make_error_code(std::errc::operation_canceled),
-                           0);
+                           0U);
         }
         break;
     }
