@@ -273,6 +273,50 @@ published. No staging site can race a later channel decision, so the
 delivery channel is decided exactly once, at the observation point where
 the abort happened.
 
+## Unregistered Slots (`context == nullptr`)
+
+Two ordinary operations unregister a timer slot without any way for the
+caller to observe it atomically:
+
+- **Move semantics.** `steady_timer(steady_timer&&)` /
+  `operator=(steady_timer&&)` route through `transfer_from()`, which calls
+  `unregister_timer_locked()` on the source. A moved-from timer therefore
+  has `context == nullptr`, and the public type's contract (external
+  serialization of same-timer mutations only) promises nothing that would
+  make post-move object-API calls invalid.
+- **Context stop.** `begin_stop()` calls `abort_pending_timer_waits()`,
+  which clears every slot's `context` pointer. That runs while the stopped
+  flag is only published after `stop_internal()` finishes, and the timer
+  header's concurrency contract ("concurrent operations that mutate the
+  same timer must be externally serialized") does not require
+  synchronization with `stop()`. A timer surviving across
+  `io_context::stop()` is therefore an ordinary, non-UB state.
+
+Because the state is reachable without a defect, the guards live inside
+the object APIs rather than in a caller obligation to re-register:
+
+| API | Unregistered behavior | Rationale |
+|---|---|---|
+| `expiry()` | returns the saved `timer_.expiry` | No worker or context can mutate an unregistered slot's expiry, so the saved value is authoritative. |
+| `expires_at()` / `expires_after()` | write `timer_.expiry` through, return `0` | There is no heap/list membership to reschedule and no submitted waits to cancel; the write preserves the "expiry() observes the last set value" rule. |
+| `cancel()` | returns `0` | No context holds submitted waits for the slot. |
+| `has_context()` | returns `false` | Lets callers branch without the `context()` precondition. |
+| `context()` | empty reference (documented precondition) | Signature kept unchanged to avoid a source-breaking change; `has_context()` is the safe probe. |
+
+`async_wait()` on an unregistered slot delivers **inline** from
+`start()`, never through `timers_.ready`:
+
+- The ready list is drained exclusively by workers of the owning context
+  (passive timer fetch) — or, since the stop-drain change, by the stopping
+  thread. A wait whose `timer_context_` is null has no owner that will
+  ever drain on its behalf; staging a completion there would strand the
+  operation forever.
+- The delivery channel follows the same arbitration as the staged path:
+  a receiver stop token already cancelled at `start()` wins with
+  `set_stopped()`; otherwise the wait reports the unregistered state as
+  `set_value(operation_canceled)`, matching the cancellation table in
+  [`usage/index.md`](../usage/index.md).
+
 ## Invariants
 
 - Every registered timer belongs to exactly one of the active heap or inactive
