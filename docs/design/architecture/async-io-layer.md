@@ -141,6 +141,22 @@ before popping any queue — no reversal, no re-push. On stop,
 immediately, and the run loop re-enters the ready-tasks phase, which re-arms
 the poll on a later pass.
 
+A failed submit splits the batch the same way. `submit_and_track_prepared()`
+registers every prepared operation in the inflight list before the enter call,
+so its participants are exactly the operations that can be untracked and
+failed with the submit's errno through `fail_io_list()`. The remainder is
+designed for retryable errors, so `consume_io_tasks()` re-queues it
+unchanged whenever `is_transient_submit_error()` classifies the errno as one
+the next pass can plausibly clear (`-EINTR`, `-EAGAIN`, `-EBUSY`, `-ENOMEM`):
+none of these says anything about the ring's health, and the remainder holds
+no SQE and no inflight registration that a re-queue would have to undo. For
+any other errno the remainder fails with the same errno as the prepared head:
+those errnos (`-EBADFD`, `-EINVAL` and friends) mean the ring rejects every
+submission, so an unconditional re-queue would busy-spin the run loop through
+the retry slot forever and never let the fatal-error routing run. The split
+keeps one operation's outcome independent of where it happened to sit in the
+batch when the SQ filled.
+
 Each ready-task pass first drains CQEs to keep the completion ring from
 overflowing, then checks local and shared CPU work before consuming I/O — the
 worker's own local I/O queue first, the shared I/O queue only when the local
