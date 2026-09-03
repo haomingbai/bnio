@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -22,23 +23,43 @@ struct op_holder : op_holder_base {
   }
 };
 
+// Classifies terminal receiver calls.  Schedule ops racing the stop may
+// complete normally (accepted before the reject point) or abort via
+// set_value(operation_canceled); set_stopped is a contract violation.
 struct counting_recv {
-  std::atomic<int>* counter = nullptr;
-  void set_value(std::error_code) noexcept {
+  std::atomic<int>* counter = nullptr;   // every terminal call
+  std::atomic<int>* canceled = nullptr;  // set_value(operation_canceled)
+  std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
+  void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (canceled &&
+        ec == std::make_error_code(std::errc::operation_canceled)) {
+      canceled->fetch_add(1, std::memory_order_relaxed);
+    }
   }
   void set_stopped() noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (stopped) stopped->fetch_add(1, std::memory_order_relaxed);
   }
 };
 
+// Classifies terminal receiver calls for far-future timers: every one is
+// still pending when stop() lands, so each must abort via
+// set_value(operation_canceled), never via set_stopped.
 struct timer_recv {
-  std::atomic<int>* counter = nullptr;
-  void set_value(std::error_code) noexcept {
+  std::atomic<int>* counter = nullptr;   // every terminal call
+  std::atomic<int>* canceled = nullptr;  // set_value(operation_canceled)
+  std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
+  void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (canceled &&
+        ec == std::make_error_code(std::errc::operation_canceled)) {
+      canceled->fetch_add(1, std::memory_order_relaxed);
+    }
   }
   void set_stopped() noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (stopped) stopped->fetch_add(1, std::memory_order_relaxed);
   }
 };
 
@@ -52,6 +73,7 @@ TEST(LifecycleTest, stop_completes_all_schedule_ops) {
 
   constexpr int N = 200;
   std::atomic<int> completed{0};
+  std::atomic<int> stopped{0};
   std::vector<std::unique_ptr<op_holder_base>> ops;
   ops.reserve(N);
 
@@ -60,8 +82,8 @@ TEST(LifecycleTest, stop_completes_all_schedule_ops) {
 
   auto sched = ctx->get_post_scheduler();
   using Sender = decltype(sched.schedule());
-  using Op =
-      decltype(bexec::connect(std::declval<Sender>(), counting_recv{nullptr}));
+  using Op = decltype(
+      bexec::connect(std::declval<Sender>(), counting_recv{nullptr}));
 
   std::thread poster([&]() {
     for (int i = 0; i < N; i++) {
@@ -80,6 +102,8 @@ TEST(LifecycleTest, stop_completes_all_schedule_ops) {
   worker.join();
 
   EXPECT_EQ(static_cast<int>(ops.size()), completed.load());
+  // Whatever the race outcome, no operation may complete via set_stopped.
+  EXPECT_EQ(stopped.load(std::memory_order_relaxed), 0);
 }
 
 // Test 2: timer async_wait() operations aborted by stop.
@@ -92,6 +116,8 @@ TEST(LifecycleTest, stop_completes_all_timer_ops) {
 
   constexpr int N = 50;
   std::atomic<int> completed{0};
+  std::atomic<int> canceled{0};
+  std::atomic<int> stopped{0};
   std::vector<std::unique_ptr<op_holder_base>> ops;
   std::vector<bnio::steady_timer> timers;
 
@@ -106,8 +132,10 @@ TEST(LifecycleTest, stop_completes_all_timer_ops) {
   for (std::size_t i = 0; i < static_cast<std::size_t>(N); ++i) {
     (void)timers[i].expires_at(far);
     auto sender = timers[i].async_wait();
-    using Op = decltype(bexec::connect(sender, timer_recv{nullptr}));
-    auto h = std::make_unique<op_holder<Op>>(sender, timer_recv{&completed});
+    using Op =
+        decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
+    auto h = std::make_unique<op_holder<Op>>(
+        sender, timer_recv{&completed, &canceled, &stopped});
     bexec::start(h->op);
     ops.push_back(std::move(h));
   }
@@ -117,6 +145,10 @@ TEST(LifecycleTest, stop_completes_all_timer_ops) {
   worker.join();
 
   EXPECT_EQ(N, completed.load());
+  // Every far-future timer is pending when stop() lands: each must abort
+  // via set_value(operation_canceled), never via set_stopped.
+  EXPECT_EQ(canceled.load(std::memory_order_relaxed), N);
+  EXPECT_EQ(stopped.load(std::memory_order_relaxed), 0);
 }
 
 }  // namespace
