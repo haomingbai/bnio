@@ -148,6 +148,14 @@ struct BNIO_EXPORT kqueue_task_queue_state {
 
   [[nodiscard]] kqueue_io_operation_base* pop_io_all() noexcept;
 
+  /** Pops the whole shared I/O queue and delivers every operation through
+   *  the stop channel inline: result = -ECANCELED, complete_submit_stopped(),
+   *  then execute().  The caller owns the receiver-callback context; this
+   *  must never run while holding submit_lock.  Traverses with `io_next` —
+   *  the field push_io() links with.
+   *  @return true when at least one operation was delivered. */
+  [[nodiscard]] bool drain_io_stopped() noexcept;
+
   /**
    * Wakes exactly one sleeping worker by writing its per-worker wake
    * channel. Takes only the suspend list's lock: a node on the suspend
@@ -351,6 +359,26 @@ inline kqueue_operation_base* kqueue_task_queue_state::pop_cpu_all() noexcept {
 inline kqueue_io_operation_base*
 kqueue_task_queue_state::pop_io_all() noexcept {
   return io_head.exchange(nullptr, std::memory_order_acquire);
+}
+
+inline bool kqueue_task_queue_state::drain_io_stopped() noexcept {
+  kqueue_io_operation_base* head = pop_io_all();
+  if (head == nullptr) {
+    return false;
+  }
+  // The shared I/O queue chains through io_next (see push_io()).
+  while (head != nullptr) {
+    kqueue_io_operation_base* next = head->io_next;
+    head->io_next = nullptr;
+    head->result = -ECANCELED;
+    head->complete_submit_stopped();
+    // No worker exists in the stop-drain path: deliver inline instead of
+    // re-queueing onto a local CPU queue, or the operation would never
+    // be fetched again.
+    head->execute();
+    head = next;
+  }
+  return true;
 }
 
 /** Links a local state at the head of a worker list. Caller holds the

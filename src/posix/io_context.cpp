@@ -249,19 +249,16 @@ void io_context::drain_shared_queues_for_stop() noexcept {
       cpu = next;
     }
 
-    // Shared I/O operations: mark stopped exactly like the native
-    // abort_and-deliver paths (drain_io_list_complete_stopped) and
-    // execute() inline — the stopped branch arbitrates via the receiver
-    // stop token. No SQE or kevent is ever prepared or submitted here.
-    detail::native_io_operation_base* io = global_state_.pop_io_all();
-    while (io != nullptr) {
-      detail::native_io_operation_base* next = io->io_next;
-      io->io_next = nullptr;
+    // Shared I/O operations: each platform's task queue state owns its
+    // own link fields (kqueue chains through io_next, io_uring through
+    // next), so the traversal cannot live here — it is delegated to the
+    // state's drain_io_stopped(), which marks every operation stopped
+    // exactly like the native abort paths (drain_io_list_complete_stopped)
+    // and executes them inline — the stopped branch arbitrates via the
+    // receiver stop token. No SQE or kevent is ever prepared or submitted
+    // here.
+    if (global_state_.drain_io_stopped()) {
       had_work = true;
-      io->result = -ECANCELED;
-      io->complete_submit_stopped();
-      io->execute();
-      io = next;
     }
 
     // Timer waits staged on timers_.ready by abort_pending_timer_waits()
