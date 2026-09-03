@@ -532,19 +532,26 @@ io_context stop (`include/bnio/async_io/bsd/kqueue_operations/resolve.h:89`,
 Linux mirror `include/bnio/async_io/linux/io_uring_operations/resolve.h`),
 matching the post-operation layering difference documented below.
 
-Two teardown rules complete the picture. `io_uring_context::consume_io_tasks()`
-checks `stop_requested() || closing_requested()` up front and routes any
-I/O operation consumed in that state straight through the stop channel
-instead of preparing and submitting it — a submit failure on a dying ring
-(e.g. `EBADFD`) must not surface as a generic error where the contract
-requires the cancellation channel; this also implements the
-not-yet-executed queued-work rule
-(`src/async_io/linux/io_uring_context_io_tasks.cpp:17`). kqueue needs no
-such guard — `EV_ADD` still succeeds while the kqueue fd is open, so
-consumed operations reach the inflight → abort path naturally — and
-instead `kqueue_context::queue_exit()` was aligned with the io_uring
-abort-and-deliver pattern (see "Abnormal close delivers every
-completion"). Timer aborts do not arbitrate at all:
+Two teardown rules complete the picture. Both native consume loops gate on
+`stop_requested() || closing_requested()` up front:
+`io_uring_context::consume_io_tasks()`
+(`src/async_io/linux/io_uring_context_io_tasks.cpp:59`) and
+`kqueue_context::consume_io_tasks()`
+(`src/async_io/bsd/kqueue_context_io_tasks.cpp:36`) route every I/O
+operation consumed in that state straight through the stop channel
+(`drain_io_list_complete_stopped()`) instead of preparing it. On io_uring
+a submit failure on a dying ring (e.g. `EBADFD`) must not surface as a
+generic error where the contract requires the cancellation channel; on
+kqueue an `EV_ADD` during teardown would arm a new event filter and let
+an operation published while `finish()` drains its queues run for real —
+both platforms now refuse new I/O past the stop observation, which also
+implements the not-yet-executed queued-work rule of `io_context::stop()`
+uniformly. `kqueue_context::queue_exit()` keeps its alignment with the
+io_uring abort-and-deliver pattern (see "Abnormal close delivers every
+completion"): the guard drains the queues through the stop channel on the
+first pass, and the surrounding `while (consume_io_tasks())` loop still
+guarantees every operation published from an abort completion reaches a
+terminal receiver call. Timer aborts do not arbitrate at all:
 `abort_pending_timer_waits()` stages `timer_completion_kind::canceled` on
 the stopping thread, the kind is fixed at staging time, and `execute()`
 maps it directly to `set_value(operation_canceled)`
@@ -558,6 +565,90 @@ delivering `set_value({})` when a posted task is never executed because
 the context stopped — the async_io layer does not observe io_context
 lifecycle state, so a queued-but-unexecuted post is not reported as
 `operation_canceled`.
+
+### Why both consume loops refuse new I/O past the stop observation
+
+Both native `consume_io_tasks()` implementations open with the same
+guard (`stop_requested() || closing_requested()`) and route everything
+they pop from the worker-local and shared I/O queues through
+`drain_io_list_complete_stopped()` — marked stopped and pushed to the
+CPU queue, never prepared.  Three properties justify making the two
+platforms symmetric here instead of leaving kqueue on its historical
+"register anyway, abort later" path:
+
+1. **Liveness.**  `finish()` Phase 1 and Phase 3b break only when
+   `run_cpu_batch()` *and* `consume_io_tasks()` both report no work.  A
+   receiver that unconditionally republishes an immediately-ready I/O
+   operation (a poll on a permanently readable descriptor, a self-pipe
+   read) after every completion feeds the loop forever if the consume
+   pass really registers the operation: `EV_ADD` succeeds against the
+   still-open kqueue fd, the level-triggered filter fires at once, the
+   completion runs the receiver, and the receiver republishes —
+   `finish()` never returns and `stop()` spins in `stop_internal()`
+   waiting for `running_workers` to drop.  With the guard, the same
+   republish is consumed and cancelled instead: the receiver observes
+   the stop channel (`set_value(operation_canceled)` for a token-less
+   receiver, `set_stopped()` for a cancelled one), the chain ends, and
+   the next pass finds both sources empty.  The convergence argument is
+   the same one Phase 3b already makes for its nested-publish window —
+   the guard changes the *delivery channel* of republished work, not
+   the loop's drain-until-empty shape.
+
+2. **One queued-work rule.**  `io_context::stop()` guarantees that work
+   published before the stopping state was elected completes, and work
+   that never ran reports `operation_canceled`.  With kqueue registering
+   during teardown, which side of that rule an operation landed on
+   depended on a scheduling race between the worker's consume pass and
+   the stop publication; both platforms now decide by state alone.
+
+3. **One error surface.**  A submit or registration failure during
+   teardown (`EBADFD` on a dying ring, `EIO` from `EV_RECEIPT`) would
+   report a generic errno where the contract requires the cancellation
+   channel.  Refusing to prepare anything past the stop observation
+   removes the failure mode instead of mapping its errors.
+
+**State coverage.**  `stop_requested()` reads the native context's own
+state and holds for `finishing` (set by the native `stop()`, and by
+`queue_exit()` before its delivery pass) and `finished`.
+`closing_requested()` reads the shared `life_state` and holds from the
+moment `io_context::stop()` wins its election (`begin_stop()` publishes
+`life_state = 1` under `submit_lock`) and once `~io_context()` begins.
+Normal `io_context::stop()` therefore trips the guard through
+`closing_requested()` even while the native context still reports
+`running`; a native-only stop (no shared state, standalone context)
+trips it through `stop_requested()`.
+
+**Interaction with `queue_exit()`.**  `queue_exit()` stores
+`finishing`, runs `abort_inflight_io()`, drains the CPU queue, and then
+loops `while (consume_io_tasks()) { abort_inflight_io();
+drain_local_cpu_tasks(); }` to close the nested-publish window: a
+receiver completed by an abort may publish follow-up I/O, and that
+follow-up must itself reach a terminal call.  The guard slots into this
+loop without changing its guarantee: the first consume pass pops
+everything queued and delivers it stopped, `drain_local_cpu_tasks()`
+runs those completions, and any follow-up published from them is
+consumed by the next pass — the loop exits only when a full pass finds
+nothing, exactly as before.  What changes is the channel: follow-up
+work that previously would have been registered against the closing
+kqueue (and could itself complete with a real result, or die on an
+`EV_RECEIPT` error) is now uniformly cancelled.  Every published
+operation still reaches exactly one terminal receiver call, so the
+no-lost-work contract documented in "Abnormal close delivers every
+completion" holds; the
+`finish_no_new_io_after_stop` regression
+(`tests/integration/io_context/lifecycle/`) pins both the liveness
+bound and the per-operation terminal-call accounting.
+
+**Boundary.**  The guard governs the I/O queues — operations are
+aborted *before* any syscall or registration is attempted for them.  An
+operation whose request completes immediately inside `start()` (a
+non-blocking read that finds data, eager mode) is a CPU-queue citizen
+by construction and never passes through `consume_io_tasks()`; like
+io_uring in the same configuration, bnio does not intercept that path
+during teardown.  A receiver that keeps restarting eager-completing
+work past a stop-channel completion violates the stop contract on both
+platforms alike; the poll-based regression above deliberately avoids
+that path so the guard's contract stays the pinned one.
 
 ### A failed native enter is reported through run()'s result
 
