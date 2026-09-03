@@ -363,6 +363,17 @@ the retry slot takes strict priority over I/O published after the SQ filled —
 with the old local-queue parking, operations pushed onto the local queue behind
 the parked batch would have been handled first.
 
+The retry-slot contract on submit failure: a failed submit fails only the
+operations that took part in it. Operations already prepared into SQEs inherit
+the submit's errno through `fail_io_list()`; the unprepared remainder never
+reached an SQE, so it must not be handed an errno it did nothing to produce.
+The remainder keeps its retry-slot turn whenever the submit error is one the
+next pass can plausibly clear — `EINTR`, `EAGAIN`, `EBUSY`, or `ENOMEM` (the
+transient submit errors of `io_uring_enter(2)`). Any other submit error fails
+the remainder with the same errno instead of re-queueing it: a ring that
+rejects every submit would otherwise spin the retry slot forever without ever
+reaching the fatal-error routing.
+
 ## 8. Why the structure is shaped this way
 
 - **Lock and list head in one struct.** Every traversal is
