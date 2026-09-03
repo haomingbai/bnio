@@ -113,7 +113,13 @@ class BNIO_EXPORT kqueue_context {
                                    std::string_view service,
                                    bnio::async_io::dns_result_view result);
 
-  /** Runs posted work and readiness completions until stopped. */
+  /**
+   * Runs posted work and readiness completions until stopped.
+   *
+   * Once the context has reached finished, calling run() again is not
+   * supported; a caller that races a completed run loop past its lifetime
+   * is outside the contract.
+   */
   void run() noexcept;
 
   /** Requests run-loop termination. */

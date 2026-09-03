@@ -594,6 +594,9 @@ use.  Concurrent calls to `run()` on the same native context object are
 make races easier to detect under debug assertions, not to make concurrent
 calls correct.  Callers that bypass `io_context` and use the native
 contexts directly must ensure at most one thread calls `run()` at a time.
+Calling `run()` again after the single run loop has reached finished is
+likewise not supported; a caller that races a completed run loop past its
+lifetime is outside the contract.
 
 ### Performance overhead
 

@@ -147,6 +147,10 @@ class BNIO_EXPORT io_uring_context {
 
   /**
    * Runs queued tasks and CQE completions until the context finishes.
+   *
+   * Once the context has reached finished, calling run() again is not
+   * supported; a caller that races a completed run loop past its lifetime
+   * is outside the contract.
    */
   void run() noexcept;
 
