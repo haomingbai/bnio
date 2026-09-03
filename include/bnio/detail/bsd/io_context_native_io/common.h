@@ -132,13 +132,19 @@ class native_io_operation : public io_context::operation_base {
         // Abort (io_context::stop() -> abort_inflight_io) or token-at-start
         // marking. Arbitrate: a cancelled receiver stop token wins ->
         // set_stopped; otherwise the abort delivers
-        // set_value(operation_canceled, 0, 0).
+        // set_value(operation_canceled, -1, 0).
+        //
+        // The result is -1 and not 0: an aborted operation produced no
+        // result at all, and a descriptor-yielding request (accept) forwards
+        // `result` verbatim, so 0 here would hand the caller ownership of a
+        // real descriptor — the process's stdin. Byte-count models clamp
+        // with std::max(0, result) and still observe 0.
         if (stop_requested(receiver_)) {
           bexec::set_stopped(std::move(receiver_));
         } else {
           request_.set_value(
               std::move(receiver_),
-              std::make_error_code(std::errc::operation_canceled), 0, 0);
+              std::make_error_code(std::errc::operation_canceled), -1, 0);
         }
         break;
     }

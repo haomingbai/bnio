@@ -108,8 +108,14 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
    * `stopped_` marks the stop channel (io_context::stop() abort, or a
    * stop-token cancel observed at start()); execute() arbitrates the
    * final signal: token canceled → set_stopped, otherwise
-   * set_value(operation_canceled, 0, 0). All other completions deliver
+   * set_value(operation_canceled, -1, 0). All other completions deliver
    * the real result through set_value(ec, result, flags) untouched.
+   *
+   * The aborted result is -1 and not 0: an aborted operation produced no
+   * result at all, and a descriptor-yielding request (accept) forwards
+   * `result` verbatim, so 0 here would hand the caller ownership of a real
+   * descriptor — the process's stdin. Byte-count requests clamp with
+   * std::max(0, result) and still observe 0.
    */
   void execute() noexcept override {
     if (stopped_) {
@@ -118,7 +124,7 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
       } else {
         request_.set_value(std::move(receiver_),
                            std::make_error_code(std::errc::operation_canceled),
-                           0, 0);
+                           -1, 0);
       }
       return;
     }
