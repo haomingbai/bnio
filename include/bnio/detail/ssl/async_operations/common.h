@@ -9,6 +9,12 @@
 
 #include <bnio/buffer.h>
 #include <bnio/ssl/context.h>
+// Include order in this file is load-bearing for nothing — the header must
+// be self-contained: common.h refers to the ssl_stream template, and clang-
+// format's include sorting once exposed the missing include below when it
+// reordered a includer's blocks (ssl.cpp) so this header was processed
+// before <bnio/ssl.h>.
+#include <bnio/ssl/stream_class.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <sys/socket.h>

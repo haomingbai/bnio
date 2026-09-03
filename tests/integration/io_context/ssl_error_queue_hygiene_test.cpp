@@ -18,7 +18,8 @@ constexpr int k_no_ssl_error_value = -1;
 // queue: a stale entry seeded by earlier work must not leak into the result,
 // and an empty queue must not be papered over with a fabricated
 // protocol_error. Both are reported as the dedicated no-OpenSSL-error value.
-TEST(SslErrorQueueHygieneTest, stale_err_queue_entry_does_not_leak_into_ssl_failure) {
+TEST(SslErrorQueueHygieneTest,
+     stale_err_queue_entry_does_not_leak_into_ssl_failure) {
   bnio::io_context context;
   if (!context.is_open()) {
     return;
@@ -54,8 +55,8 @@ TEST(SslErrorQueueHygieneTest, stale_err_queue_entry_does_not_leak_into_ssl_fail
   // ... nor a fabricated protocol_error impersonating a TLS failure ...
   EXPECT_FALSE(state->error == std::errc::protocol_error);
   // ... but the dedicated no-OpenSSL-error value.
-  EXPECT_EQ(state->error,
-            std::error_code(k_no_ssl_error_value, bnio::openssl_error_category()));
+  EXPECT_EQ(state->error, std::error_code(k_no_ssl_error_value,
+                                          bnio::openssl_error_category()));
 }
 
 // The same SSL failure must report the same ec regardless of which worker
@@ -65,7 +66,8 @@ TEST(SslErrorQueueHygieneTest, stale_err_queue_entry_does_not_leak_into_ssl_fail
 // Before the fix the seeding thread surfaced the stale entry while the
 // cleared thread surfaced a fabricated protocol_error, so the same failure
 // produced two different error codes depending on thread-local history.
-TEST(SslErrorQueueHygieneTest, same_ssl_failure_reports_same_ec_on_fresh_threads) {
+TEST(SslErrorQueueHygieneTest,
+     same_ssl_failure_reports_same_ec_on_fresh_threads) {
   auto run_failure = [](bool seed, std::error_code* out) {
     bnio::io_context context;
     if (!context.is_open()) {
@@ -87,8 +89,8 @@ TEST(SslErrorQueueHygieneTest, same_ssl_failure_reports_same_ec_on_fresh_threads
     auto state = std::make_shared<handshake_state>();
     auto sender =
         source.async_handshake(scheduler, bnio::ssl_handshake_type::client);
-    auto operation = bexec::connect(std::move(sender),
-                                    handshake_receiver{state, &context});
+    auto operation =
+        bexec::connect(std::move(sender), handshake_receiver{state, &context});
     bexec::start(operation);
     context.run();
     *out = state->error;
@@ -102,8 +104,8 @@ TEST(SslErrorQueueHygieneTest, same_ssl_failure_reports_same_ec_on_fresh_threads
   thread_b.join();
 
   EXPECT_EQ(error_a, error_b);
-  EXPECT_EQ(error_a,
-            std::error_code(k_no_ssl_error_value, bnio::openssl_error_category()));
+  EXPECT_EQ(error_a, std::error_code(k_no_ssl_error_value,
+                                     bnio::openssl_error_category()));
 }
 
 }  // namespace

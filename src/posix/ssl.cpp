@@ -3,8 +3,8 @@
  * @brief SSL context RAII owner and OpenSSL error category implementation.
  */
 
-#include <bnio/ssl.h>
 #include <bnio/detail/ssl/async_operations/common.h>
+#include <bnio/ssl.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 

@@ -1,12 +1,12 @@
 #include <bnio/bnio.h>
 #include <gtest/gtest.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <chrono>
 #include <memory>
-#include <poll.h>
 #include <thread>
 #include <vector>
 
@@ -125,9 +125,8 @@ TEST(LifecycleTest, finish_stops_executing_io_published_after_stop) {
   // consumes data, so every republished operation is immediately ready.
   ASSERT_EQ(::write(sv[1], "x", 1), 1);
 
-  owner->worker = std::make_unique<std::thread>([&owner] {
-    (void)owner->context->run();
-  });
+  owner->worker =
+      std::make_unique<std::thread>([&owner] { (void)owner->context->run(); });
   std::this_thread::sleep_for(50ms);
 
   start_poll(*owner);
@@ -154,13 +153,13 @@ TEST(LifecycleTest, finish_stops_executing_io_published_after_stop) {
   }
 
   if (!stop_done.load(std::memory_order_acquire)) {
-    ADD_FAILURE()
-        << "stop() did not return within "
-        << std::chrono::duration_cast<std::chrono::milliseconds>(kStopBound)
-               .count()
-        << "ms: finish() kept executing republished always-ready I/O "
-           "instead of aborting it through the stop channel (missing "
-           "consume-loop teardown guard)";
+    ADD_FAILURE() << "stop() did not return within "
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(
+                         kStopBound)
+                         .count()
+                  << "ms: finish() kept executing republished always-ready I/O "
+                     "instead of aborting it through the stop channel (missing "
+                     "consume-loop teardown guard)";
     (void)owner.release();
     stopper.detach();
     return;  // fds leak with the owner; process exit reaps everything
@@ -168,10 +167,12 @@ TEST(LifecycleTest, finish_stops_executing_io_published_after_stop) {
   stopper.join();
 
   const unsigned started = owner->started.load(std::memory_order_acquire);
-  const unsigned value = owner->value_completions.load(std::memory_order_acquire);
+  const unsigned value =
+      owner->value_completions.load(std::memory_order_acquire);
   const unsigned canceled =
       owner->canceled_completions.load(std::memory_order_acquire);
-  const unsigned error = owner->error_completions.load(std::memory_order_acquire);
+  const unsigned error =
+      owner->error_completions.load(std::memory_order_acquire);
   const unsigned stopped =
       owner->stopped_completions.load(std::memory_order_acquire);
 
