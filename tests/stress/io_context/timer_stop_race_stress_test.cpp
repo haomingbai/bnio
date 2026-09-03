@@ -51,8 +51,7 @@ struct timer_recv {
   std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
   void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
-    if (canceled &&
-        ec == std::make_error_code(std::errc::operation_canceled)) {
+    if (canceled && ec == std::make_error_code(std::errc::operation_canceled)) {
       canceled->fetch_add(1, std::memory_order_relaxed);
     }
   }
@@ -99,8 +98,7 @@ TEST(TimerStopRaceStressTest, repeated_stop_with_pending_timers) {
     for (auto& timer : timers) {
       (void)timer.expires_at(far);
       auto sender = timer.async_wait();
-      using Op =
-          decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
+      using Op = decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
       auto h = std::make_unique<op_holder<Op>>(
           sender, timer_recv{&completed, &canceled, &stopped});
       bexec::start(h->op);
@@ -174,8 +172,7 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
     for (auto& timer : busy_timers) {
       (void)timer.expires_after(std::chrono::microseconds(1));
       auto sender = timer.async_wait();
-      using Op =
-          decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
+      using Op = decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
       auto h = std::make_unique<op_holder<Op>>(
           sender, timer_recv{&busy_completed, nullptr, &stopped});
       bexec::start(h->op);
@@ -188,8 +185,7 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
     for (auto& timer : burst_timers) {
       (void)timer.expires_at(far);
       auto sender = timer.async_wait();
-      using Op =
-          decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
+      using Op = decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
       auto h = std::make_unique<op_holder<Op>>(
           sender, timer_recv{&burst_completed, &burst_canceled, &stopped});
       bexec::start(h->op);

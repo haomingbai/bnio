@@ -390,8 +390,7 @@ TEST(KqueueSenderTest, queue_exit_delivers_published_but_unrun_io) {
   context.queue_exit();
 
   EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error,
-            std::make_error_code(std::errc::operation_canceled));
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
   // The abort carries no ready mask; the errno rides in ec.
   EXPECT_EQ(state->poll_events, 0u);
   // Delivered synchronously on the calling thread, not on a worker.
@@ -440,8 +439,7 @@ TEST(KqueueSenderTest, stop_aborts_inflight_poll_reports_operation_canceled) {
   worker.join();
 
   EXPECT_EQ(state->signal, signal_kind::error);
-  EXPECT_EQ(state->error,
-            std::make_error_code(std::errc::operation_canceled));
+  EXPECT_EQ(state->error, std::make_error_code(std::errc::operation_canceled));
   EXPECT_EQ(state->poll_events, 0u);
   EXPECT_TRUE(state->in_context);  // delivered on the worker thread
 
@@ -498,9 +496,9 @@ TEST(KqueueSenderTest, rearm_keeps_second_waiter_pending_until_data_arrives) {
   // One byte fires the armed head; arming the successor races the head's
   // read by construction (see process_event()).
   EXPECT_EQ(::write(descriptors[1], "a", 1), 1);
-  ASSERT_TRUE(wait_until(
-                  [&] { return first_state->signal == signal_kind::value; },
-                  std::chrono::milliseconds(2000)))
+  ASSERT_TRUE(
+      wait_until([&] { return first_state->signal == signal_kind::value; },
+                 std::chrono::milliseconds(2000)))
       << "first waiter never completed";
   EXPECT_EQ(first_state->result, 1);
   EXPECT_EQ(first_buffer[0], 'a');

@@ -32,8 +32,7 @@ struct counting_recv {
   std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
   void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
-    if (canceled &&
-        ec == std::make_error_code(std::errc::operation_canceled)) {
+    if (canceled && ec == std::make_error_code(std::errc::operation_canceled)) {
       canceled->fetch_add(1, std::memory_order_relaxed);
     }
   }

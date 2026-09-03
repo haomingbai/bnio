@@ -32,8 +32,7 @@ struct counting_recv {
   std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
   void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
-    if (canceled &&
-        ec == std::make_error_code(std::errc::operation_canceled)) {
+    if (canceled && ec == std::make_error_code(std::errc::operation_canceled)) {
       canceled->fetch_add(1, std::memory_order_relaxed);
     }
   }
@@ -52,8 +51,7 @@ struct timer_recv {
   std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
   void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
-    if (canceled &&
-        ec == std::make_error_code(std::errc::operation_canceled)) {
+    if (canceled && ec == std::make_error_code(std::errc::operation_canceled)) {
       canceled->fetch_add(1, std::memory_order_relaxed);
     }
   }
@@ -82,8 +80,8 @@ TEST(LifecycleTest, stop_completes_all_schedule_ops) {
 
   auto sched = ctx->get_post_scheduler();
   using Sender = decltype(sched.schedule());
-  using Op = decltype(
-      bexec::connect(std::declval<Sender>(), counting_recv{nullptr}));
+  using Op =
+      decltype(bexec::connect(std::declval<Sender>(), counting_recv{nullptr}));
 
   std::thread poster([&]() {
     for (int i = 0; i < N; i++) {
@@ -132,8 +130,7 @@ TEST(LifecycleTest, stop_completes_all_timer_ops) {
   for (std::size_t i = 0; i < static_cast<std::size_t>(N); ++i) {
     (void)timers[i].expires_at(far);
     auto sender = timers[i].async_wait();
-    using Op =
-        decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
+    using Op = decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
     auto h = std::make_unique<op_holder<Op>>(
         sender, timer_recv{&completed, &canceled, &stopped});
     bexec::start(h->op);
