@@ -25,12 +25,15 @@ struct join_flag_recv {
 // contract violation.
 struct schedule_recv {
   std::atomic<int>* counter = nullptr;   // every terminal call
+  std::atomic<int>* ok = nullptr;        // set_value({}) — ran before the stop
   std::atomic<int>* canceled = nullptr;  // set_value(operation_canceled)
   std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
   void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
-    if (canceled &&
-        ec == std::make_error_code(std::errc::operation_canceled)) {
+    if (ok && ec == std::error_code{}) {
+      ok->fetch_add(1, std::memory_order_relaxed);
+    }
+    if (canceled && ec == std::make_error_code(std::errc::operation_canceled)) {
       canceled->fetch_add(1, std::memory_order_relaxed);
     }
   }
@@ -128,8 +131,8 @@ TEST(LifecycleTest, join_races_with_schedule) {
 
   auto sched = ctx->get_post_scheduler();
   using Sender = decltype(sched.schedule());
-  using Op = decltype(
-      bexec::connect(std::declval<Sender>(), schedule_recv{nullptr}));
+  using Op =
+      decltype(bexec::connect(std::declval<Sender>(), schedule_recv{nullptr}));
 
   // Post N schedule operations on the heap so they outlive the test loop.
   for (int i = 0; i < N; ++i) {

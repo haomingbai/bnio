@@ -14,8 +14,12 @@ namespace {
 
 using namespace bnio_async_io_io_uring_test;
 
+// Classifies terminal receiver calls for external posts: every op should
+// complete via set_value() with an empty error_code; a set_value(error)
+// lands in errors and set_stopped is a contract violation.
 struct concurrent_post_state {
   std::atomic<unsigned> completed{0};
+  std::atomic<unsigned> errors{0};
   std::atomic<unsigned> stopped{0};
   std::atomic_bool all_in_context{true};
 };
@@ -26,9 +30,12 @@ struct concurrent_post_receiver {
   io_uring_context* context = nullptr;
   unsigned target = 0;
 
-  void set_value(std::error_code) noexcept {
+  void set_value(std::error_code ec) noexcept {
     if (context == nullptr || !context->is_in_context()) {
       state->all_in_context.store(false, std::memory_order_release);
+    }
+    if (ec != std::error_code()) {
+      state->errors.fetch_add(1, std::memory_order_acq_rel);
     }
     const unsigned completed =
         state->completed.fetch_add(1, std::memory_order_acq_rel) + 1;
@@ -141,7 +148,8 @@ TEST(IoUringRunLoopTest, posted_tasks_accept_concurrent_external_posts) {
   runner.join();
 
   EXPECT_EQ(state->completed.load(std::memory_order_acquire), k_count);
-  EXPECT_EQ(state->stopped.load(std::memory_order_acquire), 0);
+  EXPECT_EQ(state->errors.load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(state->stopped.load(std::memory_order_acquire), 0u);
   EXPECT_TRUE(state->all_in_context.load(std::memory_order_acquire));
 }
 

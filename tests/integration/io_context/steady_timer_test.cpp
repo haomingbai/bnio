@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -268,6 +269,11 @@ TEST(SteadyTimerTest, steady_timer_cancel_counts_all_queued_waits) {
   EXPECT_EQ(completions, 2);
   EXPECT_EQ(first_state->signal, signal_kind::error);
   EXPECT_EQ(second_state->signal, signal_kind::error);
+  // timer.cancel() aborts every queued wait via operation_canceled.
+  EXPECT_EQ(first_state->error,
+            std::make_error_code(std::errc::operation_canceled));
+  EXPECT_EQ(second_state->error,
+            std::make_error_code(std::errc::operation_canceled));
 }
 
 TEST(SteadyTimerTest, timer_destruction_after_stop_does_not_post) {
