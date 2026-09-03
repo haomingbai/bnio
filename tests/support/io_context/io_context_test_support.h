@@ -37,6 +37,10 @@ struct shared_state {
   signal_kind signal = signal_kind::none;
   std::size_t size = 0;
   int fd = -1;
+  // Raw payload of the last set_value(ec, payload). Unlike `size`, this is
+  // recorded on every completion — including failures — so a test can assert
+  // what a sender delivered when ec was non-empty.
+  unsigned poll_events = 0;
   std::error_code error;
 };
 
@@ -174,6 +178,7 @@ struct poll_receiver {
   bnio::io_context* context = nullptr;
 
   void set_value(std::error_code ec, unsigned events) noexcept {
+    state->poll_events = events;
     if (ec) {
       state->signal = signal_kind::error;
       state->error = ec;

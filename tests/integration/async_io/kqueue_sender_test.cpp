@@ -121,7 +121,40 @@ TEST(KqueueSenderTest, poll_sender_reports_bad_descriptor) {
 
   EXPECT_EQ(state->signal, signal_kind::error);
   EXPECT_EQ(state->error, std::error_code(EBADF, std::generic_category()));
+  // The errno travels in ec; the ready mask must be 0, never
+  // static_cast<unsigned>(-EBADF).
+  EXPECT_EQ(state->poll_events, 0u);
   EXPECT_TRUE(state->in_context);
+}
+
+// A stop token already cancelled at start() is observed by start(), which marks
+// the completion stopped; execute() then delivers set_stopped. No mask is
+// delivered on the stop channel at all, so the recorded payload stays 0.
+TEST(KqueueSenderTest, poll_sender_cancelled_before_start_stops) {
+  kqueue_context context;
+  EXPECT_EQ(context.queue_init(), 0);
+
+  int descriptors[2] = {-1, -1};
+  EXPECT_EQ(::pipe(descriptors), 0);
+
+  bexec::inplace_stop_source source;
+  EXPECT_TRUE(source.request_stop());
+
+  stopped_poll_receiver completion;
+  completion.context = &context;
+  completion.environment = stop_env{source.get_token()};
+  auto state = completion.state;
+  auto sender = context.async_poll(descriptor_view(descriptors[0]),
+                                   static_cast<unsigned>(POLLIN));
+  auto operation = bexec::connect(std::move(sender), std::move(completion));
+  bexec::start(operation);
+  context.run();
+
+  EXPECT_EQ(state->signal, signal_kind::stopped);
+  EXPECT_EQ(state->poll_events, 0u);
+
+  EXPECT_EQ(::close(descriptors[0]), 0);
+  EXPECT_EQ(::close(descriptors[1]), 0);
 }
 
 TEST(KqueueSenderTest, poll_sender_accepts_read_and_write_filters) {

@@ -37,6 +37,10 @@ struct shared_state {
   int result = 0;
   unsigned flags = 0;
   bool in_context = false;
+  // Raw payload of the last set_value(ec, payload). Unlike `result`, this is
+  // recorded on every completion — including failures — so a test can assert
+  // what a sender delivered when ec was non-empty.
+  unsigned poll_events = 0;
   std::error_code error;
 };
 
@@ -88,6 +92,7 @@ struct poll_receiver {
   kqueue_context* context = nullptr;
 
   void set_value(std::error_code ec, unsigned events) noexcept {
+    state->poll_events = events;
     if (ec) {
       state->signal = signal_kind::error;
       state->error = ec;
@@ -124,6 +129,12 @@ struct stop_env {
 };
 
 struct stopped_receiver : receiver {
+  stop_env environment;
+
+  [[nodiscard]] stop_env get_env() const noexcept { return environment; }
+};
+
+struct stopped_poll_receiver : poll_receiver {
   stop_env environment;
 
   [[nodiscard]] stop_env get_env() const noexcept { return environment; }
