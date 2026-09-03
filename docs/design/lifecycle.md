@@ -639,16 +639,25 @@ completion" holds; the
 (`tests/integration/io_context/lifecycle/`) pins both the liveness
 bound and the per-operation terminal-call accounting.
 
-**Boundary.**  The guard governs the I/O queues — operations are
-aborted *before* any syscall or registration is attempted for them.  An
-operation whose request completes immediately inside `start()` (a
-non-blocking read that finds data, eager mode) is a CPU-queue citizen
-by construction and never passes through `consume_io_tasks()`; like
-io_uring in the same configuration, bnio does not intercept that path
-during teardown.  A receiver that keeps restarting eager-completing
-work past a stop-channel completion violates the stop contract on both
-platforms alike; the poll-based regression above deliberately avoids
-that path so the guard's contract stays the pinned one.
+**Boundary — eager completion is best-effort.**  The guard governs the
+I/O queues — operations are aborted *before* any syscall or registration
+is attempted for them.  An operation whose request completes immediately
+inside `start()` (a non-blocking read that finds data, eager mode) is a
+CPU-queue citizen by construction and never passes through
+`consume_io_tasks()`; like io_uring in the same configuration, bnio does
+not intercept that path during teardown.  This is deliberate: the eager
+probe is a plain syscall that never reaches the submission path, so it
+neither registers kernel state that teardown would have to unwind nor
+touches descriptor lifetime — resource release stays exactly where it
+was without the probe.  Teardown is therefore **best-effort** for this
+class of work: whatever the probe already did is real and is delivered
+as-is, and no attempt is made to un-do it.  Checking whether a stop has
+been requested — and keeping every object the operation touches alive —
+remains the receiver's own responsibility.  A receiver that keeps
+restarting eager-completing work past a stop-channel completion violates
+the stop contract on both platforms alike; the poll-based regression
+above deliberately avoids that path so the guard's contract stays the
+pinned one.
 
 ### A failed native enter is reported through run()'s result
 

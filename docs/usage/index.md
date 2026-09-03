@@ -130,7 +130,14 @@ Rules that follow from the table:
   `async_wait()` completes inline with `set_value(operation_canceled)` — or
   `set_stopped()` when the receiver's stop token is already cancelled.
 - Already-completed results are delivered unchanged: work whose result exists
-  before a stop is not fabricated as cancelled. For TLS streams this covers
+  before a stop is not fabricated as cancelled.
+- Queued I/O that has not reached the kernel is aborted by a stop and completes
+  with `set_value(operation_canceled, ...)`. Operations that can complete
+  eagerly (the probe inside `start()` finds the fd ready) are **best-effort**:
+  the probe is a plain syscall outside the submission path, so a stop neither
+  reverts it nor affects descriptor lifetime — its real result is delivered as
+  it is. Checking stop state and keeping the operation's objects alive remain
+  the receiver's responsibility. For TLS streams this covers
   staged completions too: a handshake or read/write result the SSL state
   machine has already produced (a TLS failure, an orderly close, transferred
   bytes) is delivered unchanged even when the context stopped before the
