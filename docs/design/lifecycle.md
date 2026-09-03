@@ -400,12 +400,42 @@ this is `io_uring_context`'s existing abort-and-deliver sequence; on BSD
 `kqueue_context::queue_exit()` (`src/async_io/bsd/kqueue_context.cpp`) now
 mirrors it — guarded by a not-already-finished precondition, it marks
 finishing, aborts inflight I/O, drains local CPU tasks, and consumes I/O
-tasks (re-aborting after each batch) until both queues stay empty. Forced
-or abnormal close therefore reaches a terminal receiver call for every
-operation that was published to the context — nothing is silently dropped,
-even when `run()` never drained the queues. The same delivery guarantee
-covers fatal run-loop errors, which route through the `finish_drain` phase
-(drain → abort → deliver) instead of exiting the loop directly.
+tasks (re-aborting after each batch) until both queues stay empty. Within
+the `queue_exit()` / `finish()` scope, therefore, a forced or abnormal
+close reaches a terminal receiver call for every operation that was
+published to the context — nothing is silently dropped, even when `run()`
+never drained the queues. The same delivery guarantee covers fatal
+run-loop errors, which route through the `finish_drain` phase (drain →
+abort → deliver) instead of exiting the loop directly.
+
+Two boundaries keep that statement scoped. First, it covers the teardown
+paths above, not `~io_context()` itself: the destructor publishes the
+terminal state and closes the wake channel without delivering any pending
+completion — outstanding operations are dropped, which is the caller's
+responsibility under Rule 3 (`io_context` and operation storage must both
+remain alive until terminal completion). Second, the normal `stop()` path
+has its own delivery guarantee, described next.
+
+### stop() drains the shared queues
+
+`stop()` (and `join()`, which shares the stop path) never abandons work
+that was published before the stopping state was elected. After
+`stop_internal()` waits for `running_workers` to reach zero, the stopping
+thread performs one drain-and-deliver pass over the state no worker owns:
+
+- the shared CPU queue (`pop_cpu_all()`), executing each operation inline
+  — the delivery arbitration (stop token, then `is_stopped()`) reports
+  `set_value(operation_canceled)` for queued work that never ran;
+- the shared I/O queue (`pop_io_all()`), marking each operation stopped
+  (`result = -ECANCELED`, `complete_submit_stopped()`) and executing it
+  inline — no SQE or kevent is prepared or submitted during this drain;
+- `timers_.ready`, where `abort_pending_timer_waits()` staged the aborted
+  timer waits; with no worker left, the stopping thread delivers them
+  inline as `set_value(operation_canceled)`.
+
+The normal multi-worker stop is unaffected: the last worker's `finish()`
+already drained everything, so this pass finds the queues empty and
+returns immediately.
 
 ### Stop-channel arbitration
 
