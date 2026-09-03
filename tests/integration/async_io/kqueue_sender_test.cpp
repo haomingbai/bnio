@@ -5,18 +5,33 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <system_error>
+#include <thread>
 
 #include "../../support/async_io/kqueue_context_test_support.h"
 
 namespace {
 
 using namespace bnio_async_io_kqueue_test;
+
+template <typename Predicate>
+[[nodiscard]] bool wait_until(Predicate&& predicate,
+                              std::chrono::milliseconds timeout) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (!predicate()) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return false;
+    }
+    std::this_thread::yield();
+  }
+  return true;
+}
 
 TEST(KqueueSenderTest, post_operation_runs_on_context_thread) {
   kqueue_context context;
@@ -340,6 +355,182 @@ TEST(KqueueSenderTest, stop_token_completes_before_native_registration) {
   // User stop-token cancellation completes through set_stopped().
   EXPECT_EQ(state->signal, signal_kind::stopped);
   EXPECT_TRUE(state->in_context);
+}
+
+// queue_exit() on a context whose run() was never called: an operation
+// published into the shared I/O queue (publish_io takes the shared path
+// off the run-loop thread) is never registered, so its only chance at a
+// terminal call is the teardown drain.  queue_exit() must deliver it
+// through the stop channel — set_value(operation_canceled) for this
+// token-less receiver — synchronously on the calling thread, never
+// silently drop it.  This shape is kqueue-specific: the native
+// publish_io is void with no life_state check (the io_uring publish
+// path rejects once stopping), so a publication racing the teardown has
+// no inline-rejection fallback and relies on the drain entirely.
+TEST(KqueueSenderTest, queue_exit_delivers_published_but_unrun_io) {
+  kqueue_task_queue_state global_tasks;
+  ASSERT_GE(global_tasks.wake_channel_.open(), 0);
+  kqueue_context context;
+  context.set_global_state(&global_tasks);
+  ASSERT_EQ(context.queue_init(), 0);
+
+  int descriptors[2] = {-1, -1};
+  ASSERT_EQ(::pipe(descriptors), 0);
+
+  poll_receiver completion;
+  completion.context = &context;
+  auto state = completion.state;
+  auto sender = context.async_poll(descriptor_view(descriptors[0]),
+                                   static_cast<unsigned>(POLLIN));
+  auto operation = bexec::connect(std::move(sender), std::move(completion));
+  // The calling thread is outside run(): publish_io routes to the shared
+  // I/O queue, and run() is deliberately never called, so nobody drains
+  // it before the teardown.
+  bexec::start(operation);
+  context.queue_exit();
+
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error,
+            std::make_error_code(std::errc::operation_canceled));
+  // The abort carries no ready mask; the errno rides in ec.
+  EXPECT_EQ(state->poll_events, 0u);
+  // Delivered synchronously on the calling thread, not on a worker.
+  EXPECT_FALSE(state->in_context);
+
+  EXPECT_EQ(::close(descriptors[0]), 0);
+  EXPECT_EQ(::close(descriptors[1]), 0);
+}
+
+// stop() racing an in-flight poll: the worker parked on the poll, the
+// caller publishes the closing state (io_context::begin_stop()'s
+// life_state = 1) and stops the native context; the wake write unblocks
+// the kevent wait and finish()'s abort path delivers the in-flight poll
+// through the stop channel — set_value(operation_canceled) for this
+// token-less receiver — executed on the worker thread.  Together with
+// queue_exit_delivers_published_but_unrun_io this pins the kqueue-side
+// abort/error-code contract that used to be asserted only against
+// io_uring.
+TEST(KqueueSenderTest, stop_aborts_inflight_poll_reports_operation_canceled) {
+  kqueue_task_queue_state global_tasks;
+  ASSERT_GE(global_tasks.wake_channel_.open(), 0);
+  kqueue_context context;
+  context.set_global_state(&global_tasks);
+  ASSERT_EQ(context.queue_init(), 0);
+
+  int descriptors[2] = {-1, -1};
+  ASSERT_EQ(::pipe(descriptors), 0);
+
+  poll_receiver completion;
+  completion.context = &context;
+  auto state = completion.state;
+  auto sender = context.async_poll(descriptor_view(descriptors[0]),
+                                   static_cast<unsigned>(POLLIN));
+  auto operation = bexec::connect(std::move(sender), std::move(completion));
+  bexec::start(operation);  // shared queue; the worker registers it
+
+  std::thread worker([&context] { context.run(); });
+  ASSERT_TRUE(wait_until([&] { return context.is_waiting(); },
+                         std::chrono::milliseconds(2000)))
+      << "worker never parked with the poll in flight";
+
+  // io_context::stop() semantics: publish the closing state, then stop
+  // the native context (finishing + wake write).
+  global_tasks.life_state.store(1, std::memory_order_release);
+  (void)context.stop();
+  worker.join();
+
+  EXPECT_EQ(state->signal, signal_kind::error);
+  EXPECT_EQ(state->error,
+            std::make_error_code(std::errc::operation_canceled));
+  EXPECT_EQ(state->poll_events, 0u);
+  EXPECT_TRUE(state->in_context);  // delivered on the worker thread
+
+  EXPECT_EQ(::close(descriptors[0]), 0);
+  EXPECT_EQ(::close(descriptors[1]), 0);
+}
+
+// EAGAIN re-arm contract at its source (kqueue_context::perform_io_step,
+// src/async_io/bsd/kqueue_context_events.cpp:94).  With two read waiters
+// queued on one pipe read end, process_event() arms the successor
+// *before* the fired head performs its read — and the byte is still in
+// the pipe at that moment, so the kernel reports the successor ready.
+// The head's read then consumes the byte, the successor's perform_io()
+// hits -EAGAIN, and try_rearm_operation() re-arms it to stay in flight.
+// Nothing may deliver -EAGAIN to any receiver: the second waiter must
+// stay silent until new data arrives, then complete normally with
+// exactly one byte.
+TEST(KqueueSenderTest, rearm_keeps_second_waiter_pending_until_data_arrives) {
+  kqueue_context context;
+  ASSERT_EQ(context.queue_init(), 0);
+
+  int descriptors[2] = {-1, -1};
+  ASSERT_EQ(::pipe(descriptors), 0);
+  std::array<char, 1> first_buffer{};
+  std::array<char, 1> second_buffer{};
+
+  receiver first_completion;
+  first_completion.context = &context;
+  auto first_state = first_completion.state;
+  kqueue_read_operation first_operation(
+      context, descriptor_view(descriptors[0]),
+      buffer_view{first_buffer.data(), first_buffer.size()},
+      std::move(first_completion));
+
+  receiver second_completion;
+  second_completion.context = &context;
+  second_completion.stop_on_completion = true;
+  auto second_state = second_completion.state;
+  kqueue_read_operation second_operation(
+      context, descriptor_view(descriptors[0]),
+      buffer_view{second_buffer.data(), second_buffer.size()},
+      std::move(second_completion));
+
+  // The pipe is empty here: both waiters probe -EAGAIN on their first
+  // non-blocking read and publish to the I/O queue.
+  bexec::start(first_operation);
+  bexec::start(second_operation);
+
+  std::thread worker([&context] { context.run(); });
+  ASSERT_TRUE(wait_until([&] { return context.is_waiting(); },
+                         std::chrono::milliseconds(2000)))
+      << "worker never parked with both waiters registered";
+
+  // One byte fires the armed head; arming the successor races the head's
+  // read by construction (see process_event()).
+  EXPECT_EQ(::write(descriptors[1], "a", 1), 1);
+  ASSERT_TRUE(wait_until(
+                  [&] { return first_state->signal == signal_kind::value; },
+                  std::chrono::milliseconds(2000)))
+      << "first waiter never completed";
+  EXPECT_EQ(first_state->result, 1);
+  EXPECT_EQ(first_buffer[0], 'a');
+
+  // The successor was armed while the byte was still pending, so its
+  // ready event raced the head's read: perform_io() hit -EAGAIN and the
+  // re-arm kept it in flight.  Give the run loop a bounded settle window,
+  // then require zero terminal calls on the second waiter.
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_EQ(second_state->signal, signal_kind::none)
+      << "second waiter completed or errored instead of staying pending "
+         "after the raced -EAGAIN";
+
+  // New data completes the re-armed waiter normally.
+  EXPECT_EQ(::write(descriptors[1], "b", 1), 1);
+  ASSERT_TRUE(
+      wait_until([&] { return second_state->signal == signal_kind::value; },
+                 std::chrono::milliseconds(2000)))
+      << "re-armed second waiter never completed after new data";
+  EXPECT_EQ(second_state->result, 1);
+  EXPECT_EQ(second_buffer[0], 'b');
+  // Zero -EAGAIN deliveries anywhere: both waiters end on the value
+  // channel (an EAGAIN error would have latched signal_kind::error).
+  EXPECT_EQ(first_state->signal, signal_kind::value);
+  EXPECT_EQ(second_state->signal, signal_kind::value);
+
+  worker.join();
+
+  EXPECT_EQ(::close(descriptors[0]), 0);
+  EXPECT_EQ(::close(descriptors[1]), 0);
 }
 
 }  // namespace
