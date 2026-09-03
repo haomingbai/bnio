@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -18,14 +19,24 @@ struct join_flag_recv {
   }
 };
 
-// Receiver for schedule operations — counts completions via any channel.
+// Receiver for schedule operations.  Classifies terminal calls: an op
+// racing the join either completes normally (accepted before the reject
+// point) or aborts via set_value(operation_canceled); set_stopped is a
+// contract violation.
 struct schedule_recv {
-  std::atomic<int>* counter = nullptr;
-  void set_value(std::error_code) noexcept {
+  std::atomic<int>* counter = nullptr;   // every terminal call
+  std::atomic<int>* canceled = nullptr;  // set_value(operation_canceled)
+  std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
+  void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (canceled &&
+        ec == std::make_error_code(std::errc::operation_canceled)) {
+      canceled->fetch_add(1, std::memory_order_relaxed);
+    }
   }
   void set_stopped() noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (stopped) stopped->fetch_add(1, std::memory_order_relaxed);
   }
 };
 
@@ -108,6 +119,7 @@ TEST(LifecycleTest, join_races_with_schedule) {
 
   constexpr int N = 100;
   std::atomic<int> completed{0};
+  std::atomic<int> stopped{0};
   std::vector<std::unique_ptr<op_holder_base>> ops;
   ops.reserve(N);
 
@@ -116,13 +128,14 @@ TEST(LifecycleTest, join_races_with_schedule) {
 
   auto sched = ctx->get_post_scheduler();
   using Sender = decltype(sched.schedule());
-  using Op =
-      decltype(bexec::connect(std::declval<Sender>(), schedule_recv{nullptr}));
+  using Op = decltype(
+      bexec::connect(std::declval<Sender>(), schedule_recv{nullptr}));
 
   // Post N schedule operations on the heap so they outlive the test loop.
   for (int i = 0; i < N; ++i) {
     auto sender = sched.schedule();
-    auto h = std::make_unique<op_holder<Op>>(sender, schedule_recv{&completed});
+    auto h = std::make_unique<op_holder<Op>>(
+        sender, schedule_recv{&completed, nullptr, &stopped});
     bexec::start(h->op);
     ops.push_back(std::move(h));
   }
@@ -140,6 +153,8 @@ TEST(LifecycleTest, join_races_with_schedule) {
 
   EXPECT_TRUE(join_done.load(std::memory_order_acquire));
   EXPECT_EQ(N, completed.load(std::memory_order_relaxed));
+  // Whatever the race outcome, no operation may complete via set_stopped.
+  EXPECT_EQ(stopped.load(std::memory_order_relaxed), 0);
 }
 
 // Test 4: double_join
