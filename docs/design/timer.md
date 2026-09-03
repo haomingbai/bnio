@@ -252,6 +252,13 @@ call (`include/bnio/detail/posix/io_context/timer_wait.h:40`):
 | `canceled` | `cancel()`, expiry replacement, destruction unregistration, and the context-stop abort `abort_pending_timer_waits()` | `set_value(operation_canceled)` |
 | `value` | expiry processing | `set_value({})` |
 
+On an unregistered timer (`context == nullptr`) no completion is staged at
+all: the wait operation observes the missing context at `start()` and
+delivers inline — `set_stopped()` when the receiver's stop token is already
+cancelled, otherwise `set_value(operation_canceled)`. Inline delivery is
+required because nothing will ever drain `timers_.ready` on behalf of an
+operation whose context pointer is null.
+
 `set_stopped` is therefore reserved for observed token cancellation; every
 timer-object abort and every context-stop abort delivers
 `value(operation_canceled)`, matching the unified stop contract documented
@@ -273,6 +280,13 @@ the abort happened.
 - `active == true` means the slot is reachable from `timer_state_data::heap`.
 - `active == false` and `context != nullptr` means the slot is reachable from
   `timer_state_data::inactive`.
+- A `context == nullptr` slot (unregistered — moved-from, or waits aborted by
+  `io_context::stop()`) is a legal state. Its object APIs are null-safe
+  no-ops: `cancel()` and `expires_at()` return `0` (no pending waits can be
+  canceled; `expires_at()` still writes the saved `expiry`), `expiry()`
+  returns the saved `expiry`, `has_context()` reports `false`, and
+  `async_wait()` delivers inline per the completion-kind rules above — no
+  operation is staged on `timers_.ready`, because nothing will drain it.
 - At most one submitted head-linked queue exists per timer.
 - Queue `head` and `size` are either both empty/zero or describe the same
   intrusive list.

@@ -115,6 +115,7 @@ Which channel a cancellation fires on depends only on its source:
 | Stop token visible in the receiver environment (user-provided, or forwarded by a composite sender algorithm) | `set_stopped()` |
 | `io_context::stop()` aborting inflight I/O or not-yet-executed queued work | `set_value(operation_canceled, ...)` |
 | `steady_timer::cancel()`, `expires_after()`, timer destruction | `set_value(operation_canceled)` |
+| `async_wait()` on an unregistered timer (moved-from `steady_timer`, or waits aborted by `io_context::stop()`) | `set_value(operation_canceled)` |
 | Kernel-level cancel (CQE / kevent reporting `ECANCELED`) | `set_value(ECANCELED, ...)` |
 
 Rules that follow from the table:
@@ -122,6 +123,12 @@ Rules that follow from the table:
 - Both sources racing: when the stop token is cancelled and the context is
   stopping at the same time, the token wins — the operation completes with
   `set_stopped()`.
+- An unregistered timer (`context == nullptr`, observable via
+  `steady_timer::has_context()`) is legal to keep using: `cancel()` and
+  `expires_after()` return `0` (no pending waits to cancel; `expires_at()`
+  still updates the saved expiry), `expiry()` returns the saved expiry, and
+  `async_wait()` completes inline with `set_value(operation_canceled)` — or
+  `set_stopped()` when the receiver's stop token is already cancelled.
 - Already-completed results are delivered unchanged: work whose result exists
   before a stop is not fabricated as cancelled.
 - Write-all and read-all senders report the bytes transferred so far when
