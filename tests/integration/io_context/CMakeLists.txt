@@ -43,6 +43,10 @@ bnio_add_integration_io_context_test(
   lifecycle_finish_phase3_operation_leak
   lifecycle/finish_phase3_operation_leak_test.cpp)
 bnio_add_integration_io_context_test(
+  lifecycle_finish_no_new_io_after_stop
+  lifecycle/finish_no_new_io_after_stop_test.cpp
+  PROPERTIES TIMEOUT 20)
+bnio_add_integration_io_context_test(
   lifecycle_stop_operation_completion
   lifecycle/stop_operation_completion_test.cpp
   PROPERTIES TIMEOUT 10)
