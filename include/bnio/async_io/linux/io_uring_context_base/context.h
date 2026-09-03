@@ -186,6 +186,21 @@ class BNIO_EXPORT io_uring_context {
   [[nodiscard]] bool is_waiting() const noexcept;
 
   /**
+   * Returns the negative errno that aborted enter_run(), or 0 when the
+   * last run() entered its loop normally (or never ran).
+   *
+   * The only failures enter_run() can report are the io_uring ring
+   * enable and the wake-poll arming: both happen before any worker has
+   * started, so the value is written once by the run() caller and read
+   * after run() returns — no synchronization is needed. The caller
+   * (io_context::run_native_loop) surfaces it as the error_code run()
+   * returns instead of reporting success for a worker that never ran.
+   */
+  [[nodiscard]] int enter_run_error() const noexcept {
+    return enter_run_error_;
+  }
+
+  /**
    * Posts an operation for execution by the context run loop.
    *
    * Internal submission API. Unlike the posix io_context queue, this
@@ -590,6 +605,13 @@ class BNIO_EXPORT io_uring_context {
     bool ring_disabled = false;
   };
   run_state run_state_;
+
+  /**
+   * Negative errno recorded by enter_run() when the ring enable or a
+   * wake-poll arming failed, 0 otherwise. Owned by the run() caller
+   * thread; see enter_run_error().
+   */
+  int enter_run_error_ = 0;
 
   /** Poll-arming state for the shared and per-worker wake channels. */
   struct poll_state {

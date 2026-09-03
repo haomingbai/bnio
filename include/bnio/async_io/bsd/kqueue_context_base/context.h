@@ -144,6 +144,17 @@ class BNIO_EXPORT kqueue_context {
   /** Returns whether this run-loop worker has published a sleeping state. */
   [[nodiscard]] bool is_waiting() const noexcept;
 
+  /**
+   * Returns the negative errno that aborted enter_run(), or 0 when the
+   * last run() entered its loop normally (or never ran).
+   *
+   * The kqueue backend always returns 0: its enter_run() has no failure
+   * point past io_context::run_native_loop()'s is_open() pre-check, so
+   * a kqueue run never needs to report a failed enter. The query exists
+   * to give both native backends the same run() error surface.
+   */
+  [[nodiscard]] int enter_run_error() const noexcept { return 0; }
+
   /** Posts an operation to the context run loop. */
   int post(kqueue_operation_base& operation) noexcept;
 

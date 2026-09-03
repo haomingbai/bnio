@@ -59,6 +59,7 @@ int io_uring_context::queue_init(
   }
   run_state_.run_active.store(false, std::memory_order_release);
   run_state_.queue_initialized = true;
+  enter_run_error_ = 0;
   apply_context_options(options);
   poll_state_.eventfd_poll_pending = false;
   poll_state_.local_eventfd_poll_pending = false;

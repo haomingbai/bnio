@@ -132,7 +132,13 @@ std::error_code io_context::run_native_loop() noexcept {
       // worker (anti-recurrence).
       current_worker_native_ = previous_worker_native;
       current_context_ = previous_context;
-      result = std::error_code{};
+      // A failed native enter (ring enable or wake-poll arming) happened
+      // before any worker started, so the native context records its
+      // errno for this same thread to read; an empty error_code keeps
+      // the normal-run channel. This must not report success for a run
+      // loop that never started.
+      result = std::error_code(-ctx.enter_run_error(),
+                               std::generic_category());
     }
   }  // native context (and its queue_exit teardown) completes here
 

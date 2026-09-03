@@ -54,8 +54,10 @@ bool io_uring_context::enter_run() noexcept {
 
   // With SINGLE_ISSUER | R_DISABLED, this call makes the run-loop thread the
   // designated issuer before any SQE can be submitted.
-  if (enable_ring() < 0) {
+  const int enable_result = enable_ring();
+  if (enable_result < 0) {
     // enable_ring() runs before awake_workers is incremented below.
+    enter_run_error_ = enable_result;
     return fail_enter_run(/*awake_worker_added=*/false);
   }
 
@@ -65,11 +67,19 @@ bool io_uring_context::enter_run() noexcept {
   // Arm the shared wake poll and the per-worker wake poll (the latter
   // for directed wakeups). A failure to arm either carries the same
   // stranding risk as the enable_ring failure above.
-  if (arm_wake_poll(global_state_->wake_channel_.read_fd(), eventfd_user_data(),
-                    poll_state_.eventfd_poll_pending) < 0 ||
+  const int shared_poll_result = arm_wake_poll(
+      global_state_->wake_channel_.read_fd(), eventfd_user_data(),
+      poll_state_.eventfd_poll_pending);
+  if (shared_poll_result < 0) {
+    enter_run_error_ = shared_poll_result;
+    return fail_enter_run(/*awake_worker_added=*/true);
+  }
+  const int local_poll_result =
       arm_wake_poll(local_state_.wake_channel_.read_fd(),
                     local_eventfd_user_data(),
-                    poll_state_.local_eventfd_poll_pending) < 0) {
+                    poll_state_.local_eventfd_poll_pending);
+  if (local_poll_result < 0) {
+    enter_run_error_ = local_poll_result;
     return fail_enter_run(/*awake_worker_added=*/true);
   }
 
