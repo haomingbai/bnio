@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -41,13 +42,23 @@ struct op_holder : op_holder_base {
   }
 };
 
+// Classifies terminal receiver calls instead of lumping them together.
+// The lifecycle contract: context stop() aborting a pending timer wait
+// completes via set_value(operation_canceled), never via set_stopped.
 struct timer_recv {
-  std::atomic<int>* counter = nullptr;
-  void set_value(std::error_code) noexcept {
+  std::atomic<int>* counter = nullptr;   // every terminal call
+  std::atomic<int>* canceled = nullptr;  // set_value(operation_canceled)
+  std::atomic<int>* stopped = nullptr;   // set_stopped (contract violation)
+  void set_value(std::error_code ec) noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (canceled &&
+        ec == std::make_error_code(std::errc::operation_canceled)) {
+      canceled->fetch_add(1, std::memory_order_relaxed);
+    }
   }
   void set_stopped() noexcept {
     if (counter) counter->fetch_add(1, std::memory_order_relaxed);
+    if (stopped) stopped->fetch_add(1, std::memory_order_relaxed);
   }
 };
 
@@ -67,6 +78,8 @@ TEST(TimerStopRaceStressTest, repeated_stop_with_pending_timers) {
     }
 
     std::atomic<int> completed{0};
+    std::atomic<int> canceled{0};
+    std::atomic<int> stopped{0};
     std::vector<std::unique_ptr<op_holder_base>> ops;
     std::vector<bnio::steady_timer> timers;
 
@@ -86,8 +99,10 @@ TEST(TimerStopRaceStressTest, repeated_stop_with_pending_timers) {
     for (auto& timer : timers) {
       (void)timer.expires_at(far);
       auto sender = timer.async_wait();
-      using Op = decltype(bexec::connect(sender, timer_recv{nullptr}));
-      auto h = std::make_unique<op_holder<Op>>(sender, timer_recv{&completed});
+      using Op =
+          decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
+      auto h = std::make_unique<op_holder<Op>>(
+          sender, timer_recv{&completed, &canceled, &stopped});
       bexec::start(h->op);
       ops.push_back(std::move(h));
     }
@@ -101,10 +116,20 @@ TEST(TimerStopRaceStressTest, repeated_stop_with_pending_timers) {
     if (completed.load() != kTimersPerIteration) {
       ++failures;
     }
+    // Every far-future timer is pending when stop() lands, so every one
+    // must complete through set_value(operation_canceled).
+    if (canceled.load() != kTimersPerIteration) {
+      ++failures;
+    }
+    if (stopped.load() != 0) {
+      ++failures;
+    }
   }
 
-  EXPECT_EQ(failures, 0) << failures << " / " << kIterations
-                         << " iterations had stranded timer operations";
+  EXPECT_EQ(failures, 0)
+      << failures << " / " << kIterations
+      << " iterations had stranded timer operations, a missing "
+         "operation_canceled abort, or a contract-violating set_stopped";
 }
 
 // Test B: Burst-stop pattern — submit many far-future timers while the
@@ -126,6 +151,8 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
 
     std::atomic<int> burst_completed{0};
     std::atomic<int> busy_completed{0};
+    std::atomic<int> burst_canceled{0};
+    std::atomic<int> stopped{0};
     std::vector<std::unique_ptr<op_holder_base>> burst_ops;
     std::vector<std::unique_ptr<op_holder_base>> busy_ops;
     std::vector<bnio::steady_timer> burst_timers;
@@ -147,9 +174,10 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
     for (auto& timer : busy_timers) {
       (void)timer.expires_after(std::chrono::microseconds(1));
       auto sender = timer.async_wait();
-      using Op = decltype(bexec::connect(sender, timer_recv{nullptr}));
-      auto h =
-          std::make_unique<op_holder<Op>>(sender, timer_recv{&busy_completed});
+      using Op =
+          decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
+      auto h = std::make_unique<op_holder<Op>>(
+          sender, timer_recv{&busy_completed, nullptr, &stopped});
       bexec::start(h->op);
       busy_ops.push_back(std::move(h));
     }
@@ -160,9 +188,10 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
     for (auto& timer : burst_timers) {
       (void)timer.expires_at(far);
       auto sender = timer.async_wait();
-      using Op = decltype(bexec::connect(sender, timer_recv{nullptr}));
-      auto h =
-          std::make_unique<op_holder<Op>>(sender, timer_recv{&burst_completed});
+      using Op =
+          decltype(bexec::connect(sender, timer_recv{nullptr, nullptr}));
+      auto h = std::make_unique<op_holder<Op>>(
+          sender, timer_recv{&burst_completed, &burst_canceled, &stopped});
       bexec::start(h->op);
       burst_ops.push_back(std::move(h));
     }
@@ -172,13 +201,29 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
     ctx->stop();
     worker.join();
 
+    // Every started operation must reach a terminal receiver call.
     if (burst_completed.load() != kBurstTimers) {
+      ++failures;
+    }
+    if (busy_completed.load() != kBusyTimers) {
+      ++failures;
+    }
+    // All burst timers are still pending at stop(): each must abort via
+    // set_value(operation_canceled).  Busy timers may have expired
+    // already, so their split between normal completion and cancellation
+    // is timing-dependent and only the terminal count is asserted.
+    if (burst_canceled.load() != kBurstTimers) {
+      ++failures;
+    }
+    if (stopped.load() != 0) {
       ++failures;
     }
   }
 
-  EXPECT_EQ(failures, 0) << failures << " / " << kIterations
-                         << " iterations had stranded timer operations";
+  EXPECT_EQ(failures, 0)
+      << failures << " / " << kIterations
+      << " iterations had stranded timer operations, a missing "
+         "operation_canceled abort, or a contract-violating set_stopped";
 }
 
 }  // namespace
