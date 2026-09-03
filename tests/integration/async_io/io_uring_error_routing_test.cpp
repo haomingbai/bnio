@@ -33,7 +33,6 @@
 //   local_wake_channel_close_in_context_strands_inflight_io.
 
 #include <bnio/io_context.h>
-
 #include <fcntl.h>
 #include <gtest/gtest.h>
 #include <poll.h>

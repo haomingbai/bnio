@@ -38,16 +38,15 @@
 // test binary. The executable is registered RUN_SERIAL for the same reason.
 
 #include <bnio/bnio.h>
-#include <gtest/gtest.h>
-
 #include <fcntl.h>
+#include <gtest/gtest.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <bexec/bexec.hpp>
-#include <chrono>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -171,7 +170,7 @@ class stdin_guard {
     if (::fcntl(0, F_GETFD, 0) < 0 && errno == EBADF) {
       return true;  // closed and not (yet) reused.
     }
-    struct stat current {};
+    struct stat current{};
     if (::fstat(0, &current) != 0) {
       return true;
     }
@@ -196,7 +195,7 @@ class stdin_guard {
   // stat_valid_ ensures the default member initializer `stat_ {}` runs
   // first and the fstat snapshot survives; the other order zeroed the
   // snapshot after filling it and made replaced() a tautology.
-  struct stat stat_ {};
+  struct stat stat_{};
   int saved_;
   int flags_;
   bool stat_valid_;
@@ -242,9 +241,8 @@ TEST(LifecycleAcceptAbortTest, aborted_accept_must_not_close_descriptor_zero) {
   accept_state state;
   using sender_type =
       decltype(acceptor.async_accept(context.get_post_scheduler(), 0));
-  using operation_type =
-      decltype(bexec::connect(std::declval<sender_type>(),
-                              destroying_accept_receiver{}));
+  using operation_type = decltype(bexec::connect(std::declval<sender_type>(),
+                                                 destroying_accept_receiver{}));
   auto holder = std::make_unique<op_holder<operation_type> >(
       acceptor.async_accept(context.get_post_scheduler(), 0),
       destroying_accept_receiver{&state});
@@ -309,8 +307,8 @@ TEST(LifecycleAcceptAbortTest, aborted_accept_must_not_touch_stdin_flags) {
   accept_state state;
   using sender_type =
       decltype(acceptor.async_accept(context.get_post_scheduler(), 0));
-  using operation_type = decltype(
-      bexec::connect(std::declval<sender_type>(), releasing_accept_receiver{}));
+  using operation_type = decltype(bexec::connect(std::declval<sender_type>(),
+                                                 releasing_accept_receiver{}));
   auto holder = std::make_unique<op_holder<operation_type> >(
       acceptor.async_accept(context.get_post_scheduler(), 0),
       releasing_accept_receiver{&state});
@@ -372,9 +370,8 @@ TEST(LifecycleAcceptAbortTest,
   accept_state state;
   using sender_type =
       decltype(acceptor.async_accept(context.get_post_scheduler(), 0));
-  using operation_type =
-      decltype(bexec::connect(std::declval<sender_type>(),
-                              destroying_accept_receiver{}));
+  using operation_type = decltype(bexec::connect(std::declval<sender_type>(),
+                                                 destroying_accept_receiver{}));
   auto holder = std::make_unique<op_holder<operation_type> >(
       acceptor.async_accept(context.get_post_scheduler(), 0),
       destroying_accept_receiver{&state});

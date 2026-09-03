@@ -137,8 +137,7 @@ std::error_code io_context::run_native_loop() noexcept {
       // errno for this same thread to read; an empty error_code keeps
       // the normal-run channel. This must not report success for a run
       // loop that never started.
-      result = std::error_code(-ctx.enter_run_error(),
-                               std::generic_category());
+      result = std::error_code(-ctx.enter_run_error(), std::generic_category());
     }
   }  // native context (and its queue_exit teardown) completes here
 

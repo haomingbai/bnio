@@ -1,10 +1,10 @@
 #include <bnio/bnio.h>
 #include <gtest/gtest.h>
+#include <poll.h>
 
 #include <atomic>
 #include <chrono>
 #include <memory>
-#include <poll.h>
 #include <utility>
 #include <vector>
 
@@ -119,9 +119,9 @@ TEST(StopWithoutWorkerTest, stop_without_worker_delivers_queued_operations) {
   // drain delivers them.
   auto scheduler = ctx->get_post_scheduler();
   for (int i = 0; i < kPollCount; ++i) {
-    auto sender = bnio::async_poll(
-        scheduler, bnio::async_io::descriptor_view(-1),
-        static_cast<unsigned>(POLLIN));
+    auto sender =
+        bnio::async_poll(scheduler, bnio::async_io::descriptor_view(-1),
+                         static_cast<unsigned>(POLLIN));
     using Op = decltype(bexec::connect(sender, poll_recv{nullptr}));
     auto holder =
         std::make_unique<op_holder<Op>>(sender, poll_recv{&poll_counts});

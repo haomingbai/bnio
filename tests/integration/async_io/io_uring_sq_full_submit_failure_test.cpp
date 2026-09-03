@@ -21,8 +21,8 @@
 
 #include <array>
 #include <atomic>
-#include <chrono>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <mutex>
@@ -215,9 +215,10 @@ TEST(IoUringSqFullSubmitFailureTest,
   // it and turn this into a CQ-overflow test instead.
   for (unsigned i = 0; i < k_operation_count; ++i) {
     fixture.pipe_at(i).make_readable();
-    ASSERT_TRUE(wait_until(
-        [&counters, i] { return counters->value.load() == i + 1; }))
-        << "poll " << i << " never completed with the value channel";
+    ASSERT_TRUE(wait_until([&counters, i] {
+      return counters->value.load() == i + 1;
+    })) << "poll "
+        << i << " never completed with the value channel";
   }
 
   worker.join();
@@ -305,10 +306,10 @@ TEST(IoUringSqFullSubmitFailureTest,
 
   // With the storm stopped the retries must all land; a stranded operation
   // (or a retry slot that spins without progress) fails this bound.
-  ASSERT_TRUE(wait_until(
-      [&counters] { return counters->total() == k_operation_count; }))
-      << "operations were stranded: value=" << counters->value.load()
-      << " eintr=" << counters->eintr.load()
+  ASSERT_TRUE(wait_until([&counters] {
+    return counters->total() == k_operation_count;
+  })) << "operations were stranded: value="
+      << counters->value.load() << " eintr=" << counters->eintr.load()
       << " other_error=" << counters->other_error.load()
       << " stopped=" << counters->stopped.load();
 

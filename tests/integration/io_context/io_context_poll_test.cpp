@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
-#include "../../support/io_context/io_context_runtime_test_support.h"
-
 #include <system_error>
+
+#include "../../support/io_context/io_context_runtime_test_support.h"
 
 namespace {
 
@@ -64,9 +64,8 @@ TEST(IoContextPollTest, poll_error_reports_zero_mask) {
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto sender =
-      bnio::async_poll(scheduler, bnio::async_io::descriptor_view(-1),
-                       static_cast<unsigned>(POLLIN));
+  auto sender = bnio::async_poll(scheduler, bnio::async_io::descriptor_view(-1),
+                                 static_cast<unsigned>(POLLIN));
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();

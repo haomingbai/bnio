@@ -67,17 +67,16 @@ bool io_uring_context::enter_run() noexcept {
   // Arm the shared wake poll and the per-worker wake poll (the latter
   // for directed wakeups). A failure to arm either carries the same
   // stranding risk as the enable_ring failure above.
-  const int shared_poll_result = arm_wake_poll(
-      global_state_->wake_channel_.read_fd(), eventfd_user_data(),
-      poll_state_.eventfd_poll_pending);
+  const int shared_poll_result =
+      arm_wake_poll(global_state_->wake_channel_.read_fd(), eventfd_user_data(),
+                    poll_state_.eventfd_poll_pending);
   if (shared_poll_result < 0) {
     enter_run_error_ = shared_poll_result;
     return fail_enter_run(/*awake_worker_added=*/true);
   }
-  const int local_poll_result =
-      arm_wake_poll(local_state_.wake_channel_.read_fd(),
-                    local_eventfd_user_data(),
-                    poll_state_.local_eventfd_poll_pending);
+  const int local_poll_result = arm_wake_poll(
+      local_state_.wake_channel_.read_fd(), local_eventfd_user_data(),
+      poll_state_.local_eventfd_poll_pending);
   if (local_poll_result < 0) {
     enter_run_error_ = local_poll_result;
     return fail_enter_run(/*awake_worker_added=*/true);
