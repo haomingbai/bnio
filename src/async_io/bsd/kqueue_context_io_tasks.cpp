@@ -34,6 +34,32 @@ namespace {
 }  // namespace
 
 bool kqueue_context::consume_io_tasks() noexcept {
+  // Teardown guard: once the context is stopping or closing, operations
+  // consumed here must be aborted, not registered.  EV_ADD still succeeds
+  // while the kqueue fd is open, so without this guard an operation
+  // published from a completion callback while finish() drains its queues
+  // would be armed for real and executed — and a receiver that keeps
+  // republishing ready I/O would starve the finish() break condition and
+  // hang stop().  Routing the drained operations through
+  // complete_submit_stopped() lets execute()'s token arbitration deliver
+  // set_value(operation_canceled, ...) (or set_stopped when the receiver
+  // token raced the stop).  This mirrors the io_uring guard and implements
+  // the not-yet-executed queued-work rule of io_context::stop().
+  if (stop_requested() || closing_requested()) {
+    bool found = false;
+    if (kqueue_io_operation_base* operations = local_state_.pop_io_all()) {
+      found = true;
+      drain_io_list_complete_stopped(operations);
+    }
+    if (global_state_ != nullptr) {
+      if (kqueue_io_operation_base* operations = global_state_->pop_io_all()) {
+        found = true;
+        drain_io_list_complete_stopped(operations);
+      }
+    }
+    return found;
+  }
+
   // Worker-local queue first (fastest, keeps the operation on the worker
   // that owns the connection), then the shared queue — stop at the first
   // non-empty source, exactly like fetch_cpu_task().
