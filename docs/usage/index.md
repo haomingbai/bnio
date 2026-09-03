@@ -140,7 +140,13 @@ Rules that follow from the table:
   they complete with `set_value(operation_canceled, ...)`; on
   `set_stopped()` no byte count is reported.
 - `io_context::run()` keeps returning `operation_canceled` as its own
-  function result after a stop; that channel is unchanged.
+  function result after a stop; that channel is unchanged. When the native
+  backend fails to enter its run loop on a worker — the io_uring ring could
+  not be enabled or a wake poll could not be armed — that same result
+  carries the backend's error instead: `std::error_code(-errno,
+  std::generic_category())` from the failing enter step, with an empty
+  error_code for a normal run. Whatever was already published when the
+  enter failed is still delivered to its receivers before `run()` returns.
 - With `bexec::sync_wait`, token cancellation yields `std::nullopt`, while a
   context stop yields an engaged optional carrying `operation_canceled`.
 - `when_all` over children aborted by a context stop aggregates their
