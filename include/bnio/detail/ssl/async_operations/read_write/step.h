@@ -153,6 +153,7 @@ class ssl_io_step_operation {
   }
 
   void run_application() noexcept {
+    clear_ssl_errors();
     if constexpr (State::application == ssl_application_io::read) {
       async_io::buffer_view view = state_->buffer.view();
       const int result = SSL_read(state_->stream->native_handle(), view.data,
@@ -270,6 +271,7 @@ class ssl_io_step_operation {
 
   void submit_transport_read() noexcept {
     char* data = nullptr;
+    clear_ssl_errors();
     const int available = BIO_nwrite0(read_bio(*state_->stream), &data);
     if (available <= 0) {
       state_->done = true;
@@ -345,6 +347,7 @@ class ssl_io_step_operation {
     // handle_transport_complete
 
     char* data = nullptr;
+    clear_ssl_errors();
     const int committed = BIO_nwrite(read_bio(*state_->stream), &data,
                                      ssl_bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
@@ -362,6 +365,7 @@ class ssl_io_step_operation {
     // handle_transport_complete
 
     char* data = nullptr;
+    clear_ssl_errors();
     const int consumed = BIO_nread(write_bio(*state_->stream), &data,
                                    ssl_bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {

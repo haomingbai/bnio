@@ -62,6 +62,15 @@ openssl_error_category() noexcept;
     unsigned long code) noexcept;
 
 /**
+ * Returns the error_code bnio reports when an SSL operation's failure path
+ * recorded no OpenSSL error at all (for example, a handshake on an invalid
+ * stream never reaches OpenSSL). The value lives in the OpenSSL error
+ * category, never collides with a real OpenSSL error code, and does not
+ * represent any TLS-level failure.
+ */
+[[nodiscard]] BNIO_EXPORT std::error_code make_no_ssl_error() noexcept;
+
+/**
  * RAII owner for an OpenSSL SSL_CTX object.
  *
  * ssl_context owns the native context and frees it on destruction. It is

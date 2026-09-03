@@ -13,10 +13,10 @@ namespace {
 // operation_canceled abort ec must never overwrite a staged completion.
 //
 // Deterministic construction: an io_context with no worker, stopped before
-// start(). The invalid-stream path (no OpenSSL call, empty error queue ->
-// last_ssl_error() == protocol_error) stages the error and submits the post
-// synchronously inside bexec::start(); the already-stopped context rejects
-// the post and completes it inline with operation_canceled.
+// start(). The invalid-stream path (no OpenSSL call, so no OpenSSL error to
+// report -> last_ssl_error() == make_no_ssl_error()) stages the error and
+// submits the post synchronously inside bexec::start(); the already-stopped
+// context rejects the post and completes it inline with operation_canceled.
 TEST(SslErrorPrecedenceTest, staged_tls_error_survives_post_receiver_cancel) {
   bnio::io_context context;
   if (!context.is_open()) {
@@ -46,8 +46,9 @@ TEST(SslErrorPrecedenceTest, staged_tls_error_survives_post_receiver_cancel) {
   EXPECT_EQ(state->values, 0);
   EXPECT_EQ(state->errors, 1);
   EXPECT_EQ(state->stopped, 0);
-  // The staged TLS error, not the scheduler's operation_canceled abort.
-  EXPECT_TRUE(state->error == std::errc::protocol_error);
+  // The staged no-OpenSSL-error value, not the scheduler's
+  // operation_canceled abort.
+  EXPECT_EQ(state->error, bnio::make_no_ssl_error());
   EXPECT_FALSE(state->error == std::errc::operation_canceled);
 }
 

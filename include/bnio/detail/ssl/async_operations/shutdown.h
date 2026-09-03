@@ -47,6 +47,7 @@ class ssl_shutdown_operation
 
  private:
   void run_shutdown() noexcept {
+    clear_ssl_errors();
     const int result = SSL_shutdown(this->stream_->native_handle());
     if (result == 1) {
       this->flush_then(ssl_resume_action::finish);

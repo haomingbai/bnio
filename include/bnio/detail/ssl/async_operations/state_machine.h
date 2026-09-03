@@ -251,6 +251,7 @@ class ssl_async_operation_base {
 
   void submit_transport_read() noexcept {
     char* data = nullptr;
+    clear_ssl_errors();
     const int available = BIO_nwrite0(read_bio(*stream_), &data);
     if (available <= 0) {
       post_complete_value(last_ssl_error());
@@ -323,6 +324,7 @@ class ssl_async_operation_base {
     // handle_transport_complete
 
     char* data = nullptr;
+    clear_ssl_errors();
     const int committed =
         BIO_nwrite(read_bio(*stream_), &data, bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
@@ -340,6 +342,7 @@ class ssl_async_operation_base {
     // handle_transport_complete
 
     char* data = nullptr;
+    clear_ssl_errors();
     const int consumed =
         BIO_nread(write_bio(*stream_), &data, bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {

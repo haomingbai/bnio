@@ -33,7 +33,11 @@ class ssl_handshake_operation
 
   void on_start() noexcept {
     if (!this->stream_->valid()) {
-      this->post_complete_error(last_ssl_error());
+      // No OpenSSL call happens on this path, so there is no OpenSSL error
+      // to read: reporting the dedicated no-OpenSSL-error value is the only
+      // honest attribution. Reading the thread-local queue here would
+      // surface a stale entry from unrelated earlier OpenSSL work.
+      this->post_complete_error(make_no_ssl_error());
       return;
     }
 
@@ -59,6 +63,7 @@ class ssl_handshake_operation
 
  private:
   void run_handshake() noexcept {
+    clear_ssl_errors();
     const int result = SSL_do_handshake(this->stream_->native_handle());
     if (result == 1) {
       this->flush_then(ssl_resume_action::finish);

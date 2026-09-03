@@ -56,7 +56,7 @@ TEST(SslHandshakeTest, socketpair_handshake_is_io_context_driven) {
   EXPECT_EQ(state->stopped, 0);
 }
 
-TEST(SslHandshakeTest, invalid_stream_reports_protocol_error) {
+TEST(SslHandshakeTest, invalid_stream_reports_no_ssl_error) {
   bnio::io_context context;
   if (!context.is_open()) {
     return;
@@ -82,7 +82,9 @@ TEST(SslHandshakeTest, invalid_stream_reports_protocol_error) {
   EXPECT_EQ(state->values, 0);
   EXPECT_EQ(state->errors, 1);
   EXPECT_EQ(state->stopped, 0);
-  EXPECT_TRUE(state->error == std::errc::protocol_error);
+  // The invalid stream never reaches OpenSSL, so the failure reports the
+  // dedicated no-OpenSSL-error value instead of an impersonated TLS error.
+  EXPECT_EQ(state->error, bnio::make_no_ssl_error());
 }
 
 TEST(SslHandshakeTest, closed_transport_reports_handshake_error) {
