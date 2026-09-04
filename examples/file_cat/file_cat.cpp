@@ -5,10 +5,12 @@
 //
 //   repeat_until(read_some(file) | let_value(write stdout) | then)
 //
-// Each round reads one chunk from the file at a moving offset and drains it
-// to stdout. File reads always complete eagerly (regular files are always
-// ready), while writes to a slow stdout (tty/pipe) suspend the operation and
-// resume it from the event loop — the same pipeline transparently spans both
+// Each round reads one chunk from the file and drains it to stdout. Both
+// ends are streaming descriptor I/O: every operation transfers from/to the
+// kernel file position and advances it, so no offsets are tracked here.
+// File reads always complete eagerly (regular files are always ready),
+// while writes to a slow stdout (tty/pipe) suspend the operation and resume
+// it from the event loop — the same pipeline transparently spans both
 // paths. EOF and errors zero the chunk, which the loop predicate observes.
 
 #include <bnio/bnio.h>
@@ -33,8 +35,6 @@ constexpr std::size_t k_chunk = 64 * 1024;
 // io_context thread, so plain members suffice.
 struct cat_state {
   int in_fd = -1;
-  std::uint64_t offset = 0;     // next file position to read
-  std::uint64_t out_offset = 0; // next stdout position to write
   std::size_t chunk = k_chunk;  // bytes read in the current round (0 = done)
   std::size_t total = 0;        // bytes handed to stdout
   std::error_code error;        // first error observed, if any
@@ -92,31 +92,29 @@ int main(int argc, char** argv) {
   state.in_fd = in_fd;
 
   const auto io = ctx.get_post_scheduler();
-  const auto file = bnio::async_io::random_access_file(state.in_fd);
-  const auto out = bnio::async_io::random_access_file(STDOUT_FILENO);
+  const auto file = bnio::async_io::descriptor_view(state.in_fd);
+  const auto out = bnio::async_io::descriptor_view(STDOUT_FILENO);
 
-  // One round: read a chunk at the current offset, then write it to stdout.
+  // One round: read a chunk at the kernel file position, then stream it to
+  // stdout.
   //
   // bexec::let_value requires a single return-sender type, so every outcome
   // funnels through the same async_write: EOF and error rounds request a
   // zero-byte write, which write-all completes immediately without a system
   // call. state.chunk == 0 afterwards makes the predicate end the loop.
   auto read_round = [&]() {
-    return io.async_read_some(file, bnio::buffer(state.buf), state.offset) |
+    return io.async_read_some(file, bnio::buffer(state.buf)) |
            bexec::let_value([&](std::error_code ec, std::size_t n) {
              if (ec) {
                if (!state.error) state.error = ec;
                n = 0;
              }
-             state.offset += n;
              state.chunk = n;
-             // A positioned write lands shell redirection (stdout as a
-             // regular file) at the right position; pipes and ttys ignore
-             // the offset and take the unpositioned write path.
-             return io.async_write(out,
-                                   bnio::const_buffer(state.buf.data(),
-                                                      state.chunk),
-                                   state.out_offset);
+             // Streaming writes are correct for every stdout kind: the
+             // kernel position of a redirected regular file advances on its
+             // own, and pipes/ttys simply take the bytes in order.
+             return io.async_write(
+                 out, bnio::const_buffer(state.buf.data(), state.chunk));
            }) |
            bexec::then([&](std::error_code ec,
                            std::size_t) noexcept -> std::size_t {
@@ -125,7 +123,6 @@ int main(int argc, char** argv) {
                state.chunk = 0;
              } else {
                state.total += state.chunk;
-               state.out_offset += state.chunk;
              }
              return state.chunk;
            });
