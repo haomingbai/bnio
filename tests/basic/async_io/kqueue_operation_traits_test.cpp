@@ -2,7 +2,12 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <bexec/completion_signatures.hpp>
 #include <bexec/operation_state.hpp>
+#include <bexec/sender.hpp>
+#include <cstdint>
+#include <type_traits>
+#include <utility>
 
 #include "../../support/async_io/kqueue_context_test_support.h"
 
@@ -71,6 +76,47 @@ TEST(KqueueOperationTraitsTest, buffer_operations_own_their_native_io_step) {
   write_operation.prepare(write_helper);
   EXPECT_EQ(read_helper.descriptor(), 1);
   EXPECT_EQ(write_helper.descriptor(), 1);
+}
+
+TEST(KqueueOperationTraitsTest, file_io_splits_streaming_and_positioned) {
+  using bnio::async_io::random_access_file;
+
+  // Streaming: descriptor_view without offset advances the kernel file
+  // position; positioned: random_access_file with an explicit offset.
+  using stream_read_sender = decltype(std::declval<kqueue_context&>()
+                                          .async_read(descriptor_view{},
+                                                      buffer_view{}));
+  using stream_write_sender =
+      decltype(std::declval<kqueue_context&>().async_write(
+          descriptor_view{}, static_cast<const void*>(nullptr),
+          std::size_t{0}));
+  using positioned_read_sender =
+      decltype(std::declval<kqueue_context&>().async_read(
+          random_access_file{}, buffer_view{}, std::uint64_t{0}));
+  using positioned_write_sender =
+      decltype(std::declval<kqueue_context&>().async_write(
+          random_access_file{}, static_cast<const void*>(nullptr),
+          std::size_t{0}, std::uint64_t{0}));
+
+  static_assert(bexec::sender<stream_read_sender>);
+  static_assert(bexec::sender<stream_write_sender>);
+  static_assert(bexec::sender<positioned_read_sender>);
+  static_assert(bexec::sender<positioned_write_sender>);
+
+  using expected_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::error_code,
+                                                      std::size_t),
+                                   bexec::set_stopped_t()>;
+  static_assert(std::is_same_v<typename stream_read_sender::completion_signatures,
+                               expected_signatures>);
+  static_assert(std::is_same_v<typename stream_write_sender::completion_signatures,
+                               expected_signatures>);
+  static_assert(
+      std::is_same_v<typename positioned_read_sender::completion_signatures,
+                     expected_signatures>);
+  static_assert(
+      std::is_same_v<typename positioned_write_sender::completion_signatures,
+                     expected_signatures>);
 }
 
 }  // namespace

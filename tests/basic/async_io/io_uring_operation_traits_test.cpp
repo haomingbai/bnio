@@ -69,6 +69,22 @@ TEST(IoUringOperationTraitsTest, operation_state_concepts) {
   static_assert(bexec::operation_state<io_uring_readv_operation<receiver>>);
   static_assert(bexec::operation_state<io_uring_writev_operation<receiver>>);
   static_assert(
+      bexec::operation_state<
+          bnio::async_io::linux_native::io_uring_random_access_read_operation<
+              receiver>>);
+  static_assert(
+      bexec::operation_state<
+          bnio::async_io::linux_native::io_uring_random_access_write_operation<
+              receiver>>);
+  static_assert(
+      bexec::operation_state<
+          bnio::async_io::linux_native::io_uring_random_access_readv_operation<
+              receiver>>);
+  static_assert(
+      bexec::operation_state<
+          bnio::async_io::linux_native::io_uring_random_access_writev_operation<
+              receiver>>);
+  static_assert(
       bexec::operation_state<io_uring_resolve_operation<resolve_receiver>>);
 
   using resolve_sender =
@@ -152,13 +168,26 @@ TEST(IoUringOperationTraitsTest, io_operations_accept_async_io_views) {
   [[maybe_unused]] io_uring_sendmsg_operation sendmsg_operation(
       context, stream, send_message, 0, receiver{});
   [[maybe_unused]] io_uring_read_operation read_operation(
-      context, descriptor, buffer, 0, receiver{});
+      context, descriptor, buffer, receiver{});
   [[maybe_unused]] io_uring_write_operation write_operation(
-      context, descriptor, buffer, 0, receiver{});
+      context, descriptor, buffer, receiver{});
   [[maybe_unused]] io_uring_readv_operation readv_operation(
-      context, descriptor, vectors, 0, receiver{});
+      context, descriptor, vectors, receiver{});
   [[maybe_unused]] io_uring_writev_operation writev_operation(
-      context, descriptor, vectors, 0, receiver{});
+      context, descriptor, vectors, receiver{});
+  bnio::async_io::random_access_file random_access(descriptor);
+  [[maybe_unused]] bnio::async_io::linux_native::
+      io_uring_random_access_read_operation positioned_read_operation(
+          context, random_access, buffer, 0, receiver{});
+  [[maybe_unused]] bnio::async_io::linux_native::
+      io_uring_random_access_write_operation positioned_write_operation(
+          context, random_access, buffer, 0, receiver{});
+  [[maybe_unused]] bnio::async_io::linux_native::
+      io_uring_random_access_readv_operation positioned_readv_operation(
+          context, random_access, vectors, 0, receiver{});
+  [[maybe_unused]] bnio::async_io::linux_native::
+      io_uring_random_access_writev_operation positioned_writev_operation(
+          context, random_access, vectors, 0, receiver{});
   bnio::async_io::ip::endpoint resolved_endpoints[4]{};
   [[maybe_unused]] io_uring_resolve_operation resolve_operation(
       context, bnio::async_io::dns_query("127.0.0.1", "80"),
@@ -236,18 +265,34 @@ TEST(IoUringOperationTraitsTest, eagain_rearm_classification) {
   io_uring_sendmsg_operation sendmsg_operation(context, stream, send_message, 0,
                                                receiver{});
   EXPECT_TRUE(sendmsg_operation.rearm_on_eagain());
-  io_uring_read_operation read_operation(context, descriptor, buffer, 0,
+  io_uring_read_operation read_operation(context, descriptor, buffer,
                                          receiver{});
   EXPECT_TRUE(read_operation.rearm_on_eagain());
-  io_uring_write_operation write_operation(context, descriptor, buffer, 0,
+  io_uring_write_operation write_operation(context, descriptor, buffer,
                                            receiver{});
   EXPECT_TRUE(write_operation.rearm_on_eagain());
-  io_uring_readv_operation readv_operation(context, descriptor, vectors, 0,
+  io_uring_readv_operation readv_operation(context, descriptor, vectors,
                                            receiver{});
   EXPECT_TRUE(readv_operation.rearm_on_eagain());
-  io_uring_writev_operation writev_operation(context, descriptor, vectors, 0,
+  io_uring_writev_operation writev_operation(context, descriptor, vectors,
                                              receiver{});
   EXPECT_TRUE(writev_operation.rearm_on_eagain());
+  bnio::async_io::random_access_file random_access(descriptor);
+  bnio::async_io::linux_native::io_uring_random_access_read_operation
+      positioned_read_operation(context, random_access, buffer, 0, receiver{});
+  EXPECT_TRUE(positioned_read_operation.rearm_on_eagain());
+  bnio::async_io::linux_native::io_uring_random_access_write_operation
+      positioned_write_operation(context, random_access, buffer, 0,
+                                 receiver{});
+  EXPECT_TRUE(positioned_write_operation.rearm_on_eagain());
+  bnio::async_io::linux_native::io_uring_random_access_readv_operation
+      positioned_readv_operation(context, random_access, vectors, 0,
+                                 receiver{});
+  EXPECT_TRUE(positioned_readv_operation.rearm_on_eagain());
+  bnio::async_io::linux_native::io_uring_random_access_writev_operation
+      positioned_writev_operation(context, random_access, vectors, 0,
+                                  receiver{});
+  EXPECT_TRUE(positioned_writev_operation.rearm_on_eagain());
 
   // Non-I/O or event-class operations keep the default: a -EAGAIN CQE is
   // not a would-block outcome for them and stays a terminal error.

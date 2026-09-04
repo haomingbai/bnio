@@ -14,6 +14,8 @@ bnio_add_integration_io_context_test(io_context_accept_connect
                                      io_context_accept_connect_test.cpp)
 bnio_add_integration_io_context_test(io_context_poll
                                      io_context_poll_test.cpp)
+bnio_add_integration_io_context_test(io_context_random_access_file
+                                     io_context_random_access_file_test.cpp)
 bnio_add_integration_io_context_test(io_context_eager_optional
                                      io_context_eager_optional_test.cpp)
 bnio_add_integration_io_context_test(io_context_read_all

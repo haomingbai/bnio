@@ -494,15 +494,24 @@ TEST(IoContextReadWriteTest, pre_stopped_descriptor_write_stops) {
   EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
+// Streaming file I/O contract: descriptor_view operations advance the
+// kernel file position. Consecutive writes concatenate instead of
+// overlapping, and consecutive reads continue from where the previous one
+// stopped. Positioned access is provided by random_access_file instead.
 TEST(IoContextReadWriteTest, file_write_and_read) {
   std::string path = "/tmp/bnio-io-context-file-XXXXXX";
   const int fd = ::mkstemp(path.data());
   EXPECT_TRUE(fd >= 0);
   EXPECT_EQ(::unlink(path.c_str()), 0);
 
-  constexpr std::string_view payload = "file through io_uring";
+  constexpr std::string_view first_payload = "file through ";
+  constexpr std::string_view second_payload = "streaming io";
+  const std::string expected =
+      std::string(first_payload) + std::string(second_payload);
 
-  {
+  // Two consecutive streaming writes: each must start where the kernel file
+  // position was left by the previous one.
+  for (const std::string_view payload : {first_payload, second_payload}) {
     bnio::io_context context;
     if (!context_available(context)) {
       EXPECT_EQ(::close(fd), 0);
@@ -516,7 +525,7 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
 
     auto sender =
         bnio::async_write(scheduler, bnio::async_io::descriptor_view(fd),
-                          bnio::buffer(payload), 0);
+                          bnio::buffer(payload));
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
 
@@ -527,21 +536,31 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
     EXPECT_EQ(state->size, payload.size());
   }
 
+  // The file holds both payloads back to back, not overlapping at offset 0.
+  EXPECT_EQ(::lseek(fd, 0, SEEK_SET), 0);
   {
+    std::array<char, 64> written{};
+    const ssize_t stored = ::read(fd, written.data(), written.size());
+    EXPECT_EQ(stored, static_cast<ssize_t>(expected.size()));
+    EXPECT_TRUE(std::memcmp(written.data(), expected.data(),
+                            expected.size()) == 0);
+  }
+
+  // Two consecutive streaming reads: the second continues from the kernel
+  // file position left by the first instead of re-reading the same chunk.
+  EXPECT_EQ(::lseek(fd, 0, SEEK_SET), 0);
+  for (const std::string_view payload : {first_payload, second_payload}) {
     bnio::io_context context;
-    if (!context_available(context)) {
-      EXPECT_EQ(::close(fd), 0);
-      GTEST_SKIP() << "native I/O context is unavailable";
-    }
     auto scheduler = context.get_post_scheduler();
-    std::array<char, 64> bytes{};
+    std::array<char, 16> bytes{};
 
     byte_receiver receiver;
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = bnio::async_read(
-        scheduler, bnio::async_io::descriptor_view(fd), bnio::buffer(bytes), 0);
+    auto sender = bnio::async_read_some(
+        scheduler, bnio::async_io::descriptor_view(fd),
+        bnio::buffer(bytes.data(), payload.size()));
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     EXPECT_EQ(state->signal, signal_kind::none);
