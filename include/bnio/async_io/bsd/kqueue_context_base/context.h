@@ -13,6 +13,7 @@
 #include <bnio/async_io/buffer_view.h>
 #include <bnio/async_io/descriptor_view.h>
 #include <bnio/async_io/dns.h>
+#include <bnio/async_io/random_access_file.h>
 #include <bnio/async_io/ip/endpoint.h>
 #include <bnio/async_io/socket_view.h>
 #include <bnio/async_io/time.h>
@@ -63,13 +64,33 @@ class BNIO_EXPORT kqueue_context {
   /** Creates a typed poll sender. */
   [[nodiscard]] auto async_poll(descriptor_view descriptor, unsigned poll_mask);
 
-  /** Creates a regular-file read sender whose start performs pread. */
-  [[nodiscard]] auto async_read(descriptor_view descriptor, buffer_view buffer,
-                                std::uint64_t offset = 0);
+  /**
+   * Creates a streaming read sender whose start performs ::read, advancing
+   * the kernel file position.
+   */
+  [[nodiscard]] auto async_read(descriptor_view descriptor,
+                                buffer_view buffer);
 
-  /** Creates a regular-file write sender whose start performs pwrite. */
+  /**
+   * Creates a positioned read sender whose start performs ::pread at the
+   * given offset, without observing or advancing the kernel file position.
+   */
+  [[nodiscard]] auto async_read(random_access_file file, buffer_view buffer,
+                                std::uint64_t offset);
+
+  /**
+   * Creates a streaming write sender whose start performs ::write,
+   * advancing the kernel file position.
+   */
   [[nodiscard]] auto async_write(descriptor_view descriptor, const void* data,
-                                 std::size_t size, std::uint64_t offset = 0);
+                                 std::size_t size);
+
+  /**
+   * Creates a positioned write sender whose start performs ::pwrite at the
+   * given offset, without observing or advancing the kernel file position.
+   */
+  [[nodiscard]] auto async_write(random_access_file file, const void* data,
+                                 std::size_t size, std::uint64_t offset);
 
   /** Creates one nonblocking stream receive sender. */
   [[nodiscard]] auto async_receive(stream_socket_view socket,

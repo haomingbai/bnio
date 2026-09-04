@@ -7,6 +7,7 @@
 #ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #define BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 
+#include <bnio/async_io/random_access_file.h>
 #include <bnio/async_io/socket_view.h>
 #include <bnio/async_io/time.h>
 #include <bnio/buffer.h>
@@ -38,6 +39,7 @@ enum class ssl_handshake_type;
 
 namespace detail {
 class descriptor_write_all_state;
+class random_access_write_all_state;
 class socket_write_all_state;
 template <class Request, class Control, class Receiver>
 class native_io_operation;
@@ -284,34 +286,63 @@ class BNIO_EXPORT io_context {
                                      const ip::endpoint& endpoint,
                                      int flags = 0) const;
     /**
-     * Creates a sender that reads the whole buffer from a descriptor at an
-     * offset.
+     * Creates a sender that reads the whole buffer from a descriptor,
+     * advancing the kernel file position.
      */
     [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
-                                  mutable_buffer buffer,
-                                  std::uint64_t offset = 0) const;
+                                  mutable_buffer buffer) const;
 
     /**
-     * Creates a sender for one descriptor read operation at an offset.
+     * Creates a sender for one streaming descriptor read operation.
      */
     [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
-                                       mutable_buffer buffer,
-                                       std::uint64_t offset = 0) const;
+                                       mutable_buffer buffer) const;
 
     /**
-     * Creates a sender that writes the whole buffer to a descriptor.
+     * Creates a sender that writes the whole buffer to a descriptor,
+     * advancing the kernel file position.
      */
     [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
-                                   const_buffer buffer,
-                                   std::uint64_t offset = 0) const;
+                                   const_buffer buffer) const;
 
     /**
-     * Creates a sender for one descriptor write operation at an offset without
+     * Creates a sender for one streaming descriptor write operation without
      * retrying short writes.
      */
     [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
+                                        const_buffer buffer) const;
+
+    /**
+     * Creates a sender that reads the whole buffer from a random access
+     * file at an explicit offset.
+     */
+    [[nodiscard]] auto async_read(async_io::random_access_file file,
+                                  mutable_buffer buffer,
+                                  std::uint64_t offset) const;
+
+    /**
+     * Creates a sender for one random access read operation at an explicit
+     * offset.
+     */
+    [[nodiscard]] auto async_read_some(async_io::random_access_file file,
+                                       mutable_buffer buffer,
+                                       std::uint64_t offset) const;
+
+    /**
+     * Creates a sender that writes the whole buffer to a random access file
+     * at an explicit offset.
+     */
+    [[nodiscard]] auto async_write(async_io::random_access_file file,
+                                   const_buffer buffer,
+                                   std::uint64_t offset) const;
+
+    /**
+     * Creates a sender for one random access write operation at an explicit
+     * offset without retrying short writes.
+     */
+    [[nodiscard]] auto async_write_some(async_io::random_access_file file,
                                         const_buffer buffer,
-                                        std::uint64_t offset = 0) const;
+                                        std::uint64_t offset) const;
 
     /**
      * Creates a sender that accepts one connection.
@@ -539,6 +570,7 @@ class BNIO_EXPORT io_context {
   friend class steady_timer;
   friend class detail::timer_operation_base;
   friend class detail::descriptor_write_all_state;
+  friend class detail::random_access_write_all_state;
   friend class detail::socket_write_all_state;
   template <class Receiver>
   friend class detail::timer_wait_operation;
@@ -575,28 +607,53 @@ class BNIO_EXPORT io_context {
                                       const_buffer buffer, int flags = 0);
 
   /**
-   * Creates a sender that reads bytes from a file descriptor.
+   * Creates a sender that reads bytes from a file descriptor, advancing the
+   * kernel file position.
    */
   [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
-                                mutable_buffer buffer,
-                                std::uint64_t offset = 0);
+                                mutable_buffer buffer);
 
   [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
-                                     mutable_buffer buffer,
-                                     std::uint64_t offset = 0);
+                                     mutable_buffer buffer);
 
   /**
-   * Creates a sender that writes the whole buffer to a file descriptor.
+   * Creates a sender that writes the whole buffer to a file descriptor,
+   * advancing the kernel file position.
    */
   [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
-                                 const_buffer buffer, std::uint64_t offset = 0);
+                                 const_buffer buffer);
 
   /**
-   * Creates a sender for one write operation to a file descriptor.
+   * Creates a sender for one streaming write operation to a file descriptor.
    */
   [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
+                                      const_buffer buffer);
+
+  /**
+   * Creates a sender that reads bytes from a random access file at an
+   * explicit offset.
+   */
+  [[nodiscard]] auto async_read(async_io::random_access_file file,
+                                mutable_buffer buffer, std::uint64_t offset);
+
+  [[nodiscard]] auto async_read_some(async_io::random_access_file file,
+                                     mutable_buffer buffer,
+                                     std::uint64_t offset);
+
+  /**
+   * Creates a sender that writes the whole buffer to a random access file at
+   * an explicit offset.
+   */
+  [[nodiscard]] auto async_write(async_io::random_access_file file,
+                                 const_buffer buffer, std::uint64_t offset);
+
+  /**
+   * Creates a sender for one positioned write operation to a random access
+   * file.
+   */
+  [[nodiscard]] auto async_write_some(async_io::random_access_file file,
                                       const_buffer buffer,
-                                      std::uint64_t offset = 0);
+                                      std::uint64_t offset);
 
   [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
                                    mutable_buffer buffer, int flags = 0);

@@ -92,8 +92,8 @@ int main(int argc, char** argv) {
   state.in_fd = in_fd;
 
   const auto io = ctx.get_post_scheduler();
-  const auto file = bnio::async_io::descriptor_view(state.in_fd);
-  const auto out = bnio::async_io::descriptor_view(STDOUT_FILENO);
+  const auto file = bnio::async_io::random_access_file(state.in_fd);
+  const auto out = bnio::async_io::random_access_file(STDOUT_FILENO);
 
   // One round: read a chunk at the current offset, then write it to stdout.
   //

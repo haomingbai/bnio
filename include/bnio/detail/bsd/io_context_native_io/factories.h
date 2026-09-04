@@ -9,6 +9,7 @@
 #else
 #define BNIO_DETAIL_BSD_IO_CONTEXT_NATIVE_IO_FACTORIES_H_
 
+#include <bnio/async_io/random_access_file.h>
 #include <bnio/detail/bsd/io_context_native_io/common.h>
 
 namespace bnio::detail {
@@ -51,18 +52,30 @@ namespace bnio::detail {
       socket, buffer.data(), buffer.size(), endpoint, flags);
 }
 
-[[nodiscard]] inline auto make_file_read_request(
-    async_io::descriptor_view descriptor, mutable_buffer buffer,
-    std::uint64_t offset) {
-  return async_io::bsd_native::kqueue_file_read_request(descriptor,
-                                                        buffer.view(), offset);
+[[nodiscard]] inline auto make_descriptor_read_request(
+    async_io::descriptor_view descriptor, mutable_buffer buffer) {
+  return async_io::bsd_native::kqueue_descriptor_read_request(descriptor,
+                                                              buffer.view());
 }
 
-[[nodiscard]] inline auto make_file_write_request(
-    async_io::descriptor_view descriptor, const_buffer buffer,
+[[nodiscard]] inline auto make_descriptor_write_request(
+    async_io::descriptor_view descriptor, const_buffer buffer) {
+  return async_io::bsd_native::kqueue_descriptor_write_request(
+      descriptor, buffer.data(), buffer.size());
+}
+
+[[nodiscard]] inline auto make_random_access_read_request(
+    async_io::random_access_file file, mutable_buffer buffer,
     std::uint64_t offset) {
-  return async_io::bsd_native::kqueue_file_write_request(
-      descriptor, buffer.data(), buffer.size(), offset);
+  return async_io::bsd_native::kqueue_random_access_read_request(
+      file, buffer.view(), offset);
+}
+
+[[nodiscard]] inline auto make_random_access_write_request(
+    async_io::random_access_file file, const_buffer buffer,
+    std::uint64_t offset) {
+  return async_io::bsd_native::kqueue_random_access_write_request(
+      file, buffer.data(), buffer.size(), offset);
 }
 
 [[nodiscard]] inline auto make_accept_request(
