@@ -270,6 +270,21 @@ cancellation occurs.
 attempt's byte count. Use it when the caller wants manual framing, retry, or
 backpressure policy.
 
+File descriptors come in two families. On `async_io::descriptor_view` the four
+operations are **streaming**: they transfer at the kernel file position and
+advance it, exactly like `::read()`/`::write()`, so sequential pipelines track
+no offsets of their own. On `async_io::random_access_file` (a non-owning view
+constructed from an fd or a `descriptor_view`) the same four operations are
+**positioned**: each takes a mandatory trailing `offset` argument and leaves
+the kernel file position untouched; read-all/write-all on this view advance
+through `offset + transferred` per step, and an offset beyond the `int64_t`
+range fails with `EOVERFLOW`. Use streaming for sequential files, pipes, and
+ttys; use positioned I/O when the caller computes every offset (parallel range
+I/O, headers, database pages). Keep at most one streaming operation in flight
+per descriptor — concurrent streaming operations race on the shared kernel
+position — while positioned operations on one file may overlap freely. A
+streaming write on an `O_APPEND` descriptor is the kernel-atomic append.
+
 UDP operations always transfer exactly one datagram. `async_send_to()` and
 `async_receive_from()` preserve message boundaries and never use stream-style
 write-all retries. Call `udp::socket::connect(endpoint)` to set a default peer,

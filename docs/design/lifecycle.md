@@ -223,8 +223,9 @@ op.start();
 
 Composite senders such as write-all operations own additional nested state:
 
-- A durable state object tracks the original buffer, current offset, bytes
-  transferred, and done flag.
+- A durable state object tracks the original buffer, the bytes transferred,
+  and the done flag (random-access state additionally tracks the current
+  offset; streaming state relies on the kernel file position).
 - A `repeat_until` operation owns the loop machinery and predicate.
 - Each loop iteration constructs one child `async_write_some*` operation for the
   current buffer slice.

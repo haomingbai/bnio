@@ -21,7 +21,17 @@ Plain aggregate. Copy copies pointer and size; the data is not owned.
 #### `descriptor_view`
 
 Non-owning wrapper around a native file descriptor (`int`). Destruction does
-**not** close the descriptor.
+**not** close the descriptor. I/O on this view is **streaming**: every
+operation transfers at the kernel file position and advances it.
+
+#### `random_access_file`
+
+Non-owning wrapper around a native file descriptor, constructible explicitly
+from an `int` or a `descriptor_view`, with the same `native_handle()` /
+`valid()` interface. I/O on this view is **positioned**: every operation takes
+an explicit offset (no default) and leaves the kernel file position untouched.
+Like `descriptor_view`, it owns nothing and destruction does not close the
+descriptor.
 
 #### Socket View Family
 

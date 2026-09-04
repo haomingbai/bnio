@@ -45,6 +45,7 @@ This repository is a CMake-based C++20 async I/O library.
 
 - `buffer_view.h` — non-owning byte range.
 - `descriptor_view.h` — non-owning fd wrapper.
+- `random_access_file.h` — non-owning positioned-I/O fd wrapper.
 - `socket_view.h` — non-owning socket view family.
 - `address.h` — platform-neutral IP address helpers.
 - `tcp_endpoint.h` — TCP endpoint type.

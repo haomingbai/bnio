@@ -75,9 +75,14 @@ attempts and SQE preparation likewise remain platform-native implementation
 details.
 
 BSD regular-file requests use a documented blocking-at-start fallback:
-`start()` performs one positioned `pread()` or `pwrite()`, then posts the
-receiver completion through the shared CPU queue. Thus data transfer is
-finished when `start()` returns, but no receiver is called inline. This keeps
+streaming `start()` performs one `::read()` or `::write()` at the kernel file
+position, and positioned `start()` performs one `::pread()` or `::pwrite()`
+at the explicit offset, then posts the receiver completion through the shared
+CPU queue. Thus data transfer is finished when `start()` returns, but no
+receiver is called inline. Regular files never arm a kqueue filter
+(`EVFILT_READ` on a regular file never fires); non-regular streaming
+descriptors (pipes, ttys) are switched to `O_NONBLOCK` and wait on readiness
+instead. This keeps
 the public sender interface aligned with Linux without pretending that kqueue
 provides asynchronous regular-file kernel work.
 
@@ -199,10 +204,14 @@ The `set_value` column lists only the success payload. The actual signature is
 | `scheduler.async_receive(view, buffer, flags)` | `datagram_socket_view` | one datagram byte count |
 | `scheduler.async_send_to(view, buffer, endpoint, flags)` | `datagram_socket_view` | one datagram byte count |
 | `scheduler.async_receive_from(view, buffer, endpoint, flags)` | `datagram_socket_view` | one datagram byte count |
-| `scheduler.async_read(descriptor, buffer, offset)` | `descriptor_view` | `size_t` total bytes read until buffer full or EOF |
-| `scheduler.async_read_some(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes read by one operation |
-| `scheduler.async_write(descriptor, buffer, offset)` | `descriptor_view` | `size_t` total bytes written |
-| `scheduler.async_write_some(descriptor, buffer, offset)` | `descriptor_view` | `size_t` bytes written by one operation |
+| `scheduler.async_read(descriptor, buffer)` | `descriptor_view` | `size_t` total bytes read until buffer full or EOF, advancing the kernel file position |
+| `scheduler.async_read_some(descriptor, buffer)` | `descriptor_view` | `size_t` bytes read by one streaming operation |
+| `scheduler.async_write(descriptor, buffer)` | `descriptor_view` | `size_t` total bytes written, advancing the kernel file position |
+| `scheduler.async_write_some(descriptor, buffer)` | `descriptor_view` | `size_t` bytes written by one streaming operation |
+| `scheduler.async_read(file, buffer, offset)` | `random_access_file` | `size_t` total bytes read at `offset` until buffer full or EOF |
+| `scheduler.async_read_some(file, buffer, offset)` | `random_access_file` | `size_t` bytes read by one positioned operation |
+| `scheduler.async_write(file, buffer, offset)` | `random_access_file` | `size_t` total bytes written at `offset` |
+| `scheduler.async_write_some(file, buffer, offset)` | `random_access_file` | `size_t` bytes written by one positioned operation |
 | `scheduler.async_poll(descriptor, mask)` | `descriptor_view` | `unsigned` ready-event mask |
 
 All senders complete with `set_value(std::error_code, ...)` as the universal
@@ -350,6 +359,40 @@ public buffers are `std::size_t`. Every one-attempt operation bounds the native
 request length before preparing the SQE. Write-all operations then repeat those
 bounded attempts until the public buffer is exhausted.
 
+#### Streaming vs Random-Access File I/O
+
+Descriptor I/O comes in two families that differ only in how the byte range is
+chosen:
+
+- **Streaming** (`descriptor_view`): every operation transfers at the kernel
+  file position and advances it, like a plain `::read()`/`::write()`. On
+  io_uring the SQE carries `offset = -1`; the eager path probes with
+  `preadv2`/`pwritev2` at `pos = -1` with `RWF_NOWAIT`. Use this family for
+  sequential readers/writers, pipes, ttys, and anything feeding or draining a
+  stream.
+- **Positioned** (`random_access_file`): every operation takes an explicit
+  offset (`::pread()`/`::pwrite()` on BSD, an explicit SQE offset on Linux)
+  and never touches the kernel file position. Offsets beyond the `int64_t`
+  range are rejected up front with `EOVERFLOW` at the operation layer. Use
+  this family for offset-addressed file work: parallel range I/O on one file,
+  headers/footers, database-style pages.
+
+Choose by ownership of the position: if the kernel should track "where am I"
+for you, streaming; if the caller computes every offset, positioned.
+
+Two contracts apply to the streaming family:
+
+- **One in-flight streaming operation per descriptor.** Concurrent streaming
+  reads (or writes) on the same fd race on the shared kernel file position —
+  each completion advances it past the other operation's intended range.
+  Callers must chain streaming rounds (as `file_cat` does with
+  `repeat_until`) or give each stream its own fd. Positioned operations have
+  no such restriction; any number may be in flight on one file.
+- **`O_APPEND` is honored by the kernel.** A streaming write on an
+  `O_APPEND` descriptor is the kernel-atomic append: the position is
+  atomically moved to EOF before the transfer, so concurrent appenders on
+  the same open file description cannot interleave bytes.
+
 #### Write-All as `state + repeat_until`
 
 Write-all is implemented as a sender adaptor, not as a special io_uring
@@ -379,14 +422,17 @@ The state contains:
 | Field | Purpose |
 |-------|---------|
 | scheduler/context pointer | Creates each next child sender against the same provider. |
-| sink handle | `stream_socket_view` or `descriptor_view`. |
+| sink handle | `stream_socket_view`, `descriptor_view`, or `random_access_file`. |
 | buffer | Original non-owning `const_buffer`; caller storage must outlive the composed operation. |
-| flags or offset | Socket flags, or descriptor starting offset. |
+| flags or offset | Socket flags, or the `random_access_file` starting offset (streaming descriptor state tracks no offset). |
 | transferred | Number of bytes successfully written so far. |
 | done | Predicate observed by `repeat_until` after each child completion. |
 
-For descriptor writes, each child uses `offset + transferred`, so retries write
-the next file range. For socket writes, each child advances the buffer pointer
+For streaming descriptor writes, each child transfers at the kernel file
+position and advances it, so retries simply continue the stream. For
+random-access writes, each child uses `offset + transferred`, so retries write
+the next file range while the kernel file position stays untouched. For socket
+writes, each child advances the buffer pointer
 by `transferred`. A child result of zero before completion is treated as an
 error to avoid an infinite repeat loop.
 
@@ -542,10 +588,14 @@ auto s = bnio::async_read(scheduler, socket, buffer);
 | `bnio::async_write_some(provider, stream, buf)` | `stream.async_write_some(provider, buf)` or lowest-layer fallback | `io_context_cpo.h` |
 | `bnio::async_accept` | `acceptor.async_accept(provider)` or lowest-layer fallback | `io_context_cpo.h` |
 | `bnio::async_connect` | `stream.async_connect(provider, ep)` or lowest-layer fallback | `io_context_cpo.h` |
-| `bnio::async_read(provider, descriptor, buf, offset)` | `provider.async_read(descriptor, buf, offset)` | `io_context_cpo.h` |
-| `bnio::async_read_some(provider, descriptor, buf, offset)` | `provider.async_read_some(descriptor, buf, offset)` | `io_context_cpo.h` |
-| `bnio::async_write(provider, descriptor, buf, offset)` | `provider.async_write(descriptor, buf, offset)` | `io_context_cpo.h` |
-| `bnio::async_write_some(provider, descriptor, buf, offset)` | `provider.async_write_some(descriptor, buf, offset)` | `io_context_cpo.h` |
+| `bnio::async_read(provider, descriptor, buf)` | `provider.async_read(descriptor, buf)` (streaming) | `io_context_cpo.h` |
+| `bnio::async_read_some(provider, descriptor, buf)` | `provider.async_read_some(descriptor, buf)` (streaming) | `io_context_cpo.h` |
+| `bnio::async_write(provider, descriptor, buf)` | `provider.async_write(descriptor, buf)` (streaming) | `io_context_cpo.h` |
+| `bnio::async_write_some(provider, descriptor, buf)` | `provider.async_write_some(descriptor, buf)` (streaming) | `io_context_cpo.h` |
+| `bnio::async_read(provider, file, buf, offset)` | `provider.async_read(file, buf, offset)` (positioned) | `io_context_cpo.h` |
+| `bnio::async_read_some(provider, file, buf, offset)` | `provider.async_read_some(file, buf, offset)` (positioned) | `io_context_cpo.h` |
+| `bnio::async_write(provider, file, buf, offset)` | `provider.async_write(file, buf, offset)` (positioned) | `io_context_cpo.h` |
+| `bnio::async_write_some(provider, file, buf, offset)` | `provider.async_write_some(file, buf, offset)` (positioned) | `io_context_cpo.h` |
 | `bnio::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
 | `bnio::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
 | `bnio::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
@@ -565,8 +615,10 @@ concept writes_bytes = /* ... */;
 template <class Provider, class Acceptor>
 concept accepts_connections = /* ... */;
 
-// Descriptor I/O uses the same reads_bytes/writes_bytes concepts with
-// async_io::descriptor_view as the source/sink type.
+// Streaming descriptor I/O uses the same reads_bytes/writes_bytes concepts
+// with async_io::descriptor_view as the source/sink type. Positioned calls
+// take async_io::random_access_file plus an explicit offset argument and are
+// bound by the CPO's own requires-clause, not by these concepts.
 ```
 
 ---

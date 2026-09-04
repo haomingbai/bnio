@@ -7,8 +7,8 @@ bnio/bnio.h  (umbrella)
 │   │               params, probe, liburing}.h
 │   └── base/bsd/{kqueue, event, event_list_view}.h
 ├── bnio/async_io.h
-│   ├── async_io/{buffer_view, descriptor_view, socket_view, time,
-│   │             address, tcp_endpoint, config}.h
+│   ├── async_io/{buffer_view, descriptor_view, random_access_file,
+│   │             socket_view, time, address, tcp_endpoint, config}.h
 │   ├── async_io/ip/{address, endpoint, tcp, udp}.h
 │   └── async_io/dns/{query, result, resolve, types}.h
 ├── bnio/io_context.h
@@ -69,7 +69,8 @@ bnio
 │       └── event_list_view               non-owning kevent array view
 ├── async_io                              Layer 2: vocabulary types
 │   ├── buffer_view                       non-owning byte range
-│   ├── descriptor_view                   non-owning fd
+│   ├── descriptor_view                   non-owning fd (streaming I/O)
+│   ├── random_access_file                non-owning fd (positioned I/O)
 │   ├── socket_view                       non-owning generic socket
 │   ├── stream_socket_view                non-owning SOCK_STREAM socket
 │   ├── datagram_socket_view              non-owning SOCK_DGRAM socket
