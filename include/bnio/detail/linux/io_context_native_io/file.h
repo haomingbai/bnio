@@ -9,7 +9,7 @@
 #else
 #define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_FILE_H_
 
-#include <bnio/detail/linux/io_context_native_io/descriptor_file.h>
+#include <bnio/detail/linux/io_context_native_io/stream_file.h>
 #include <bnio/detail/linux/io_context_native_io/random_access_file.h>
 
 #endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_

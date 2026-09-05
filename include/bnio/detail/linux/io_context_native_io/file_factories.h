@@ -10,19 +10,19 @@
 #define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_FILE_FACTORIES_H_
 
 #include <bnio/async_io/random_access_file.h>
-#include <bnio/detail/linux/io_context_native_io/descriptor_file.h>
+#include <bnio/detail/linux/io_context_native_io/stream_file.h>
 #include <bnio/detail/linux/io_context_native_io/random_access_file.h>
 
 namespace bnio::detail {
 
-[[nodiscard]] inline auto make_descriptor_read_request(
+[[nodiscard]] inline auto make_stream_file_read_request(
     async_io::descriptor_view descriptor, mutable_buffer buffer) {
-  return descriptor_read_model(descriptor, buffer);
+  return stream_file_read_model(descriptor, buffer);
 }
 
-[[nodiscard]] inline auto make_descriptor_write_request(
+[[nodiscard]] inline auto make_stream_file_write_request(
     async_io::descriptor_view descriptor, const_buffer buffer) {
-  return descriptor_write_model(descriptor, buffer);
+  return stream_file_write_model(descriptor, buffer);
 }
 
 [[nodiscard]] inline auto make_random_access_read_request(

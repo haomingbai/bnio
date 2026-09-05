@@ -69,7 +69,7 @@ This repository is a CMake-based C++20 async I/O library.
 - `linux/io_uring_operations/core.h` — nop, timeout, and internal operations.
 - `linux/io_uring_operations/file.h` — aggregate for streaming and positioned
   file read/write operations.
-- `linux/io_uring_operations/descriptor_file.h` — streaming descriptor
+- `linux/io_uring_operations/stream_file.h` — streaming descriptor
   read/write operations.
 - `linux/io_uring_operations/random_access_file.h` — positioned random-access
   file read/write operations.
@@ -92,7 +92,7 @@ This repository is a CMake-based C++20 async I/O library.
   file read/write operations.
 - `bsd/kqueue_operations/file_common.h` — shared helpers for kqueue file
   read/write operations.
-- `bsd/kqueue_operations/descriptor_file.h` — streaming descriptor read/write
+- `bsd/kqueue_operations/stream_file.h` — streaming descriptor read/write
   operations and low-level readiness operations.
 - `bsd/kqueue_operations/random_access_file.h` — positioned random-access file
   read/write operations.
@@ -121,9 +121,9 @@ High-level async runtime, stream owners, and buffer types.
 - `detail/posix/io_context/timer_wait.h`, `read_all.h`, and `write_all.h` —
   shared timer wait and composed full-read/full-write sender templates; the
   read/write-all operation states are split by access kind into
-  `descriptor_read_all.h`, `descriptor_write_all.h`, `random_access_read_all.h`,
+  `stream_file_read_all.h`, `stream_file_write_all.h`, `random_access_read_all.h`,
   and `random_access_write_all.h`.
-- `detail/posix/io_context/descriptor_file_io.h` and `random_access_file_io.h` —
+- `detail/posix/io_context/stream_file_io.h` and `random_access_file_io.h` —
   context/scheduler file I/O forwarding definitions, split by access kind.
 - `detail/{linux,bsd}/io_context_native_io/` — backend-specific request
   adapters and factories (plus Linux SQE models); they remain explicit because

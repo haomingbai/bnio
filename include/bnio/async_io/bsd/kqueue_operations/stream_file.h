@@ -1,11 +1,11 @@
 /**
- * @file descriptor_file.h
+ * @file stream_file.h
  * @brief kqueue streaming descriptor read/write operations.
  */
 
 #pragma once
-#ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_DESCRIPTOR_FILE_H_
-#define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_DESCRIPTOR_FILE_H_
+#ifndef BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_STREAM_FILE_H_
+#define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_STREAM_FILE_H_
 
 #include <bnio/async_io/bsd/kqueue_operations/detail/io_request.h>
 #include <bnio/async_io/bsd/kqueue_operations/detail/native_io.h>
@@ -28,12 +28,12 @@ namespace bnio::async_io::bsd_native {
  * and wait for kqueue readiness. The fstat classification is kept only to
  * select those two behaviors.
  */
-class kqueue_descriptor_read_request {
+class kqueue_stream_file_read_request {
  public:
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
-  kqueue_descriptor_read_request(descriptor_view descriptor,
+  kqueue_stream_file_read_request(descriptor_view descriptor,
                                  buffer_view buffer) noexcept
       : descriptor_(descriptor), buffer_(buffer) {}
 
@@ -100,12 +100,12 @@ class kqueue_descriptor_read_request {
  * the kernel file position; other descriptors are switched to O_NONBLOCK
  * and wait for kqueue readiness.
  */
-class kqueue_descriptor_write_request {
+class kqueue_stream_file_write_request {
  public:
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
-  kqueue_descriptor_write_request(descriptor_view descriptor, const void* data,
+  kqueue_stream_file_write_request(descriptor_view descriptor, const void* data,
                                   std::size_t size) noexcept
       : descriptor_(descriptor), data_(data), size_(size) {}
 
@@ -167,32 +167,32 @@ class kqueue_descriptor_write_request {
   bool resolved_ = false;
 };
 
-using kqueue_descriptor_read_sender =
-    detail::kqueue_ready_io_sender<kqueue_descriptor_read_request>;
-using kqueue_descriptor_write_sender =
-    detail::kqueue_ready_io_sender<kqueue_descriptor_write_request>;
+using kqueue_stream_file_read_sender =
+    detail::kqueue_ready_io_sender<kqueue_stream_file_read_request>;
+using kqueue_stream_file_write_sender =
+    detail::kqueue_ready_io_sender<kqueue_stream_file_write_request>;
 
 /** @cond BNIO_DETAIL */
 
 inline auto kqueue_context::async_read(descriptor_view descriptor,
                                        buffer_view buffer) {
-  return kqueue_descriptor_read_sender(
-      *this, kqueue_descriptor_read_request(descriptor, buffer));
+  return kqueue_stream_file_read_sender(
+      *this, kqueue_stream_file_read_request(descriptor, buffer));
 }
 
 inline auto kqueue_context::async_write(descriptor_view descriptor,
                                         const void* data, std::size_t size) {
-  return kqueue_descriptor_write_sender(
-      *this, kqueue_descriptor_write_request(descriptor, data, size));
+  return kqueue_stream_file_write_sender(
+      *this, kqueue_stream_file_write_request(descriptor, data, size));
 }
 
 /** @endcond */
 
 /** Streaming read that forwards the raw (ec, result, flags) completion. */
-class kqueue_raw_descriptor_read_request
-    : public kqueue_descriptor_read_request {
+class kqueue_raw_stream_file_read_request
+    : public kqueue_stream_file_read_request {
  public:
-  using kqueue_descriptor_read_request::kqueue_descriptor_read_request;
+  using kqueue_stream_file_read_request::kqueue_stream_file_read_request;
 
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::error_code, int,
@@ -207,12 +207,12 @@ class kqueue_raw_descriptor_read_request
 };
 
 /** Streaming write that forwards the raw (ec, result, flags) completion. */
-class kqueue_raw_descriptor_write_request
-    : public kqueue_descriptor_write_request {
+class kqueue_raw_stream_file_write_request
+    : public kqueue_stream_file_write_request {
  public:
-  kqueue_raw_descriptor_write_request(descriptor_view descriptor,
+  kqueue_raw_stream_file_write_request(descriptor_view descriptor,
                                       buffer_view buffer)
-      : kqueue_descriptor_write_request(descriptor, buffer.data, buffer.size) {}
+      : kqueue_stream_file_write_request(descriptor, buffer.data, buffer.size) {}
 
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::error_code, int,
@@ -230,13 +230,13 @@ class kqueue_raw_descriptor_write_request
 template <class Receiver>
 class kqueue_read_operation
     : public detail::kqueue_ready_io_operation<
-          kqueue_raw_descriptor_read_request, Receiver> {
+          kqueue_raw_stream_file_read_request, Receiver> {
  public:
   kqueue_read_operation(kqueue_context& context, descriptor_view descriptor,
                         buffer_view buffer, Receiver receiver)
-      : detail::kqueue_ready_io_operation<kqueue_raw_descriptor_read_request,
+      : detail::kqueue_ready_io_operation<kqueue_raw_stream_file_read_request,
                                           Receiver>(
-            context, kqueue_raw_descriptor_read_request(descriptor, buffer),
+            context, kqueue_raw_stream_file_read_request(descriptor, buffer),
             std::move(receiver)) {}
 };
 
@@ -244,16 +244,16 @@ class kqueue_read_operation
 template <class Receiver>
 class kqueue_write_operation
     : public detail::kqueue_ready_io_operation<
-          kqueue_raw_descriptor_write_request, Receiver> {
+          kqueue_raw_stream_file_write_request, Receiver> {
  public:
   kqueue_write_operation(kqueue_context& context, descriptor_view descriptor,
                          buffer_view buffer, Receiver receiver)
-      : detail::kqueue_ready_io_operation<kqueue_raw_descriptor_write_request,
+      : detail::kqueue_ready_io_operation<kqueue_raw_stream_file_write_request,
                                           Receiver>(
-            context, kqueue_raw_descriptor_write_request(descriptor, buffer),
+            context, kqueue_raw_stream_file_write_request(descriptor, buffer),
             std::move(receiver)) {}
 };
 
 }  // namespace bnio::async_io::bsd_native
 
-#endif  // BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_DESCRIPTOR_FILE_H_
+#endif  // BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_STREAM_FILE_H_

@@ -19,16 +19,16 @@ bnio/bnio.h  (umbrella)
 │   ├── detail/posix/io_context/{options,
 │   │                      timer_types, steady_timer}.h
 │   └── detail/posix/io_context/native_io.h
-│       ├── detail/posix/io_context/{timer_wait, descriptor_file_io,
+│       ├── detail/posix/io_context/{timer_wait, stream_file_io,
 │       │                            random_access_file_io}.h
 │       ├── detail/posix/io_context/read_all.h
-│       │   └── detail/posix/io_context/{descriptor_read_all,
+│       │   └── detail/posix/io_context/{stream_file_read_all,
 │       │                                random_access_read_all}.h
 │       ├── detail/posix/io_context/write_all.h
-│       │   └── detail/posix/io_context/{descriptor_write_all,
+│       │   └── detail/posix/io_context/{stream_file_write_all,
 │       │                                random_access_write_all}.h
 │       ├── detail/linux/io_context_native_io/{common, factories,
-│       │                     file_factories, file, descriptor_file,
+│       │                     file_factories, file, stream_file,
 │       │                     random_access_file, poll, socket}.h
 │       └── detail/bsd/io_context_native_io/{common, factories,
 │                                            file_factories}.h
@@ -41,7 +41,7 @@ bnio/bnio.h  (umbrella)
 │       ├── async_io/linux/io_uring_operations/{core, helpers, poll,
 │       │     resolve, socket, views}.h
 │       └── async_io/linux/io_uring_operations/file.h
-│           └── async_io/linux/io_uring_operations/{descriptor_file,
+│           └── async_io/linux/io_uring_operations/{stream_file,
 │               random_access_file}.h
 ├── bnio/async_io/bsd/kqueue_context.h
 │   ├── async_io/bsd/kqueue_context_base.h
@@ -50,7 +50,7 @@ bnio/bnio.h  (umbrella)
 │   │   socket}.h
 │   └── async_io/bsd/kqueue_operations/file.h
 │       └── async_io/bsd/kqueue_operations/{file_common,
-│           descriptor_file, random_access_file}.h
+│           stream_file, random_access_file}.h
 ├── bnio/ip.h
 ├── bnio/buffer.h
 │   └── buffer/{basic, dynamic_string, dynamic_byte_vector, holders}.h

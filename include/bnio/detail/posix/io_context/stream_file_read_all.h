@@ -1,13 +1,13 @@
 /**
- * @file descriptor_read_all.h
+ * @file stream_file_read_all.h
  * @brief Streaming descriptor read-all operation state.
  */
 
-#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_DESCRIPTOR_READ_ALL_H_
+#ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_STREAM_FILE_READ_ALL_H_
 #ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>
 #else
-#define BNIO_DETAIL_POSIX_IO_CONTEXT_DESCRIPTOR_READ_ALL_H_
+#define BNIO_DETAIL_POSIX_IO_CONTEXT_STREAM_FILE_READ_ALL_H_
 
 namespace bnio::detail {
 
@@ -17,11 +17,11 @@ namespace bnio::detail {
  * Each step reads at the kernel file position, which the kernel advances
  * naturally on every successful read.
  */
-class descriptor_read_all_state {
+class stream_file_read_all_state {
  public:
   static constexpr bool zero_byte_is_error = false;
 
-  descriptor_read_all_state(io_context& context,
+  stream_file_read_all_state(io_context& context,
                             async_io::descriptor_view descriptor,
                             mutable_buffer buffer) noexcept
       : context(&context), descriptor(descriptor), buffer(buffer) {}
@@ -39,8 +39,8 @@ class descriptor_read_all_state {
 
   [[nodiscard]] auto make_sender() noexcept {
     return native_io_sender(
-        *context, make_descriptor_read_request(descriptor, current_buffer()),
-        adaptive_eager_control<descriptor_read_all_state>{this});
+        *context, make_stream_file_read_request(descriptor, current_buffer()),
+        adaptive_eager_control<stream_file_read_all_state>{this});
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -63,4 +63,4 @@ class descriptor_read_all_state {
 }  // namespace bnio::detail
 
 #endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
-#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_DESCRIPTOR_READ_ALL_H_
+#endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_STREAM_FILE_READ_ALL_H_

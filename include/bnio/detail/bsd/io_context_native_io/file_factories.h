@@ -14,15 +14,15 @@
 
 namespace bnio::detail {
 
-[[nodiscard]] inline auto make_descriptor_read_request(
+[[nodiscard]] inline auto make_stream_file_read_request(
     async_io::descriptor_view descriptor, mutable_buffer buffer) {
-  return async_io::bsd_native::kqueue_descriptor_read_request(descriptor,
+  return async_io::bsd_native::kqueue_stream_file_read_request(descriptor,
                                                               buffer.view());
 }
 
-[[nodiscard]] inline auto make_descriptor_write_request(
+[[nodiscard]] inline auto make_stream_file_write_request(
     async_io::descriptor_view descriptor, const_buffer buffer) {
-  return async_io::bsd_native::kqueue_descriptor_write_request(
+  return async_io::bsd_native::kqueue_stream_file_write_request(
       descriptor, buffer.data(), buffer.size());
 }
 

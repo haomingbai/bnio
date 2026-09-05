@@ -1,11 +1,11 @@
 /**
- * @file descriptor_file.h
+ * @file stream_file.h
  * @brief io_uring streaming file read/write operations.
  */
 
 #pragma once
-#ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_DESCRIPTOR_FILE_H_
-#define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_DESCRIPTOR_FILE_H_
+#ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_STREAM_FILE_H_
+#define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_STREAM_FILE_H_
 
 #include <bnio/async_io/buffer_view.h>
 #include <bnio/async_io/descriptor_view.h>
@@ -194,4 +194,4 @@ class io_uring_writev_operation
 
 }  // namespace bnio::async_io::linux_native
 
-#endif  // BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_DESCRIPTOR_FILE_H_
+#endif  // BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_STREAM_FILE_H_

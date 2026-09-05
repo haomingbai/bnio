@@ -1,13 +1,13 @@
 /**
- * @file descriptor_file.h
+ * @file stream_file.h
  * @brief Linux native streaming file I/O models.
  */
 
-#ifndef BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_DESCRIPTOR_FILE_H_
+#ifndef BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_STREAM_FILE_H_
 #ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #include <bnio/io_context.h>
 #else
-#define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_DESCRIPTOR_FILE_H_
+#define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_STREAM_FILE_H_
 
 #include <algorithm>
 #include <cerrno>
@@ -17,15 +17,15 @@
 namespace bnio::detail {
 
 /** SQE/preadv2 offset -1: use and advance the kernel file position. */
-inline constexpr std::uint64_t streaming_file_offset =
+inline constexpr std::uint64_t stream_file_offset =
     static_cast<std::uint64_t>(-1);
 
-class descriptor_read_model {
+class stream_file_read_model {
  public:
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
-  descriptor_read_model(async_io::descriptor_view descriptor,
+  stream_file_read_model(async_io::descriptor_view descriptor,
                         mutable_buffer buffer) noexcept
       : descriptor_(descriptor), buffer_(buffer) {}
 
@@ -33,14 +33,14 @@ class descriptor_read_model {
     sqe.prep_read(
         descriptor_.native_handle(), buffer_.data(),
         async_io::linux_native::detail::bounded_io_size(buffer_.size()),
-        streaming_file_offset);
+        stream_file_offset);
   }
 
   [[nodiscard]] int try_immediate() noexcept {
     const ssize_t result = pread_nowait(
         descriptor_.native_handle(), buffer_.data(),
         async_io::linux_native::detail::bounded_io_size(buffer_.size()),
-        streaming_file_offset);
+        stream_file_offset);
     if (result >= 0) {
       return static_cast<int>(result);
     }
@@ -65,12 +65,12 @@ class descriptor_read_model {
   mutable_buffer buffer_;
 };
 
-class descriptor_write_model {
+class stream_file_write_model {
  public:
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
-  descriptor_write_model(async_io::descriptor_view descriptor,
+  stream_file_write_model(async_io::descriptor_view descriptor,
                          const_buffer buffer) noexcept
       : descriptor_(descriptor), buffer_(buffer) {}
 
@@ -78,14 +78,14 @@ class descriptor_write_model {
     sqe.prep_write(
         descriptor_.native_handle(), buffer_.data(),
         async_io::linux_native::detail::bounded_io_size(buffer_.size()),
-        streaming_file_offset);
+        stream_file_offset);
   }
 
   [[nodiscard]] int try_immediate() noexcept {
     const ssize_t result = pwrite_nowait(
         descriptor_.native_handle(), buffer_.data(),
         async_io::linux_native::detail::bounded_io_size(buffer_.size()),
-        streaming_file_offset);
+        stream_file_offset);
     if (result >= 0) {
       return static_cast<int>(result);
     }
@@ -113,4 +113,4 @@ class descriptor_write_model {
 }  // namespace bnio::detail
 
 #endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
-#endif  // BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_DESCRIPTOR_FILE_H_
+#endif  // BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_STREAM_FILE_H_

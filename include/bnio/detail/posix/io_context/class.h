@@ -38,7 +38,7 @@ namespace bnio {
 enum class ssl_handshake_type;
 
 namespace detail {
-class descriptor_write_all_state;
+class stream_file_write_all_state;
 class random_access_write_all_state;
 class socket_write_all_state;
 template <class Request, class Control, class Receiver>
@@ -569,7 +569,7 @@ class BNIO_EXPORT io_context {
  private:
   friend class steady_timer;
   friend class detail::timer_operation_base;
-  friend class detail::descriptor_write_all_state;
+  friend class detail::stream_file_write_all_state;
   friend class detail::random_access_write_all_state;
   friend class detail::socket_write_all_state;
   template <class Receiver>
