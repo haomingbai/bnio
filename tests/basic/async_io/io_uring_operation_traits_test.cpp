@@ -167,10 +167,10 @@ TEST(IoUringOperationTraitsTest, io_operations_accept_async_io_views) {
       context, stream, receive_message, 0, receiver{});
   [[maybe_unused]] io_uring_sendmsg_operation sendmsg_operation(
       context, stream, send_message, 0, receiver{});
-  [[maybe_unused]] io_uring_read_operation read_operation(
-      context, descriptor, buffer, receiver{});
-  [[maybe_unused]] io_uring_write_operation write_operation(
-      context, descriptor, buffer, receiver{});
+  [[maybe_unused]] io_uring_read_operation read_operation(context, descriptor,
+                                                          buffer, receiver{});
+  [[maybe_unused]] io_uring_write_operation write_operation(context, descriptor,
+                                                            buffer, receiver{});
   [[maybe_unused]] io_uring_readv_operation readv_operation(
       context, descriptor, vectors, receiver{});
   [[maybe_unused]] io_uring_writev_operation writev_operation(
@@ -282,8 +282,7 @@ TEST(IoUringOperationTraitsTest, eagain_rearm_classification) {
       positioned_read_operation(context, random_access, buffer, 0, receiver{});
   EXPECT_TRUE(positioned_read_operation.rearm_on_eagain());
   bnio::async_io::linux_native::io_uring_random_access_write_operation
-      positioned_write_operation(context, random_access, buffer, 0,
-                                 receiver{});
+      positioned_write_operation(context, random_access, buffer, 0, receiver{});
   EXPECT_TRUE(positioned_write_operation.rearm_on_eagain());
   bnio::async_io::linux_native::io_uring_random_access_readv_operation
       positioned_readv_operation(context, random_access, vectors, 0,

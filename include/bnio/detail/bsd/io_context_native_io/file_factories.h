@@ -17,7 +17,7 @@ namespace bnio::detail {
 [[nodiscard]] inline auto make_stream_file_read_request(
     async_io::descriptor_view descriptor, mutable_buffer buffer) {
   return async_io::bsd_native::kqueue_stream_file_read_request(descriptor,
-                                                              buffer.view());
+                                                               buffer.view());
 }
 
 [[nodiscard]] inline auto make_stream_file_write_request(

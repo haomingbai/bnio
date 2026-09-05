@@ -14,18 +14,18 @@
 // paths. EOF and errors zero the chunk, which the loop predicate observes.
 
 #include <bnio/bnio.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <array>
+#include <bexec/bexec.hpp>
 #include <cerrno>
 #include <csignal>
 #include <cstddef>
 #include <exception>
-#include <fcntl.h>
 #include <iostream>
 #include <string>
 #include <system_error>
-#include <unistd.h>
-#include <bexec/bexec.hpp>
 
 namespace {
 
@@ -65,8 +65,7 @@ struct cat_receiver {
 
 int main(int argc, char** argv) {
   if (argc != 2) {
-    std::cerr << "usage: " << (argc > 0 ? argv[0] : "file_cat")
-              << " <file>\n";
+    std::cerr << "usage: " << (argc > 0 ? argv[0] : "file_cat") << " <file>\n";
     return 2;
   }
 
@@ -76,8 +75,8 @@ int main(int argc, char** argv) {
 
   const int in_fd = ::open(argv[1], O_RDONLY);
   if (in_fd < 0) {
-    std::cerr << "cannot open '" << argv[1] << "': "
-              << std::generic_category().message(errno) << '\n';
+    std::cerr << "cannot open '" << argv[1]
+              << "': " << std::generic_category().message(errno) << '\n';
     return 1;
   }
 
@@ -116,16 +115,16 @@ int main(int argc, char** argv) {
              return io.async_write(
                  out, bnio::const_buffer(state.buf.data(), state.chunk));
            }) |
-           bexec::then([&](std::error_code ec,
-                           std::size_t) noexcept -> std::size_t {
-             if (ec) {
-               if (!state.error) state.error = ec;
-               state.chunk = 0;
-             } else {
-               state.total += state.chunk;
-             }
-             return state.chunk;
-           });
+           bexec::then(
+               [&](std::error_code ec, std::size_t) noexcept -> std::size_t {
+                 if (ec) {
+                   if (!state.error) state.error = ec;
+                   state.chunk = 0;
+                 } else {
+                   state.total += state.chunk;
+                 }
+                 return state.chunk;
+               });
   };
 
   auto operation = bexec::connect(

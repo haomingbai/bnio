@@ -80,8 +80,8 @@ inline auto io_context::async_send_to(async_io::datagram_socket_view socket,
 
 }  // namespace bnio
 
-#include <bnio/detail/posix/io_context/stream_file_io.h>
 #include <bnio/detail/posix/io_context/random_access_file_io.h>
+#include <bnio/detail/posix/io_context/stream_file_io.h>
 
 namespace bnio {
 

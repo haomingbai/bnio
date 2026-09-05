@@ -579,8 +579,8 @@ void file_write_read() {
     std::array<char, 64> written{};
     const ssize_t stored = ::read(fd, written.data(), written.size());
     EXPECT_EQ(stored, static_cast<ssize_t>(expected.size()));
-    EXPECT_TRUE(std::memcmp(written.data(), expected.data(),
-                            expected.size()) == 0);
+    EXPECT_TRUE(std::memcmp(written.data(), expected.data(), expected.size()) ==
+                0);
   }
 
   // Two consecutive streaming reads: the second continues from the kernel
@@ -599,9 +599,9 @@ void file_write_read() {
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = scheduler.async_read_some(
-        bnio::async_io::descriptor_view(fd),
-        bnio::buffer(bytes.data(), payload.size()));
+    auto sender =
+        scheduler.async_read_some(bnio::async_io::descriptor_view(fd),
+                                  bnio::buffer(bytes.data(), payload.size()));
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();

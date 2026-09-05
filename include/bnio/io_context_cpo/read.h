@@ -26,14 +26,15 @@ struct async_read_t {
    * resolution instead of failing inside the body.
    */
   template <class Provider, class Source, class Buffer>
-    requires(requires {
-               std::declval<Source>().async_read(std::declval<Provider>(),
-                                                 std::declval<Buffer>());
-             } ||
-             requires {
-               std::declval<Provider>().async_read(std::declval<Source>(),
-                                                   std::declval<Buffer>());
-             })
+    requires(
+        requires {
+          std::declval<Source>().async_read(std::declval<Provider>(),
+                                            std::declval<Buffer>());
+        } ||
+        requires {
+          std::declval<Provider>().async_read(std::declval<Source>(),
+                                              std::declval<Buffer>());
+        })
   constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
                                       Buffer&& buffer) const {
     if constexpr (requires {
@@ -55,16 +56,17 @@ struct async_read_t {
    * (random_access_file).
    */
   template <class Provider, class Source, class Buffer, class Mode>
-    requires(requires {
-               std::declval<Source>().async_read(std::declval<Provider>(),
-                                                 std::declval<Buffer>(),
-                                                 std::declval<Mode>());
-             } ||
-             requires {
-               std::declval<Provider>().async_read(
-                   std::declval<Source>(), std::declval<Buffer>(),
-                   static_cast<std::uint64_t>(std::declval<Mode>()));
-             })
+    requires(
+        requires {
+          std::declval<Source>().async_read(std::declval<Provider>(),
+                                            std::declval<Buffer>(),
+                                            std::declval<Mode>());
+        } ||
+        requires {
+          std::declval<Provider>().async_read(
+              std::declval<Source>(), std::declval<Buffer>(),
+              static_cast<std::uint64_t>(std::declval<Mode>()));
+        })
   constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
                                       Buffer&& buffer, Mode mode) const {
     if constexpr (requires {
@@ -91,14 +93,15 @@ struct async_read_some_t {
    * otherwise on a provider.
    */
   template <class Provider, class Source, class Buffer>
-    requires(requires {
-               std::declval<Source>().async_read_some(
-                   std::declval<Provider>(), std::declval<Buffer>());
-             } ||
-             requires {
-               std::declval<Provider>().async_read_some(
-                   std::declval<Source>(), std::declval<Buffer>());
-             })
+    requires(
+        requires {
+          std::declval<Source>().async_read_some(std::declval<Provider>(),
+                                                 std::declval<Buffer>());
+        } ||
+        requires {
+          std::declval<Provider>().async_read_some(std::declval<Source>(),
+                                                   std::declval<Buffer>());
+        })
   constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
                                       Buffer&& buffer) const {
     if constexpr (requires {
@@ -120,16 +123,17 @@ struct async_read_some_t {
    * (random_access_file).
    */
   template <class Provider, class Source, class Buffer, class Mode>
-    requires(requires {
-               std::declval<Source>().async_read_some(
-                   std::declval<Provider>(), std::declval<Buffer>(),
-                   std::declval<Mode>());
-             } ||
-             requires {
-               std::declval<Provider>().async_read_some(
-                   std::declval<Source>(), std::declval<Buffer>(),
-                   static_cast<std::uint64_t>(std::declval<Mode>()));
-             })
+    requires(
+        requires {
+          std::declval<Source>().async_read_some(std::declval<Provider>(),
+                                                 std::declval<Buffer>(),
+                                                 std::declval<Mode>());
+        } ||
+        requires {
+          std::declval<Provider>().async_read_some(
+              std::declval<Source>(), std::declval<Buffer>(),
+              static_cast<std::uint64_t>(std::declval<Mode>()));
+        })
   constexpr decltype(auto) operator()(Provider&& provider, Source&& source,
                                       Buffer&& buffer, Mode mode) const {
     if constexpr (requires {

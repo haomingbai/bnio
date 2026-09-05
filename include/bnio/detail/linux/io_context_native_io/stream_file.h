@@ -26,7 +26,7 @@ class stream_file_read_model {
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   stream_file_read_model(async_io::descriptor_view descriptor,
-                        mutable_buffer buffer) noexcept
+                         mutable_buffer buffer) noexcept
       : descriptor_(descriptor), buffer_(buffer) {}
 
   void prepare(bnio::base::submission_queue_entry& sqe) noexcept {
@@ -71,7 +71,7 @@ class stream_file_write_model {
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   stream_file_write_model(async_io::descriptor_view descriptor,
-                         const_buffer buffer) noexcept
+                          const_buffer buffer) noexcept
       : descriptor_(descriptor), buffer_(buffer) {}
 
   void prepare(bnio::base::submission_queue_entry& sqe) noexcept {

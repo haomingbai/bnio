@@ -83,9 +83,9 @@ TEST(KqueueOperationTraitsTest, file_io_splits_streaming_and_positioned) {
 
   // Streaming: descriptor_view without offset advances the kernel file
   // position; positioned: random_access_file with an explicit offset.
-  using stream_read_sender = decltype(std::declval<kqueue_context&>()
-                                          .async_read(descriptor_view{},
-                                                      buffer_view{}));
+  using stream_read_sender =
+      decltype(std::declval<kqueue_context&>().async_read(descriptor_view{},
+                                                          buffer_view{}));
   using stream_write_sender =
       decltype(std::declval<kqueue_context&>().async_write(
           descriptor_view{}, static_cast<const void*>(nullptr),
@@ -103,14 +103,14 @@ TEST(KqueueOperationTraitsTest, file_io_splits_streaming_and_positioned) {
   static_assert(bexec::sender<positioned_read_sender>);
   static_assert(bexec::sender<positioned_write_sender>);
 
-  using expected_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::error_code,
-                                                      std::size_t),
-                                   bexec::set_stopped_t()>;
-  static_assert(std::is_same_v<typename stream_read_sender::completion_signatures,
-                               expected_signatures>);
-  static_assert(std::is_same_v<typename stream_write_sender::completion_signatures,
-                               expected_signatures>);
+  using expected_signatures = bexec::completion_signatures<
+      bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
+  static_assert(
+      std::is_same_v<typename stream_read_sender::completion_signatures,
+                     expected_signatures>);
+  static_assert(
+      std::is_same_v<typename stream_write_sender::completion_signatures,
+                     expected_signatures>);
   static_assert(
       std::is_same_v<typename positioned_read_sender::completion_signatures,
                      expected_signatures>);

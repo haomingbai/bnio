@@ -71,8 +71,8 @@ class socket_read_all_state {
 
 }  // namespace bnio::detail
 
-#include <bnio/detail/posix/io_context/stream_file_read_all.h>
 #include <bnio/detail/posix/io_context/random_access_read_all.h>
+#include <bnio/detail/posix/io_context/stream_file_read_all.h>
 
 namespace bnio::detail {
 

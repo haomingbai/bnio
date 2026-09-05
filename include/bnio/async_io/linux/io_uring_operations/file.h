@@ -7,7 +7,7 @@
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_FILE_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_FILE_H_
 
-#include <bnio/async_io/linux/io_uring_operations/stream_file.h>
 #include <bnio/async_io/linux/io_uring_operations/random_access_file.h>
+#include <bnio/async_io/linux/io_uring_operations/stream_file.h>
 
 #endif  // BNIO_ASYNC_IO_LINUX_IO_URING_OPERATIONS_FILE_H_

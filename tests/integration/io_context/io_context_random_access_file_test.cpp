@@ -74,12 +74,10 @@ TEST(IoContextRandomAccessFileTest, offset_parameter_is_mandatory) {
   using scheduler_type = decltype(scheduler);
   using buffer_type = decltype(bnio::buffer(bytes));
 
-  static_assert(
-      !offsetless_read_some_invocable<scheduler_type, decltype(file),
-                                      buffer_type>);
-  static_assert(
-      !offsetless_write_some_invocable<scheduler_type, decltype(file),
-                                       buffer_type>);
+  static_assert(!offsetless_read_some_invocable<scheduler_type, decltype(file),
+                                                buffer_type>);
+  static_assert(!offsetless_write_some_invocable<scheduler_type, decltype(file),
+                                                 buffer_type>);
   static_assert(
       !offsetless_read_invocable<scheduler_type, decltype(file), buffer_type>);
   static_assert(
@@ -112,9 +110,9 @@ TEST(IoContextRandomAccessFileTest,
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = bnio::async_read_some(
-        scheduler, bnio::async_io::random_access_file(fd),
-        bnio::buffer(*bytes), std::uint64_t{0});
+    auto sender =
+        bnio::async_read_some(scheduler, bnio::async_io::random_access_file(fd),
+                              bnio::buffer(*bytes), std::uint64_t{0});
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -147,9 +145,9 @@ TEST(IoContextRandomAccessFileTest, positioned_write_overwrites_at_offset) {
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = bnio::async_write_some(
-        scheduler, bnio::async_io::random_access_file(fd),
-        bnio::buffer(patch), std::uint64_t{4});
+    auto sender = bnio::async_write_some(scheduler,
+                                         bnio::async_io::random_access_file(fd),
+                                         bnio::buffer(patch), std::uint64_t{4});
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -190,9 +188,9 @@ TEST(IoContextRandomAccessFileTest,
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = bnio::async_read_some(
-        scheduler, bnio::async_io::random_access_file(fd), bnio::buffer(bytes),
-        std::uint64_t{8});
+    auto sender =
+        bnio::async_read_some(scheduler, bnio::async_io::random_access_file(fd),
+                              bnio::buffer(bytes), std::uint64_t{8});
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -217,9 +215,9 @@ TEST(IoContextRandomAccessFileTest,
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = bnio::async_write_some(
-        scheduler, bnio::async_io::random_access_file(fd),
-        bnio::buffer(patch), std::uint64_t{0});
+    auto sender = bnio::async_write_some(scheduler,
+                                         bnio::async_io::random_access_file(fd),
+                                         bnio::buffer(patch), std::uint64_t{0});
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -249,9 +247,9 @@ TEST(IoContextRandomAccessFileTest, read_all_and_write_all_fill_exact_region) {
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = bnio::async_read(scheduler,
-                                   bnio::async_io::random_access_file(fd),
-                                   bnio::buffer(bytes), std::uint64_t{8});
+    auto sender =
+        bnio::async_read(scheduler, bnio::async_io::random_access_file(fd),
+                         bnio::buffer(bytes), std::uint64_t{8});
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -277,9 +275,9 @@ TEST(IoContextRandomAccessFileTest, read_all_and_write_all_fill_exact_region) {
     receiver.context = &context;
     auto state = receiver.state;
 
-    auto sender = bnio::async_write(scheduler,
-                                    bnio::async_io::random_access_file(fd),
-                                    bnio::buffer(payload), std::uint64_t{8});
+    auto sender =
+        bnio::async_write(scheduler, bnio::async_io::random_access_file(fd),
+                          bnio::buffer(payload), std::uint64_t{8});
     auto operation = bexec::connect(std::move(sender), std::move(receiver));
     bexec::start(operation);
     context.run();
@@ -292,8 +290,8 @@ TEST(IoContextRandomAccessFileTest, read_all_and_write_all_fill_exact_region) {
   EXPECT_EQ(::pread(fd, verified.data(), verified.size(), 0),
             static_cast<ssize_t>(verified.size()));
   constexpr std::string_view payload = "ABCDEFGH";
-  EXPECT_TRUE(std::memcmp(verified.data() + 8, payload.data(), payload.size()) ==
-              0);
+  EXPECT_TRUE(
+      std::memcmp(verified.data() + 8, payload.data(), payload.size()) == 0);
   EXPECT_TRUE(std::memcmp(verified.data(), kContent.data(), 8) == 0);
 
   EXPECT_EQ(::close(fd), 0);

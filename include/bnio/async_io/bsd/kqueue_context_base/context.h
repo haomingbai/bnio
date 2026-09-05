@@ -13,8 +13,8 @@
 #include <bnio/async_io/buffer_view.h>
 #include <bnio/async_io/descriptor_view.h>
 #include <bnio/async_io/dns.h>
-#include <bnio/async_io/random_access_file.h>
 #include <bnio/async_io/ip/endpoint.h>
+#include <bnio/async_io/random_access_file.h>
 #include <bnio/async_io/socket_view.h>
 #include <bnio/async_io/time.h>
 #include <bnio/base/bsd/kqueue.h>
@@ -68,8 +68,7 @@ class BNIO_EXPORT kqueue_context {
    * Creates a streaming read sender whose start performs ::read, advancing
    * the kernel file position.
    */
-  [[nodiscard]] auto async_read(descriptor_view descriptor,
-                                buffer_view buffer);
+  [[nodiscard]] auto async_read(descriptor_view descriptor, buffer_view buffer);
 
   /**
    * Creates a positioned read sender whose start performs ::pread at the

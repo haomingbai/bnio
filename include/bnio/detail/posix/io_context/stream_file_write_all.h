@@ -22,8 +22,8 @@ class stream_file_write_all_state {
   static constexpr bool zero_byte_is_error = true;
 
   stream_file_write_all_state(io_context& context,
-                             async_io::descriptor_view descriptor,
-                             const_buffer buffer) noexcept
+                              async_io::descriptor_view descriptor,
+                              const_buffer buffer) noexcept
       : context(&context), descriptor(descriptor), buffer(buffer) {}
 
   [[nodiscard]] std::size_t remaining() const noexcept {

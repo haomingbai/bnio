@@ -34,7 +34,7 @@ class kqueue_stream_file_read_request {
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   kqueue_stream_file_read_request(descriptor_view descriptor,
-                                 buffer_view buffer) noexcept
+                                  buffer_view buffer) noexcept
       : descriptor_(descriptor), buffer_(buffer) {}
 
   void prepare(kqueue_helper& helper) noexcept {
@@ -106,7 +106,7 @@ class kqueue_stream_file_write_request {
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   kqueue_stream_file_write_request(descriptor_view descriptor, const void* data,
-                                  std::size_t size) noexcept
+                                   std::size_t size) noexcept
       : descriptor_(descriptor), data_(data), size_(size) {}
 
   void prepare(kqueue_helper& helper) noexcept {
@@ -211,8 +211,9 @@ class kqueue_raw_stream_file_write_request
     : public kqueue_stream_file_write_request {
  public:
   kqueue_raw_stream_file_write_request(descriptor_view descriptor,
-                                      buffer_view buffer)
-      : kqueue_stream_file_write_request(descriptor, buffer.data, buffer.size) {}
+                                       buffer_view buffer)
+      : kqueue_stream_file_write_request(descriptor, buffer.data, buffer.size) {
+  }
 
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::error_code, int,
