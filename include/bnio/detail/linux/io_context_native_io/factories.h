@@ -9,9 +9,8 @@
 #else
 #define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_FACTORIES_H_
 
-#include <bnio/async_io/random_access_file.h>
 #include <bnio/detail/linux/io_context_native_io/common.h>
-#include <bnio/detail/linux/io_context_native_io/file.h>
+#include <bnio/detail/linux/io_context_native_io/file_factories.h>
 #include <bnio/detail/linux/io_context_native_io/poll.h>
 #include <bnio/detail/linux/io_context_native_io/socket.h>
 
@@ -47,28 +46,6 @@ namespace bnio::detail {
     async_io::datagram_socket_view socket, const_buffer buffer,
     const ip::endpoint& endpoint, int flags) {
   return datagram_send_to_model(socket, buffer, endpoint, flags);
-}
-
-[[nodiscard]] inline auto make_descriptor_read_request(
-    async_io::descriptor_view descriptor, mutable_buffer buffer) {
-  return descriptor_read_model(descriptor, buffer);
-}
-
-[[nodiscard]] inline auto make_descriptor_write_request(
-    async_io::descriptor_view descriptor, const_buffer buffer) {
-  return descriptor_write_model(descriptor, buffer);
-}
-
-[[nodiscard]] inline auto make_random_access_read_request(
-    async_io::random_access_file file, mutable_buffer buffer,
-    std::uint64_t offset) {
-  return random_access_read_model(file, buffer, offset);
-}
-
-[[nodiscard]] inline auto make_random_access_write_request(
-    async_io::random_access_file file, const_buffer buffer,
-    std::uint64_t offset) {
-  return random_access_write_model(file, buffer, offset);
 }
 
 [[nodiscard]] inline auto make_accept_request(

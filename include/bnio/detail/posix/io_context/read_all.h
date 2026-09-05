@@ -69,107 +69,12 @@ class socket_read_all_state {
   bool eager = true;
 };
 
-/**
- * State for a streaming descriptor read-all operation.
- *
- * Each step reads at the kernel file position, which the kernel advances
- * naturally on every successful read.
- */
-class descriptor_read_all_state {
- public:
-  static constexpr bool zero_byte_is_error = false;
+}  // namespace bnio::detail
 
-  descriptor_read_all_state(io_context& context,
-                            async_io::descriptor_view descriptor,
-                            mutable_buffer buffer) noexcept
-      : context(&context), descriptor(descriptor), buffer(buffer) {}
+#include <bnio/detail/posix/io_context/descriptor_read_all.h>
+#include <bnio/detail/posix/io_context/random_access_read_all.h>
 
-  [[nodiscard]] std::size_t remaining() const noexcept {
-    return buffer.size() - transferred;
-  }
-
-  [[nodiscard]] bool empty() const noexcept { return buffer.size() == 0; }
-
-  [[nodiscard]] mutable_buffer current_buffer() const noexcept {
-    auto* data = static_cast<char*>(buffer.data());
-    return mutable_buffer(data + transferred, remaining());
-  }
-
-  [[nodiscard]] auto make_sender() noexcept {
-    return native_io_sender(
-        *context, make_descriptor_read_request(descriptor, current_buffer()),
-        adaptive_eager_control<descriptor_read_all_state>{this});
-  }
-
-  void advance(std::size_t bytes) noexcept {
-    transferred += bytes;
-    if (transferred >= buffer.size()) {
-      done = true;
-    }
-  }
-
-  io_context* context;
-  async_io::descriptor_view descriptor;
-  mutable_buffer buffer;
-  std::size_t transferred = 0;
-  bool done = false;
-  // Adaptive eager probing: cleared when the previous step had a short
-  // transfer, so the next step skips the immediate-completion probe.
-  bool eager = true;
-};
-
-/**
- * State for a positioned read-all operation on a random access file.
- *
- * Every step passes an explicit offset (offset + transferred); the kernel
- * file position is never observed or advanced.
- */
-class random_access_read_all_state {
- public:
-  static constexpr bool zero_byte_is_error = false;
-
-  random_access_read_all_state(io_context& context,
-                               async_io::random_access_file file,
-                               mutable_buffer buffer,
-                               std::uint64_t offset) noexcept
-      : context(&context), file(file), buffer(buffer), offset(offset) {}
-
-  [[nodiscard]] std::size_t remaining() const noexcept {
-    return buffer.size() - transferred;
-  }
-
-  [[nodiscard]] bool empty() const noexcept { return buffer.size() == 0; }
-
-  [[nodiscard]] mutable_buffer current_buffer() const noexcept {
-    auto* data = static_cast<char*>(buffer.data());
-    return mutable_buffer(data + transferred, remaining());
-  }
-
-  [[nodiscard]] auto make_sender() noexcept {
-    return native_io_sender(
-        *context,
-        make_random_access_read_request(file, current_buffer(),
-                                        offset + transferred),
-        adaptive_eager_control<random_access_read_all_state>{this});
-  }
-
-  void advance(std::size_t bytes) noexcept {
-    transferred += bytes;
-    if (transferred >= buffer.size()) {
-      done = true;
-    }
-  }
-
-  io_context* context;
-  async_io::random_access_file file;
-  mutable_buffer buffer;
-  std::uint64_t offset;
-  std::size_t transferred = 0;
-  bool done = false;
-  // Adaptive eager probing: cleared when the previous step had a short
-  // transfer, so the next step skips the immediate-completion probe.
-  bool eager = true;
-};
+namespace bnio::detail {
 
 // read_all_sender reuses write_all_sender with a read-specific state.
 template <class State>

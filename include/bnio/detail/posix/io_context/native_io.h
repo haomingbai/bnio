@@ -78,57 +78,12 @@ inline auto io_context::async_send_to(async_io::datagram_socket_view socket,
                                              socket, buffer, endpoint, flags));
 }
 
-inline auto io_context::async_read(async_io::descriptor_view descriptor,
-                                   mutable_buffer buffer) {
-  return detail::write_all_sender<detail::descriptor_read_all_state>(
-      detail::descriptor_read_all_state(*this, descriptor, buffer));
-}
+}  // namespace bnio
 
-inline auto io_context::async_read_some(async_io::descriptor_view descriptor,
-                                        mutable_buffer buffer) {
-  return detail::native_io_sender(
-      *this, detail::make_descriptor_read_request(descriptor, buffer));
-}
+#include <bnio/detail/posix/io_context/descriptor_file_io.h>
+#include <bnio/detail/posix/io_context/random_access_file_io.h>
 
-inline auto io_context::async_write(async_io::descriptor_view descriptor,
-                                    const_buffer buffer) {
-  return detail::write_all_sender(
-      detail::descriptor_write_all_state(*this, descriptor, buffer));
-}
-
-inline auto io_context::async_write_some(async_io::descriptor_view descriptor,
-                                         const_buffer buffer) {
-  return detail::native_io_sender(
-      *this, detail::make_descriptor_write_request(descriptor, buffer));
-}
-
-inline auto io_context::async_read(async_io::random_access_file file,
-                                   mutable_buffer buffer,
-                                   std::uint64_t offset) {
-  return detail::write_all_sender<detail::random_access_read_all_state>(
-      detail::random_access_read_all_state(*this, file, buffer, offset));
-}
-
-inline auto io_context::async_read_some(async_io::random_access_file file,
-                                        mutable_buffer buffer,
-                                        std::uint64_t offset) {
-  return detail::native_io_sender(
-      *this, detail::make_random_access_read_request(file, buffer, offset));
-}
-
-inline auto io_context::async_write(async_io::random_access_file file,
-                                    const_buffer buffer,
-                                    std::uint64_t offset) {
-  return detail::write_all_sender(
-      detail::random_access_write_all_state(*this, file, buffer, offset));
-}
-
-inline auto io_context::async_write_some(async_io::random_access_file file,
-                                         const_buffer buffer,
-                                         std::uint64_t offset) {
-  return detail::native_io_sender(
-      *this, detail::make_random_access_write_request(file, buffer, offset));
-}
+namespace bnio {
 
 inline auto io_context::async_accept(async_io::stream_socket_view socket,
                                      int flags) {
@@ -214,58 +169,6 @@ auto io_context::basic_scheduler<Kind>::async_send_to(
     async_io::datagram_socket_view socket, const_buffer buffer,
     const ip::endpoint& endpoint, int flags) const {
   return context_->async_send_to(socket, buffer, endpoint, flags);
-}
-
-template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_read(
-    async_io::descriptor_view descriptor, mutable_buffer buffer) const {
-  return context_->async_read(descriptor, buffer);
-}
-
-template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_read_some(
-    async_io::descriptor_view descriptor, mutable_buffer buffer) const {
-  return context_->async_read_some(descriptor, buffer);
-}
-
-template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_write(
-    async_io::descriptor_view descriptor, const_buffer buffer) const {
-  return context_->async_write(descriptor, buffer);
-}
-
-template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_write_some(
-    async_io::descriptor_view descriptor, const_buffer buffer) const {
-  return context_->async_write_some(descriptor, buffer);
-}
-
-template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_read(
-    async_io::random_access_file file, mutable_buffer buffer,
-    std::uint64_t offset) const {
-  return context_->async_read(file, buffer, offset);
-}
-
-template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_read_some(
-    async_io::random_access_file file, mutable_buffer buffer,
-    std::uint64_t offset) const {
-  return context_->async_read_some(file, buffer, offset);
-}
-
-template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_write(
-    async_io::random_access_file file, const_buffer buffer,
-    std::uint64_t offset) const {
-  return context_->async_write(file, buffer, offset);
-}
-
-template <io_context::schedule_kind Kind>
-auto io_context::basic_scheduler<Kind>::async_write_some(
-    async_io::random_access_file file, const_buffer buffer,
-    std::uint64_t offset) const {
-  return context_->async_write_some(file, buffer, offset);
 }
 
 template <io_context::schedule_kind Kind>

@@ -67,7 +67,12 @@ This repository is a CMake-based C++20 async I/O library.
 - `linux/io_uring_context_base/options.h` — `io_uring_context_options`.
 - `linux/io_uring_operations.h` — umbrella for concrete operation types.
 - `linux/io_uring_operations/core.h` — nop, timeout, and internal operations.
-- `linux/io_uring_operations/file.h` — regular-file read/write operations.
+- `linux/io_uring_operations/file.h` — aggregate for streaming and positioned
+  file read/write operations.
+- `linux/io_uring_operations/descriptor_file.h` — streaming descriptor
+  read/write operations.
+- `linux/io_uring_operations/random_access_file.h` — positioned random-access
+  file read/write operations.
 - `linux/io_uring_operations/poll.h` — descriptor poll operations.
 - `linux/io_uring_operations/resolve.h` — DNS resolution operations.
 - `linux/io_uring_operations/socket.h` — socket accept/connect/read/write operations.
@@ -83,7 +88,14 @@ This repository is a CMake-based C++20 async I/O library.
 - `bsd/kqueue_helper.h` — readiness registration builder used by passive I/O operations.
 - `bsd/kqueue_operations.h` — umbrella for concrete kqueue operation types.
 - `bsd/kqueue_operations/core.h` — post, nop, and raw operations.
-- `bsd/kqueue_operations/file.h` — start-time positioned file I/O operations and low-level readiness operations.
+- `bsd/kqueue_operations/file.h` — aggregate for streaming and positioned
+  file read/write operations.
+- `bsd/kqueue_operations/file_common.h` — shared helpers for kqueue file
+  read/write operations.
+- `bsd/kqueue_operations/descriptor_file.h` — streaming descriptor read/write
+  operations and low-level readiness operations.
+- `bsd/kqueue_operations/random_access_file.h` — positioned random-access file
+  read/write operations.
 - `bsd/kqueue_operations/poll.h` — descriptor poll operations and sender.
 - `bsd/kqueue_operations/resolve.h` — DNS resolution operations.
 - `bsd/kqueue_operations/socket.h` — objectized nonblocking socket operations and typed senders.
@@ -106,8 +118,13 @@ High-level async runtime, stream owners, and buffer types.
 - `detail/posix/io_context/native_io.h` — shared context/scheduler forwarding
   functions; selects backend request factories after the complete class
   definition.
-- `detail/posix/io_context/timer_wait.h` and `write_all.h` — shared timer wait and
-  composed full-write sender templates.
+- `detail/posix/io_context/timer_wait.h`, `read_all.h`, and `write_all.h` —
+  shared timer wait and composed full-read/full-write sender templates; the
+  read/write-all operation states are split by access kind into
+  `descriptor_read_all.h`, `descriptor_write_all.h`, `random_access_read_all.h`,
+  and `random_access_write_all.h`.
+- `detail/posix/io_context/descriptor_file_io.h` and `random_access_file_io.h` —
+  context/scheduler file I/O forwarding definitions, split by access kind.
 - `detail/{linux,bsd}/io_context_native_io/` — backend-specific request
   adapters and factories (plus Linux SQE models); they remain explicit because
   readiness/retry and SQE/CQE lifecycles cannot be represented by an alias
