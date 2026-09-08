@@ -171,10 +171,17 @@ bnio::io_context ctx;
 
 auto post = ctx.get_post_scheduler();       // schedule() always posts.
 auto dispatch = ctx.get_dispatch_scheduler(); // schedule() may run inline.
+auto defer = ctx.get_defer_scheduler();     // schedule() and I/O always go to the shared queue.
 ```
 
 The scheduler is passed to stream factories such as
 `socket.async_read(scheduler, buffer)`.
+
+The defer scheduler routes every submission it initiates — `schedule()` and
+all I/O operations — through the shared queues, bypassing the worker-local
+queues entirely, so any worker can take the work. Use it where pinning work
+to the publishing worker's connection affinity is undesirable, such as an
+accept loop whose re-arms should rotate across all workers.
 
 ## 2. Operation types
 

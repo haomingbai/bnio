@@ -70,12 +70,15 @@ class context_eager_control {
  * the corresponding filter fires — while any other result completes
  * immediately on the CPU queue.
  *
+ * @tparam Kind     Schedule kind controlling the publish path (defer
+ *                  publishes through the shared queue only).
  * @tparam Request  Layer-2 kqueue request model owning the native call.
  * @tparam Control  Eager-mode predicate returning whether the start step
  *                  may run.
  * @tparam Receiver Downstream receiver.
  */
-template <class Request, class Control, class Receiver>
+template <io_context::schedule_kind Kind, class Request, class Control,
+          class Receiver>
 class native_io_operation : public io_context::operation_base {
  public:
   /** Creates the operation state bound to the context, request, control,
@@ -204,16 +207,24 @@ class native_io_operation : public io_context::operation_base {
 
  private:
   /** Publishes to the CPU queue, completing inline when the context is
-   *  already stopping and rejected the publish. */
+   *  already stopping and rejected the publish. Honors the schedule kind:
+   *  the defer kind routes through the shared queue only, skipping the
+   *  worker-local fast path (io_context::publish_cpu_deferred). */
   void publish_cpu_or_complete_inline() noexcept {
-    if (!context_->publish_cpu(*this)) {
-      // Context already stopping: complete inline instead of stranding.
-      execute();
+    if constexpr (Kind == io_context::schedule_kind::defer) {
+      if (!context_->publish_cpu_deferred(*this)) {
+        execute();
+      }
+    } else {
+      if (!context_->publish_cpu(*this)) {
+        execute();
+      }
     }
   }
 
   /** Publishes the would-block result for passive registration, completing
-   *  inline through the stop channel when the context is already stopping. */
+   *  inline through the stop channel when the context is already stopping.
+   *  Honors the schedule kind like publish_cpu_or_complete_inline(). */
   void publish_io_or_complete_stopped() noexcept {
     // EAGAIN/EWOULDBLOCK: register with kqueue for readiness. Leave
     // completion_ as `value`; the kevent path will update this->result via
@@ -221,12 +232,22 @@ class native_io_operation : public io_context::operation_base {
     // (§9.2 guard). Eagerly setting value_with_ec here would leak a stale
     // EAGAIN ec when the eventual perform_io() succeeds.
     completion_ = completion_kind::value;
-    if (!context_->publish_io(*this)) {
-      // Context already stopping: mark stopped and complete inline instead
-      // of publishing into a context that is shutting down; execute()'s
-      // token arbitration decides the final delivery channel.
-      complete_submit_stopped();
-      execute();
+    if constexpr (Kind == io_context::schedule_kind::defer) {
+      if (!context_->publish_io_deferred(*this)) {
+        // Context already stopping: mark stopped and complete inline instead
+        // of publishing into a context that is shutting down; execute()'s
+        // token arbitration decides the final delivery channel.
+        complete_submit_stopped();
+        execute();
+      }
+    } else {
+      if (!context_->publish_io(*this)) {
+        // Context already stopping: mark stopped and complete inline instead
+        // of publishing into a context that is shutting down; execute()'s
+        // token arbitration decides the final delivery channel.
+        complete_submit_stopped();
+        execute();
+      }
     }
   }
 
@@ -253,7 +274,8 @@ class native_io_operation : public io_context::operation_base {
  * Completion signatures are forwarded from the request type. The optional
  * control overrides the default eager-mode predicate.
  */
-template <class Request, class Control = context_eager_control>
+template <class Request, class Control = context_eager_control,
+          io_context::schedule_kind Kind = io_context::schedule_kind::post>
 class native_io_sender {
  public:
   /** Completion signatures forwarded from the request type. */
@@ -277,7 +299,7 @@ class native_io_sender {
    *  created operation state. */
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return native_io_operation<Request, Control,
+    return native_io_operation<Kind, Request, Control,
                                std::remove_cvref_t<Receiver> >(
         *context_, std::move(request_), std::move(control_),
         std::move(receiver));
@@ -289,7 +311,7 @@ class native_io_sender {
     requires std::copy_constructible<Request> &&
              std::copy_constructible<Control>
   auto connect(Receiver receiver) const& {
-    return native_io_operation<Request, Control,
+    return native_io_operation<Kind, Request, Control,
                                std::remove_cvref_t<Receiver> >(
         *context_, request_, control_, std::move(receiver));
   }
@@ -307,9 +329,11 @@ class native_io_sender {
  * eager data step — and the run loop translates the fired filter's
  * readiness into the poll mask without performing an extra data syscall.
  *
+ * @tparam Kind     Schedule kind controlling the publish path (defer
+ *                  publishes through the shared queue only).
  * @tparam Receiver Downstream receiver.
  */
-template <class Receiver>
+template <io_context::schedule_kind Kind, class Receiver>
 class native_poll_operation : public io_context::operation_base {
  public:
   /** Creates the operation state bound to the context, descriptor, mask,
@@ -348,20 +372,37 @@ class native_poll_operation : public io_context::operation_base {
       // Token cancel at start: mark stopped; execute()'s arbitration
       // delivers set_stopped (token wins) or set_value(operation_canceled).
       completion_ = completion_kind::stopped;
-      if (!context_->publish_cpu(*this)) {
-        // Context already stopping: complete inline instead of stranding.
-        execute();
+      if constexpr (Kind == io_context::schedule_kind::defer) {
+        if (!context_->publish_cpu_deferred(*this)) {
+          // Context already stopping: complete inline instead of stranding.
+          execute();
+        }
+      } else {
+        if (!context_->publish_cpu(*this)) {
+          // Context already stopping: complete inline instead of stranding.
+          execute();
+        }
       }
       return;
     }
 
     completion_ = completion_kind::value;
-    if (!context_->publish_io(*this)) {
-      // Context already stopping: mark stopped and complete inline instead
-      // of publishing into a context that is shutting down; execute()'s
-      // token arbitration decides the final delivery channel.
-      complete_submit_stopped();
-      execute();
+    if constexpr (Kind == io_context::schedule_kind::defer) {
+      if (!context_->publish_io_deferred(*this)) {
+        // Context already stopping: mark stopped and complete inline instead
+        // of publishing into a context that is shutting down; execute()'s
+        // token arbitration decides the final delivery channel.
+        complete_submit_stopped();
+        execute();
+      }
+    } else {
+      if (!context_->publish_io(*this)) {
+        // Context already stopping: mark stopped and complete inline instead
+        // of publishing into a context that is shutting down; execute()'s
+        // token arbitration decides the final delivery channel.
+        complete_submit_stopped();
+        execute();
+      }
     }
   }
 
@@ -423,6 +464,7 @@ class native_poll_operation : public io_context::operation_base {
 };
 
 /** Sender for descriptor polling on the kqueue backend. */
+template <io_context::schedule_kind Kind = io_context::schedule_kind::post>
 class native_poll_sender {
  public:
   /** Completes with the ready poll mask, or through the error, cancel, or
@@ -438,7 +480,7 @@ class native_poll_sender {
   /** Connects the sender to a receiver, creating the poll operation state. */
   template <class Receiver>
   auto connect(Receiver receiver) const {
-    return native_poll_operation<std::remove_cvref_t<Receiver> >(
+    return native_poll_operation<Kind, std::remove_cvref_t<Receiver> >(
         *context_, descriptor_, poll_mask_, std::move(receiver));
   }
 
@@ -460,7 +502,7 @@ class native_poll_sender {
  *
  * @tparam Receiver Downstream receiver.
  */
-template <class Receiver>
+template <io_context::schedule_kind Kind, class Receiver>
 class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
  public:
   /** Creates the operation state bound to the context, query, result
@@ -478,9 +520,16 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
     // Token check at the start observation point: a cancel here is marked
     // and execute() delivers set_stopped for it.
     canceled_ = stop_requested(receiver_);
-    if (!context_->publish_cpu(*this)) {
-      // Context already stopping: complete inline instead of stranding.
-      execute();
+    if constexpr (Kind == io_context::schedule_kind::defer) {
+      if (!context_->publish_cpu_deferred(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
+    } else {
+      if (!context_->publish_cpu(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
     }
   }
 
@@ -519,6 +568,7 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
 };
 
 /** Sender for DNS resolution on the context CPU queue. */
+template <io_context::schedule_kind Kind = io_context::schedule_kind::post>
 class resolve_sender {
  public:
   /** Completes with the resolved endpoint count, or through the error,
@@ -535,7 +585,7 @@ class resolve_sender {
    *  operation state. */
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return resolve_operation<std::remove_cvref_t<Receiver> >(
+    return resolve_operation<Kind, std::remove_cvref_t<Receiver> >(
         *context_, std::move(query_), result_, std::move(receiver));
   }
 
@@ -543,7 +593,7 @@ class resolve_sender {
    *  operation state. */
   template <class Receiver>
   auto connect(Receiver receiver) const& {
-    return resolve_operation<std::remove_cvref_t<Receiver> >(
+    return resolve_operation<Kind, std::remove_cvref_t<Receiver> >(
         *context_, query_, result_, std::move(receiver));
   }
 
@@ -552,6 +602,24 @@ class resolve_sender {
   async_io::dns_query query_;
   async_io::dns_result_view result_;
 };
+
+/** Creates a native I/O sender honoring the schedule kind. Function-template
+ *  factories allow the defer call sites to pass Kind explicitly while Request
+ *  and Control stay deduced (class templates cannot mix partial explicit
+ *  specification with CTAD). */
+template <io_context::schedule_kind Kind, class Request,
+          class Control = context_eager_control>
+[[nodiscard]] auto make_io_sender(io_context& context,
+                                  Request request) noexcept {
+  return native_io_sender<Request, Control, Kind>(context, std::move(request));
+}
+
+template <io_context::schedule_kind Kind, class Request, class Control>
+[[nodiscard]] auto make_io_sender(io_context& context, Request request,
+                                  Control control) noexcept {
+  return native_io_sender<Request, Control, Kind>(context, std::move(request),
+                                                  std::move(control));
+}
 
 }  // namespace bnio::detail
 

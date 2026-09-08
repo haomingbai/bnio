@@ -17,6 +17,7 @@ namespace bnio::detail {
  * Each step writes at the kernel file position, which the kernel advances
  * naturally on every successful write.
  */
+template <io_context::schedule_kind Kind>
 class stream_file_write_all_state {
  public:
   static constexpr bool zero_byte_is_error = true;
@@ -38,9 +39,9 @@ class stream_file_write_all_state {
   }
 
   [[nodiscard]] auto make_sender() noexcept {
-    return native_io_sender(
+    return make_io_sender<Kind>(
         *context, make_stream_file_write_request(descriptor, current_buffer()),
-        adaptive_eager_control<stream_file_write_all_state>{this});
+        adaptive_eager_control<stream_file_write_all_state<Kind>>{this});
   }
 
   void advance(std::size_t bytes) noexcept {

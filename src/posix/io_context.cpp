@@ -297,4 +297,8 @@ io_context::post_scheduler io_context::get_post_scheduler() noexcept {
   return post_scheduler(*this);
 }
 
+io_context::defer_scheduler io_context::get_defer_scheduler() noexcept {
+  return defer_scheduler(*this);
+}
+
 }  // namespace bnio

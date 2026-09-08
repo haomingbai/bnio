@@ -58,10 +58,12 @@ namespace bnio::detail {
   return connect_model(socket, endpoint);
 }
 
+/** Creates the descriptor-poll sender for the context. */
+template <io_context::schedule_kind Kind = io_context::schedule_kind::post>
 [[nodiscard]] inline auto make_poll_sender(io_context& context,
                                            async_io::descriptor_view descriptor,
                                            unsigned poll_mask) {
-  return native_io_sender(context, poll_model(descriptor, poll_mask));
+  return make_io_sender<Kind>(context, poll_model(descriptor, poll_mask));
 }
 
 }  // namespace bnio::detail

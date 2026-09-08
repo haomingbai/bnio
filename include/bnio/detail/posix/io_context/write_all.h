@@ -33,6 +33,7 @@ class adaptive_eager_control {
   State* state_;
 };
 
+template <io_context::schedule_kind Kind>
 class socket_write_all_state {
  public:
   static constexpr bool zero_byte_is_error = true;
@@ -54,9 +55,9 @@ class socket_write_all_state {
   }
 
   [[nodiscard]] auto make_sender() noexcept {
-    return native_io_sender(
+    return make_io_sender<Kind>(
         *context, make_stream_write_request(socket, current_buffer(), flags),
-        adaptive_eager_control<socket_write_all_state>{this});
+        adaptive_eager_control<socket_write_all_state<Kind>>{this});
   }
 
   void advance(std::size_t bytes) noexcept {

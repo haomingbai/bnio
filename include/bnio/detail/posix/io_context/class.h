@@ -38,14 +38,44 @@ namespace bnio {
 enum class ssl_handshake_type;
 
 namespace detail {
+
+/**
+ * Scheduling policy used by io_context scheduler handles.
+ *
+ * Lives at bnio::detail scope so the forward declarations below and the
+ * detail operation templates can name it before and after the io_context
+ * class body; io_context re-exposes it as io_context::schedule_kind.
+ */
+enum class schedule_kind {
+  /**
+   * Complete schedule() inline when start() runs on the context thread.
+   */
+  dispatch,
+
+  /**
+   * Always post schedule() completion through the context run loop.
+   */
+  post,
+
+  /**
+   * Always publish schedule() and scheduler-initiated I/O through the
+   * shared queue, skipping the worker-local fast path, so completions
+   * are drained by whichever worker reaches the queue first.
+   */
+  defer,
+};
+
+template <schedule_kind Kind>
 class stream_file_write_all_state;
+template <schedule_kind Kind>
 class random_access_write_all_state;
+template <schedule_kind Kind>
 class socket_write_all_state;
-template <class Request, class Control, class Receiver>
+template <schedule_kind Kind, class Request, class Control, class Receiver>
 class native_io_operation;
-template <class Receiver>
+template <schedule_kind Kind, class Receiver>
 class native_poll_operation;
-template <class Receiver>
+template <schedule_kind Kind, class Receiver>
 class resolve_operation;
 }  // namespace detail
 
@@ -56,7 +86,7 @@ class resolve_operation;
  *
  * 1. Event loop host — run() drives the selected io_uring or kqueue loop;
  *    each thread calling run() creates its own native context.
- * 2. Scheduler factory — produces dispatch and post schedulers.
+ * 2. Scheduler factory — produces dispatch, post, and defer schedulers.
  * 3. Passive I/O backend — publishes scheduler I/O to the running worker's
  *    own queue or, for every other producer, to the shared queue that a
  *    worker drains on its owning native-context thread.
@@ -96,18 +126,12 @@ class BNIO_EXPORT io_context {
 
   /**
    * Scheduling policy used by io_context scheduler handles.
+   *
+   * The enumerator set lives at bnio::detail scope so the detail operation
+   * templates can name it; this alias keeps the io_context::schedule_kind
+   * spelling.
    */
-  enum class schedule_kind {
-    /**
-     * Complete schedule() inline when start() runs on the context thread.
-     */
-    dispatch,
-
-    /**
-     * Always post schedule() completion through the context run loop.
-     */
-    post,
-  };
+  using schedule_kind = detail::schedule_kind;
 
   /**
    * Sender returned by io_context schedulers' schedule() member.
@@ -171,6 +195,17 @@ class BNIO_EXPORT io_context {
             complete();
             return;
           }
+        }
+
+        // defer never takes the worker-local fast path: even when start()
+        // runs on a context worker, the completion is enqueued on the
+        // shared queue so any worker can drain it instead of staying
+        // pinned to the publishing worker.
+        if constexpr (Kind == schedule_kind::defer) {
+          if (!context_->publish_cpu_deferred(*this)) {
+            complete();
+          }
+          return;
         }
 
         // The submission critical section (locked state check + enqueue)
@@ -501,6 +536,12 @@ class BNIO_EXPORT io_context {
   using post_scheduler = basic_scheduler<schedule_kind::post>;
 
   /**
+   * Scheduler whose schedule() and scheduler-initiated I/O always go
+   * through the shared queue.
+   */
+  using defer_scheduler = basic_scheduler<schedule_kind::defer>;
+
+  /**
    * Creates a context with default options.
    */
   io_context() noexcept;
@@ -623,19 +664,29 @@ class BNIO_EXPORT io_context {
    */
   [[nodiscard]] post_scheduler get_post_scheduler() noexcept;
 
+  /**
+   * Returns a scheduler whose schedule() and scheduler-initiated I/O are
+   * always published through the shared queue, never onto a worker's
+   * local queue.
+   */
+  [[nodiscard]] defer_scheduler get_defer_scheduler() noexcept;
+
  private:
   friend class steady_timer;
   friend class detail::timer_operation_base;
+  template <schedule_kind Kind>
   friend class detail::stream_file_write_all_state;
+  template <schedule_kind Kind>
   friend class detail::random_access_write_all_state;
+  template <schedule_kind Kind>
   friend class detail::socket_write_all_state;
   template <class Receiver>
   friend class detail::timer_wait_operation;
-  template <class Request, class Control, class Receiver>
+  template <schedule_kind Kind, class Request, class Control, class Receiver>
   friend class detail::native_io_operation;
-  template <class Receiver>
+  template <schedule_kind Kind, class Receiver>
   friend class detail::native_poll_operation;
-  template <class Receiver>
+  template <schedule_kind Kind, class Receiver>
   friend class detail::resolve_operation;
   friend class join_sender;
 
@@ -643,6 +694,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender that reads bytes from a non-owning stream socket
    * view and completes with bytes transferred.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
                                 mutable_buffer buffer, int flags = 0);
 
@@ -650,6 +702,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender for one socket read operation through a non-owning
    * stream socket view.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read_some(async_io::stream_socket_view socket,
                                      mutable_buffer buffer, int flags = 0);
 
@@ -657,6 +710,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender that writes the whole buffer through a non-owning
    * stream socket view.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
                                  const_buffer buffer, int flags = 0);
 
@@ -664,6 +718,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender for one write operation through a non-owning
    * stream socket view.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write_some(async_io::stream_socket_view socket,
                                       const_buffer buffer, int flags = 0);
 
@@ -671,12 +726,14 @@ class BNIO_EXPORT io_context {
    * Creates a sender that reads bytes from a file descriptor, advancing the
    * kernel file position.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
                                 mutable_buffer buffer);
 
   /**
    * Creates a sender for one streaming descriptor read operation.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
                                      mutable_buffer buffer);
 
@@ -684,12 +741,14 @@ class BNIO_EXPORT io_context {
    * Creates a sender that writes the whole buffer to a file descriptor,
    * advancing the kernel file position.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
                                  const_buffer buffer);
 
   /**
    * Creates a sender for one streaming write operation to a file descriptor.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
                                       const_buffer buffer);
 
@@ -697,6 +756,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender that reads bytes from a random access file at an
    * explicit offset.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read(async_io::random_access_file file,
                                 mutable_buffer buffer, std::uint64_t offset);
 
@@ -704,6 +764,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender for one random access read operation at an explicit
    * offset.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read_some(async_io::random_access_file file,
                                      mutable_buffer buffer,
                                      std::uint64_t offset);
@@ -712,6 +773,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender that writes the whole buffer to a random access file at
    * an explicit offset.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write(async_io::random_access_file file,
                                  const_buffer buffer, std::uint64_t offset);
 
@@ -719,6 +781,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender for one positioned write operation to a random access
    * file.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write_some(async_io::random_access_file file,
                                       const_buffer buffer,
                                       std::uint64_t offset);
@@ -727,6 +790,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender that performs one datagram receive on a connected
    * socket.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
                                    mutable_buffer buffer, int flags = 0);
 
@@ -734,6 +798,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender that performs one datagram send on a connected
    * socket.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
                                 const_buffer buffer, int flags = 0);
 
@@ -741,33 +806,40 @@ class BNIO_EXPORT io_context {
    * Creates a sender that performs one datagram receive and stores the
    * source endpoint into @p endpoint.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
                                         mutable_buffer buffer,
-                                        ip::endpoint& endpoint, int flags = 0);
+                                        ip::endpoint& endpoint,
+                                        int flags = 0);
 
   /**
    * Creates a sender that performs one datagram send to @p endpoint,
    * without requiring a connected socket.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                    const_buffer buffer,
-                                   const ip::endpoint& endpoint, int flags = 0);
+                                   const ip::endpoint& endpoint,
+                                   int flags = 0);
   /**
    * Creates a sender that accepts one connection from a non-owning
    * listening socket view.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                   int flags = 0);
 
   /**
    * Creates a sender that connects a non-owning stream socket view.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                    const ip::endpoint& endpoint);
 
   /**
    * Creates a sender that waits for events on a file descriptor.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_poll(async_io::descriptor_view descriptor,
                                 unsigned poll_mask);
 
@@ -775,6 +847,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender that resolves a DNS query into caller-provided result
    * storage on the context run loop.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_resolve(async_io::dns_query query,
                                    async_io::dns_result_view result);
 
@@ -782,6 +855,7 @@ class BNIO_EXPORT io_context {
    * Creates a sender that resolves a host and service into caller-provided
    * result storage on the context run loop.
    */
+  template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_resolve(std::string_view host,
                                    std::string_view service,
                                    async_io::dns_result_view result);
@@ -829,6 +903,37 @@ class BNIO_EXPORT io_context {
    * the critical section; the caller executes the operation afterwards.
    */
   [[nodiscard]] bool publish_cpu(
+      detail::native_operation_base& operation) noexcept;
+
+  /**
+   * Publishes an I/O operation through the shared queue only, without the
+   * worker-local fast path.
+   *
+   * This is publish_io()'s shared path factored out for the defer schedule
+   * kind: the operation must not stay on the publishing worker's own
+   * queue, so even a running worker goes through the submit_lock critical
+   * section.
+   *
+   * @return true if the operation was published; false if the context is
+   *         already stopping and the operation was NOT enqueued — the
+   *         caller must complete it inline (set_stopped), mirroring the
+   *         abort path.
+   */
+  [[nodiscard]] bool publish_io_deferred(operation_base& operation) noexcept;
+
+  /**
+   * Publishes CPU work through the shared queue only, without the
+   * worker-local fast path.
+   *
+   * Same relationship to publish_cpu() as publish_io_deferred() has to
+   * publish_io(): identical critical section, minus the local fast path.
+   *
+   * @return true if the operation was published; false if the context is
+   *         already stopping and the operation was NOT enqueued — the
+   *         caller must complete it inline (e.g. set_stopped) so it never
+   *         strands.
+   */
+  [[nodiscard]] bool publish_cpu_deferred(
       detail::native_operation_base& operation) noexcept;
 
   /**

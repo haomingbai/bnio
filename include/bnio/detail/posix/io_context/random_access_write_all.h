@@ -17,6 +17,7 @@ namespace bnio::detail {
  * Every step passes an explicit offset (offset + transferred); the kernel
  * file position is never observed or advanced.
  */
+template <io_context::schedule_kind Kind>
 class random_access_write_all_state {
  public:
   static constexpr bool zero_byte_is_error = true;
@@ -39,11 +40,11 @@ class random_access_write_all_state {
   }
 
   [[nodiscard]] auto make_sender() noexcept {
-    return native_io_sender(
+    return make_io_sender<Kind>(
         *context,
         make_random_access_write_request(file, current_buffer(),
                                          offset + transferred),
-        adaptive_eager_control<random_access_write_all_state>{this});
+        adaptive_eager_control<random_access_write_all_state<Kind>>{this});
   }
 
   void advance(std::size_t bytes) noexcept {

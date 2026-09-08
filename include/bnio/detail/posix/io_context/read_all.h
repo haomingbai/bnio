@@ -25,6 +25,7 @@ namespace bnio::detail {
  * write_all_done_predicate, write_all_operation,
  * and write_all_sender – work unchanged.
  */
+template <io_context::schedule_kind Kind>
 class socket_read_all_state {
  public:
   static constexpr bool zero_byte_is_error = false;
@@ -46,9 +47,9 @@ class socket_read_all_state {
   }
 
   [[nodiscard]] auto make_sender() noexcept {
-    return native_io_sender(
+    return make_io_sender<Kind>(
         *context, make_stream_read_request(socket, current_buffer(), flags),
-        adaptive_eager_control<socket_read_all_state>{this});
+        adaptive_eager_control<socket_read_all_state<Kind>>{this});
   }
 
   void advance(std::size_t bytes) noexcept {

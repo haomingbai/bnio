@@ -51,7 +51,15 @@ bool io_context::publish_io(operation_base& operation) noexcept {
     worker->publish_io(operation);
     return true;
   }
+  return publish_io_deferred(operation);
+}
 
+bool io_context::publish_io_deferred(operation_base& operation) noexcept {
+  // defer scheduling policy: never take the worker-local fast path, even
+  // when the caller runs on a worker of this context, so I/O initiated by
+  // the defer scheduler is not pinned to the publishing worker's
+  // connection affinity. This is publish_io()'s shared path verbatim.
+  //
   // Critical section, ordered against begin_stop() / ~io_context() by the
   // same submit_lock. Contains only state-involving work: check the shutdown
   // state, enqueue, and decide whether a sleeping worker must be woken.
@@ -77,7 +85,14 @@ bool io_context::publish_cpu(
     worker->post(operation);
     return true;
   }
+  return publish_cpu_deferred(operation);
+}
 
+bool io_context::publish_cpu_deferred(
+    detail::native_operation_base& operation) noexcept {
+  // defer scheduling policy: never take the worker-local fast path; see
+  // publish_io_deferred(). This is publish_cpu()'s shared path verbatim.
+  //
   // Critical section, ordered against begin_stop() / ~io_context() by the
   // same submit_lock. The critical section contains ONLY state-involving
   // work:
@@ -88,8 +103,8 @@ bool io_context::publish_cpu(
   // Operation execution (complete/execute) never happens here; the caller
   // runs it after publish_cpu returns.
   //
-  // publish_cpu publishes an operation ONLY while the context is not
-  // stopping; it assumes the publish happens against a running context.
+  // publish_cpu_deferred publishes an operation ONLY while the context is
+  // not stopping; it assumes the publish happens against a running context.
   // When the context is already stopping it does NOT enqueue (the queue may
   // no longer be drained) and returns false — the caller must then complete
   // the operation inline so it never strands.

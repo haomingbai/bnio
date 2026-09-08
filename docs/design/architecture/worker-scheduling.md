@@ -210,7 +210,8 @@ written by the native contexts' own cross-thread publication path:
 (`post()`/`publish_io()` from a foreign thread) write the shared channel
 directly, waking every suspended worker rather than just one. Directed wakeup
 targets the `io_context`-level publish paths (`publish_cpu()`, `publish_io()`,
-timer wakeups), where exactly one sleeping worker is enough. Each worker
+their deferred variants, timer wakeups), where exactly one sleeping worker is
+enough. Each worker
 therefore listens to **two** wake sources:
 
 1. its **per-worker** `wake_channel_` (directed wake);
@@ -352,6 +353,17 @@ once — the same "first non-empty source wins" order `fetch_cpu_task()` uses.
 Batch unfairness for the shared queue is accepted: io_uring and kqueue are
 batch-capable, and a worker that cannot handle a batch simply leaves it for the
 next fetch pass. There is no I/O stealing, on either queue.
+
+The defer scheduler bypasses this locality by construction: operations
+initiated through `io_context::get_defer_scheduler()` — `schedule()` and every
+I/O factory — publish through `io_context::publish_cpu_deferred()` /
+`io_context::publish_io_deferred()`, which never take the worker-local fast
+path even when the caller runs on the worker's own run-loop thread; they
+always enqueue on the shared queue inside the `submit_lock` critical section.
+The wakeup protocol is unchanged: the global publication is paired with
+`io_context::wake_one_sleeping_locked()`, which directs a wake to exactly one
+sleeping worker through its per-worker wake channel and falls back to the
+shared broadcast channel when nobody is suspended.
 
 Standalone kqueue contexts (no `global_state_`) always take the local path; the
 io_uring backend has no standalone mode. When the io_uring submission queue is

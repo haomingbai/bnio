@@ -10,7 +10,7 @@ worker ownership, timers, and source implementation live under
 
 1. **Event loop host** — `run()` drives the selected io_uring or kqueue loop.
    Each thread calling `run()` creates a native context directly.
-2. **Scheduler factory** — produces dispatch and post schedulers.
+2. **Scheduler factory** — produces dispatch, post, and defer schedulers.
 3. **Passive I/O backend** — publishes scheduler I/O to the running worker's
    own queue or, for every other producer, to the shared queue that a worker
    drains on its owning native-context thread.
@@ -39,6 +39,8 @@ graph LR
     I["operation"] --> E["publish_io()"]
     E --> L["worker-local I/O queue (caller is a worker of this io_context)"]
     E --> Q["shared lower-priority I/O queue (all other producers)"]
+    I --> D["publish_io_deferred() (defer kind)"]
+    D --> Q
     L --> W["native context run loop takes all I/O"]
     Q --> W
     W --> U["prepare SQEs or readiness registrations"]
@@ -58,6 +60,20 @@ outer worker's handler may publish to a different context while
 `current_worker_native_` still points at the OUTER worker's native context, and
 the inner run loop never drains the outer worker's local queue. The check
 routes that publication to the shared queue instead of stranding it.
+
+`publish_io()` and `publish_cpu()` are each split into the local fast path and
+a deferred variant, `publish_io_deferred()` / `publish_cpu_deferred()`, which
+is the shared path verbatim: a `submit_lock` critical section that re-checks
+`life_state`, enqueues on the shared queue, and calls
+`wake_one_sleeping_locked()`. The defer scheduler kind routes every submission
+it initiates — `schedule()` and all I/O operations — through these variants and
+never takes the worker-local fast path, even when `start()` runs on a worker of
+this context, so accept re-arms and similar work rotate across all workers
+instead of staying pinned to the publishing worker's connection affinity. A
+`life_state` rejection (the context is already stopping) returns `false` and
+the caller completes the operation inline. Eager immediate completion is
+unchanged: a deferred operation still probes with a direct syscall at
+`start()`, and its completion is published through `publish_cpu_deferred()`.
 
 Workers give the CPU queue priority, then consume I/O: the local I/O queue
 first, the shared queue only when the local one is empty, taking the complete
@@ -116,7 +132,10 @@ before preparing or submitting SQEs, becoming that ring's designated issuer.
 
 High-level CPU work follows the same two paths as I/O: `publish_cpu()` posts to
 the running worker's own CPU queue when the caller is a worker of this context
-and to the shared CPU queue otherwise. Wakeup targets one sleeping worker
+and to the shared CPU queue otherwise. The deferred variants
+(`publish_cpu_deferred()` / `publish_io_deferred()`) always take the shared
+queue and carry the defer scheduler kind's traffic. Wakeup targets one sleeping
+worker
 through its per-worker wake channel (`wake_one_sleeping`), falling back to the
 shared broadcast channel when nobody is suspended. I/O uses the worker-local
 I/O queue when the caller is a worker of this context and the lower-priority
@@ -159,7 +178,15 @@ queued-I/O flush timer and active timer submission.
 Streams expose the high-level async I/O factories. Schedulers expose the
 lowest-layer factories for socket views, file descriptors, polling, DNS, and
 timers. Each factory returns a sender. Connecting a sender to a receiver and
-calling `start()` begins the asynchronous I/O.
+calling `start()` begins the asynchronous I/O. The submission policy travels as
+a compile-time template parameter, `io_context::schedule_kind` (`dispatch`,
+`post`, or `defer`; the enumerator set lives in `bnio::detail` and the class
+re-exposes the alias): the `io_context::async_*` member templates default to
+`post` and forward the kind to `basic_scheduler<Kind>::async_*`, which
+instantiates the detail native senders (`native_io_sender<Kind>`,
+`native_poll_operation<Kind, ...>`, `resolve_sender<Kind>`) and the composed
+read/write-all states per kind; the `post` and `dispatch` instantiation paths
+are unchanged.
 
 #### Stream Level
 
@@ -548,7 +575,7 @@ sequenceDiagram
     User->>Op: connect(receiver) → start()
     Op->>Ctx: publish_io(*this)
 
-    Note over Ctx: local I/O queue if the caller is a worker, else shared
+    Note over Ctx: local I/O queue if the caller is a worker, else shared; defer kind always takes the shared queue via publish_io_deferred()
     Ctx->>Worker: notify one worker if sleeping (shared path only)
     Worker->>UCtx: run(): CPU queue first
     UCtx->>UCtx: consume_io_tasks(): local_state_.pop_io_all(), then global_state_->pop_io_all()

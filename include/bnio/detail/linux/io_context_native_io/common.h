@@ -122,7 +122,8 @@ concept has_immediate_io = requires(Model& model) {
 #endif
 }
 
-template <class Model, class Control, class Receiver>
+template <io_context::schedule_kind Kind, class Model, class Control,
+          class Receiver>
 class native_io_operation : public io_context::operation_base {
  public:
   native_io_operation(io_context& context, Model model, Control control,
@@ -163,7 +164,7 @@ class native_io_operation : public io_context::operation_base {
       completion_ = completion_kind::stopped;
       this->result = 0;
       this->flags = 0;
-      if (!context_->publish_cpu(*this)) {
+      if (!publish_cpu_by_kind()) {
         // Context already stopping: complete inline instead of stranding.
         execute();
       }
@@ -175,7 +176,7 @@ class native_io_operation : public io_context::operation_base {
     }
 
     completion_ = completion_kind::value;
-    if (!context_->publish_io(*this)) {
+    if (!publish_io_by_kind()) {
       // Context already stopping: mark stopped and complete inline instead
       // of publishing into a context that is shutting down; execute()'s
       // token arbitration decides the final delivery channel.
@@ -226,6 +227,26 @@ class native_io_operation : public io_context::operation_base {
   }
 
  private:
+  /** Publishes to the CPU queue honoring the schedule kind: the defer kind
+   *  routes through the shared queue only, skipping the worker-local fast
+   *  path (io_context::publish_cpu_deferred). */
+  [[nodiscard]] bool publish_cpu_by_kind() noexcept {
+    if constexpr (Kind == io_context::schedule_kind::defer) {
+      return context_->publish_cpu_deferred(*this);
+    } else {
+      return context_->publish_cpu(*this);
+    }
+  }
+
+  /** Publishes to the I/O queues honoring the schedule kind. */
+  [[nodiscard]] bool publish_io_by_kind() noexcept {
+    if constexpr (Kind == io_context::schedule_kind::defer) {
+      return context_->publish_io_deferred(*this);
+    } else {
+      return context_->publish_io(*this);
+    }
+  }
+
   [[nodiscard]] bool try_complete_immediate() noexcept {
     if constexpr (has_immediate_io<Model>) {
       // The runtime switch gates eager probing; when disabled the operation
@@ -248,7 +269,7 @@ class native_io_operation : public io_context::operation_base {
       } else {
         completion_ = completion_kind::value;
       }
-      if (!context_->publish_cpu(*this)) {
+      if (!publish_cpu_by_kind()) {
         // Context already stopping: complete inline instead of stranding.
         execute();
       }
@@ -273,7 +294,8 @@ class native_io_operation : public io_context::operation_base {
   std::error_code error_;
 };
 
-template <class Model, class Control = context_eager_control>
+template <class Model, class Control = context_eager_control,
+          io_context::schedule_kind Kind = io_context::schedule_kind::post>
 class native_io_sender {
  public:
   using completion_signatures = typename Model::completion_signatures;
@@ -290,14 +312,16 @@ class native_io_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return native_io_operation<Model, Control, std::remove_cvref_t<Receiver> >(
+    return native_io_operation<Kind, Model, Control,
+                               std::remove_cvref_t<Receiver> >(
         *context_, std::move(model_), std::move(control_), std::move(receiver));
   }
 
   template <class Receiver>
     requires std::copy_constructible<Model> && std::copy_constructible<Control>
   auto connect(Receiver receiver) const& {
-    return native_io_operation<Model, Control, std::remove_cvref_t<Receiver> >(
+    return native_io_operation<Kind, Model, Control,
+                               std::remove_cvref_t<Receiver> >(
         *context_, model_, control_, std::move(receiver));
   }
 
@@ -307,7 +331,7 @@ class native_io_sender {
   Control control_;
 };
 
-template <class Receiver>
+template <io_context::schedule_kind Kind, class Receiver>
 class resolve_operation
     : public async_io::linux_native::io_uring_operation_base {
  public:
@@ -322,9 +346,16 @@ class resolve_operation
     // Token check at the start observation point: a cancel here is marked
     // and execute() delivers set_stopped for it.
     canceled_ = stop_requested(receiver_);
-    if (!context_->publish_cpu(*this)) {
-      // Context already stopping: complete inline instead of stranding.
-      execute();
+    if constexpr (Kind == io_context::schedule_kind::defer) {
+      if (!context_->publish_cpu_deferred(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
+    } else {
+      if (!context_->publish_cpu(*this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
+      }
     }
   }
 
@@ -361,6 +392,7 @@ class resolve_operation
   bool canceled_ = false;
 };
 
+template <io_context::schedule_kind Kind = io_context::schedule_kind::post>
 class resolve_sender {
  public:
   using completion_signatures = bexec::completion_signatures<
@@ -372,13 +404,13 @@ class resolve_sender {
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return resolve_operation<std::remove_cvref_t<Receiver> >(
+    return resolve_operation<Kind, std::remove_cvref_t<Receiver> >(
         *context_, std::move(query_), result_, std::move(receiver));
   }
 
   template <class Receiver>
   auto connect(Receiver receiver) const& {
-    return resolve_operation<std::remove_cvref_t<Receiver> >(
+    return resolve_operation<Kind, std::remove_cvref_t<Receiver> >(
         *context_, query_, result_, std::move(receiver));
   }
 
@@ -387,6 +419,23 @@ class resolve_sender {
   async_io::dns_query query_;
   async_io::dns_result_view result_;
 };
+
+/** Creates a native I/O sender honoring the schedule kind. Function-template
+ *  factories allow the defer call sites to pass Kind explicitly while Model
+ *  and Control stay deduced (class templates cannot mix partial explicit
+ *  specification with CTAD). */
+template <io_context::schedule_kind Kind, class Model,
+          class Control = context_eager_control>
+[[nodiscard]] auto make_io_sender(io_context& context, Model model) noexcept {
+  return native_io_sender<Model, Control, Kind>(context, std::move(model));
+}
+
+template <io_context::schedule_kind Kind, class Model, class Control>
+[[nodiscard]] auto make_io_sender(io_context& context, Model model,
+                                  Control control) noexcept {
+  return native_io_sender<Model, Control, Kind>(context, std::move(model),
+                                                std::move(control));
+}
 
 }  // namespace bnio::detail
 
