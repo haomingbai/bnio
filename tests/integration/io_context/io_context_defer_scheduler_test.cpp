@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
+#include <cerrno>
 #include <cstring>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -621,6 +624,117 @@ TEST(IoContextDeferSchedulerTest, defer_accept_echo_smoke) {
   EXPECT_EQ(client_read_state->size, payload.size());
   EXPECT_TRUE(std::memcmp(client_received.data(), payload.data(),
                           payload.size()) == 0);
+}
+
+// Socketpair helper for the defer eager-retention tests. Same pattern as
+// io_context_eager_optional_test.cpp.
+[[nodiscard]] std::array<int, 2> make_socketpair() {
+  int sockets[2] = {-1, -1};
+  const int rc = ::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets);
+  EXPECT_EQ(rc, 0);
+  return {sockets[0], sockets[1]};
+}
+
+// Regression guard for the defer I/O policy: with the eager runtime switch
+// ON, a defer-kind read still attempts the eager immediate probe — the
+// schedule policy keeps k_immediate enabled for every current kind. The
+// observation point is the socket receive queue right after start(),
+// before run(): the probe consumes the pending bytes synchronously on the
+// starting thread and publishes the completion through the shared CPU
+// queue, so the kernel buffer is already empty when the peek runs.
+TEST(IoContextDeferSchedulerTest,
+     defer_io_read_completes_eagerly_with_eager_on) {
+  bnio::io_context_options options;
+  options.enable_immediate_io = true;  // eager runtime switch explicitly on
+  bnio::io_context context(options);
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  auto sockets = make_socketpair();
+  bnio::tcp_socket receiver_socket(sockets[0]);
+  bnio::tcp_socket sender_socket(sockets[1]);
+
+  constexpr std::string_view payload = "defer-eager";
+  EXPECT_EQ(::send(sender_socket.native_handle(), payload.data(),
+                   payload.size(), MSG_NOSIGNAL),
+            static_cast<ssize_t>(payload.size()));
+
+  std::array<char, 32> bytes{};
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto operation = bexec::connect(
+      context.get_defer_scheduler().async_read_some(
+          receiver_socket.view(), bnio::buffer(bytes), 0),
+      std::move(receiver));
+  bexec::start(operation);
+
+  // The eager probe consumed the data during start(), before run().
+  std::array<char, 32> peek{};
+  const ssize_t peeked =
+      ::recv(receiver_socket.native_handle(), peek.data(), peek.size(),
+             MSG_PEEK | MSG_DONTWAIT);
+  EXPECT_EQ(peeked, -1);
+  EXPECT_EQ(errno, EAGAIN);
+
+  context.run();
+
+  // The completion is delivered through the shared CPU queue with the real
+  // payload.
+  EXPECT_EQ(state->signal, signal_kind::value);
+  EXPECT_EQ(state->size, payload.size());
+  EXPECT_TRUE(std::memcmp(bytes.data(), payload.data(), payload.size()) == 0);
+}
+
+// Write-side twin of the read guard: with the eager runtime switch ON, a
+// defer-kind write pushes the payload into the peer's receive queue during
+// start() — the eager probe runs on the starting thread for every kind
+// that keeps k_immediate enabled.
+TEST(IoContextDeferSchedulerTest,
+     defer_io_write_completes_eagerly_with_eager_on) {
+  bnio::io_context_options options;
+  options.enable_immediate_io = true;  // eager runtime switch explicitly on
+  bnio::io_context context(options);
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  auto sockets = make_socketpair();
+  bnio::tcp_socket sender_socket(sockets[0]);
+  bnio::tcp_socket receiver_socket(sockets[1]);
+
+  constexpr std::string_view payload = "defer-eager";
+  byte_receiver receiver;
+  receiver.context = &context;
+  auto state = receiver.state;
+
+  auto operation = bexec::connect(
+      context.get_defer_scheduler().async_write(sender_socket.view(),
+                                                bnio::buffer(payload),
+                                                MSG_NOSIGNAL),
+      std::move(receiver));
+  bexec::start(operation);
+
+  // The eager probe pushed the bytes into the peer's receive queue during
+  // start().
+  std::array<char, 32> peek{};
+  const ssize_t peeked =
+      ::recv(receiver_socket.native_handle(), peek.data(), peek.size(),
+             MSG_PEEK | MSG_DONTWAIT);
+  EXPECT_EQ(peeked, static_cast<ssize_t>(payload.size()));
+
+  context.run();
+
+  // The completion is delivered through the shared CPU queue and the peer
+  // receives the payload.
+  EXPECT_EQ(state->signal, signal_kind::value);
+  EXPECT_EQ(state->size, payload.size());
+  std::array<char, 32> got{};
+  EXPECT_EQ(::recv(receiver_socket.native_handle(), got.data(), got.size(), 0),
+            static_cast<ssize_t>(payload.size()));
+  EXPECT_TRUE(std::memcmp(got.data(), payload.data(), payload.size()) == 0);
 }
 
 }  // namespace

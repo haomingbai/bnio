@@ -227,28 +227,26 @@ class native_io_operation : public io_context::operation_base {
   }
 
  private:
-  /** Publishes to the CPU queue honoring the schedule kind: the defer kind
-   *  routes through the shared queue only, skipping the worker-local fast
+  /** Publishes to the CPU queue through the schedule policy: defer routes
+   *  through the shared queue only, skipping the worker-local fast
    *  path (io_context::publish_cpu_deferred). */
   [[nodiscard]] bool publish_cpu_by_kind() noexcept {
-    if constexpr (Kind == io_context::schedule_kind::defer) {
-      return context_->publish_cpu_deferred(*this);
-    } else {
-      return context_->publish_cpu(*this);
-    }
+    return schedule_policy<Kind>::publish_cpu(*context_, *this);
   }
 
-  /** Publishes to the I/O queues honoring the schedule kind. */
+  /** Publishes to the I/O queues through the schedule policy. */
   [[nodiscard]] bool publish_io_by_kind() noexcept {
-    if constexpr (Kind == io_context::schedule_kind::defer) {
-      return context_->publish_io_deferred(*this);
-    } else {
-      return context_->publish_io(*this);
-    }
+    return schedule_policy<Kind>::publish_io(*context_, *this);
   }
 
   [[nodiscard]] bool try_complete_immediate() noexcept {
-    if constexpr (has_immediate_io<Model>) {
+    // The schedule policy owns the eager gate: a kind opts out via
+    // k_immediate = false, which skips the probe regardless of the runtime
+    // eager switch. Every current kind keeps the probe enabled.
+    // has_immediate_io keeps the models without an eager probe (accept,
+    // connect) on the submission path.
+    if constexpr (schedule_policy<Kind>::k_immediate &&
+                  has_immediate_io<Model>) {
       // The runtime switch gates eager probing; when disabled the operation
       // goes straight to io_uring submission in start().
       if (!control_()) {
@@ -346,16 +344,9 @@ class resolve_operation
     // Token check at the start observation point: a cancel here is marked
     // and execute() delivers set_stopped for it.
     canceled_ = stop_requested(receiver_);
-    if constexpr (Kind == io_context::schedule_kind::defer) {
-      if (!context_->publish_cpu_deferred(*this)) {
-        // Context already stopping: complete inline instead of stranding.
-        execute();
-      }
-    } else {
-      if (!context_->publish_cpu(*this)) {
-        // Context already stopping: complete inline instead of stranding.
-        execute();
-      }
+    if (!schedule_policy<Kind>::publish_cpu(*context_, *this)) {
+      // Context already stopping: complete inline instead of stranding.
+      execute();
     }
   }
 

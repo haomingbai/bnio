@@ -136,7 +136,15 @@ class native_io_operation : public io_context::operation_base {
       return;
     }
 
-    this->result = control_() ? request_.start_io() : request_.perform_io();
+    // The schedule policy owns the eager gate: for defer the request
+    // performs its plain nonblocking call only, so I/O never completes
+    // on the publishing worker's CPU queue and a would-block result
+    // always registers with kqueue for readiness.
+    if constexpr (schedule_policy<Kind>::k_immediate) {
+      this->result = control_() ? request_.start_io() : request_.perform_io();
+    } else {
+      this->result = request_.perform_io();
+    }
     this->flags = 0;
     if (async_io::bsd_native::detail::should_wait(request_, this->result)) {
       publish_io_or_complete_stopped();
@@ -207,24 +215,18 @@ class native_io_operation : public io_context::operation_base {
 
  private:
   /** Publishes to the CPU queue, completing inline when the context is
-   *  already stopping and rejected the publish. Honors the schedule kind:
-   *  the defer kind routes through the shared queue only, skipping the
-   *  worker-local fast path (io_context::publish_cpu_deferred). */
+   *  already stopping and rejected the publish. The schedule policy picks
+   *  the queue composition: defer routes through the shared queue only,
+   *  skipping the worker-local fast path. */
   void publish_cpu_or_complete_inline() noexcept {
-    if constexpr (Kind == io_context::schedule_kind::defer) {
-      if (!context_->publish_cpu_deferred(*this)) {
-        execute();
-      }
-    } else {
-      if (!context_->publish_cpu(*this)) {
-        execute();
-      }
+    if (!schedule_policy<Kind>::publish_cpu(*context_, *this)) {
+      execute();
     }
   }
 
   /** Publishes the would-block result for passive registration, completing
    *  inline through the stop channel when the context is already stopping.
-   *  Honors the schedule kind like publish_cpu_or_complete_inline(). */
+   *  Honors the schedule policy like publish_cpu_or_complete_inline(). */
   void publish_io_or_complete_stopped() noexcept {
     // EAGAIN/EWOULDBLOCK: register with kqueue for readiness. Leave
     // completion_ as `value`; the kevent path will update this->result via
@@ -232,22 +234,12 @@ class native_io_operation : public io_context::operation_base {
     // (§9.2 guard). Eagerly setting value_with_ec here would leak a stale
     // EAGAIN ec when the eventual perform_io() succeeds.
     completion_ = completion_kind::value;
-    if constexpr (Kind == io_context::schedule_kind::defer) {
-      if (!context_->publish_io_deferred(*this)) {
-        // Context already stopping: mark stopped and complete inline instead
-        // of publishing into a context that is shutting down; execute()'s
-        // token arbitration decides the final delivery channel.
-        complete_submit_stopped();
-        execute();
-      }
-    } else {
-      if (!context_->publish_io(*this)) {
-        // Context already stopping: mark stopped and complete inline instead
-        // of publishing into a context that is shutting down; execute()'s
-        // token arbitration decides the final delivery channel.
-        complete_submit_stopped();
-        execute();
-      }
+    if (!schedule_policy<Kind>::publish_io(*context_, *this)) {
+      // Context already stopping: mark stopped and complete inline instead
+      // of publishing into a context that is shutting down; execute()'s
+      // token arbitration decides the final delivery channel.
+      complete_submit_stopped();
+      execute();
     }
   }
 
@@ -372,37 +364,20 @@ class native_poll_operation : public io_context::operation_base {
       // Token cancel at start: mark stopped; execute()'s arbitration
       // delivers set_stopped (token wins) or set_value(operation_canceled).
       completion_ = completion_kind::stopped;
-      if constexpr (Kind == io_context::schedule_kind::defer) {
-        if (!context_->publish_cpu_deferred(*this)) {
-          // Context already stopping: complete inline instead of stranding.
-          execute();
-        }
-      } else {
-        if (!context_->publish_cpu(*this)) {
-          // Context already stopping: complete inline instead of stranding.
-          execute();
-        }
+      if (!schedule_policy<Kind>::publish_cpu(*context_, *this)) {
+        // Context already stopping: complete inline instead of stranding.
+        execute();
       }
       return;
     }
 
     completion_ = completion_kind::value;
-    if constexpr (Kind == io_context::schedule_kind::defer) {
-      if (!context_->publish_io_deferred(*this)) {
-        // Context already stopping: mark stopped and complete inline instead
-        // of publishing into a context that is shutting down; execute()'s
-        // token arbitration decides the final delivery channel.
-        complete_submit_stopped();
-        execute();
-      }
-    } else {
-      if (!context_->publish_io(*this)) {
-        // Context already stopping: mark stopped and complete inline instead
-        // of publishing into a context that is shutting down; execute()'s
-        // token arbitration decides the final delivery channel.
-        complete_submit_stopped();
-        execute();
-      }
+    if (!schedule_policy<Kind>::publish_io(*context_, *this)) {
+      // Context already stopping: mark stopped and complete inline instead
+      // of publishing into a context that is shutting down; execute()'s
+      // token arbitration decides the final delivery channel.
+      complete_submit_stopped();
+      execute();
     }
   }
 
@@ -520,16 +495,9 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
     // Token check at the start observation point: a cancel here is marked
     // and execute() delivers set_stopped for it.
     canceled_ = stop_requested(receiver_);
-    if constexpr (Kind == io_context::schedule_kind::defer) {
-      if (!context_->publish_cpu_deferred(*this)) {
-        // Context already stopping: complete inline instead of stranding.
-        execute();
-      }
-    } else {
-      if (!context_->publish_cpu(*this)) {
-        // Context already stopping: complete inline instead of stranding.
-        execute();
-      }
+    if (!schedule_policy<Kind>::publish_cpu(*context_, *this)) {
+      // Context already stopping: complete inline instead of stranding.
+      execute();
     }
   }
 

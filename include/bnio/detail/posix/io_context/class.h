@@ -77,6 +77,8 @@ template <schedule_kind Kind, class Receiver>
 class native_poll_operation;
 template <schedule_kind Kind, class Receiver>
 class resolve_operation;
+template <schedule_kind Kind>
+struct schedule_policy;
 }  // namespace detail
 
 /**
@@ -197,22 +199,15 @@ class BNIO_EXPORT io_context {
           }
         }
 
-        // defer never takes the worker-local fast path: even when start()
-        // runs on a context worker, the completion is enqueued on the
-        // shared queue so any worker can drain it instead of staying
-        // pinned to the publishing worker.
-        if constexpr (Kind == schedule_kind::defer) {
-          if (!context_->publish_cpu_deferred(*this)) {
-            complete();
-          }
-          return;
-        }
-
-        // The submission critical section (locked state check + enqueue)
-        // is ordered against stop()'s state transition by the submit lock.
-        // If the context is already stopping, publish_cpu() rejects the
-        // enqueue and we complete inline so the operation never strands.
-        if (!context_->publish_cpu(*this)) {
+        // The schedule policy owns the publish composition: defer
+        // publishes through the shared queue only, so the completion is
+        // drained by whichever worker reaches the queue first instead of
+        // staying pinned to the publishing worker. The submission critical
+        // section (locked state check + enqueue) is ordered against
+        // stop()'s state transition by the submit lock; if the context is
+        // already stopping, the publish is rejected and we complete inline
+        // so the operation never strands.
+        if (!detail::schedule_policy<Kind>::publish_cpu(*context_, *this)) {
           complete();
         }
       }
@@ -688,6 +683,10 @@ class BNIO_EXPORT io_context {
   friend class detail::native_poll_operation;
   template <schedule_kind Kind, class Receiver>
   friend class detail::resolve_operation;
+  // The schedule policy composes the private publish primitives on behalf
+  // of the operation layer.
+  template <schedule_kind Kind>
+  friend struct detail::schedule_policy;
   friend class join_sender;
 
   /**
@@ -1217,6 +1216,7 @@ class BNIO_EXPORT io_context {
 
 }  // namespace bnio
 
+#include <bnio/detail/posix/io_context/schedule_policy.h>
 #include <bnio/detail/posix/io_context/native_io.h>
 
 #endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
