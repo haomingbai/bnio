@@ -1,3 +1,11 @@
+// bnio throughput benchmark: accept goes through the defer scheduler
+// (get_defer_scheduler()), while session I/O stays on the post scheduler.
+// The defer scheduler bypasses the worker-local queue fast path and
+// publishes every submission to the shared queues, so accept re-arms
+// rotate across all workers instead of staying pinned to one worker's
+// connection affinity; post+eager keeps per-connection I/O efficient.
+// This is the single converged scheduling scheme for this benchmark.
+
 #include <bnio/bnio.h>
 #include <sys/socket.h>
 
@@ -334,7 +342,7 @@ detached_task echo_session(io_context& ctx, tcp_socket sk) {
 }
 
 detached_task accept_loop(io_context& ctx, tcp_acceptor& acceptor) {
-  auto scheduler = ctx.get_post_scheduler();
+  auto scheduler = ctx.get_defer_scheduler();
   while (true) {
     auto accept_result =
         co_await async_result(acceptor.async_accept(scheduler, SOCK_CLOEXEC));
