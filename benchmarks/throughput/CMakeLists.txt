@@ -5,6 +5,12 @@ target_link_libraries(bnio_throughput_benchmark PRIVATE bnio::bnio
                                                          Threads::Threads)
 bnio_set_project_warnings(bnio_throughput_benchmark)
 
+add_executable(bnio_defer_throughput_benchmark
+               bnio_defer_throughput_benchmark.cpp)
+target_link_libraries(bnio_defer_throughput_benchmark PRIVATE bnio::bnio
+                                                              Threads::Threads)
+bnio_set_project_warnings(bnio_defer_throughput_benchmark)
+
 add_executable(asio_throughput_benchmark asio_throughput_benchmark.cpp)
 target_compile_features(asio_throughput_benchmark PRIVATE cxx_std_20)
 target_compile_definitions(asio_throughput_benchmark PRIVATE ASIO_STANDALONE)
