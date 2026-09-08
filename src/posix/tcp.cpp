@@ -4,6 +4,7 @@
  */
 
 #include <bnio/tcp.h>
+#include <bnio/detail/error_code.h>
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -38,10 +39,10 @@ namespace {
 
 [[nodiscard]] std::error_code close_fd(int fd) noexcept {
   if (fd < 0) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   if (::close(fd) == 0) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   return make_errno_error(errno);
 }
@@ -97,14 +98,14 @@ socket& socket::operator=(socket&& other) noexcept {
 
 std::error_code socket::open(int family) noexcept {
   if (is_open()) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   const int fd = open_socket(family, SOCK_STREAM, 0);
   if (fd < 0) {
     return make_errno_error(errno);
   }
   fd_ = fd;
-  return {};
+  return bnio::detail::empty_error_code;
 }
 
 std::error_code socket::open(ip::tcp protocol) noexcept {
@@ -163,14 +164,14 @@ acceptor& acceptor::operator=(acceptor&& other) noexcept {
 
 std::error_code acceptor::open(int family) noexcept {
   if (is_open()) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   const int fd = open_socket(family, SOCK_STREAM, 0);
   if (fd < 0) {
     return make_errno_error(errno);
   }
   fd_ = fd;
-  return {};
+  return bnio::detail::empty_error_code;
 }
 
 std::error_code acceptor::open(ip::tcp protocol) noexcept {

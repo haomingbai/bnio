@@ -107,6 +107,8 @@ This repository is a CMake-based C++20 async I/O library.
 High-level async runtime, stream owners, and buffer types.
 
 - `io_context.h` — public platform-neutral `io_context` umbrella.
+- `detail/error_code.h` — shared empty `std::error_code` sentinel for async-I/O
+  completion hot paths (internal implementation detail).
 - `detail/posix/io_context/class.h` — the shared `io_context` class definition and
   scheduler surface.
 - `detail/posix/io_context/native_context.h` — aliases the selected native context,

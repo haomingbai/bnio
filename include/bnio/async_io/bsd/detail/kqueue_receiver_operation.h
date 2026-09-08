@@ -8,6 +8,7 @@
 #define BNIO_ASYNC_IO_BSD_DETAIL_KQUEUE_RECEIVER_OPERATION_H_
 
 #include <bnio/async_io/bsd/kqueue_context_base.h>
+#include <bnio/detail/error_code.h>
 
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
@@ -86,8 +87,9 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
               std::error_code(-this->result, std::generic_category()),
               this->result, this->flags);
         } else {
-          bexec::set_value(std::move(receiver_), std::error_code{},
-                           this->result, this->flags);
+          bexec::set_value(std::move(receiver_),
+                           bnio::detail::empty_error_code, this->result,
+                           this->flags);
         }
         break;
       case kqueue_receiver_completion::value_with_ec:
@@ -181,7 +183,7 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
   /** Completion channel selected before execution; consumed by execute(). */
   kqueue_receiver_completion completion_ = kqueue_receiver_completion::value;
   /** Leading ec for the value_with_ec channel; empty for value. */
-  std::error_code error_;
+  std::error_code error_ = bnio::detail::empty_error_code;
 };
 
 }  // namespace bnio::async_io::bsd_native::detail

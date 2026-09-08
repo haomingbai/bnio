@@ -8,6 +8,7 @@
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_DETAIL_IO_REQUEST_H_
 
 #include <bnio/async_io/bsd/kqueue_context_base.h>
+#include <bnio/detail/error_code.h>
 
 #include <bexec/completion_signatures.hpp>
 #include <bexec/query.hpp>
@@ -161,7 +162,7 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
       }
       return;
     }
-    std::error_code ec;
+    std::error_code ec = bnio::detail::empty_error_code;
     if (result < 0) {
       ec = std::error_code(-result, std::generic_category());
     }

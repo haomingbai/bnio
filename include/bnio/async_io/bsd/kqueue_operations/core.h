@@ -8,6 +8,7 @@
 #define BNIO_ASYNC_IO_BSD_KQUEUE_OPERATIONS_CORE_H_
 
 #include <bnio/async_io/bsd/detail/kqueue_receiver_operation.h>
+#include <bnio/detail/error_code.h>
 
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
@@ -34,7 +35,8 @@ class kqueue_post_operation : public kqueue_operation_base {
     if (stopped_) {
       bexec::set_stopped(std::move(receiver_));
     } else {
-      bexec::set_value(std::move(receiver_), std::error_code{});
+      bexec::set_value(std::move(receiver_),
+                       bnio::detail::empty_error_code);
     }
   }
 

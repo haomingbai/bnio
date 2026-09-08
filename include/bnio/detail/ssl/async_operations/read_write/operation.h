@@ -7,6 +7,7 @@
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_OPERATION_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_OPERATION_H_
 
+#include <bnio/detail/error_code.h>
 #include <bnio/detail/ssl/async_operations/read_write/step.h>
 
 #include <bexec/detail/manual_lifetime.hpp>
@@ -96,7 +97,7 @@ class ssl_io_operation {
       return;
     }
     if (empty_buffer()) {
-      complete_value(std::error_code{}, 0);
+      complete_value(bnio::detail::empty_error_code, 0);
       return;
     }
 

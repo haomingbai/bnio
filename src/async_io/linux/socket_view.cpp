@@ -6,6 +6,7 @@
 #include <bnio/async_io/ip/endpoint.h>
 #include <bnio/async_io/linux/socket_address.h>
 #include <bnio/async_io/socket_view.h>
+#include <bnio/detail/error_code.h>
 #include <sys/socket.h>
 
 #include <cerrno>
@@ -18,7 +19,7 @@ std::error_code last_error() noexcept {
 }
 
 std::error_code result_to_error_code(int result) noexcept {
-  return result == 0 ? std::error_code{} : last_error();
+  return result == 0 ? bnio::detail::empty_error_code : last_error();
 }
 
 std::error_code bind_socket(int descriptor,
@@ -55,7 +56,7 @@ std::error_code get_socket_endpoint(int descriptor, bool peer,
     return std::make_error_code(std::errc::address_family_not_supported);
   }
   endpoint = *converted;
-  return {};
+  return bnio::detail::empty_error_code;
 }
 
 }  // namespace

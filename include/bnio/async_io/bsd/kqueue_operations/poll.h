@@ -9,6 +9,7 @@
 
 #include <bnio/async_io/bsd/detail/kqueue_receiver_operation.h>
 #include <bnio/async_io/descriptor_view.h>
+#include <bnio/detail/error_code.h>
 
 #include <bexec/completion_signatures.hpp>
 #include <bexec/query.hpp>
@@ -133,7 +134,8 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
                            std::error_code(-result, std::generic_category()),
                            0U);
         } else {
-          bexec::set_value(std::move(receiver_), std::error_code{},
+          bexec::set_value(std::move(receiver_),
+                           bnio::detail::empty_error_code,
                            static_cast<unsigned>(result));
         }
         break;
@@ -173,7 +175,7 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
   kqueue_poll_request request_;
   std::remove_cvref_t<Receiver> receiver_;
   completion_kind completion_ = completion_kind::value;
-  std::error_code error_;
+  std::error_code error_ = bnio::detail::empty_error_code;
 };
 
 /** Sender returned by kqueue_context::async_poll. */

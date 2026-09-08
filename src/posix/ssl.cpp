@@ -4,6 +4,7 @@
  */
 
 #include <bnio/detail/ssl/async_operations/common.h>
+#include <bnio/detail/error_code.h>
 #include <bnio/ssl.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -92,7 +93,7 @@ std::error_code ssl_context::use_certificate_chain_file(
     const char* path) noexcept {
   detail::clear_ssl_errors();
   if (SSL_CTX_use_certificate_chain_file(context_, path) == 1) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   return detail::last_ssl_error();
 }
@@ -100,7 +101,7 @@ std::error_code ssl_context::use_certificate_chain_file(
 std::error_code ssl_context::use_private_key_file(const char* path) noexcept {
   detail::clear_ssl_errors();
   if (SSL_CTX_use_PrivateKey_file(context_, path, SSL_FILETYPE_PEM) == 1) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   return detail::last_ssl_error();
 }
@@ -108,7 +109,7 @@ std::error_code ssl_context::use_private_key_file(const char* path) noexcept {
 std::error_code ssl_context::check_private_key() noexcept {
   detail::clear_ssl_errors();
   if (SSL_CTX_check_private_key(context_) == 1) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   return detail::last_ssl_error();
 }

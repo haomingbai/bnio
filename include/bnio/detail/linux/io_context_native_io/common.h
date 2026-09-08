@@ -10,6 +10,7 @@
 #define BNIO_DETAIL_LINUX_IO_CONTEXT_NATIVE_IO_COMMON_H_
 
 #include <bnio/async_io/dns/resolve.h>
+#include <bnio/detail/error_code.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -195,7 +196,8 @@ class native_io_operation : public io_context::operation_base {
           model_.set_value(std::move(receiver_), errno_result(this->result),
                            this->result, this->flags);
         } else {
-          model_.set_value(std::move(receiver_), std::error_code{},
+          model_.set_value(std::move(receiver_),
+                           bnio::detail::empty_error_code,
                            this->result, this->flags);
         }
         break;
@@ -289,7 +291,7 @@ class native_io_operation : public io_context::operation_base {
   Control control_;
   std::remove_cvref_t<Receiver> receiver_;
   completion_kind completion_ = completion_kind::value;
-  std::error_code error_;
+  std::error_code error_ = bnio::detail::empty_error_code;
 };
 
 template <class Model, class Control = context_eager_control,

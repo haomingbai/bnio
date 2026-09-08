@@ -8,6 +8,7 @@
 #define BNIO_ASYNC_IO_LINUX_DETAIL_IO_URING_RECEIVER_OPERATION_H_
 
 #include <bnio/async_io/linux/io_uring_context_base.h>
+#include <bnio/detail/error_code.h>
 
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
@@ -105,8 +106,8 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
                            std::error_code(-result, std::generic_category()),
                            result, flags);
         } else {
-          bexec::set_value(std::move(receiver_), std::error_code{}, result,
-                           flags);
+          bexec::set_value(std::move(receiver_),
+                           bnio::detail::empty_error_code, result, flags);
         }
         break;
       case io_uring_receiver_completion::value_with_ec:
@@ -237,7 +238,7 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
    * Error delivered as the leading argument of set_value when
    * completion_ is value_with_ec. Empty for the value channel.
    */
-  std::error_code error_;
+  std::error_code error_ = bnio::detail::empty_error_code;
 
   /**
    * Whether a -EAGAIN CQE re-submits this operation (read/write-class

@@ -64,6 +64,20 @@
   API or C structure.
 - Run `scripts/check-doc.sh` before submitting documentation changes.
 
+## Hot-path error code handling
+
+- Do not default-construct `std::error_code` on async-I/O completion hot paths
+  (`std::error_code{}`, `std::error_code()`, or a default-initialized member
+  or local variable). libstdc++'s default constructor calls
+  `system_category()`, which is visible under profiling. Reuse a shared empty
+  error code (`bnio::detail::empty_error_code`) for success completions and
+  initialize operation-state members and hot-path locals from it; it is
+  initialized once with the same category as the default constructor, so no
+  per-completion category lookup is needed.
+- Construct real error codes only when an error is being reported, for example
+  `std::error_code(-errno, std::generic_category())` or
+  `std::make_error_code(std::errc::...)`.
+
 ## Tests
 
 - Write runtime tests as focused GoogleTest `TEST` cases and register them with

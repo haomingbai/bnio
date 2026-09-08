@@ -11,6 +11,7 @@
 #include <bnio/async_io/socket_view.h>
 #include <bnio/async_io/time.h>
 #include <bnio/buffer.h>
+#include <bnio/detail/error_code.h>
 #include <bnio/detail/posix/io_context/native_context.h>
 #include <bnio/detail/posix/io_context/options.h>
 #include <bnio/detail/posix/io_context/steady_timer.h>
@@ -235,7 +236,8 @@ class BNIO_EXPORT io_context {
                            std::make_error_code(std::errc::operation_canceled));
           return;
         }
-        bexec::set_value(std::move(receiver_), std::error_code{});
+        bexec::set_value(std::move(receiver_),
+                         bnio::detail::empty_error_code);
       }
 
       io_context* context_;

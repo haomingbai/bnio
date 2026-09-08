@@ -9,6 +9,8 @@
 #else
 #define BNIO_DETAIL_POSIX_IO_CONTEXT_WRITE_ALL_H_
 
+#include <bnio/detail/error_code.h>
+
 #include <bexec/detail/manual_lifetime.hpp>
 #include <bexec/just.hpp>
 #include <bexec/let.hpp>
@@ -103,12 +105,13 @@ template <class State>
       return bexec::just(std::make_error_code(std::errc::broken_pipe),
                          state->transferred);
     } else {
-      return bexec::just(std::error_code{}, state->transferred);
+      return bexec::just(bnio::detail::empty_error_code,
+                         state->transferred);
     }
   }
 
   state->advance(bytes);
-  return bexec::just(std::error_code{}, state->transferred);
+  return bexec::just(bnio::detail::empty_error_code, state->transferred);
 }
 
 template <class State>
@@ -212,7 +215,7 @@ class write_all_operation {
     }
     if (state_.empty()) {
       // Empty buffer: succeed with 0 bytes
-      complete_value(std::error_code{}, state_.transferred);
+      complete_value(bnio::detail::empty_error_code, state_.transferred);
       return;
     }
 

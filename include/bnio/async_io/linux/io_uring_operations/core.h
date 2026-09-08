@@ -10,6 +10,7 @@
 #include <bnio/async_io/linux/detail/io_uring_receiver_operation.h>
 #include <bnio/async_io/linux/io_uring_operations/helpers.h>
 #include <bnio/base/linux/submission_queue_entry.h>
+#include <bnio/detail/error_code.h>
 
 #include <bexec/query.hpp>
 #include <bexec/receiver.hpp>
@@ -63,7 +64,8 @@ class io_uring_post_operation : public io_uring_operation_base {
     if (stopped_) {
       bexec::set_stopped(std::move(receiver_));
     } else {
-      bexec::set_value(std::move(receiver_), std::error_code{});
+      bexec::set_value(std::move(receiver_),
+                       bnio::detail::empty_error_code);
     }
   }
 

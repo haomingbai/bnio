@@ -9,6 +9,8 @@
 #else
 #define BNIO_DETAIL_POSIX_IO_CONTEXT_TIMER_WAIT_H_
 
+#include <bnio/detail/error_code.h>
+
 #include <system_error>
 
 namespace bnio::detail {
@@ -63,7 +65,8 @@ class timer_wait_operation : public timer_operation_base {
                          std::make_error_code(std::errc::operation_canceled));
         break;
       case timer_completion_kind::value:
-        bexec::set_value(std::move(receiver_), std::error_code{});
+        bexec::set_value(std::move(receiver_),
+                         bnio::detail::empty_error_code);
         break;
     }
   }

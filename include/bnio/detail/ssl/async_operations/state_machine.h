@@ -7,6 +7,7 @@
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_STATE_MACHINE_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_STATE_MACHINE_H_
 
+#include <bnio/detail/error_code.h>
 #include <bnio/detail/ssl/async_operations/common.h>
 
 #include <bexec/completion_signatures.hpp>
@@ -390,7 +391,7 @@ class ssl_async_operation_base {
   }
 
   child_operations_type child_operation_;
-  std::error_code ec_;
+  std::error_code ec_ = bnio::detail::empty_error_code;
   char* transport_data_ = nullptr;
   std::size_t transport_size_ = 0;
   ssl_child_io child_ = ssl_child_io::none;

@@ -7,6 +7,7 @@
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SHUTDOWN_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SHUTDOWN_H_
 
+#include <bnio/detail/error_code.h>
 #include <bnio/detail/ssl/async_operations/state_machine.h>
 
 #include <bexec/receiver.hpp>
@@ -35,7 +36,7 @@ class ssl_shutdown_operation
 
   void resume(ssl_resume_action action) noexcept {
     if (action == ssl_resume_action::finish) {
-      this->post_complete_value(std::error_code{});
+      this->post_complete_value(bnio::detail::empty_error_code);
       return;
     }
     run_shutdown();

@@ -4,6 +4,7 @@
  */
 
 #include <bnio/io_context.h>
+#include <bnio/detail/error_code.h>
 
 #include <atomic>
 #include <cerrno>
@@ -103,7 +104,7 @@ std::error_code io_context::run_native_loop() noexcept {
   // runs before release_worker_slot() in the caller, so running_workers
   // never reaches zero while queue_exit may still touch global_state_ —
   // stop() and ~io_context() can therefore never race the teardown.
-  std::error_code result;
+  std::error_code result = bnio::detail::empty_error_code;
   {
     detail::native_context ctx(native_options_);
     ctx.set_global_state(&global_state_);

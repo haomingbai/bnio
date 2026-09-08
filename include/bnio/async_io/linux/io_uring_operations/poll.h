@@ -10,6 +10,7 @@
 #include <bnio/async_io/descriptor_view.h>
 #include <bnio/async_io/linux/detail/io_uring_receiver_operation.h>
 #include <bnio/base/linux/submission_queue_entry.h>
+#include <bnio/detail/error_code.h>
 
 #include <bexec/completion_signatures.hpp>
 #include <bexec/query.hpp>
@@ -164,7 +165,8 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
                            std::error_code(-result, std::generic_category()),
                            0U);
         } else {
-          bexec::set_value(std::move(receiver_), std::error_code{},
+          bexec::set_value(std::move(receiver_),
+                           bnio::detail::empty_error_code,
                            static_cast<unsigned>(result));
         }
         break;
@@ -204,7 +206,7 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
   io_uring_poll_request request_;
   std::remove_cvref_t<Receiver> receiver_;
   completion_kind completion_ = completion_kind::value;
-  std::error_code error_;
+  std::error_code error_ = bnio::detail::empty_error_code;
 };
 
 /**

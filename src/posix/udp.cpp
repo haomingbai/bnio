@@ -4,6 +4,7 @@
  */
 
 #include <bnio/async_io/socket_view.h>
+#include <bnio/detail/error_code.h>
 #include <bnio/ip.h>
 #include <bnio/udp/socket.h>
 #include <fcntl.h>
@@ -86,14 +87,14 @@ socket& socket::operator=(socket&& other) noexcept {
 
 std::error_code socket::open(int family) noexcept {
   if (is_open()) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   const int fd = open_socket(family);
   if (fd < 0) {
     return make_errno_error(errno);
   }
   fd_ = fd;
-  return {};
+  return bnio::detail::empty_error_code;
 }
 
 std::error_code socket::open(ip::udp protocol) noexcept {
@@ -115,7 +116,7 @@ std::error_code socket::connect(const ip::endpoint& endpoint) noexcept {
 std::error_code socket::close() noexcept {
   const int fd = std::exchange(fd_, -1);
   if (fd < 0 || ::close(fd) == 0) {
-    return {};
+    return bnio::detail::empty_error_code;
   }
   return make_errno_error(errno);
 }

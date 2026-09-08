@@ -20,6 +20,7 @@
 #include <bnio/async_io/bsd/kqueue_operations/poll.h>
 #include <bnio/async_io/bsd/kqueue_operations/socket.h>
 #include <bnio/async_io/dns/resolve.h>
+#include <bnio/detail/error_code.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -182,7 +183,8 @@ class native_io_operation : public io_context::operation_base {
           request_.set_value(std::move(receiver_), errno_result(this->result),
                              this->result, this->flags);
         } else {
-          request_.set_value(std::move(receiver_), std::error_code{},
+          request_.set_value(std::move(receiver_),
+                             bnio::detail::empty_error_code,
                              this->result, this->flags);
         }
         break;
@@ -257,7 +259,7 @@ class native_io_operation : public io_context::operation_base {
   Control control_;
   std::remove_cvref_t<Receiver> receiver_;
   completion_kind completion_ = completion_kind::value;
-  std::error_code error_;
+  std::error_code error_ = bnio::detail::empty_error_code;
 };
 
 /**
@@ -399,7 +401,8 @@ class native_poll_operation : public io_context::operation_base {
           bexec::set_value(std::move(receiver_), errno_result(this->result),
                            0U);
         } else {
-          bexec::set_value(std::move(receiver_), std::error_code{},
+          bexec::set_value(std::move(receiver_),
+                           bnio::detail::empty_error_code,
                            static_cast<unsigned>(this->result));
         }
         break;
@@ -435,7 +438,7 @@ class native_poll_operation : public io_context::operation_base {
   async_io::bsd_native::kqueue_poll_request request_;
   std::remove_cvref_t<Receiver> receiver_;
   completion_kind completion_ = completion_kind::value;
-  std::error_code error_;
+  std::error_code error_ = bnio::detail::empty_error_code;
 };
 
 /** Sender for descriptor polling on the kqueue backend. */

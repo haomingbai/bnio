@@ -7,6 +7,7 @@
 #ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_STEP_H_
 #define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_STEP_H_
 
+#include <bnio/detail/error_code.h>
 #include <bnio/detail/ssl/async_operations/read_write/state.h>
 
 #include <atomic>
@@ -147,7 +148,7 @@ class ssl_io_step_operation {
         submit_transport_write();
         return;
       case ssl_io_phase::done:
-        complete_value(std::error_code{}, state_->bytes);
+        complete_value(bnio::detail::empty_error_code, state_->bytes);
         return;
     }
   }
@@ -189,7 +190,7 @@ class ssl_io_step_operation {
         }
       }
       state_->phase = ssl_io_phase::flush_output;
-      complete_value(std::error_code{}, 0);
+      complete_value(bnio::detail::empty_error_code, 0);
       return;
     }
 
@@ -203,12 +204,12 @@ class ssl_io_step_operation {
       case SSL_ERROR_WANT_READ:
         state_->after_flush = ssl_resume_action::transport_read;
         state_->phase = ssl_io_phase::flush_output;
-        complete_value(std::error_code{}, 0);
+        complete_value(bnio::detail::empty_error_code, 0);
         return;
       case SSL_ERROR_WANT_WRITE:
         state_->after_flush = State::application_action;
         state_->phase = ssl_io_phase::flush_output;
-        complete_value(std::error_code{}, 0);
+        complete_value(bnio::detail::empty_error_code, 0);
         return;
       case SSL_ERROR_ZERO_RETURN:
         state_->done = true;
@@ -216,7 +217,7 @@ class ssl_io_step_operation {
           // Orderly TLS close (peer sent close_notify): complete the read
           // successfully with the bytes so far — the same EOF encoding as a
           // plain descriptor / TCP socket read (docs/usage/index.md).
-          complete_value(std::error_code{}, state_->bytes);
+          complete_value(bnio::detail::empty_error_code, state_->bytes);
         } else {
           // A write step terminated by the orderly close: write-all reports
           // it as broken_pipe, matching the TCP write-all zero-byte encoding.
@@ -257,12 +258,12 @@ class ssl_io_step_operation {
         state_->phase = ssl_io_phase::done;
         state_->done = true;
         std::atomic_thread_fence(std::memory_order_release);
-        complete_value(std::error_code{}, state_->bytes);
+        complete_value(bnio::detail::empty_error_code, state_->bytes);
         return;
       case ssl_resume_action::application_read:
       case ssl_resume_action::application_write:
         state_->phase = ssl_io_phase::application;
-        complete_value(std::error_code{}, 0);
+        complete_value(bnio::detail::empty_error_code, 0);
         return;
       default:
         return;
@@ -357,7 +358,7 @@ class ssl_io_step_operation {
     }
 
     state_->phase = ssl_io_phase::application;
-    complete_value(std::error_code{}, 0);
+    complete_value(bnio::detail::empty_error_code, 0);
   }
 
   void handle_transport_write_complete(std::size_t result) noexcept {
@@ -375,7 +376,7 @@ class ssl_io_step_operation {
     }
 
     state_->phase = ssl_io_phase::flush_output;
-    complete_value(std::error_code{}, 0);
+    complete_value(bnio::detail::empty_error_code, 0);
   }
 
   void complete_value(std::error_code ec, std::size_t bytes) noexcept {

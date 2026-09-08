@@ -5,6 +5,7 @@
 
 #include <bnio/async_io/dns.h>
 #include <bnio/async_io/linux/socket_address.h>
+#include <bnio/detail/error_code.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -135,7 +136,7 @@ std::error_code resolve_dns_platform(dns_query_view query,
   }
 
   ::freeaddrinfo(results);
-  return {};
+  return bnio::detail::empty_error_code;
 }
 
 }  // namespace detail
