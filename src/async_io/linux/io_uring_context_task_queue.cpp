@@ -59,12 +59,12 @@ void io_uring_context::push_cpu_tasks(operation_queue& operations) noexcept {
 io_uring_operation_base* io_uring_context::fetch_cpu_task() noexcept {
   // 1. Worker-local queue first: fastest and preserves locality.
   if (io_uring_operation_base* operations = local_state_.pop_cpu_all()) {
-    return reverse_tasks(operations);
+    return operations;
   }
 
   // 2. Shared CPU queue.
   if (io_uring_operation_base* operations = global_state_->pop_cpu_all()) {
-    return reverse_tasks(operations);
+    return operations;
   }
 
   return nullptr;

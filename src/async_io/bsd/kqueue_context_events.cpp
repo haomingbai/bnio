@@ -60,14 +60,14 @@ unsigned kqueue_context::collect_event_tasks(
 void kqueue_context::dispatch_event_tasks(operation_queue& event_tasks,
                                           unsigned task_count) noexcept {
   if (task_count <= options_.event_inline_completion_threshold) {
-    local_state_.push_cpu(reverse_tasks(event_tasks.pop_all()));
+    local_state_.push_cpu(event_tasks.pop_all());
     return;
   }
 
   if (options_.local_queue_threshold == 0 ||
       (scheduling_state_.local_task_budget > 0 &&
        task_count <= scheduling_state_.local_task_budget)) {
-    local_state_.push_cpu(reverse_tasks(event_tasks.pop_all()));
+    local_state_.push_cpu(event_tasks.pop_all());
     if (options_.local_queue_threshold > 0) {
       scheduling_state_.local_task_budget -= task_count;
     }

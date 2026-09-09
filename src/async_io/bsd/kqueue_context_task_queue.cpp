@@ -45,10 +45,10 @@ void kqueue_context::publish_io(kqueue_io_operation_base& operation) noexcept {
 
 void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {
   if (global_state_ == nullptr) {
-    local_state_.push_cpu(reverse_tasks(operations.pop_all()));
+    local_state_.push_cpu(operations.pop_all());
     return;
   }
-  kqueue_operation_base* ordered_tasks = reverse_tasks(operations.pop_all());
+  kqueue_operation_base* ordered_tasks = operations.pop_all();
   if (ordered_tasks == nullptr) {
     return;
   }
@@ -65,7 +65,7 @@ void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {
 kqueue_operation_base* kqueue_context::fetch_cpu_task() noexcept {
   // 1. Worker-local queue first: fastest and preserves locality.
   if (kqueue_operation_base* operations = local_state_.pop_cpu_all()) {
-    return reverse_tasks(operations);
+    return operations;
   }
 
   if (global_state_ == nullptr) {
@@ -74,7 +74,7 @@ kqueue_operation_base* kqueue_context::fetch_cpu_task() noexcept {
 
   // 2. Shared CPU queue.
   if (kqueue_operation_base* operations = global_state_->pop_cpu_all()) {
-    return reverse_tasks(operations);
+    return operations;
   }
 
   return nullptr;

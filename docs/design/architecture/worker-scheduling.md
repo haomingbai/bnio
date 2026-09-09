@@ -127,18 +127,17 @@ local queue  →  shared CPU queue
 kqueue_operation_base* kqueue_context::fetch_cpu_task() noexcept {
   // 1. Worker-local queue first: fastest and preserves locality.
   if (kqueue_operation_base* operations = local_state_.pop_cpu_all())
-    return reverse_tasks(operations);
+    return operations;
 
   // 2. Shared CPU queue.
   if (kqueue_operation_base* operations = global_state_->pop_cpu_all())
-    return reverse_tasks(operations);
+    return operations;
 
   return nullptr;
 }
 ```
 
-Each level takes the whole batch at once (`pop_cpu_all()` + `reverse_tasks()`
-to restore FIFO order), and the run loop stops at the first level that yields
+Each level takes the whole batch at once (`pop_cpu_all()`), and the run loop stops at the first level that yields
 a batch. Because a batch is fetched and executed before the loop checks
 again, work never piles up on one thread's stack.
 
