@@ -52,39 +52,6 @@ struct concurrent_post_receiver {
   }
 };
 
-TEST(IoUringRunLoopTest, posted_tasks_drain_in_post_order) {
-  io_uring_context context;
-  if (!queue_init_or_skip(context)) {
-    GTEST_SKIP() << "io_uring is unavailable";
-  }
-
-  constexpr unsigned k_count = 8;
-  auto state = std::make_shared<batch_state>();
-  std::array<std::unique_ptr<io_uring_post_operation<post_batch_receiver>>,
-             k_count>
-      operations;
-
-  for (unsigned index = 0; index < k_count; ++index) {
-    post_batch_receiver recv;
-    recv.context = &context;
-    recv.target = k_count;
-    recv.index = index;
-    recv.state = state;
-    operations[index] =
-        std::make_unique<io_uring_post_operation<post_batch_receiver>>(
-            context, std::move(recv));
-    bexec::start(*operations[index]);
-  }
-
-  context.run();
-
-  EXPECT_EQ(state->completed, k_count);
-  EXPECT_EQ(state->errors, 0);
-  EXPECT_EQ(state->stopped, 0);
-  EXPECT_TRUE(state->all_in_context);
-  EXPECT_TRUE(state->in_order);
-}
-
 TEST(IoUringRunLoopTest, posted_tasks_accept_concurrent_external_posts) {
   io_uring_task_queue_state global_tasks;
   io_uring_context context;

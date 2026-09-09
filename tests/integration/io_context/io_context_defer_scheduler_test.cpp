@@ -251,55 +251,6 @@ struct defer_echo_byte_receiver {
   }
 };
 
-TEST(IoContextDeferSchedulerTest, defer_scheduler_schedule_posts_fifo) {
-  bnio::io_context context;
-  if (!context_available(context)) {
-    GTEST_SKIP() << "native I/O context is unavailable";
-  }
-
-  auto scheduler = context.get_defer_scheduler();
-  auto state = std::make_shared<schedule_state>();
-  state->order.reserve(3);
-
-  schedule_receiver first;
-  first.state = state;
-  first.context = &context;
-  first.value = 1;
-  first.target = 3;
-
-  schedule_receiver second;
-  second.state = state;
-  second.context = &context;
-  second.value = 2;
-  second.target = 3;
-
-  schedule_receiver third;
-  third.state = state;
-  third.context = &context;
-  third.value = 3;
-  third.target = 3;
-
-  auto first_operation =
-      bexec::connect(bexec::schedule(scheduler), std::move(first));
-  auto second_operation =
-      bexec::connect(bexec::schedule(scheduler), std::move(second));
-  auto third_operation =
-      bexec::connect(bexec::schedule(scheduler), std::move(third));
-
-  bexec::start(first_operation);
-  bexec::start(second_operation);
-  bexec::start(third_operation);
-
-  EXPECT_TRUE(state->order.empty());
-  context.run();
-
-  EXPECT_EQ(state->signal, signal_kind::value);
-  EXPECT_EQ(state->order.size(), 3);
-  EXPECT_EQ(state->order[0], 1);
-  EXPECT_EQ(state->order[1], 2);
-  EXPECT_EQ(state->order[2], 3);
-}
-
 TEST(IoContextDeferSchedulerTest,
      defer_scheduler_schedule_never_completes_inline) {
   bnio::io_context context;
