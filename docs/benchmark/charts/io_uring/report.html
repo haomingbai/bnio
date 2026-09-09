@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>bnio vs asio — io_uring interactive charts</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+  <style>
+    :root {
+      --ink: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --card: #ffffff;
+      --bg: #f8fafc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: "DejaVu Sans", ui-sans-serif, system-ui, sans-serif;
+    }
+    main { max-width: 1280px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { margin: 0 0 0.25rem; font-size: 1.65rem; }
+    p.lead { color: var(--muted); margin: 0 0 2rem; }
+    h2 { margin: 2.5rem 0 1rem; font-size: 1.15rem; }
+    .note { color: var(--muted); font-size: 0.9rem; margin: -0.5rem 0 1rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 1rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.75rem;
+      box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+    }
+    .chart { width: 100%; height: 360px; }
+    .footer { color: var(--muted); font-size: 0.85rem; margin-top: 2.5rem; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>bnio vs Asio — io_uring interactive charts</h1>
+  <p class="lead">Linux x86_64, TCP echo throughput and timer churn. Open in a browser if charts do not render in this view.</p>
+
+  <h2>Throughput</h2>
+  <div class="grid">
+    <div class="card"><div id="overview" class="chart"></div></div>
+    <div class="card"><div id="worker-overview" class="chart"></div></div>
+  </div>
+  <h2>Throughput scaling</h2>
+  <div class="grid">
+    <div class="card"><div id="conn-64" class="chart"></div></div>
+    <div class="card"><div id="conn-1024" class="chart"></div></div>
+    <div class="card"><div id="conn-4096" class="chart"></div></div>
+    <div class="card"><div id="conn-65536" class="chart"></div></div>
+  </div>
+  <div class="grid">
+    <div class="card"><div id="worker-64" class="chart"></div></div>
+    <div class="card"><div id="worker-1024" class="chart"></div></div>
+    <div class="card"><div id="worker-4096" class="chart"></div></div>
+    <div class="card"><div id="worker-65536" class="chart"></div></div>
+  </div>
+  <h2>Throughput ratio</h2>
+  <div class="grid">
+    <div class="card"><div id="heatmap" class="chart"></div></div>
+    <div class="card"><div id="worker-heatmap" class="chart"></div></div>
+  </div>
+
+  <h2>Timer churn</h2>
+  <div class="grid">
+    <div class="card"><div id="timer-lifecycle" class="chart"></div></div>
+    <div class="card"><div id="timer-waits" class="chart"></div></div>
+  </div>
+  <div class="grid">
+    <div class="card"><div id="timer-rounds-100" class="chart"></div></div>
+    <div class="card"><div id="timer-rounds-500" class="chart"></div></div>
+    <div class="card"><div id="timer-rounds-1000" class="chart"></div></div>
+  </div>
+  <div class="grid">
+    <div class="card"><div id="timer-lifecycle-heatmap" class="chart"></div></div>
+    <div class="card"><div id="timer-waits-heatmap" class="chart"></div></div>
+  </div>
+
+  <p class="footer">Values are arithmetic means across three iterations. The page is generated from the aggregate benchmark summary; raw measurement logs are not included.</p>
+</main>
+<script>
+const DATA = {"throughputRows": [{"connections": 64, "iterations": 3, "message_size": 64, "rate": 440703.0, "rate_stdev": 370.94473981982816, "server": "bnio", "throughput": 26.0, "workers": 1}, {"connections": 64, "iterations": 3, "message_size": 64, "rate": 427313.3333333333, "rate_stdev": 473.4147817248164, "server": "asio", "throughput": 26.0, "workers": 1}, {"connections": 64, "iterations": 3, "message_size": 1024, "rate": 427226.0, "rate_stdev": 456.8026561510634, "server": "bnio", "throughput": 416.6666666666667, "workers": 1}, {"connections": 64, "iterations": 3, "message_size": 1024, "rate": 414593.3333333333, "rate_stdev": 1094.9198854507829, "server": "asio", "throughput": 404.3333333333333, "workers": 1}, {"connections": 64, "iterations": 3, "message_size": 4096, "rate": 376643.6666666667, "rate_stdev": 182.66970800387847, "server": "bnio", "throughput": 1471.0, "workers": 1}, {"connections": 64, "iterations": 3, "message_size": 4096, "rate": 373815.6666666667, "rate_stdev": 1799.3621709434212, "server": "asio", "throughput": 1460.0, "workers": 1}, {"connections": 64, "iterations": 3, "message_size": 65536, "rate": 1574.0, "rate_stdev": 7.118052168020874, "server": "bnio", "throughput": 97.66666666666667, "workers": 1}, {"connections": 64, "iterations": 3, "message_size": 65536, "rate": 1566.0, "rate_stdev": 2.160246899469287, "server": "asio", "throughput": 97.33333333333333, "workers": 1}, {"connections": 256, "iterations": 3, "message_size": 64, "rate": 434000.0, "rate_stdev": 568.5191289657719, "server": "bnio", "throughput": 26.0, "workers": 1}, {"connections": 256, "iterations": 3, "message_size": 64, "rate": 433871.0, "rate_stdev": 2096.5029612825892, "server": "asio", "throughput": 26.0, "workers": 1}, {"connections": 256, "iterations": 3, "message_size": 1024, "rate": 419325.0, "rate_stdev": 1749.215252620443, "server": "bnio", "throughput": 408.6666666666667, "workers": 1}, {"connections": 256, "iterations": 3, "message_size": 1024, "rate": 416560.3333333333, "rate_stdev": 906.6724264522932, "server": "asio", "throughput": 406.0, "workers": 1}, {"connections": 256, "iterations": 3, "message_size": 4096, "rate": 356639.0, "rate_stdev": 1848.270001920715, "server": "bnio", "throughput": 1393.0, "workers": 1}, {"connections": 256, "iterations": 3, "message_size": 4096, "rate": 364214.0, "rate_stdev": 1473.8536788523706, "server": "asio", "throughput": 1422.3333333333333, "workers": 1}, {"connections": 256, "iterations": 3, "message_size": 65536, "rate": 6244.333333333333, "rate_stdev": 5.2493385826745405, "server": "bnio", "throughput": 389.6666666666667, "workers": 1}, {"connections": 256, "iterations": 3, "message_size": 65536, "rate": 6264.666666666667, "rate_stdev": 42.02644669993197, "server": "asio", "throughput": 391.0, "workers": 1}, {"connections": 1024, "iterations": 3, "message_size": 64, "rate": 423765.3333333333, "rate_stdev": 2288.5046549123635, "server": "bnio", "throughput": 25.333333333333332, "workers": 1}, {"connections": 1024, "iterations": 3, "message_size": 64, "rate": 417218.3333333333, "rate_stdev": 2089.612616943363, "server": "asio", "throughput": 25.0, "workers": 1}, {"connections": 1024, "iterations": 3, "message_size": 1024, "rate": 381524.6666666667, "rate_stdev": 12820.238747993562, "server": "bnio", "throughput": 372.0, "workers": 1}, {"connections": 1024, "iterations": 3, "message_size": 1024, "rate": 385804.0, "rate_stdev": 850.6707157688377, "server": "asio", "throughput": 376.0, "workers": 1}, {"connections": 1024, "iterations": 3, "message_size": 4096, "rate": 270769.3333333333, "rate_stdev": 1977.28877225581, "server": "bnio", "throughput": 1057.0, "workers": 1}, {"connections": 1024, "iterations": 3, "message_size": 4096, "rate": 296851.3333333333, "rate_stdev": 1924.3198509834297, "server": "asio", "throughput": 1159.0, "workers": 1}, {"connections": 1024, "iterations": 3, "message_size": 65536, "rate": 24814.0, "rate_stdev": 6.164414002968976, "server": "bnio", "throughput": 1550.3333333333333, "workers": 1}, {"connections": 1024, "iterations": 3, "message_size": 65536, "rate": 24821.0, "rate_stdev": 19.8158185969358, "server": "asio", "throughput": 1551.0, "workers": 1}, {"connections": 64, "iterations": 3, "message_size": 64, "rate": 681900.0, "rate_stdev": 14727.831499126634, "server": "bnio", "throughput": 41.0, "workers": 2}, {"connections": 64, "iterations": 3, "message_size": 64, "rate": 610456.0, "rate_stdev": 8360.731586809055, "server": "asio", "throughput": 36.666666666666664, "workers": 2}, {"connections": 64, "iterations": 3, "message_size": 1024, "rate": 646436.3333333334, "rate_stdev": 12517.80697868263, "server": "bnio", "throughput": 630.6666666666666, "workers": 2}, {"connections": 64, "iterations": 3, "message_size": 1024, "rate": 605276.0, "rate_stdev": 7620.370988344333, "server": "asio", "throughput": 590.6666666666666, "workers": 2}, {"connections": 64, "iterations": 3, "message_size": 4096, "rate": 582672.0, "rate_stdev": 7092.74986635414, "server": "bnio", "throughput": 2275.6666666666665, "workers": 2}, {"connections": 64, "iterations": 3, "message_size": 4096, "rate": 580016.3333333334, "rate_stdev": 2030.2384643736366, "server": "asio", "throughput": 2265.3333333333335, "workers": 2}, {"connections": 64, "iterations": 3, "message_size": 65536, "rate": 1584.6666666666667, "rate_stdev": 20.531818125912658, "server": "bnio", "throughput": 98.33333333333333, "workers": 2}, {"connections": 64, "iterations": 3, "message_size": 65536, "rate": 1561.0, "rate_stdev": 0.816496580927726, "server": "asio", "throughput": 97.0, "workers": 2}, {"connections": 256, "iterations": 3, "message_size": 64, "rate": 672200.6666666666, "rate_stdev": 2290.662252615072, "server": "bnio", "throughput": 40.333333333333336, "workers": 2}, {"connections": 256, "iterations": 3, "message_size": 64, "rate": 651786.3333333334, "rate_stdev": 9767.944387411077, "server": "asio", "throughput": 39.0, "workers": 2}, {"connections": 256, "iterations": 3, "message_size": 1024, "rate": 650265.0, "rate_stdev": 1428.0296448837, "server": "bnio", "throughput": 634.3333333333334, "workers": 2}, {"connections": 256, "iterations": 3, "message_size": 1024, "rate": 672212.0, "rate_stdev": 5450.5656587183685, "server": "asio", "throughput": 655.6666666666666, "workers": 2}, {"connections": 256, "iterations": 3, "message_size": 4096, "rate": 597610.3333333334, "rate_stdev": 1892.9885249402744, "server": "bnio", "throughput": 2333.6666666666665, "workers": 2}, {"connections": 256, "iterations": 3, "message_size": 4096, "rate": 611673.0, "rate_stdev": 2265.1573896751634, "server": "asio", "throughput": 2388.6666666666665, "workers": 2}, {"connections": 256, "iterations": 3, "message_size": 65536, "rate": 6297.0, "rate_stdev": 61.47086030524273, "server": "bnio", "throughput": 393.0, "workers": 2}, {"connections": 256, "iterations": 3, "message_size": 65536, "rate": 6237.666666666667, "rate_stdev": 3.0912061651652345, "server": "asio", "throughput": 389.3333333333333, "workers": 2}, {"connections": 1024, "iterations": 3, "message_size": 64, "rate": 702269.0, "rate_stdev": 5085.669474120394, "server": "bnio", "throughput": 42.333333333333336, "workers": 2}, {"connections": 1024, "iterations": 3, "message_size": 64, "rate": 696859.0, "rate_stdev": 735.5818558574339, "server": "asio", "throughput": 42.0, "workers": 2}, {"connections": 1024, "iterations": 3, "message_size": 1024, "rate": 649078.3333333334, "rate_stdev": 1738.3680725196134, "server": "bnio", "throughput": 633.6666666666666, "workers": 2}, {"connections": 1024, "iterations": 3, "message_size": 1024, "rate": 651782.3333333334, "rate_stdev": 841.6659405937462, "server": "asio", "throughput": 635.6666666666666, "workers": 2}, {"connections": 1024, "iterations": 3, "message_size": 4096, "rate": 479057.3333333333, "rate_stdev": 6859.448584900166, "server": "bnio", "throughput": 1871.0, "workers": 2}, {"connections": 1024, "iterations": 3, "message_size": 4096, "rate": 490075.0, "rate_stdev": 1274.4114981695145, "server": "asio", "throughput": 1913.6666666666667, "workers": 2}, {"connections": 1024, "iterations": 3, "message_size": 65536, "rate": 24851.0, "rate_stdev": 62.65780079128216, "server": "bnio", "throughput": 1552.6666666666667, "workers": 2}, {"connections": 1024, "iterations": 3, "message_size": 65536, "rate": 24806.333333333332, "rate_stdev": 11.785113019775793, "server": "asio", "throughput": 1549.6666666666667, "workers": 2}, {"connections": 64, "iterations": 3, "message_size": 64, "rate": 1007660.0, "rate_stdev": 16032.412232724058, "server": "bnio", "throughput": 61.0, "workers": 4}, {"connections": 64, "iterations": 3, "message_size": 64, "rate": 797956.6666666666, "rate_stdev": 5253.884425409028, "server": "asio", "throughput": 48.333333333333336, "workers": 4}, {"connections": 64, "iterations": 3, "message_size": 1024, "rate": 935145.6666666666, "rate_stdev": 28905.44897112346, "server": "bnio", "throughput": 912.6666666666666, "workers": 4}, {"connections": 64, "iterations": 3, "message_size": 1024, "rate": 779306.3333333334, "rate_stdev": 1855.1898974378757, "server": "asio", "throughput": 760.3333333333334, "workers": 4}, {"connections": 64, "iterations": 3, "message_size": 4096, "rate": 827509.6666666666, "rate_stdev": 4749.253438407159, "server": "bnio", "throughput": 3232.0, "workers": 4}, {"connections": 64, "iterations": 3, "message_size": 4096, "rate": 699706.6666666666, "rate_stdev": 1125.7608784975412, "server": "asio", "throughput": 2732.6666666666665, "workers": 4}, {"connections": 64, "iterations": 3, "message_size": 65536, "rate": 1572.3333333333333, "rate_stdev": 6.599663291074443, "server": "bnio", "throughput": 97.66666666666667, "workers": 4}, {"connections": 64, "iterations": 3, "message_size": 65536, "rate": 1560.6666666666667, "rate_stdev": 0.9428090415820634, "server": "asio", "throughput": 97.0, "workers": 4}, {"connections": 256, "iterations": 3, "message_size": 64, "rate": 998217.0, "rate_stdev": 9059.443728323868, "server": "bnio", "throughput": 60.333333333333336, "workers": 4}, {"connections": 256, "iterations": 3, "message_size": 64, "rate": 830430.6666666666, "rate_stdev": 5149.448729934324, "server": "asio", "throughput": 50.333333333333336, "workers": 4}, {"connections": 256, "iterations": 3, "message_size": 1024, "rate": 932800.6666666666, "rate_stdev": 24132.968339781346, "server": "bnio", "throughput": 910.3333333333334, "workers": 4}, {"connections": 256, "iterations": 3, "message_size": 1024, "rate": 787301.6666666666, "rate_stdev": 1342.7688640351407, "server": "asio", "throughput": 768.3333333333334, "workers": 4}, {"connections": 256, "iterations": 3, "message_size": 4096, "rate": 832177.3333333334, "rate_stdev": 568.7186377189417, "server": "bnio", "throughput": 3250.0, "workers": 4}, {"connections": 256, "iterations": 3, "message_size": 4096, "rate": 729242.6666666666, "rate_stdev": 1512.0983947996094, "server": "asio", "throughput": 2848.0, "workers": 4}, {"connections": 256, "iterations": 3, "message_size": 65536, "rate": 6303.333333333333, "rate_stdev": 40.30991055421593, "server": "bnio", "throughput": 393.6666666666667, "workers": 4}, {"connections": 256, "iterations": 3, "message_size": 65536, "rate": 6220.666666666667, "rate_stdev": 3.858612300930075, "server": "asio", "throughput": 388.3333333333333, "workers": 4}, {"connections": 1024, "iterations": 3, "message_size": 64, "rate": 1001160.0, "rate_stdev": 7509.018755248029, "server": "bnio", "throughput": 60.666666666666664, "workers": 4}, {"connections": 1024, "iterations": 3, "message_size": 64, "rate": 909826.0, "rate_stdev": 2522.3775820972296, "server": "asio", "throughput": 55.0, "workers": 4}, {"connections": 1024, "iterations": 3, "message_size": 1024, "rate": 932331.3333333334, "rate_stdev": 9661.645144016049, "server": "bnio", "throughput": 909.6666666666666, "workers": 4}, {"connections": 1024, "iterations": 3, "message_size": 1024, "rate": 848530.6666666666, "rate_stdev": 1517.662530194231, "server": "asio", "throughput": 828.0, "workers": 4}, {"connections": 1024, "iterations": 3, "message_size": 4096, "rate": 770464.3333333334, "rate_stdev": 4037.5380562361956, "server": "bnio", "throughput": 3009.3333333333335, "workers": 4}, {"connections": 1024, "iterations": 3, "message_size": 4096, "rate": 695281.6666666666, "rate_stdev": 2034.2750278388833, "server": "asio", "throughput": 2715.3333333333335, "workers": 4}, {"connections": 1024, "iterations": 3, "message_size": 65536, "rate": 25074.333333333332, "rate_stdev": 196.3913326894941, "server": "bnio", "throughput": 1566.6666666666667, "workers": 4}, {"connections": 1024, "iterations": 3, "message_size": 65536, "rate": 24773.0, "rate_stdev": 4.242640687119285, "server": "asio", "throughput": 1547.6666666666667, "workers": 4}, {"connections": 64, "iterations": 3, "message_size": 64, "rate": 990547.3333333334, "rate_stdev": 14699.750209517922, "server": "bnio", "throughput": 60.0, "workers": 8}, {"connections": 64, "iterations": 3, "message_size": 64, "rate": 891945.6666666666, "rate_stdev": 52412.32133975963, "server": "asio", "throughput": 54.0, "workers": 8}, {"connections": 64, "iterations": 3, "message_size": 1024, "rate": 843926.3333333334, "rate_stdev": 6851.136418304793, "server": "bnio", "throughput": 823.3333333333334, "workers": 8}, {"connections": 64, "iterations": 3, "message_size": 1024, "rate": 803845.0, "rate_stdev": 2507.1487125152084, "server": "asio", "throughput": 784.6666666666666, "workers": 8}, {"connections": 64, "iterations": 3, "message_size": 4096, "rate": 823239.6666666666, "rate_stdev": 27332.048762497765, "server": "bnio", "throughput": 3215.6666666666665, "workers": 8}, {"connections": 64, "iterations": 3, "message_size": 4096, "rate": 757836.6666666666, "rate_stdev": 2502.8264466842725, "server": "asio", "throughput": 2959.6666666666665, "workers": 8}, {"connections": 64, "iterations": 3, "message_size": 65536, "rate": 1572.0, "rate_stdev": 4.546060565661952, "server": "bnio", "throughput": 97.66666666666667, "workers": 8}, {"connections": 64, "iterations": 3, "message_size": 65536, "rate": 1558.6666666666667, "rate_stdev": 2.0548046676563256, "server": "asio", "throughput": 97.0, "workers": 8}, {"connections": 256, "iterations": 3, "message_size": 64, "rate": 925480.0, "rate_stdev": 10564.375640172337, "server": "bnio", "throughput": 56.0, "workers": 8}, {"connections": 256, "iterations": 3, "message_size": 64, "rate": 852859.3333333334, "rate_stdev": 41782.0772208478, "server": "asio", "throughput": 51.666666666666664, "workers": 8}, {"connections": 256, "iterations": 3, "message_size": 1024, "rate": 823763.6666666666, "rate_stdev": 5618.175998983616, "server": "bnio", "throughput": 804.3333333333334, "workers": 8}, {"connections": 256, "iterations": 3, "message_size": 1024, "rate": 788402.0, "rate_stdev": 1513.5959390361309, "server": "asio", "throughput": 769.3333333333334, "workers": 8}, {"connections": 256, "iterations": 3, "message_size": 4096, "rate": 796720.0, "rate_stdev": 5303.6195816316485, "server": "bnio", "throughput": 3112.0, "workers": 8}, {"connections": 256, "iterations": 3, "message_size": 4096, "rate": 747485.6666666666, "rate_stdev": 1903.6509367236654, "server": "asio", "throughput": 2919.0, "workers": 8}, {"connections": 256, "iterations": 3, "message_size": 65536, "rate": 6269.666666666667, "rate_stdev": 8.956685895029603, "server": "bnio", "throughput": 391.3333333333333, "workers": 8}, {"connections": 256, "iterations": 3, "message_size": 65536, "rate": 6226.333333333333, "rate_stdev": 0.4714045207910317, "server": "asio", "throughput": 389.0, "workers": 8}, {"connections": 1024, "iterations": 3, "message_size": 64, "rate": 1036852.3333333334, "rate_stdev": 28502.897096416164, "server": "bnio", "throughput": 62.666666666666664, "workers": 8}, {"connections": 1024, "iterations": 3, "message_size": 64, "rate": 965576.3333333334, "rate_stdev": 23490.484347686168, "server": "asio", "throughput": 58.333333333333336, "workers": 8}, {"connections": 1024, "iterations": 3, "message_size": 1024, "rate": 926174.3333333334, "rate_stdev": 10069.758068372625, "server": "bnio", "throughput": 903.6666666666666, "workers": 8}, {"connections": 1024, "iterations": 3, "message_size": 1024, "rate": 878383.3333333334, "rate_stdev": 4775.538387332772, "server": "asio", "throughput": 857.3333333333334, "workers": 8}, {"connections": 1024, "iterations": 3, "message_size": 4096, "rate": 827639.6666666666, "rate_stdev": 5560.441549213715, "server": "bnio", "throughput": 3232.3333333333335, "workers": 8}, {"connections": 1024, "iterations": 3, "message_size": 4096, "rate": 791433.6666666666, "rate_stdev": 1059.5440319097436, "server": "asio", "throughput": 3091.0, "workers": 8}, {"connections": 1024, "iterations": 3, "message_size": 65536, "rate": 24849.333333333332, "rate_stdev": 8.993825042154695, "server": "bnio", "throughput": 1552.6666666666667, "workers": 8}, {"connections": 1024, "iterations": 3, "message_size": 65536, "rate": 24835.666666666668, "rate_stdev": 20.821996915655223, "server": "asio", "throughput": 1551.6666666666667, "workers": 8}], "timerRows": [{"iterations": 3, "lifecycle_per_s": 12986166.666666666, "lifecycle_stdev": 609629.6489581924, "rounds": 100, "server": "bnio", "timers": 256, "waits_per_s": 7327396.666666667, "waits_stdev": 343987.5678309061}, {"iterations": 3, "lifecycle_per_s": 13645200.0, "lifecycle_stdev": 497866.6153365444, "rounds": 100, "server": "asio", "timers": 256, "waits_per_s": 7699253.333333333, "waits_stdev": 280933.6161602753}, {"iterations": 3, "lifecycle_per_s": 17973600.0, "lifecycle_stdev": 468215.44898333575, "rounds": 500, "server": "bnio", "timers": 256, "waits_per_s": 10244346.666666666, "waits_stdev": 266863.0042216834}, {"iterations": 3, "lifecycle_per_s": 16705300.0, "lifecycle_stdev": 707390.0904027424, "rounds": 500, "server": "asio", "timers": 256, "waits_per_s": 9521450.0, "waits_stdev": 403194.31651086884}, {"iterations": 3, "lifecycle_per_s": 17589600.0, "lifecycle_stdev": 855567.7880799393, "rounds": 1000, "server": "bnio", "timers": 256, "waits_per_s": 10038300.0, "waits_stdev": 488267.3311482826}, {"iterations": 3, "lifecycle_per_s": 17374366.666666668, "lifecycle_stdev": 224727.27669085676, "rounds": 1000, "server": "asio", "timers": 256, "waits_per_s": 9915483.333333334, "waits_stdev": 128258.19592611703}, {"iterations": 3, "lifecycle_per_s": 15784366.666666666, "lifecycle_stdev": 1110314.8182184887, "rounds": 100, "server": "bnio", "timers": 1024, "waits_per_s": 8906260.0, "waits_stdev": 626477.5592682204}, {"iterations": 3, "lifecycle_per_s": 15815833.333333334, "lifecycle_stdev": 1246271.9054131897, "rounds": 100, "server": "asio", "timers": 1024, "waits_per_s": 8924023.333333334, "waits_stdev": 703211.5873776699}, {"iterations": 3, "lifecycle_per_s": 18288933.333333332, "lifecycle_stdev": 305774.0596511672, "rounds": 500, "server": "bnio", "timers": 1024, "waits_per_s": 10424066.666666666, "waits_stdev": 174287.5274430796}, {"iterations": 3, "lifecycle_per_s": 18958033.333333332, "lifecycle_stdev": 199871.66438047745, "rounds": 500, "server": "asio", "timers": 1024, "waits_per_s": 10805433.333333334, "waits_stdev": 113925.13136071232}, {"iterations": 3, "lifecycle_per_s": 18250533.333333332, "lifecycle_stdev": 1025545.3649427487, "rounds": 1000, "server": "bnio", "timers": 1024, "waits_per_s": 10415506.666666666, "waits_stdev": 585292.5981269729}, {"iterations": 3, "lifecycle_per_s": 19059133.333333332, "lifecycle_stdev": 442301.74717669334, "rounds": 1000, "server": "asio", "timers": 1024, "waits_per_s": 10876966.666666666, "waits_stdev": 252423.00916429065}, {"iterations": 3, "lifecycle_per_s": 17323033.333333332, "lifecycle_stdev": 537007.9722147728, "rounds": 100, "server": "bnio", "timers": 4096, "waits_per_s": 9774456.666666666, "waits_stdev": 302993.27234922047}, {"iterations": 3, "lifecycle_per_s": 17026566.666666668, "lifecycle_stdev": 464253.3814871166, "rounds": 100, "server": "asio", "timers": 4096, "waits_per_s": 9607176.666666666, "waits_stdev": 261944.64254028094}, {"iterations": 3, "lifecycle_per_s": 19034766.666666668, "lifecycle_stdev": 177173.96974599728, "rounds": 500, "server": "bnio", "timers": 4096, "waits_per_s": 10849166.666666666, "waits_stdev": 101006.47944012744}, {"iterations": 3, "lifecycle_per_s": 17778433.333333332, "lifecycle_stdev": 251135.09423327429, "rounds": 500, "server": "asio", "timers": 4096, "waits_per_s": 10133113.333333334, "waits_stdev": 143139.95140731637}, {"iterations": 3, "lifecycle_per_s": 19039100.0, "lifecycle_stdev": 76950.54688997776, "rounds": 1000, "server": "bnio", "timers": 4096, "waits_per_s": 10865500.0, "waits_stdev": 43932.97926008054}, {"iterations": 3, "lifecycle_per_s": 18221733.333333332, "lifecycle_stdev": 126723.75029523428, "rounds": 1000, "server": "asio", "timers": 4096, "waits_per_s": 10399100.0, "waits_stdev": 72347.26440347738}, {"iterations": 3, "lifecycle_per_s": 18605900.0, "lifecycle_stdev": 606562.0715694863, "rounds": 100, "server": "bnio", "timers": 16384, "waits_per_s": 10498300.0, "waits_stdev": 342244.67855614645}, {"iterations": 3, "lifecycle_per_s": 17597133.333333332, "lifecycle_stdev": 251419.4149667488, "rounds": 100, "server": "asio", "timers": 16384, "waits_per_s": 9929093.333333334, "waits_stdev": 141850.90983924715}, {"iterations": 3, "lifecycle_per_s": 18939533.333333332, "lifecycle_stdev": 243972.07945901423, "rounds": 500, "server": "bnio", "timers": 16384, "waits_per_s": 10794866.666666666, "waits_stdev": 139062.6797127428}, {"iterations": 3, "lifecycle_per_s": 18060333.333333332, "lifecycle_stdev": 38961.03466570443, "rounds": 500, "server": "asio", "timers": 16384, "waits_per_s": 10293733.333333334, "waits_stdev": 22222.261111077085}, {"iterations": 3, "lifecycle_per_s": 19189366.666666668, "lifecycle_stdev": 90885.65465584886, "rounds": 1000, "server": "bnio", "timers": 16384, "waits_per_s": 10951300.0, "waits_stdev": 51835.573370675345}, {"iterations": 3, "lifecycle_per_s": 18028766.666666668, "lifecycle_stdev": 63314.89205199323, "rounds": 1000, "server": "asio", "timers": 16384, "waits_per_s": 10288966.666666666, "waits_stdev": 36119.18542209328}], "throughputRatios": [{"asio_rate": 427313.3333333333, "bnio_rate": 440703.0, "connections": 64, "message_size": 64, "ratio": 1.031334539838058, "workers": 1}, {"asio_rate": 414593.3333333333, "bnio_rate": 427226.0, "connections": 64, "message_size": 1024, "ratio": 1.0304700188136167, "workers": 1}, {"asio_rate": 373815.6666666667, "bnio_rate": 376643.6666666667, "connections": 64, "message_size": 4096, "ratio": 1.0075652259981969, "workers": 1}, {"asio_rate": 1566.0, "bnio_rate": 1574.0, "connections": 64, "message_size": 65536, "ratio": 1.0051085568326947, "workers": 1}, {"asio_rate": 433871.0, "bnio_rate": 434000.0, "connections": 256, "message_size": 64, "ratio": 1.0002973233979686, "workers": 1}, {"asio_rate": 416560.3333333333, "bnio_rate": 419325.0, "connections": 256, "message_size": 1024, "ratio": 1.0066368937352812, "workers": 1}, {"asio_rate": 364214.0, "bnio_rate": 356639.0, "connections": 256, "message_size": 4096, "ratio": 0.9792017879598258, "workers": 1}, {"asio_rate": 6264.666666666667, "bnio_rate": 6244.333333333333, "connections": 256, "message_size": 65536, "ratio": 0.9967542832818984, "workers": 1}, {"asio_rate": 417218.3333333333, "bnio_rate": 423765.3333333333, "connections": 1024, "message_size": 64, "ratio": 1.0156920237605411, "workers": 1}, {"asio_rate": 385804.0, "bnio_rate": 381524.6666666667, "connections": 1024, "message_size": 1024, "ratio": 0.9889080120130084, "workers": 1}, {"asio_rate": 296851.3333333333, "bnio_rate": 270769.3333333333, "connections": 1024, "message_size": 4096, "ratio": 0.9121378377953498, "workers": 1}, {"asio_rate": 24821.0, "bnio_rate": 24814.0, "connections": 1024, "message_size": 65536, "ratio": 0.9997179807421135, "workers": 1}, {"asio_rate": 610456.0, "bnio_rate": 681900.0, "connections": 64, "message_size": 64, "ratio": 1.1170338238955797, "workers": 2}, {"asio_rate": 605276.0, "bnio_rate": 646436.3333333334, "connections": 64, "message_size": 1024, "ratio": 1.0680025861480273, "workers": 2}, {"asio_rate": 580016.3333333334, "bnio_rate": 582672.0, "connections": 64, "message_size": 4096, "ratio": 1.0045786066944091, "workers": 2}, {"asio_rate": 1561.0, "bnio_rate": 1584.6666666666667, "connections": 64, "message_size": 65536, "ratio": 1.0151612214392485, "workers": 2}, {"asio_rate": 651786.3333333334, "bnio_rate": 672200.6666666666, "connections": 256, "message_size": 64, "ratio": 1.0313205912571553, "workers": 2}, {"asio_rate": 672212.0, "bnio_rate": 650265.0, "connections": 256, "message_size": 1024, "ratio": 0.9673510737683945, "workers": 2}, {"asio_rate": 611673.0, "bnio_rate": 597610.3333333334, "connections": 256, "message_size": 4096, "ratio": 0.9770095023539267, "workers": 2}, {"asio_rate": 6237.666666666667, "bnio_rate": 6297.0, "connections": 256, "message_size": 65536, "ratio": 1.0095121038849997, "workers": 2}, {"asio_rate": 696859.0, "bnio_rate": 702269.0, "connections": 1024, "message_size": 64, "ratio": 1.00776340694459, "workers": 2}, {"asio_rate": 651782.3333333334, "bnio_rate": 649078.3333333334, "connections": 1024, "message_size": 1024, "ratio": 0.9958513757404696, "workers": 2}, {"asio_rate": 490075.0, "bnio_rate": 479057.3333333333, "connections": 1024, "message_size": 4096, "ratio": 0.9775184070465405, "workers": 2}, {"asio_rate": 24806.333333333332, "bnio_rate": 24851.0, "connections": 1024, "message_size": 65536, "ratio": 1.0018006154342305, "workers": 2}, {"asio_rate": 797956.6666666666, "bnio_rate": 1007660.0, "connections": 64, "message_size": 64, "ratio": 1.2628004026952175, "workers": 4}, {"asio_rate": 779306.3333333334, "bnio_rate": 935145.6666666666, "connections": 64, "message_size": 1024, "ratio": 1.1999718553123524, "workers": 4}, {"asio_rate": 699706.6666666666, "bnio_rate": 827509.6666666666, "connections": 64, "message_size": 4096, "ratio": 1.1826522542779832, "workers": 4}, {"asio_rate": 1560.6666666666667, "bnio_rate": 1572.3333333333333, "connections": 64, "message_size": 65536, "ratio": 1.0074754378470738, "workers": 4}, {"asio_rate": 830430.6666666666, "bnio_rate": 998217.0, "connections": 256, "message_size": 64, "ratio": 1.2020473714040747, "workers": 4}, {"asio_rate": 787301.6666666666, "bnio_rate": 932800.6666666666, "connections": 256, "message_size": 1024, "ratio": 1.1848071789508892, "workers": 4}, {"asio_rate": 729242.6666666666, "bnio_rate": 832177.3333333334, "connections": 256, "message_size": 4096, "ratio": 1.141152830699246, "workers": 4}, {"asio_rate": 6220.666666666667, "bnio_rate": 6303.333333333333, "connections": 256, "message_size": 65536, "ratio": 1.0132890365448504, "workers": 4}, {"asio_rate": 909826.0, "bnio_rate": 1001160.0, "connections": 1024, "message_size": 64, "ratio": 1.1003862276962848, "workers": 4}, {"asio_rate": 848530.6666666666, "bnio_rate": 932331.3333333334, "connections": 1024, "message_size": 1024, "ratio": 1.0987597384026977, "workers": 4}, {"asio_rate": 695281.6666666666, "bnio_rate": 770464.3333333334, "connections": 1024, "message_size": 4096, "ratio": 1.1081326752467227, "workers": 4}, {"asio_rate": 24773.0, "bnio_rate": 25074.333333333332, "connections": 1024, "message_size": 65536, "ratio": 1.0121637804599093, "workers": 4}, {"asio_rate": 891945.6666666666, "bnio_rate": 990547.3333333334, "connections": 64, "message_size": 64, "ratio": 1.1105467186528926, "workers": 8}, {"asio_rate": 803845.0, "bnio_rate": 843926.3333333334, "connections": 64, "message_size": 1024, "ratio": 1.0498620173457984, "workers": 8}, {"asio_rate": 757836.6666666666, "bnio_rate": 823239.6666666666, "connections": 64, "message_size": 4096, "ratio": 1.0863022375094018, "workers": 8}, {"asio_rate": 1558.6666666666667, "bnio_rate": 1572.0, "connections": 64, "message_size": 65536, "ratio": 1.0085543199315654, "workers": 8}, {"asio_rate": 852859.3333333334, "bnio_rate": 925480.0, "connections": 256, "message_size": 64, "ratio": 1.0851496417150464, "workers": 8}, {"asio_rate": 788402.0, "bnio_rate": 823763.6666666666, "connections": 256, "message_size": 1024, "ratio": 1.0448523299873245, "workers": 8}, {"asio_rate": 747485.6666666666, "bnio_rate": 796720.0, "connections": 256, "message_size": 4096, "ratio": 1.0658665918677594, "workers": 8}, {"asio_rate": 6226.333333333333, "bnio_rate": 6269.666666666667, "connections": 256, "message_size": 65536, "ratio": 1.00695968734943, "workers": 8}, {"asio_rate": 965576.3333333334, "bnio_rate": 1036852.3333333334, "connections": 1024, "message_size": 64, "ratio": 1.0738170536491332, "workers": 8}, {"asio_rate": 878383.3333333334, "bnio_rate": 926174.3333333334, "connections": 1024, "message_size": 1024, "ratio": 1.0544079084682085, "workers": 8}, {"asio_rate": 791433.6666666666, "bnio_rate": 827639.6666666666, "connections": 1024, "message_size": 4096, "ratio": 1.045747358906895, "workers": 8}, {"asio_rate": 24835.666666666668, "bnio_rate": 24849.333333333332, "connections": 1024, "message_size": 65536, "ratio": 1.0005502838659455, "workers": 8}], "timerLifecycleRatios": [{"asio": 13645200.0, "bnio": 12986166.666666666, "ratio": 0.9517021858724435, "rounds": 100, "timers": 256}, {"asio": 16705300.0, "bnio": 17973600.0, "ratio": 1.075922012774389, "rounds": 500, "timers": 256}, {"asio": 17374366.666666668, "bnio": 17589600.0, "ratio": 1.0123879815283434, "rounds": 1000, "timers": 256}, {"asio": 15815833.333333334, "bnio": 15784366.666666666, "ratio": 0.9980104325833815, "rounds": 100, "timers": 1024}, {"asio": 18958033.333333332, "bnio": 18288933.333333332, "ratio": 0.9647062546923819, "rounds": 500, "timers": 1024}, {"asio": 19059133.333333332, "bnio": 18250533.333333332, "ratio": 0.9575741464284839, "rounds": 1000, "timers": 1024}, {"asio": 17026566.666666668, "bnio": 17323033.333333332, "ratio": 1.0174120051605626, "rounds": 100, "timers": 4096}, {"asio": 17778433.333333332, "bnio": 19034766.666666668, "ratio": 1.0706661441859333, "rounds": 500, "timers": 4096}, {"asio": 18221733.333333332, "bnio": 19039100.0, "ratio": 1.0448566912770831, "rounds": 1000, "timers": 4096}, {"asio": 17597133.333333332, "bnio": 18605900.0, "ratio": 1.0573256250071035, "rounds": 100, "timers": 16384}, {"asio": 18060333.333333332, "bnio": 18939533.333333332, "ratio": 1.0486812720326313, "rounds": 500, "timers": 16384}, {"asio": 18028766.666666668, "bnio": 19189366.666666668, "ratio": 1.0643748971551021, "rounds": 1000, "timers": 16384}], "timerWaitsRatios": [{"asio": 7699253.333333333, "bnio": 7327396.666666667, "ratio": 0.9517022429880647, "rounds": 100, "timers": 256}, {"asio": 9521450.0, "bnio": 10244346.666666666, "ratio": 1.0759229599133184, "rounds": 500, "timers": 256}, {"asio": 9915483.333333334, "bnio": 10038300.0, "ratio": 1.0123863519848586, "rounds": 1000, "timers": 256}, {"asio": 8924023.333333334, "bnio": 8906260.0, "ratio": 0.9980094927288028, "rounds": 100, "timers": 1024}, {"asio": 10805433.333333334, "bnio": 10424066.666666666, "ratio": 0.9647060275231903, "rounds": 500, "timers": 1024}, {"asio": 10876966.666666666, "bnio": 10415506.666666666, "ratio": 0.9575745688902236, "rounds": 1000, "timers": 1024}, {"asio": 9607176.666666666, "bnio": 9774456.666666666, "ratio": 1.0174119833332929, "rounds": 100, "timers": 4096}, {"asio": 10133113.333333334, "bnio": 10849166.666666666, "ratio": 1.0706646920623932, "rounds": 500, "timers": 4096}, {"asio": 10399100.0, "bnio": 10865500.0, "ratio": 1.0448500350991912, "rounds": 1000, "timers": 4096}, {"asio": 9929093.333333334, "bnio": 10498300.0, "ratio": 1.057327154409533, "rounds": 100, "timers": 16384}, {"asio": 10293733.333333334, "bnio": 10794866.666666666, "ratio": 1.048683341320933, "rounds": 500, "timers": 16384}, {"asio": 10288966.666666666, "bnio": 10951300.0, "ratio": 1.0643731634858054, "rounds": 1000, "timers": 16384}]};
+const MSG = {64: "64 B", 1024: "1 KB", 4096: "4 KB", 65536: "64 KB"};
+const BLUE = "#2563eb";
+const AMBER = "#f59e0b";
+const INK = "#111827";
+const MUTED = "#6b7280";
+
+function text(v) {
+  if (v === undefined || v === null) return "";
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + "M";
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return v.toLocaleString();
+}
+
+function axis(label) {
+  return {
+    axisLine: { lineStyle: { color: "#9ca3af" } },
+    axisLabel: { color: MUTED },
+    splitLine: { lineStyle: { color: "#e5e7eb", type: "dashed" } },
+    name: label,
+    nameLocation: "middle",
+    nameGap: 28,
+    nameTextStyle: { color: MUTED }
+  };
+}
+
+function tooltip() {
+  return {
+    trigger: "axis",
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderColor: "#e5e7eb",
+    textStyle: { color: INK },
+    extraCssText: "box-shadow: 0 4px 12px rgba(15,23,42,.08); border-radius: 8px;"
+  };
+}
+
+function legend() {
+  return { top: 0, textStyle: { color: INK } };
+}
+
+function render(id, option) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const chart = echarts.init(el);
+  chart.setOption(option);
+  window.addEventListener("resize", () => chart.resize());
+}
+
+function lineOrBar(rows, xKey, title, yName, seriesLabels) {
+  const xValues = [...new Set(rows.map(r => r[xKey]))].sort((a, b) => a - b);
+  const series = [];
+  for (const [server, color, label] of seriesLabels) {
+    series.push({
+      name: label,
+      type: "line",
+      smooth: true,
+      symbol: "circle",
+      symbolSize: 7,
+      lineStyle: { width: 3, color },
+      itemStyle: { color },
+      data: xValues.map(x => {
+        const row = rows.find(r => r[xKey] === x && r.server === server);
+        return row ? row.rate : null;
+      })
+    });
+  }
+  return {
+    title: { text: title, left: 0, top: 24, textStyle: { fontSize: 15, color: INK } },
+    tooltip: tooltip(),
+    legend: legend(),
+    grid: { left: 58, right: 22, top: 82, bottom: 42 },
+    xAxis: Object.assign(axis(""), { type: "category", data: xValues.map(String) }),
+    yAxis: Object.assign(axis(yName), { type: "value" }),
+    series
+  };
+}
+
+function barOptions(rows, xKey, title, yName) {
+  const xValues = [...new Set(rows.map(r => r[xKey]))].sort((a, b) => a - b);
+  return {
+    title: { text: title, left: 0, top: 24, textStyle: { fontSize: 15, color: INK } },
+    tooltip: tooltip(),
+    legend: legend(),
+    grid: { left: 58, right: 22, top: 82, bottom: 42 },
+    xAxis: Object.assign(axis(""), { type: "category", data: xValues.map(String) }),
+    yAxis: Object.assign(axis(yName), { type: "value" }),
+    series: [
+      { name: "bnio", type: "bar", barMaxWidth: 42, itemStyle: { color: BLUE }, data: xValues.map(x => rows.find(r => r.x === x && r.server === "bnio")?.rate ?? null) },
+      { name: "asio", type: "bar", barMaxWidth: 42, itemStyle: { color: AMBER }, data: xValues.map(x => rows.find(r => r.x === x && r.server === "asio")?.rate ?? null) }
+    ]
+  };
+}
+
+function heatmap(rows, title, xData, yData) {
+  const values = rows.map(r => [xData.indexOf(String(r.x)), yData.indexOf(String(r.y)), r.ratio]);
+  return {
+    title: { text: title, left: 0, top: 16, textStyle: { fontSize: 15, color: INK } },
+    tooltip: { formatter: p => `${p.name}<br/>bnio / asio: ${p.value[2].toFixed(3)}×` },
+    grid: { left: 62, right: 28, top: 68, bottom: 42 },
+    xAxis: Object.assign(axis(""), { type: "category", data: xData.map(String) }),
+    yAxis: Object.assign(axis(""), { type: "category", data: yData.map(String) }),
+    visualMap: {
+      min: 0.8,
+      max: 1.25,
+      calculable: true,
+      orient: "horizontal",
+      left: "center",
+      bottom: 0,
+      textStyle: { color: MUTED },
+      inRange: { color: ["#ef4444", "#fef3c7", "#2563eb"] }
+    },
+    series: [{
+      type: "heatmap",
+      data: values,
+      label: { show: true, color: INK, formatter: p => p.value[2].toFixed(2) + "×" },
+      itemStyle: { borderColor: "#ffffff", borderWidth: 2 }
+    }]
+  };
+}
+
+const refRows = DATA.throughputRows.filter(r => r.workers === 4 && r.connections === 256);
+render("overview", barOptions(refRows.map(r => ({...r, x: r.message_size})), "Throughput overview (workers=4, connections=256)", "request/s"));
+render("worker-overview", lineOrBar(
+  DATA.throughputRows.filter(r => r.connections === 256 && r.message_size === 4096),
+  "workers",
+  "Worker scaling (connections=256, message=4KB)",
+  "request/s",
+  [["bnio", BLUE, "bnio"], ["asio", AMBER, "asio"]]
+));
+
+for (const msg of [64, 1024, 4096, 65536]) {
+  const rows = DATA.throughputRows.filter(r => r.workers === 4 && r.message_size === msg);
+  render("conn-" + msg, lineOrBar(rows, "connections", "Connections, " + (MSG[msg] || msg), "request/s",
+    [["bnio", BLUE, "bnio"], ["asio", AMBER, "asio"]]));
+}
+for (const msg of [64, 1024, 4096, 65536]) {
+  const rows = DATA.throughputRows.filter(r => r.connections === 256 && r.message_size === msg);
+  render("worker-" + msg, lineOrBar(rows, "workers", "Workers, " + (MSG[msg] || msg), "request/s",
+    [["bnio", BLUE, "bnio"], ["asio", AMBER, "asio"]]));
+}
+
+const hr = DATA.throughputRatios.filter(r => r.workers === 4).map(r => ({x: r.connections, y: r.message_size, ratio: r.ratio}));
+const wr = DATA.throughputRatios.filter(r => r.connections === 256).map(r => ({x: r.workers, y: r.message_size, ratio: r.ratio}));
+render("heatmap", heatmap(hr, "Throughput ratio (workers=4)", [64, 256, 1024], [64, 1024, 4096, 65536]));
+render("worker-heatmap", heatmap(wr, "Worker-scaling ratio (connections=256)", [1, 2, 4, 8], [64, 1024, 4096, 65536]));
+
+function timerOption(metric, title) {
+  const rows = DATA.timerRows.filter(r => r.rounds === 500);
+  const xValues = [256, 1024, 4096, 16384];
+  return {
+    title: { text: title, left: 0, top: 24, textStyle: { fontSize: 15, color: INK } },
+    tooltip: tooltip(),
+    legend: legend(),
+    grid: { left: 68, right: 24, top: 82, bottom: 42 },
+    xAxis: Object.assign(axis("live timers"), { type: "category", data: xValues.map(String) }),
+    yAxis: Object.assign(axis("operations/s"), { type: "value" }),
+    series: [["bnio", BLUE, "bnio"], ["asio", AMBER, "asio"]].map(([server, color, label]) => ({
+      name: label,
+      type: "bar",
+      barMaxWidth: 42,
+      itemStyle: { color },
+      data: xValues.map(x => rows.find(r => r.server === server && r.timers === x)?.[metric + "_per_s"] ?? null)
+    }))
+  };
+}
+
+render("timer-lifecycle", timerOption("lifecycle", "Timer lifecycle overview (rounds=500)"));
+render("timer-waits", timerOption("waits", "Active waits overview (rounds=500)"));
+
+for (const rounds of [100, 500, 1000]) {
+  const key = "timer-rounds-" + rounds;
+  const rows = DATA.timerRows.filter(r => r.rounds === rounds);
+  render(key, lineOrBar(
+    rows.map(r => ({...r, x: r.timers, rate: r.lifecycle_per_s})),
+    "x",
+    "Lifecycle scaling, rounds=" + rounds,
+    "lifecycle/s",
+    [["bnio", BLUE, "bnio"], ["asio", AMBER, "asio"]]
+  ));
+}
+
+const lr = DATA.timerLifecycleRatios.map(r => ({x: r.timers, y: r.rounds, ratio: r.ratio}));
+const wr2 = DATA.timerWaitsRatios.map(r => ({x: r.timers, y: r.rounds, ratio: r.ratio}));
+render("timer-lifecycle-heatmap", heatmap(lr, "Lifecycle ratio", [256, 1024, 4096, 16384], [100, 500, 1000]));
+render("timer-waits-heatmap", heatmap(wr2, "Active waits ratio", [256, 1024, 4096, 16384], [100, 500, 1000]));
+</script>
+</body>
+</html>
