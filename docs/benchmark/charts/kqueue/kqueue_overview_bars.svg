@@ -1,0 +1,83 @@
+<svg width="960" height="540" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 960 540">
+<rect width="960" height="540" x="0" y="0" fill="#ffffff"></rect>
+<path d="M90 470.5L920 470.5" fill="none" pointer-events="visible" stroke="#e5e7eb" class="zr0-cls-0"></path>
+<path d="M90 410.5L920 410.5" fill="none" pointer-events="visible" stroke="#e5e7eb" class="zr0-cls-0"></path>
+<path d="M90 350.5L920 350.5" fill="none" pointer-events="visible" stroke="#e5e7eb" class="zr0-cls-0"></path>
+<path d="M90 290.5L920 290.5" fill="none" pointer-events="visible" stroke="#e5e7eb" class="zr0-cls-0"></path>
+<path d="M90 230.5L920 230.5" fill="none" pointer-events="visible" stroke="#e5e7eb" class="zr0-cls-0"></path>
+<path d="M90 170.5L920 170.5" fill="none" pointer-events="visible" stroke="#e5e7eb" class="zr0-cls-0"></path>
+<path d="M90 110.5L920 110.5" fill="none" pointer-events="visible" stroke="#e5e7eb" class="zr0-cls-0"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" y="-6" transform="translate(90 95)" fill="#1f2937">req/s</text>
+<path d="M90 470.5L920 470.5" fill="none" pointer-events="visible" stroke="#9ca3af" stroke-linecap="round" class="zr0-cls-0"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" xml:space="preserve" y="6" transform="translate(505 504)" fill="#1f2937">message size</text>
+<path d="M90.5 470L90.5 475" fill="none" pointer-events="visible" stroke="#9ca3af" class="zr0-cls-0"></path>
+<path d="M297.5 470L297.5 475" fill="none" pointer-events="visible" stroke="#9ca3af" class="zr0-cls-0"></path>
+<path d="M505.5 470L505.5 475" fill="none" pointer-events="visible" stroke="#9ca3af" class="zr0-cls-0"></path>
+<path d="M712.5 470L712.5 475" fill="none" pointer-events="visible" stroke="#9ca3af" class="zr0-cls-0"></path>
+<path d="M920.5 470L920.5 475" fill="none" pointer-events="visible" stroke="#9ca3af" class="zr0-cls-0"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" transform="translate(82 470)" fill="#4b5563">0</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" transform="translate(82 410)" fill="#4b5563">20k</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" transform="translate(82 350)" fill="#4b5563">40k</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" transform="translate(82 290)" fill="#4b5563">60k</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" transform="translate(82 230)" fill="#4b5563">80k</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" transform="translate(82 170)" fill="#4b5563">100k</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" transform="translate(82 110)" fill="#4b5563">120k</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" xml:space="preserve" y="6" transform="translate(193.75 478)" fill="#4b5563">64 B</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" xml:space="preserve" y="6" transform="translate(401.25 478)" fill="#4b5563">1 KB</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" xml:space="preserve" y="6" transform="translate(608.75 478)" fill="#4b5563">4 KB</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" xml:space="preserve" y="6" transform="translate(816.25 478)" fill="#4b5563">64 KB</text>
+<path d="M121 156.1L183.9 156.1A3 3 0 0 1 186.9 159.1L186.9 470L118 470L118 159.1A3 3 0 0 1 121 156.1" fill="#2563eb" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="zr0-cls-1"></path>
+<path d="M328.5 154.5L391.4 154.5A3 3 0 0 1 394.4 157.5L394.4 470L325.5 470L325.5 157.5A3 3 0 0 1 328.5 154.5" fill="#2563eb" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="zr0-cls-1"></path>
+<path d="M536 164.8L598.9 164.8A3 3 0 0 1 601.9 167.8L601.9 470L533 470L533 167.8A3 3 0 0 1 536 164.8" fill="#2563eb" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="zr0-cls-1"></path>
+<path d="M743.5 423.1L806.4 423.1A3 3 0 0 1 809.4 426.1L809.4 470L740.5 470L740.5 426.1A3 3 0 0 1 743.5 423.1" fill="#2563eb" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="zr0-cls-1"></path>
+<path d="M203.6 163.3L266.5 163.3A3 3 0 0 1 269.5 166.3L269.5 470L200.6 470L200.6 166.3A3 3 0 0 1 203.6 163.3" fill="#f59e0b" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="zr0-cls-2"></path>
+<path d="M411.1 159L474 159A3 3 0 0 1 477 162L477 470L408.1 470L408.1 162A3 3 0 0 1 411.1 159" fill="#f59e0b" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="zr0-cls-2"></path>
+<path d="M618.6 169.7L681.5 169.7A3 3 0 0 1 684.5 172.7L684.5 470L615.6 470L615.6 172.7A3 3 0 0 1 618.6 169.7" fill="#f59e0b" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="zr0-cls-2"></path>
+<path d="M826.1 430.3L889 430.3A3 3 0 0 1 892 433.3L892 470L823.1 470L823.1 433.3A3 3 0 0 1 826.1 430.3" fill="#f59e0b" ecmeta_series_index="1" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="zr0-cls-2"></path>
+<path d="M-5 -5l124.9 0l0 24l-124.9 0Z" transform="translate(422.56 61)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#ccc" stroke-width="0" class="zr0-cls-0"></path>
+<path d="M3.5 0L21.5 0A3.5 3.5 0 0 1 25 3.5L25 10.5A3.5 3.5 0 0 1 21.5 14L3.5 14A3.5 3.5 0 0 1 0 10.5L0 3.5A3.5 3.5 0 0 1 3.5 0" transform="translate(422.56 61)" fill="#2563eb" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="zr0-cls-0"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" x="30" y="7" transform="translate(422.56 61)" fill="#1f2937">bnio</text>
+<path d="M0 0l52.8 0l0 14l-52.8 0Z" transform="translate(422.56 61)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="zr0-cls-3"></path>
+<path d="M3.5 0L21.5 0A3.5 3.5 0 0 1 25 3.5L25 10.5A3.5 3.5 0 0 1 21.5 14L3.5 14A3.5 3.5 0 0 1 0 10.5L0 3.5A3.5 3.5 0 0 1 3.5 0" transform="translate(485.36 61)" fill="#f59e0b" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="zr0-cls-0"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" x="30" y="7" transform="translate(485.36 61)" fill="#1f2937">asio</text>
+<path d="M0 0l52.1 0l0 14l-52.1 0Z" transform="translate(485.36 61)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="zr0-cls-3"></path>
+<path d="M-173.1 -5l346.2 0l0 50l-346.2 0Z" transform="translate(480 13)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#ccc" stroke-width="0" class="zr0-cls-0"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:18px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;font-weight:bold;" xml:space="preserve" y="9" transform="translate(480 13)" fill="#1f2937">TCP Echo Throughput Overview (kqueue)</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:12px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;" xml:space="preserve" y="34" transform="translate(480 13)" fill="#6b7280">workers=4, connections=256, 3-iteration mean</text>
+<g clip-path="url(#zr0-c0)">
+<path d="M193.8 156.1L401.3 154.5L608.8 164.8L816.3 423.1" fill="none" pointer-events="visible" stroke="#5470c6" stroke-width="0" stroke-linejoin="bevel" class="zr0-cls-0"></path>
+</g>
+<path d="M1 0A1 1 0 1 1 1 -0.1A1 1 0 0 1 1 0" transform="matrix(0.5,0,0,0.5,193.75,156.098)" fill="#5470c6" ecmeta_series_index="2" ecmeta_data_index="0" ecmeta_ssr_type="chart" ecmeta_silent="true" class="zr0-cls-0"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.1A1 1 0 0 1 1 0" transform="matrix(0.5,0,0,0.5,401.25,154.484)" fill="#5470c6" ecmeta_series_index="2" ecmeta_data_index="1" ecmeta_ssr_type="chart" ecmeta_silent="true" class="zr0-cls-0"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.1A1 1 0 0 1 1 0" transform="matrix(0.5,0,0,0.5,608.75,164.765)" fill="#5470c6" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="chart" ecmeta_silent="true" class="zr0-cls-0"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.1A1 1 0 0 1 1 0" transform="matrix(0.5,0,0,0.5,816.25,423.119)" fill="#5470c6" ecmeta_series_index="2" ecmeta_data_index="3" ecmeta_ssr_type="chart" ecmeta_silent="true" class="zr0-cls-0"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;font-weight:bold;" y="-6.5" transform="translate(193.75 145.598)" fill="#374151">1.02×</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;font-weight:bold;" y="-6.5" transform="translate(401.25 143.984)" fill="#374151">1.01×</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;font-weight:bold;" y="-6.5" transform="translate(608.75 154.265)" fill="#374151">1.02×</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Helvetica Neue, Helvetica, Arial, PingFang SC, sans-serif;font-weight:bold;" y="-6.5" transform="translate(816.25 412.619)" fill="#374151">1.18×</text>
+<defs >
+<clipPath id="zr0-c0">
+<path d="M90 -720l830 0l0 2020l-830 0Z" fill="#000" class="zr0-cls-0"></path>
+</clipPath>
+</defs>
+<style ><![CDATA[
+.zr0-cls-0:hover {
+pointer-events:none;
+}
+.zr0-cls-1:hover {
+cursor:pointer;
+fill:rgba(40,108,255,1);
+}
+.zr0-cls-2:hover {
+cursor:pointer;
+fill:rgba(255,173,12,1);
+}
+.zr0-cls-3:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg>
