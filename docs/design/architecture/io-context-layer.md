@@ -575,7 +575,7 @@ sequenceDiagram
     User->>Op: connect(receiver) → start()
     Op->>Ctx: publish_io(*this)
 
-    Note over Ctx: local I/O queue if the caller is a worker, else shared; defer kind always takes the shared queue via publish_io_deferred()
+    Note over Ctx: local I/O queue if the caller is a worker, else shared. defer kind always takes the shared queue via publish_io_deferred()
     Ctx->>Worker: notify one worker if sleeping (shared path only)
     Worker->>UCtx: run(): CPU queue first
     UCtx->>UCtx: consume_io_tasks(): local_state_.pop_io_all(), then global_state_->pop_io_all()
