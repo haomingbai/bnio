@@ -106,8 +106,8 @@ class io_uring_receiver_operation : public io_uring_io_operation_base {
                            std::error_code(-result, std::generic_category()),
                            result, flags);
         } else {
-          bexec::set_value(std::move(receiver_),
-                           bnio::detail::empty_error_code, result, flags);
+          bexec::set_value(std::move(receiver_), bnio::detail::empty_error_code,
+                           result, flags);
         }
         break;
       case io_uring_receiver_completion::value_with_ec:

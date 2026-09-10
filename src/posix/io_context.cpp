@@ -3,8 +3,8 @@
  * @brief io_context construction, destruction, run loop entry.
  */
 
-#include <bnio/io_context.h>
 #include <bnio/detail/error_code.h>
+#include <bnio/io_context.h>
 
 #include <atomic>
 #include <cerrno>

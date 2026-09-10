@@ -56,7 +56,7 @@ class kqueue_stream_file_read_request {
    *  inline for regular files, nonblocking otherwise. */
   [[nodiscard]] int perform_io() noexcept {
     if (!resolved_) {
-      struct stat status {};
+      struct stat status{};
       if (::fstat(descriptor_.native_handle(), &status) != 0) {
         return -errno;
       }
@@ -138,7 +138,7 @@ class kqueue_stream_file_write_request {
    *  inline for regular files, nonblocking otherwise. */
   [[nodiscard]] int perform_io() noexcept {
     if (!resolved_) {
-      struct stat status {};
+      struct stat status{};
       if (::fstat(descriptor_.native_handle(), &status) != 0) {
         return -errno;
       }

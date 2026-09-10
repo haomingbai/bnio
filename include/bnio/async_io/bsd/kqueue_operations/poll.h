@@ -134,8 +134,7 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
                            std::error_code(-result, std::generic_category()),
                            0U);
         } else {
-          bexec::set_value(std::move(receiver_),
-                           bnio::detail::empty_error_code,
+          bexec::set_value(std::move(receiver_), bnio::detail::empty_error_code,
                            static_cast<unsigned>(result));
         }
         break;

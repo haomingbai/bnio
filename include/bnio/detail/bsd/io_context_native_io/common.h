@@ -184,8 +184,8 @@ class native_io_operation : public io_context::operation_base {
                              this->result, this->flags);
         } else {
           request_.set_value(std::move(receiver_),
-                             bnio::detail::empty_error_code,
-                             this->result, this->flags);
+                             bnio::detail::empty_error_code, this->result,
+                             this->flags);
         }
         break;
       case completion_kind::value_with_ec:
@@ -401,8 +401,7 @@ class native_poll_operation : public io_context::operation_base {
           bexec::set_value(std::move(receiver_), errno_result(this->result),
                            0U);
         } else {
-          bexec::set_value(std::move(receiver_),
-                           bnio::detail::empty_error_code,
+          bexec::set_value(std::move(receiver_), bnio::detail::empty_error_code,
                            static_cast<unsigned>(this->result));
         }
         break;

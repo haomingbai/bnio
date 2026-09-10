@@ -236,8 +236,7 @@ class BNIO_EXPORT io_context {
                            std::make_error_code(std::errc::operation_canceled));
           return;
         }
-        bexec::set_value(std::move(receiver_),
-                         bnio::detail::empty_error_code);
+        bexec::set_value(std::move(receiver_), bnio::detail::empty_error_code);
       }
 
       io_context* context_;
@@ -810,8 +809,7 @@ class BNIO_EXPORT io_context {
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
                                         mutable_buffer buffer,
-                                        ip::endpoint& endpoint,
-                                        int flags = 0);
+                                        ip::endpoint& endpoint, int flags = 0);
 
   /**
    * Creates a sender that performs one datagram send to @p endpoint,
@@ -820,8 +818,7 @@ class BNIO_EXPORT io_context {
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                    const_buffer buffer,
-                                   const ip::endpoint& endpoint,
-                                   int flags = 0);
+                                   const ip::endpoint& endpoint, int flags = 0);
   /**
    * Creates a sender that accepts one connection from a non-owning
    * listening socket view.
@@ -1218,7 +1215,7 @@ class BNIO_EXPORT io_context {
 
 }  // namespace bnio
 
-#include <bnio/detail/posix/io_context/schedule_policy.h>
 #include <bnio/detail/posix/io_context/native_io.h>
+#include <bnio/detail/posix/io_context/schedule_policy.h>
 
 #endif  // BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_

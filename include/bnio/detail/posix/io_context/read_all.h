@@ -49,7 +49,7 @@ class socket_read_all_state {
   [[nodiscard]] auto make_sender() noexcept {
     return make_io_sender<Kind>(
         *context, make_stream_read_request(socket, current_buffer(), flags),
-        adaptive_eager_control<socket_read_all_state<Kind>>{this});
+        adaptive_eager_control<socket_read_all_state<Kind> >{this});
   }
 
   void advance(std::size_t bytes) noexcept {

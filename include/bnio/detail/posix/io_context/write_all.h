@@ -59,7 +59,7 @@ class socket_write_all_state {
   [[nodiscard]] auto make_sender() noexcept {
     return make_io_sender<Kind>(
         *context, make_stream_write_request(socket, current_buffer(), flags),
-        adaptive_eager_control<socket_write_all_state<Kind>>{this});
+        adaptive_eager_control<socket_write_all_state<Kind> >{this});
   }
 
   void advance(std::size_t bytes) noexcept {
@@ -105,8 +105,7 @@ template <class State>
       return bexec::just(std::make_error_code(std::errc::broken_pipe),
                          state->transferred);
     } else {
-      return bexec::just(bnio::detail::empty_error_code,
-                         state->transferred);
+      return bexec::just(bnio::detail::empty_error_code, state->transferred);
     }
   }
 

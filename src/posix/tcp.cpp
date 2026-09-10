@@ -3,8 +3,8 @@
  * @brief TCP socket and acceptor RAII operations (open, close, bind, listen).
  */
 
-#include <bnio/tcp.h>
 #include <bnio/detail/error_code.h>
+#include <bnio/tcp.h>
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>

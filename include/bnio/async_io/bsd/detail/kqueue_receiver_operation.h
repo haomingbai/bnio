@@ -87,9 +87,8 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
               std::error_code(-this->result, std::generic_category()),
               this->result, this->flags);
         } else {
-          bexec::set_value(std::move(receiver_),
-                           bnio::detail::empty_error_code, this->result,
-                           this->flags);
+          bexec::set_value(std::move(receiver_), bnio::detail::empty_error_code,
+                           this->result, this->flags);
         }
         break;
       case kqueue_receiver_completion::value_with_ec:

@@ -35,8 +35,7 @@ class kqueue_post_operation : public kqueue_operation_base {
     if (stopped_) {
       bexec::set_stopped(std::move(receiver_));
     } else {
-      bexec::set_value(std::move(receiver_),
-                       bnio::detail::empty_error_code);
+      bexec::set_value(std::move(receiver_), bnio::detail::empty_error_code);
     }
   }
 

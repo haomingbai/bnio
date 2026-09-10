@@ -80,9 +80,7 @@ concept has_immediate_io = requires(Model& model) {
                                           std::size_t size,
                                           std::uint64_t offset) noexcept {
 #ifdef SYS_preadv2
-  struct iovec view {
-    data, size
-  };
+  struct iovec view{data, size};
   const auto low = static_cast<unsigned long>(offset);
   unsigned long high = 0;
   if constexpr (sizeof(unsigned long) < sizeof(std::uint64_t)) {
@@ -103,9 +101,7 @@ concept has_immediate_io = requires(Model& model) {
                                            std::size_t size,
                                            std::uint64_t offset) noexcept {
 #ifdef SYS_pwritev2
-  struct iovec view {
-    const_cast<void*>(data), size
-  };
+  struct iovec view{const_cast<void*>(data), size};
   const auto low = static_cast<unsigned long>(offset);
   unsigned long high = 0;
   if constexpr (sizeof(unsigned long) < sizeof(std::uint64_t)) {
@@ -196,8 +192,7 @@ class native_io_operation : public io_context::operation_base {
           model_.set_value(std::move(receiver_), errno_result(this->result),
                            this->result, this->flags);
         } else {
-          model_.set_value(std::move(receiver_),
-                           bnio::detail::empty_error_code,
+          model_.set_value(std::move(receiver_), bnio::detail::empty_error_code,
                            this->result, this->flags);
         }
         break;

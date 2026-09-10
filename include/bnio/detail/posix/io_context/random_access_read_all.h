@@ -44,7 +44,7 @@ class random_access_read_all_state {
         *context,
         make_random_access_read_request(file, current_buffer(),
                                         offset + transferred),
-        adaptive_eager_control<random_access_read_all_state<Kind>>{this});
+        adaptive_eager_control<random_access_read_all_state<Kind> >{this});
   }
 
   void advance(std::size_t bytes) noexcept {

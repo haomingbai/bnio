@@ -36,7 +36,7 @@ namespace bnio {
 template <io_context::schedule_kind Kind>
 inline auto io_context::async_read(async_io::stream_socket_view socket,
                                    mutable_buffer buffer, int flags) {
-  return detail::write_all_sender<detail::socket_read_all_state<Kind>>(
+  return detail::write_all_sender<detail::socket_read_all_state<Kind> >(
       detail::socket_read_all_state<Kind>(*this, socket, buffer, flags));
 }
 
@@ -50,7 +50,7 @@ inline auto io_context::async_read_some(async_io::stream_socket_view socket,
 template <io_context::schedule_kind Kind>
 inline auto io_context::async_write(async_io::stream_socket_view socket,
                                     const_buffer buffer, int flags) {
-  return detail::write_all_sender<detail::socket_write_all_state<Kind>>(
+  return detail::write_all_sender<detail::socket_write_all_state<Kind> >(
       detail::socket_write_all_state<Kind>(*this, socket, buffer, flags));
 }
 
@@ -87,8 +87,7 @@ inline auto io_context::async_receive_from(
 template <io_context::schedule_kind Kind>
 inline auto io_context::async_send_to(async_io::datagram_socket_view socket,
                                       const_buffer buffer,
-                                      const ip::endpoint& endpoint,
-                                      int flags) {
+                                      const ip::endpoint& endpoint, int flags) {
   return detail::make_io_sender<Kind>(
       *this,
       detail::make_datagram_send_to_request(socket, buffer, endpoint, flags));
@@ -160,8 +159,7 @@ auto io_context::basic_scheduler<Kind>::async_write(
 
 template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_write_some(
-    async_io::stream_socket_view socket, const_buffer buffer,
-    int flags) const {
+    async_io::stream_socket_view socket, const_buffer buffer, int flags) const {
   return context_->async_write_some<Kind>(socket, buffer, flags);
 }
 

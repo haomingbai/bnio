@@ -14,7 +14,7 @@ namespace bnio {
 template <io_context::schedule_kind Kind>
 inline auto io_context::async_read(async_io::descriptor_view descriptor,
                                    mutable_buffer buffer) {
-  return detail::write_all_sender<detail::stream_file_read_all_state<Kind>>(
+  return detail::write_all_sender<detail::stream_file_read_all_state<Kind> >(
       detail::stream_file_read_all_state<Kind>(*this, descriptor, buffer));
 }
 
@@ -28,7 +28,7 @@ inline auto io_context::async_read_some(async_io::descriptor_view descriptor,
 template <io_context::schedule_kind Kind>
 inline auto io_context::async_write(async_io::descriptor_view descriptor,
                                     const_buffer buffer) {
-  return detail::write_all_sender<detail::stream_file_write_all_state<Kind>>(
+  return detail::write_all_sender<detail::stream_file_write_all_state<Kind> >(
       detail::stream_file_write_all_state<Kind>(*this, descriptor, buffer));
 }
 

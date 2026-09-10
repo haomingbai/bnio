@@ -65,8 +65,7 @@ class timer_wait_operation : public timer_operation_base {
                          std::make_error_code(std::errc::operation_canceled));
         break;
       case timer_completion_kind::value:
-        bexec::set_value(std::move(receiver_),
-                         bnio::detail::empty_error_code);
+        bexec::set_value(std::move(receiver_), bnio::detail::empty_error_code);
         break;
     }
   }

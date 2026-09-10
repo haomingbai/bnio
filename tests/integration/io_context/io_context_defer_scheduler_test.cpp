@@ -27,9 +27,9 @@ namespace {
 struct defer_inline_inner_holder {
   defer_inline_inner_holder(std::shared_ptr<schedule_state> state,
                             bnio::io_context* context)
-      : operation(bexec::connect(
-            bexec::schedule(context->get_defer_scheduler()),
-            schedule_receiver{std::move(state), context, 42})) {}
+      : operation(
+            bexec::connect(bexec::schedule(context->get_defer_scheduler()),
+                           schedule_receiver{std::move(state), context, 42})) {}
 
   decltype(bexec::connect(
       std::declval<bnio::io_context::defer_scheduler&>().schedule(),
@@ -98,9 +98,9 @@ struct defer_escape_inner_receiver {
 struct defer_escape_inner_holder {
   defer_escape_inner_holder(defer_escape_state* escape,
                             bnio::io_context* context)
-      : operation(bexec::connect(
-            bexec::schedule(context->get_defer_scheduler()),
-            defer_escape_inner_receiver{escape})) {}
+      : operation(
+            bexec::connect(bexec::schedule(context->get_defer_scheduler()),
+                           defer_escape_inner_receiver{escape})) {}
 
   decltype(bexec::connect(
       std::declval<bnio::io_context::defer_scheduler&>().schedule(),
@@ -261,9 +261,9 @@ TEST(IoContextDeferSchedulerTest,
   auto state = std::make_shared<schedule_state>();
   state->order.reserve(1);
 
-  auto operation = bexec::connect(
-      bexec::schedule(context.get_post_scheduler()),
-      defer_inline_outer_receiver{state, &context, nullptr});
+  auto operation =
+      bexec::connect(bexec::schedule(context.get_post_scheduler()),
+                     defer_inline_outer_receiver{state, &context, nullptr});
   bexec::start(operation);
   context.run();
 
@@ -326,7 +326,8 @@ TEST(IoContextDeferSchedulerTest,
   EXPECT_EQ(state->signal, signal_kind::stopped);
 }
 
-TEST(IoContextDeferSchedulerTest, defer_schedule_after_stop_completes_canceled) {
+TEST(IoContextDeferSchedulerTest,
+     defer_schedule_after_stop_completes_canceled) {
   bnio::io_context context;
   if (!context_available(context)) {
     GTEST_SKIP() << "native I/O context is unavailable";
@@ -344,9 +345,9 @@ TEST(IoContextDeferSchedulerTest, defer_schedule_after_stop_completes_canceled) 
       flag->store(true, std::memory_order_release);
     }
   };
-  auto active_operation = bexec::connect(
-      bexec::schedule(context.get_post_scheduler()),
-      active_flag_receiver{&worker_active});
+  auto active_operation =
+      bexec::connect(bexec::schedule(context.get_post_scheduler()),
+                     active_flag_receiver{&worker_active});
   bexec::start(active_operation);
 
   std::thread worker([&context] { context.run(); });
@@ -401,9 +402,9 @@ TEST(IoContextDeferSchedulerTest, defer_task_escapes_worker_local_queue) {
 
   defer_escape_state escape;
 
-  auto operation = bexec::connect(
-      bexec::schedule(context.get_defer_scheduler()),
-      defer_escape_outer_receiver{&escape, &context, nullptr});
+  auto operation =
+      bexec::connect(bexec::schedule(context.get_defer_scheduler()),
+                     defer_escape_outer_receiver{&escape, &context, nullptr});
   bexec::start(operation);
 
   std::thread first_worker([&context] { context.run(); });
@@ -523,8 +524,8 @@ TEST(IoContextDeferSchedulerTest, defer_accept_echo_smoke) {
   ASSERT_EQ(first_hop_completions.load(std::memory_order_acquire), 2);
   ASSERT_EQ(server_read_state->signal, signal_kind::value);
   ASSERT_EQ(server_read_state->size, payload.size());
-  ASSERT_TRUE(std::memcmp(server_received.data(), payload.data(),
-                          payload.size()) == 0);
+  ASSERT_TRUE(
+      std::memcmp(server_received.data(), payload.data(), payload.size()) == 0);
   ASSERT_EQ(client_write_state->signal, signal_kind::value);
   ASSERT_EQ(client_write_state->size, payload.size());
 
@@ -573,8 +574,8 @@ TEST(IoContextDeferSchedulerTest, defer_accept_echo_smoke) {
   EXPECT_EQ(server_write_state->signal, signal_kind::value);
   EXPECT_EQ(client_read_state->signal, signal_kind::value);
   EXPECT_EQ(client_read_state->size, payload.size());
-  EXPECT_TRUE(std::memcmp(client_received.data(), payload.data(),
-                          payload.size()) == 0);
+  EXPECT_TRUE(
+      std::memcmp(client_received.data(), payload.data(), payload.size()) == 0);
 }
 
 // Socketpair helper for the defer eager-retention tests. Same pattern as
@@ -616,17 +617,16 @@ TEST(IoContextDeferSchedulerTest,
   receiver.context = &context;
   auto state = receiver.state;
 
-  auto operation = bexec::connect(
-      context.get_defer_scheduler().async_read_some(
-          receiver_socket.view(), bnio::buffer(bytes), 0),
-      std::move(receiver));
+  auto operation =
+      bexec::connect(context.get_defer_scheduler().async_read_some(
+                         receiver_socket.view(), bnio::buffer(bytes), 0),
+                     std::move(receiver));
   bexec::start(operation);
 
   // The eager probe consumed the data during start(), before run().
   std::array<char, 32> peek{};
-  const ssize_t peeked =
-      ::recv(receiver_socket.native_handle(), peek.data(), peek.size(),
-             MSG_PEEK | MSG_DONTWAIT);
+  const ssize_t peeked = ::recv(receiver_socket.native_handle(), peek.data(),
+                                peek.size(), MSG_PEEK | MSG_DONTWAIT);
   EXPECT_EQ(peeked, -1);
   EXPECT_EQ(errno, EAGAIN);
 
@@ -662,18 +662,16 @@ TEST(IoContextDeferSchedulerTest,
   auto state = receiver.state;
 
   auto operation = bexec::connect(
-      context.get_defer_scheduler().async_write(sender_socket.view(),
-                                                bnio::buffer(payload),
-                                                MSG_NOSIGNAL),
+      context.get_defer_scheduler().async_write(
+          sender_socket.view(), bnio::buffer(payload), MSG_NOSIGNAL),
       std::move(receiver));
   bexec::start(operation);
 
   // The eager probe pushed the bytes into the peer's receive queue during
   // start().
   std::array<char, 32> peek{};
-  const ssize_t peeked =
-      ::recv(receiver_socket.native_handle(), peek.data(), peek.size(),
-             MSG_PEEK | MSG_DONTWAIT);
+  const ssize_t peeked = ::recv(receiver_socket.native_handle(), peek.data(),
+                                peek.size(), MSG_PEEK | MSG_DONTWAIT);
   EXPECT_EQ(peeked, static_cast<ssize_t>(payload.size()));
 
   context.run();

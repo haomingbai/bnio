@@ -15,7 +15,7 @@ template <io_context::schedule_kind Kind>
 inline auto io_context::async_read(async_io::random_access_file file,
                                    mutable_buffer buffer,
                                    std::uint64_t offset) {
-  return detail::write_all_sender<detail::random_access_read_all_state<Kind>>(
+  return detail::write_all_sender<detail::random_access_read_all_state<Kind> >(
       detail::random_access_read_all_state<Kind>(*this, file, buffer, offset));
 }
 
@@ -29,11 +29,9 @@ inline auto io_context::async_read_some(async_io::random_access_file file,
 
 template <io_context::schedule_kind Kind>
 inline auto io_context::async_write(async_io::random_access_file file,
-                                    const_buffer buffer,
-                                    std::uint64_t offset) {
-  return detail::write_all_sender<detail::random_access_write_all_state<Kind>>(
-      detail::random_access_write_all_state<Kind>(*this, file, buffer,
-                                                  offset));
+                                    const_buffer buffer, std::uint64_t offset) {
+  return detail::write_all_sender<detail::random_access_write_all_state<Kind> >(
+      detail::random_access_write_all_state<Kind>(*this, file, buffer, offset));
 }
 
 template <io_context::schedule_kind Kind>
