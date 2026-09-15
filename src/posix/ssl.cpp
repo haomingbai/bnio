@@ -71,20 +71,28 @@ ssl_context::ssl_context(ssl_context_method method) noexcept
     : context_(SSL_CTX_new(select_method(method))) {}
 
 ssl_context::~ssl_context() noexcept {
+  if (owned_alpn_arg_ != nullptr) {
+    owned_alpn_arg_->destroy();
+  }
   if (context_ != nullptr) {
     SSL_CTX_free(context_);
   }
 }
 
 ssl_context::ssl_context(ssl_context&& other) noexcept
-    : context_(std::exchange(other.context_, nullptr)) {}
+    : context_(std::exchange(other.context_, nullptr)),
+      owned_alpn_arg_(std::exchange(other.owned_alpn_arg_, nullptr)) {}
 
 ssl_context& ssl_context::operator=(ssl_context&& other) noexcept {
   if (this != &other) {
+    if (owned_alpn_arg_ != nullptr) {
+      owned_alpn_arg_->destroy();
+    }
     if (context_ != nullptr) {
       SSL_CTX_free(context_);
     }
     context_ = std::exchange(other.context_, nullptr);
+    owned_alpn_arg_ = std::exchange(other.owned_alpn_arg_, nullptr);
   }
   return *this;
 }
@@ -116,6 +124,17 @@ std::error_code ssl_context::check_private_key() noexcept {
 
 void ssl_context::set_verify_mode(int mode) noexcept {
   SSL_CTX_set_verify(context_, mode, nullptr);
+}
+
+void ssl_context::set_alpn_select_cb(alpn_select_cb cb, void* arg) noexcept {
+  SSL_CTX_set_alpn_select_cb(context_, cb, arg);
+}
+
+void ssl_context::store_owned_alpn_arg(alpn_arg_base* owned_arg) noexcept {
+  if (owned_alpn_arg_ != nullptr) {
+    owned_alpn_arg_->destroy();
+  }
+  owned_alpn_arg_ = owned_arg;
 }
 
 }  // namespace bnio

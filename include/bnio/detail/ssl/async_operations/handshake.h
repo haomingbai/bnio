@@ -55,6 +55,12 @@ class ssl_handshake_operation
       this->post_complete_value(bnio::detail::empty_error_code);
       return;
     }
+    if (action == ssl_resume_action::fail) {
+      // The pending output (e.g. the fatal alert) has been flushed; deliver
+      // the staged SSL error.
+      this->post_complete_error(this->pending_error_);
+      return;
+    }
     run_handshake();
   }
 

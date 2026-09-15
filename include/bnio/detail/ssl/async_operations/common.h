@@ -75,6 +75,9 @@ enum class ssl_resume_action {
   shutdown,
   transport_read,
   finish,
+  // Delivered after the hard-failure flush completes: complete the
+  // operation with the staged SSL error (see ssl_async_operation_base).
+  fail,
 };
 
 [[nodiscard]] inline int ssl_bounded_int_size(std::size_t size) noexcept {

@@ -222,7 +222,19 @@ class ssl_async_operation_base {
         post_complete_value(std::make_error_code(std::errc::connection_reset));
         return;
       default:
-        post_complete_value(last_ssl_error());
+        // A hard failure (SSL_ERROR_SSL, SSL_ERROR_SYSCALL, ...) may have
+        // queued outbound records in the write BIO — most notably the fatal
+        // alert OpenSSL writes when, e.g., the ALPN selection callback
+        // rejects the offered protocols. Completing immediately would leave
+        // that alert stranded in the memory BIO: the peer (already in
+        // WANT_READ) would never observe the failure and its own operation
+        // would hang forever. Flush the pending output first, then complete
+        // with the staged error through resume(ssl_resume_action::fail). If
+        // the flush itself fails, the transport error is reported instead —
+        // a connection that cannot carry the alert is the more fundamental
+        // failure by that point.
+        pending_error_ = last_ssl_error();
+        flush_then(ssl_resume_action::fail);
         return;
     }
   }
@@ -234,6 +246,11 @@ class ssl_async_operation_base {
   scheduler_type scheduler_;
   ssl_stream<NextLayer>* stream_;
   receiver_type receiver_;
+
+  // Error staged by handle_ssl_error's hard-failure branch and delivered
+  // through resume(ssl_resume_action::fail) once the pending output flush
+  // completes.
+  std::error_code pending_error_ = bnio::detail::empty_error_code;
 
  private:
   [[nodiscard]] ssl_output_chunk_state load_output_chunk() noexcept {
