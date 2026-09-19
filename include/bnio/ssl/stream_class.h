@@ -14,6 +14,7 @@
 #include <openssl/ssl.h>
 
 #include <cstddef>
+#include <span>
 #include <utility>
 
 namespace bnio {
@@ -126,6 +127,22 @@ class ssl_stream {
    * Returns the transport BIO used for encrypted output.
    */
   [[nodiscard]] BIO* native_write_bio() const noexcept { return write_bio_; }
+
+  /**
+   * Returns a non-owning read-only view of the ALPN protocol selected during
+   * the handshake. The view is empty when no protocol was negotiated, when
+   * the peer did not acknowledge ALPN, or when the handshake has not
+   * completed. The bytes point into the SSL object's internal storage and
+   * remain valid as long as this ssl_stream is alive; renegotiation may
+   * change the contents. Use this to dispatch on the negotiated protocol.
+   */
+  [[nodiscard]] std::span<const unsigned char> get_alpn_selected()
+      const noexcept {
+    const unsigned char* data = nullptr;
+    unsigned int len = 0;
+    SSL_get0_alpn_selected(ssl_, &data, &len);
+    return {data, len};
+  }
 
   /**
    * Creates a handshake sender whose transport I/O uses the scheduler's queued
