@@ -4,11 +4,11 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_STEP_H_
-#define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_STEP_H_
+#ifndef BNIO_SSL_DETAIL_READ_WRITE_STEP_H_
+#define BNIO_SSL_DETAIL_READ_WRITE_STEP_H_
 
-#include <bnio/detail/error_code.h>
-#include <bnio/detail/ssl/async_operations/read_write/state.h>
+#include <bnio/ssl/base/errors.h>
+#include <bnio/ssl/detail/read_write/state.h>
 
 #include <atomic>
 #include <bexec/completion_signatures.hpp>
@@ -19,22 +19,22 @@
 #include <type_traits>
 #include <utility>
 
-namespace bnio {
+namespace bnio::ssl {
 
 /** @cond BNIO_DETAIL */
 namespace detail {
 
 template <class State>
-class ssl_io_step_sender {
+class step_sender {
  public:
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
-  explicit ssl_io_step_sender(State* state) noexcept : state_(state) {}
+  explicit step_sender(State* state) noexcept : state_(state) {}
 
   template <class Receiver>
   auto connect(Receiver receiver) const noexcept {
-    return ssl_io_step_operation<State, std::remove_cvref_t<Receiver>>(
+    return step_operation<State, std::remove_cvref_t<Receiver>>(
         state_, std::move(receiver));
   }
 
@@ -43,12 +43,12 @@ class ssl_io_step_sender {
 };
 
 template <class State>
-class ssl_io_step_factory {
+class step_factory {
  public:
-  explicit ssl_io_step_factory(State* state) noexcept : state_(state) {}
+  explicit step_factory(State* state) noexcept : state_(state) {}
 
   [[nodiscard]] auto operator()() const noexcept {
-    return ssl_io_step_sender<State>(state_);
+    return step_sender<State>(state_);
   }
 
  private:
@@ -56,9 +56,9 @@ class ssl_io_step_factory {
 };
 
 template <class State>
-class ssl_io_done_predicate {
+class done_predicate {
  public:
-  explicit ssl_io_done_predicate(State* state) noexcept : state_(state) {}
+  explicit done_predicate(State* state) noexcept : state_(state) {}
 
   [[nodiscard]] bool operator()() const noexcept {
     std::atomic_thread_fence(std::memory_order_acquire);
@@ -70,7 +70,7 @@ class ssl_io_done_predicate {
 };
 
 template <class State, class Receiver>
-class ssl_io_step_operation {
+class step_operation {
  public:
   using receiver_type = std::remove_cvref_t<Receiver>;
 
@@ -84,7 +84,7 @@ class ssl_io_step_operation {
     // to be instantiated too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
-    explicit child_receiver(ssl_io_step_operation& operation) noexcept
+    explicit child_receiver(step_operation& operation) noexcept
         : operation_(&operation) {}
 
     [[nodiscard]] env_type get_env() const noexcept {
@@ -98,16 +98,16 @@ class ssl_io_step_operation {
     void set_stopped() noexcept { operation_->complete_stopped(); }
 
    private:
-    ssl_io_step_operation* operation_;
+    step_operation* operation_;
   };
 
-  using read_sender_type = decltype(ssl_make_transport_read_sender(
+  using read_sender_type = decltype(make_transport_read_sender(
       std::declval<typename State::scheduler_type&>(),
-      std::declval<ssl_stream<typename State::next_layer_type>&>(),
+      std::declval<tcp::stream<typename State::next_layer_type>&>(),
       static_cast<void*>(nullptr), std::size_t{}));
-  using write_sender_type = decltype(ssl_make_transport_write_sender(
+  using write_sender_type = decltype(make_transport_write_sender(
       std::declval<typename State::scheduler_type&>(),
-      std::declval<ssl_stream<typename State::next_layer_type>&>(),
+      std::declval<tcp::stream<typename State::next_layer_type>&>(),
       static_cast<const void*>(nullptr), std::size_t{}));
   using read_operation_type = decltype(bexec::connect(
       std::declval<read_sender_type>(), std::declval<child_receiver>()));
@@ -116,11 +116,11 @@ class ssl_io_step_operation {
   using child_operations_type = bexec::detail::operation_storage<
       bexec::type_list<read_operation_type, write_operation_type>>;
 
-  ssl_io_step_operation(State* state, Receiver receiver)
+  step_operation(State* state, Receiver receiver)
       : state_(state), receiver_(std::move(receiver)) {}
 
   void start() noexcept {
-    if (ssl_stop_requested(receiver_)) {
+    if (stop_requested(receiver_)) {
       // Token canceled at start: deliver set_stopped (unified contract).
       // Context-stop aborts surface as value(operation_canceled, bytes) from
       // the transport layer's token arbitration instead, so no distinction is
@@ -135,37 +135,37 @@ class ssl_io_step_operation {
  private:
   void run_step() noexcept {
     switch (state_->phase) {
-      case ssl_io_phase::application:
+      case io_phase::application:
         run_application();
         return;
-      case ssl_io_phase::flush_output:
+      case io_phase::flush_output:
         flush_output();
         return;
-      case ssl_io_phase::transport_read:
+      case io_phase::transport_read:
         submit_transport_read();
         return;
-      case ssl_io_phase::transport_write:
+      case io_phase::transport_write:
         submit_transport_write();
         return;
-      case ssl_io_phase::done:
-        complete_value(bnio::detail::empty_error_code, state_->bytes);
+      case io_phase::done:
+        complete_value(base::empty_error_code, state_->bytes);
         return;
     }
   }
 
   void run_application() noexcept {
-    clear_ssl_errors();
-    if constexpr (State::application == ssl_application_io::read) {
-      async_io::buffer_view view = state_->buffer.view();
-      const int result = SSL_read(state_->stream->native_handle(), view.data,
-                                  ssl_bounded_int_size(view.size));
+    base::clear_errors();
+    if constexpr (State::application == application_io::read) {
+      void* data = state_->buffer.data();
+      const int result = SSL_read(state_->stream->native_handle(), data,
+                                  bounded_int_size(state_->buffer.size()));
       handle_application_result(result);
     } else {
       const auto* data = static_cast<const char*>(state_->buffer.data());
       const std::size_t remaining = state_->buffer.size() - state_->bytes;
       const int result =
           SSL_write(state_->stream->native_handle(), data + state_->bytes,
-                    ssl_bounded_int_size(remaining));
+                    bounded_int_size(remaining));
       handle_application_result(result);
     }
   }
@@ -173,7 +173,7 @@ class ssl_io_step_operation {
   void handle_application_result(int result) noexcept {
     if (result > 0) {
       const std::size_t transferred = static_cast<std::size_t>(result);
-      if constexpr (State::application == ssl_application_io::read) {
+      if constexpr (State::application == application_io::read) {
         state_->bytes = transferred;
       } else {
         if (transferred > state_->buffer.size() - state_->bytes) {
@@ -182,15 +182,15 @@ class ssl_io_step_operation {
         }
         state_->bytes += transferred;
       }
-      state_->after_flush = ssl_resume_action::finish;
-      if constexpr (State::application == ssl_application_io::write &&
+      state_->after_flush = resume_action::finish;
+      if constexpr (State::application == application_io::write &&
                     State::complete_buffer) {
         if (state_->bytes < state_->buffer.size()) {
           state_->after_flush = State::application_action;
         }
       }
-      state_->phase = ssl_io_phase::flush_output;
-      complete_value(bnio::detail::empty_error_code, 0);
+      state_->phase = io_phase::flush_output;
+      complete_value(base::empty_error_code, 0);
       return;
     }
 
@@ -202,22 +202,22 @@ class ssl_io_step_operation {
         SSL_get_error(state_->stream->native_handle(), ssl_result);
     switch (error) {
       case SSL_ERROR_WANT_READ:
-        state_->after_flush = ssl_resume_action::transport_read;
-        state_->phase = ssl_io_phase::flush_output;
-        complete_value(bnio::detail::empty_error_code, 0);
+        state_->after_flush = resume_action::transport_read;
+        state_->phase = io_phase::flush_output;
+        complete_value(base::empty_error_code, 0);
         return;
       case SSL_ERROR_WANT_WRITE:
         state_->after_flush = State::application_action;
-        state_->phase = ssl_io_phase::flush_output;
-        complete_value(bnio::detail::empty_error_code, 0);
+        state_->phase = io_phase::flush_output;
+        complete_value(base::empty_error_code, 0);
         return;
       case SSL_ERROR_ZERO_RETURN:
         state_->done = true;
-        if constexpr (State::application == ssl_application_io::read) {
+        if constexpr (State::application == application_io::read) {
           // Orderly TLS close (peer sent close_notify): complete the read
           // successfully with the bytes so far — the same EOF encoding as a
           // plain descriptor / TCP socket read (docs/usage/index.md).
-          complete_value(bnio::detail::empty_error_code, state_->bytes);
+          complete_value(base::empty_error_code, state_->bytes);
         } else {
           // A write step terminated by the orderly close: write-all reports
           // it as broken_pipe, matching the TCP write-all zero-byte encoding.
@@ -229,7 +229,7 @@ class ssl_io_step_operation {
         return;
       default:
         state_->done = true;
-        complete_value(last_ssl_error(), state_->bytes);
+        complete_value(base::last_error(), state_->bytes);
         return;
     }
   }
@@ -240,7 +240,7 @@ class ssl_io_step_operation {
     if (available > 0) {
       state_->transport_data = data;
       state_->transport_size = static_cast<std::size_t>(available);
-      state_->phase = ssl_io_phase::transport_write;
+      state_->phase = io_phase::transport_write;
       submit_transport_write();
       return;
     }
@@ -250,20 +250,20 @@ class ssl_io_step_operation {
 
   void resume_after_flush() noexcept {
     switch (state_->after_flush) {
-      case ssl_resume_action::transport_read:
-        state_->phase = ssl_io_phase::transport_read;
+      case resume_action::transport_read:
+        state_->phase = io_phase::transport_read;
         submit_transport_read();
         return;
-      case ssl_resume_action::finish:
-        state_->phase = ssl_io_phase::done;
+      case resume_action::finish:
+        state_->phase = io_phase::done;
         state_->done = true;
         std::atomic_thread_fence(std::memory_order_release);
-        complete_value(bnio::detail::empty_error_code, state_->bytes);
+        complete_value(base::empty_error_code, state_->bytes);
         return;
-      case ssl_resume_action::application_read:
-      case ssl_resume_action::application_write:
-        state_->phase = ssl_io_phase::application;
-        complete_value(bnio::detail::empty_error_code, 0);
+      case resume_action::application_read:
+      case resume_action::application_write:
+        state_->phase = io_phase::application;
+        complete_value(base::empty_error_code, 0);
         return;
       default:
         return;
@@ -272,18 +272,18 @@ class ssl_io_step_operation {
 
   void submit_transport_read() noexcept {
     char* data = nullptr;
-    clear_ssl_errors();
+    base::clear_errors();
     const int available = BIO_nwrite0(read_bio(*state_->stream), &data);
     if (available <= 0) {
       state_->done = true;
-      complete_value(last_ssl_error(), state_->bytes);
+      complete_value(base::last_error(), state_->bytes);
       return;
     }
 
     state_->transport_data = data;
     state_->transport_size = static_cast<std::size_t>(available);
     child_operation_.template emplace_from<read_operation_type>([this] {
-      return bexec::connect(ssl_make_transport_read_sender(
+      return bexec::connect(make_transport_read_sender(
                                 state_->scheduler, *state_->stream,
                                 state_->transport_data, state_->transport_size),
                             child_receiver(*this));
@@ -293,7 +293,7 @@ class ssl_io_step_operation {
 
   void submit_transport_write() noexcept {
     child_operation_.template emplace_from<write_operation_type>([this] {
-      return bexec::connect(ssl_make_transport_write_sender(
+      return bexec::connect(make_transport_write_sender(
                                 state_->scheduler, *state_->stream,
                                 state_->transport_data, state_->transport_size),
                             child_receiver(*this));
@@ -314,7 +314,7 @@ class ssl_io_step_operation {
       // loop forever (SSL_read keeps returning WANT_READ, transport keeps
       // returning 0).
       state_->done = true;
-      if (state_->phase == ssl_io_phase::transport_write) {
+      if (state_->phase == io_phase::transport_write) {
         // A 0-byte transport write mid-write-all: report broken_pipe,
         // matching the TCP write-all zero-byte encoding.
         complete_value(std::make_error_code(std::errc::broken_pipe),
@@ -329,15 +329,15 @@ class ssl_io_step_operation {
       return;
     }
     switch (state_->phase) {
-      case ssl_io_phase::transport_read:
+      case io_phase::transport_read:
         handle_transport_read_complete(bytes);
         return;
-      case ssl_io_phase::transport_write:
+      case io_phase::transport_write:
         handle_transport_write_complete(bytes);
         return;
-      case ssl_io_phase::application:
-      case ssl_io_phase::flush_output:
-      case ssl_io_phase::done:
+      case io_phase::application:
+      case io_phase::flush_output:
+      case io_phase::done:
         complete_error(std::make_error_code(std::errc::protocol_error));
         return;
     }
@@ -348,17 +348,17 @@ class ssl_io_step_operation {
     // handle_transport_complete
 
     char* data = nullptr;
-    clear_ssl_errors();
+    base::clear_errors();
     const int committed = BIO_nwrite(read_bio(*state_->stream), &data,
-                                     ssl_bounded_int_size(result));
+                                     bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
-      complete_error(last_ssl_error());  // Invariant violation: passed through
-                                         // set_value(ec, bytes)
+      complete_error(base::last_error());  // Invariant violation: passed
+                                           // through set_value(ec, bytes)
       return;
     }
 
-    state_->phase = ssl_io_phase::application;
-    complete_value(bnio::detail::empty_error_code, 0);
+    state_->phase = io_phase::application;
+    complete_value(base::empty_error_code, 0);
   }
 
   void handle_transport_write_complete(std::size_t result) noexcept {
@@ -366,17 +366,17 @@ class ssl_io_step_operation {
     // handle_transport_complete
 
     char* data = nullptr;
-    clear_ssl_errors();
+    base::clear_errors();
     const int consumed = BIO_nread(write_bio(*state_->stream), &data,
-                                   ssl_bounded_int_size(result));
+                                   bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {
-      complete_error(last_ssl_error());  // Invariant violation: passed through
-                                         // set_value(ec, bytes)
+      complete_error(base::last_error());  // Invariant violation: passed
+                                           // through set_value(ec, bytes)
       return;
     }
 
-    state_->phase = ssl_io_phase::flush_output;
-    complete_value(bnio::detail::empty_error_code, 0);
+    state_->phase = io_phase::flush_output;
+    complete_value(base::empty_error_code, 0);
   }
 
   void complete_value(std::error_code ec, std::size_t bytes) noexcept {
@@ -402,6 +402,6 @@ class ssl_io_step_operation {
 }  // namespace detail
 /** @endcond */
 
-}  // namespace bnio
+}  // namespace bnio::ssl
 
-#endif  // BNIO_DETAIL_SSL_ASYNC_OPERATIONS_READ_WRITE_STEP_H_
+#endif  // BNIO_SSL_DETAIL_READ_WRITE_STEP_H_

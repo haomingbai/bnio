@@ -26,10 +26,10 @@ TEST(SslErrorQueueHygieneTest,
   }
   auto scheduler = context.get_post_scheduler();
 
-  bnio::ssl_context ssl_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context ssl_context(bnio::ssl::context_method::tls_client);
   test_require(ssl_context.valid());
-  bnio::ssl_stream source{bnio::tcp_socket(-1), ssl_context};
-  bnio::ssl_stream owner{std::move(source)};
+  bnio::ssl::tcp::stream source{bnio::tcp_socket(-1), ssl_context};
+  bnio::ssl::tcp::stream owner{std::move(source)};
   EXPECT_FALSE(source.valid());
   EXPECT_TRUE(owner.valid());
 
@@ -37,11 +37,11 @@ TEST(SslErrorQueueHygieneTest,
   ERR_put_error(ERR_LIB_USER, 0, 1234, "bnio_test.c", 1);
   const unsigned long seeded = ERR_peek_error();
   test_require(seeded != 0);
-  const std::error_code stale = bnio::make_openssl_error(seeded);
+  const std::error_code stale = bnio::ssl::make_openssl_error(seeded);
 
   auto state = std::make_shared<handshake_state>();
   auto sender =
-      source.async_handshake(scheduler, bnio::ssl_handshake_type::client);
+      source.async_handshake(scheduler, bnio::ssl::handshake_type::client);
   auto operation =
       bexec::connect(std::move(sender), handshake_receiver{state, &context});
   bexec::start(operation);
@@ -56,7 +56,7 @@ TEST(SslErrorQueueHygieneTest,
   EXPECT_FALSE(state->error == std::errc::protocol_error);
   // ... but the dedicated no-OpenSSL-error value.
   EXPECT_EQ(state->error, std::error_code(k_no_ssl_error_value,
-                                          bnio::openssl_error_category()));
+                                          bnio::ssl::openssl_error_category()));
 }
 
 // The same SSL failure must report the same ec regardless of which worker
@@ -75,10 +75,10 @@ TEST(SslErrorQueueHygieneTest,
     }
     auto scheduler = context.get_post_scheduler();
 
-    bnio::ssl_context ssl_context(bnio::ssl_context_method::tls_client);
+    bnio::ssl::context ssl_context(bnio::ssl::context_method::tls_client);
     test_require(ssl_context.valid());
-    bnio::ssl_stream source{bnio::tcp_socket(-1), ssl_context};
-    bnio::ssl_stream owner{std::move(source)};
+    bnio::ssl::tcp::stream source{bnio::tcp_socket(-1), ssl_context};
+    bnio::ssl::tcp::stream owner{std::move(source)};
 
     if (seed) {
       ERR_put_error(ERR_LIB_USER, 0, 1234, "bnio_test.c", 1);
@@ -88,7 +88,7 @@ TEST(SslErrorQueueHygieneTest,
 
     auto state = std::make_shared<handshake_state>();
     auto sender =
-        source.async_handshake(scheduler, bnio::ssl_handshake_type::client);
+        source.async_handshake(scheduler, bnio::ssl::handshake_type::client);
     auto operation =
         bexec::connect(std::move(sender), handshake_receiver{state, &context});
     bexec::start(operation);
@@ -105,7 +105,7 @@ TEST(SslErrorQueueHygieneTest,
 
   EXPECT_EQ(error_a, error_b);
   EXPECT_EQ(error_a, std::error_code(k_no_ssl_error_value,
-                                     bnio::openssl_error_category()));
+                                     bnio::ssl::openssl_error_category()));
 }
 
 }  // namespace

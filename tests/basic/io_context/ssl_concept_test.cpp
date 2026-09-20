@@ -11,11 +11,11 @@ void self_move_assign(Owner& owner) {
 }
 
 TEST(SslConceptTest, ssl_sender_concepts) {
-  using stream_type = bnio::ssl_stream<bnio::tcp_socket>;
+  using stream_type = bnio::ssl::tcp::stream<bnio::tcp_socket>;
   using scheduler_type = bnio::io_context::post_scheduler;
   using handshake_sender =
       decltype(std::declval<stream_type&>().async_handshake(
-          std::declval<scheduler_type>(), bnio::ssl_handshake_type::client));
+          std::declval<scheduler_type>(), bnio::ssl::handshake_type::client));
   using shutdown_sender = decltype(std::declval<stream_type&>().async_shutdown(
       std::declval<scheduler_type>()));
   using read_sender = decltype(std::declval<stream_type&>().async_read(
@@ -52,33 +52,33 @@ TEST(SslConceptTest, ssl_sender_concepts) {
 }
 
 TEST(SslConceptTest, ssl_raii_objects_construct) {
-  bnio::ssl_context context;
+  bnio::ssl::context context;
   EXPECT_TRUE(context.valid());
   context.set_verify_mode(SSL_VERIFY_NONE);
 
   bnio::tcp_socket socket(-1);
-  bnio::ssl_stream stream(std::move(socket), context);
+  bnio::ssl::tcp::stream stream(std::move(socket), context);
   EXPECT_TRUE(stream.valid());
   EXPECT_EQ(stream.native_handle(), stream.get_native_handle());
   EXPECT_EQ(stream.lowest_layer().get_native_handle(), -1);
 }
 
 TEST(SslConceptTest, ssl_context_errors_and_ownership) {
-  const std::error_code synthetic_error = bnio::make_openssl_error(1);
+  const std::error_code synthetic_error = bnio::ssl::make_openssl_error(1);
   EXPECT_EQ(synthetic_error.value(), 1);
-  EXPECT_EQ(synthetic_error.category(), bnio::openssl_error_category());
+  EXPECT_EQ(synthetic_error.category(), bnio::ssl::openssl_error_category());
   EXPECT_EQ(std::string_view(synthetic_error.category().name()), "openssl");
   EXPECT_FALSE(synthetic_error.message().empty());
 
-  bnio::ssl_context generic_context(bnio::ssl_context_method::tls);
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context generic_context(bnio::ssl::context_method::tls);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   EXPECT_TRUE(generic_context.valid());
   EXPECT_TRUE(client_context.valid());
   EXPECT_TRUE(server_context.valid());
 
   SSL_CTX* const client_handle = client_context.native_handle();
-  bnio::ssl_context moved_context(std::move(client_context));
+  bnio::ssl::context moved_context(std::move(client_context));
   EXPECT_FALSE(client_context.valid());
   EXPECT_EQ(moved_context.native_handle(), client_handle);
 
@@ -93,18 +93,18 @@ TEST(SslConceptTest, ssl_context_errors_and_ownership) {
       server_context.use_certificate_chain_file(
           "/bnio-test/path-that-does-not-exist/cert.pem");
   EXPECT_TRUE(certificate_error);
-  EXPECT_EQ(certificate_error.category(), bnio::openssl_error_category());
+  EXPECT_EQ(certificate_error.category(), bnio::ssl::openssl_error_category());
 
   ERR_clear_error();
   const std::error_code key_error = server_context.use_private_key_file(
       "/bnio-test/path-that-does-not-exist/key.pem");
   EXPECT_TRUE(key_error);
-  EXPECT_EQ(key_error.category(), bnio::openssl_error_category());
+  EXPECT_EQ(key_error.category(), bnio::ssl::openssl_error_category());
 
   ERR_clear_error();
   const std::error_code mismatch_error = server_context.check_private_key();
   EXPECT_TRUE(mismatch_error);
-  EXPECT_EQ(mismatch_error.category(), bnio::openssl_error_category());
+  EXPECT_EQ(mismatch_error.category(), bnio::ssl::openssl_error_category());
 }
 
 }  // namespace

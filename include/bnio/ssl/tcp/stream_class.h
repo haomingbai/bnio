@@ -1,14 +1,15 @@
 /**
  * @file stream_class.h
- * @brief ssl_stream class template definition.
+ * @brief SSL stream class template definition.
  */
 
 #pragma once
-#ifndef BNIO_SSL_STREAM_CLASS_H_
-#define BNIO_SSL_STREAM_CLASS_H_
+#ifndef BNIO_SSL_TCP_STREAM_CLASS_H_
+#define BNIO_SSL_TCP_STREAM_CLASS_H_
 
-#include <bnio/buffer.h>
 #include <bnio/io_context.h>
+#include <bnio/ssl/base/bio_pair.h>
+#include <bnio/ssl/base/context_base.h>
 #include <bnio/ssl/context.h>
 #include <bnio/tcp.h>
 #include <openssl/ssl.h>
@@ -17,22 +18,22 @@
 #include <span>
 #include <utility>
 
-namespace bnio {
+namespace bnio::ssl::tcp {
 
 /**
  * RAII owner for an OpenSSL SSL object layered over a next stream.
  *
- * ssl_stream owns the SSL object and the transport halves of its BIO pairs. It
- * also owns or stores the supplied next layer by value. The stream is move-only
+ * stream owns the SSL object and the transport halves of its BIO pair. It also
+ * owns or stores the supplied next layer by value. The stream is move-only
  * because SSL ownership is unique.
  */
-template <class NextLayer = tcp_socket>
-class ssl_stream {
+template <class NextLayer = bnio::tcp_socket>
+class stream {
  public:
   /**
    * Creates an SSL stream over a next layer using an existing context.
    */
-  ssl_stream(NextLayer next_layer, ssl_context& context) noexcept
+  stream(NextLayer next_layer, base::context_base& context) noexcept
       : next_layer_(std::move(next_layer)) {
     reset(context);
   }
@@ -40,22 +41,22 @@ class ssl_stream {
   /**
    * Frees the owned SSL object and its BIOs.
    */
-  ~ssl_stream() noexcept { release(); }
+  ~stream() noexcept { release(); }
 
   /**
    * Copy construction is disabled because the stream owns an SSL object.
    */
-  ssl_stream(const ssl_stream&) = delete;
+  stream(const stream&) = delete;
 
   /**
    * Copy assignment is disabled because the stream owns an SSL object.
    */
-  ssl_stream& operator=(const ssl_stream&) = delete;
+  stream& operator=(const stream&) = delete;
 
   /**
    * Moves SSL, BIO, and next-layer ownership from another stream.
    */
-  ssl_stream(ssl_stream&& other) noexcept
+  stream(stream&& other) noexcept
       : next_layer_(std::move(other.next_layer_)),
         ssl_(std::exchange(other.ssl_, nullptr)),
         read_bio_(std::exchange(other.read_bio_, nullptr)),
@@ -64,7 +65,7 @@ class ssl_stream {
   /**
    * Frees the current SSL object and moves ownership from another stream.
    */
-  ssl_stream& operator=(ssl_stream&& other) noexcept {
+  stream& operator=(stream&& other) noexcept {
     if (this != &other) {
       release();
       next_layer_ = std::move(other.next_layer_);
@@ -133,7 +134,7 @@ class ssl_stream {
    * the handshake. The view is empty when no protocol was negotiated, when
    * the peer did not acknowledge ALPN, or when the handshake has not
    * completed. The bytes point into the SSL object's internal storage and
-   * remain valid as long as this ssl_stream is alive; renegotiation may
+   * remain valid as long as this stream is alive; renegotiation may
    * change the contents. Use this to dispatch on the negotiated protocol.
    */
   [[nodiscard]] std::span<const unsigned char> get_alpn_selected()
@@ -149,8 +150,8 @@ class ssl_stream {
    * submission path.
    */
   template <class Scheduler>
-  [[nodiscard]] auto async_handshake(Scheduler scheduler,
-                                     ssl_handshake_type type);
+  [[nodiscard]] auto async_handshake(
+      Scheduler scheduler, bnio::ssl::handshake_type type);
 
   /**
    * Creates a sender for one plaintext SSL read operation. The operation may
@@ -206,30 +207,22 @@ class ssl_stream {
     }
   }
 
-  void reset(ssl_context& context) noexcept {
+  void reset(base::context_base& context) noexcept {
     ssl_ = SSL_new(context.native_handle());
     if (ssl_ == nullptr) {
       return;
     }
 
-    constexpr std::size_t bio_buffer_size = 64 * 1024;
-    BIO* ssl_read_bio = nullptr;
-    BIO* ssl_write_bio = nullptr;
-    if (BIO_new_bio_pair(&ssl_read_bio, 0, &read_bio_, bio_buffer_size) != 1 ||
-        BIO_new_bio_pair(&ssl_write_bio, bio_buffer_size, &write_bio_, 0) !=
-            1) {
-      BIO_free(ssl_read_bio);
-      BIO_free(ssl_write_bio);
-      BIO_free(read_bio_);
-      BIO_free(write_bio_);
+    const base::bio_pair pair = base::bio_pair::make();
+    if (!pair.valid()) {
       SSL_free(ssl_);
       ssl_ = nullptr;
-      read_bio_ = nullptr;
-      write_bio_ = nullptr;
       return;
     }
 
-    SSL_set_bio(ssl_, ssl_read_bio, ssl_write_bio);
+    SSL_set_bio(ssl_, pair.ssl_read, pair.ssl_write);
+    read_bio_ = pair.transport_read;
+    write_bio_ = pair.transport_write;
     SSL_set_mode(ssl_, SSL_MODE_ENABLE_PARTIAL_WRITE |
                            SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
   }
@@ -240,6 +233,6 @@ class ssl_stream {
   BIO* write_bio_ = nullptr;
 };
 
-}  // namespace bnio
+}  // namespace bnio::ssl::tcp
 
-#endif  // BNIO_SSL_STREAM_CLASS_H_
+#endif  // BNIO_SSL_TCP_STREAM_CLASS_H_

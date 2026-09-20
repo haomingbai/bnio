@@ -4,32 +4,32 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_HANDSHAKE_H_
-#define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_HANDSHAKE_H_
+#ifndef BNIO_SSL_DETAIL_HANDSHAKE_H_
+#define BNIO_SSL_DETAIL_HANDSHAKE_H_
 
-#include <bnio/detail/error_code.h>
-#include <bnio/detail/ssl/async_operations/state_machine.h>
+#include <bnio/ssl/base/errors.h>
+#include <bnio/ssl/context.h>
+#include <bnio/ssl/detail/state_machine.h>
 
 #include <bexec/receiver.hpp>
 #include <utility>
 
-namespace bnio {
+namespace bnio::ssl {
 
 /** @cond BNIO_DETAIL */
 namespace detail {
 
 template <class Scheduler, class NextLayer, class Receiver>
-class ssl_handshake_operation
-    : public ssl_async_operation_base<
-          ssl_handshake_operation<Scheduler, NextLayer, Receiver>, Scheduler,
-          NextLayer, Receiver> {
+class handshake_operation
+    : public operation_base<handshake_operation<Scheduler, NextLayer, Receiver>,
+                            Scheduler, NextLayer, Receiver> {
  public:
-  using base = ssl_async_operation_base<
-      ssl_handshake_operation<Scheduler, NextLayer, Receiver>, Scheduler,
-      NextLayer, Receiver>;
+  using base =
+      operation_base<handshake_operation<Scheduler, NextLayer, Receiver>,
+                     Scheduler, NextLayer, Receiver>;
 
-  ssl_handshake_operation(Scheduler scheduler, ssl_stream<NextLayer>& stream,
-                          ssl_handshake_type type, Receiver receiver)
+  handshake_operation(Scheduler scheduler, tcp::stream<NextLayer>& stream,
+                      handshake_type type, Receiver receiver)
       : base(std::move(scheduler), stream, std::move(receiver)), type_(type) {}
 
   void on_start() noexcept {
@@ -38,11 +38,11 @@ class ssl_handshake_operation
       // to read: reporting the dedicated no-OpenSSL-error value is the only
       // honest attribution. Reading the thread-local queue here would
       // surface a stale entry from unrelated earlier OpenSSL work.
-      this->post_complete_error(make_no_ssl_error());
+      this->post_complete_error(bnio::ssl::base::make_no_ssl_error());
       return;
     }
 
-    if (type_ == ssl_handshake_type::client) {
+    if (type_ == handshake_type::client) {
       SSL_set_connect_state(this->stream_->native_handle());
     } else {
       SSL_set_accept_state(this->stream_->native_handle());
@@ -50,12 +50,12 @@ class ssl_handshake_operation
     run_handshake();
   }
 
-  void resume(ssl_resume_action action) noexcept {
-    if (action == ssl_resume_action::finish) {
-      this->post_complete_value(bnio::detail::empty_error_code);
+  void resume(resume_action action) noexcept {
+    if (action == resume_action::finish) {
+      this->post_complete_value(bnio::ssl::base::empty_error_code);
       return;
     }
-    if (action == ssl_resume_action::fail) {
+    if (action == resume_action::fail) {
       // The pending output (e.g. the fatal alert) has been flushed; deliver
       // the staged SSL error.
       this->post_complete_error(this->pending_error_);
@@ -70,21 +70,21 @@ class ssl_handshake_operation
 
  private:
   void run_handshake() noexcept {
-    clear_ssl_errors();
+    bnio::ssl::base::clear_errors();
     const int result = SSL_do_handshake(this->stream_->native_handle());
     if (result == 1) {
-      this->flush_then(ssl_resume_action::finish);
+      this->flush_then(resume_action::finish);
       return;
     }
-    this->handle_ssl_error(result, ssl_resume_action::handshake);
+    this->handle_ssl_error(result, resume_action::handshake);
   }
 
-  ssl_handshake_type type_;
+  handshake_type type_;
 };
 
 }  // namespace detail
 /** @endcond */
 
-}  // namespace bnio
+}  // namespace bnio::ssl
 
-#endif  // BNIO_DETAIL_SSL_ASYNC_OPERATIONS_HANDSHAKE_H_
+#endif  // BNIO_SSL_DETAIL_HANDSHAKE_H_

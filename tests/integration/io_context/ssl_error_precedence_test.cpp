@@ -24,10 +24,10 @@ TEST(SslErrorPrecedenceTest, staged_tls_error_survives_post_receiver_cancel) {
   }
   auto scheduler = context.get_post_scheduler();
 
-  bnio::ssl_context ssl_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context ssl_context(bnio::ssl::context_method::tls_client);
   test_require(ssl_context.valid());
-  bnio::ssl_stream source{bnio::tcp_socket(-1), ssl_context};
-  bnio::ssl_stream owner{std::move(source)};
+  bnio::ssl::tcp::stream source{bnio::tcp_socket(-1), ssl_context};
+  bnio::ssl::tcp::stream owner{std::move(source)};
   EXPECT_FALSE(source.valid());
 
   ERR_clear_error();
@@ -37,7 +37,7 @@ TEST(SslErrorPrecedenceTest, staged_tls_error_survives_post_receiver_cancel) {
 
   auto state = std::make_shared<handshake_state>();
   auto sender =
-      source.async_handshake(scheduler, bnio::ssl_handshake_type::client);
+      source.async_handshake(scheduler, bnio::ssl::handshake_type::client);
   auto operation =
       bexec::connect(std::move(sender), handshake_receiver{state, &context});
   bexec::start(operation);
@@ -48,7 +48,7 @@ TEST(SslErrorPrecedenceTest, staged_tls_error_survives_post_receiver_cancel) {
   EXPECT_EQ(state->stopped, 0);
   // The staged no-OpenSSL-error value, not the scheduler's
   // operation_canceled abort.
-  EXPECT_EQ(state->error, bnio::make_no_ssl_error());
+  EXPECT_EQ(state->error, bnio::ssl::make_no_ssl_error());
   EXPECT_FALSE(state->error == std::errc::operation_canceled);
 }
 

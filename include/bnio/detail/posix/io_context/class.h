@@ -36,8 +36,6 @@
 
 namespace bnio {
 
-enum class ssl_handshake_type;
-
 namespace detail {
 
 /**

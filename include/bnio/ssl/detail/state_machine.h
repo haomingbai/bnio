@@ -4,13 +4,12 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_STATE_MACHINE_H_
-#define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_STATE_MACHINE_H_
+#ifndef BNIO_SSL_DETAIL_STATE_MACHINE_H_
+#define BNIO_SSL_DETAIL_STATE_MACHINE_H_
 
-#include <bnio/detail/error_code.h>
-#include <bnio/detail/ssl/async_operations/common.h>
+#include <bnio/ssl/base/errors.h>
+#include <bnio/ssl/detail/common.h>
 
-#include <bexec/completion_signatures.hpp>
 #include <bexec/detail/operation_storage.hpp>
 #include <bexec/receiver.hpp>
 #include <bexec/scheduler.hpp>
@@ -20,48 +19,48 @@
 #include <type_traits>
 #include <utility>
 
-namespace bnio {
+namespace bnio::ssl {
 
 /** @cond BNIO_DETAIL */
 namespace detail {
 
-enum class ssl_completion_kind {
+enum class completion_kind {
   value,
   error,
   stopped,
 };
 
-enum class ssl_child_io {
+enum class child_io {
   none,
   read,
   write,
 };
 
-enum class ssl_output_chunk_state {
+enum class output_chunk_state {
   none,
   ready,
   error,
 };
 
 template <class Derived, class Scheduler, class NextLayer, class Receiver>
-class ssl_async_operation_base {
+class operation_base {
  public:
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using receiver_type = std::remove_cvref_t<Receiver>;
 
-  ssl_async_operation_base(Scheduler scheduler, ssl_stream<NextLayer>& stream,
-                           Receiver receiver)
+  operation_base(Scheduler scheduler, tcp::stream<NextLayer>& stream,
+                 Receiver receiver)
       : scheduler_(std::move(scheduler)),
         stream_(&stream),
         receiver_(std::move(receiver)) {}
 
-  ssl_async_operation_base(const ssl_async_operation_base&) = delete;
-  ssl_async_operation_base& operator=(const ssl_async_operation_base&) = delete;
-  ssl_async_operation_base(ssl_async_operation_base&&) = delete;
-  ssl_async_operation_base& operator=(ssl_async_operation_base&&) = delete;
+  operation_base(const operation_base&) = delete;
+  operation_base& operator=(const operation_base&) = delete;
+  operation_base(operation_base&&) = delete;
+  operation_base& operator=(operation_base&&) = delete;
 
   void start() noexcept {
-    if (ssl_stop_requested(receiver_)) {
+    if (stop_requested(receiver_)) {
       // Token canceled before start: deliver set_stopped (unified contract).
       // Context-stop aborts take the value(operation_canceled) path instead,
       // decided by the token arbitration in each operation's execute().
@@ -83,7 +82,7 @@ class ssl_async_operation_base {
     // to be instantiated too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
-    explicit child_receiver(ssl_async_operation_base& operation) noexcept
+    explicit child_receiver(operation_base& operation) noexcept
         : operation_(&operation) {}
 
     [[nodiscard]] env_type get_env() const noexcept {
@@ -97,7 +96,7 @@ class ssl_async_operation_base {
     void set_stopped() noexcept { operation_->post_complete_stopped(); }
 
    private:
-    ssl_async_operation_base* operation_;
+    operation_base* operation_;
   };
 
   class post_receiver {
@@ -110,7 +109,7 @@ class ssl_async_operation_base {
     // to be instantiated too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
-    explicit post_receiver(ssl_async_operation_base& operation) noexcept
+    explicit post_receiver(operation_base& operation) noexcept
         : operation_(&operation) {}
 
     [[nodiscard]] env_type get_env() const noexcept {
@@ -120,12 +119,12 @@ class ssl_async_operation_base {
     void set_value(std::error_code ec) noexcept {
       // The schedule handoff never overwrites a staged completion. Every
       // submit_post() call site stages a completion (value, error, or
-      // stopped) before submitting, and ssl_completion_kind has no empty
-      // state, so there is always a staged result here; delivering it
-      // unchanged implements the "already-completed results are delivered
-      // unchanged" contract (docs/usage/index.md). A non-empty ec from the
-      // schedule (e.g. value(operation_canceled) after an io_context::stop()
-      // abort) is simply dropped when a completion is already staged. The
+      // stopped) before submitting, and completion_kind has no empty state,
+      // so there is always a staged result here; delivering it unchanged
+      // implements the "already-completed results are delivered unchanged"
+      // contract (docs/usage/index.md). A non-empty ec from the schedule
+      // (e.g. value(operation_canceled) after an io_context::stop() abort)
+      // is simply dropped when a completion is already staged. The
       // set_stopped() branch below is the deliberate exception: token
       // cancellation wins over everything, including a staged completion.
       (void)ec;
@@ -141,14 +140,14 @@ class ssl_async_operation_base {
     }
 
    private:
-    ssl_async_operation_base* operation_;
+    operation_base* operation_;
   };
 
-  using read_sender_type = decltype(ssl_make_transport_read_sender(
-      std::declval<scheduler_type&>(), std::declval<ssl_stream<NextLayer>&>(),
+  using read_sender_type = decltype(make_transport_read_sender(
+      std::declval<scheduler_type&>(), std::declval<tcp::stream<NextLayer>&>(),
       static_cast<void*>(nullptr), std::size_t{}));
-  using write_sender_type = decltype(ssl_make_transport_write_sender(
-      std::declval<scheduler_type&>(), std::declval<ssl_stream<NextLayer>&>(),
+  using write_sender_type = decltype(make_transport_write_sender(
+      std::declval<scheduler_type&>(), std::declval<tcp::stream<NextLayer>&>(),
       static_cast<const void*>(nullptr), std::size_t{}));
   using post_sender_type =
       decltype(bexec::schedule(std::declval<scheduler_type&>()));
@@ -164,19 +163,19 @@ class ssl_async_operation_base {
 
   void complete_value(std::error_code ec) noexcept {
     ec_ = ec;
-    completion_ = ssl_completion_kind::value;
-    child_ = ssl_child_io::none;
+    completion_ = completion_kind::value;
+    child_ = child_io::none;
   }
 
   void complete_error(std::error_code error) noexcept {
     ec_ = error;
-    completion_ = ssl_completion_kind::error;
-    child_ = ssl_child_io::none;
+    completion_ = completion_kind::error;
+    child_ = child_io::none;
   }
 
   void complete_stopped() noexcept {
-    completion_ = ssl_completion_kind::stopped;
-    child_ = ssl_child_io::none;
+    completion_ = completion_kind::stopped;
+    child_ = child_io::none;
   }
 
   void post_complete_value(std::error_code ec) noexcept {
@@ -194,26 +193,26 @@ class ssl_async_operation_base {
     submit_post();
   }
 
-  void flush_then(ssl_resume_action action) noexcept {
+  void flush_then(resume_action action) noexcept {
     after_flush_ = action;
     switch (load_output_chunk()) {
-      case ssl_output_chunk_state::ready:
+      case output_chunk_state::ready:
         submit_transport_write();
         return;
-      case ssl_output_chunk_state::none:
+      case output_chunk_state::none:
         resume_after_flush();
         return;
-      case ssl_output_chunk_state::error:
+      case output_chunk_state::error:
         return;
     }
   }
 
-  void handle_ssl_error(int ssl_result, ssl_resume_action action) noexcept {
+  void handle_ssl_error(int ssl_result, resume_action action) noexcept {
     const int error = SSL_get_error(stream_->native_handle(), ssl_result);
     switch (error) {
       case SSL_ERROR_WANT_READ:
         after_read_ = action;
-        flush_then(ssl_resume_action::transport_read);
+        flush_then(resume_action::transport_read);
         return;
       case SSL_ERROR_WANT_WRITE:
         flush_then(action);
@@ -229,71 +228,71 @@ class ssl_async_operation_base {
         // that alert stranded in the memory BIO: the peer (already in
         // WANT_READ) would never observe the failure and its own operation
         // would hang forever. Flush the pending output first, then complete
-        // with the staged error through resume(ssl_resume_action::fail). If
+        // with the staged error through resume(resume_action::fail). If
         // the flush itself fails, the transport error is reported instead —
         // a connection that cannot carry the alert is the more fundamental
         // failure by that point.
-        pending_error_ = last_ssl_error();
-        flush_then(ssl_resume_action::fail);
+        pending_error_ = base::last_error();
+        flush_then(resume_action::fail);
         return;
     }
   }
 
   [[nodiscard]] int bounded_int_size(std::size_t size) const noexcept {
-    return ssl_bounded_int_size(size);
+    return detail::bounded_int_size(size);
   }
 
   scheduler_type scheduler_;
-  ssl_stream<NextLayer>* stream_;
+  tcp::stream<NextLayer>* stream_;
   receiver_type receiver_;
 
   // Error staged by handle_ssl_error's hard-failure branch and delivered
-  // through resume(ssl_resume_action::fail) once the pending output flush
+  // through resume(resume_action::fail) once the pending output flush
   // completes.
-  std::error_code pending_error_ = bnio::detail::empty_error_code;
+  std::error_code pending_error_ = base::empty_error_code;
 
  private:
-  [[nodiscard]] ssl_output_chunk_state load_output_chunk() noexcept {
+  [[nodiscard]] output_chunk_state load_output_chunk() noexcept {
     char* data = nullptr;
     const int available = BIO_nread0(write_bio(*stream_), &data);
     if (available > 0) {
       transport_data_ = data;
       transport_size_ = static_cast<std::size_t>(available);
-      return ssl_output_chunk_state::ready;
+      return output_chunk_state::ready;
     }
 
     transport_data_ = nullptr;
     transport_size_ = 0;
-    return ssl_output_chunk_state::none;
+    return output_chunk_state::none;
   }
 
   void submit_transport_read() noexcept {
     char* data = nullptr;
-    clear_ssl_errors();
+    base::clear_errors();
     const int available = BIO_nwrite0(read_bio(*stream_), &data);
     if (available <= 0) {
-      post_complete_value(last_ssl_error());
+      post_complete_value(base::last_error());
       return;
     }
 
-    child_ = ssl_child_io::read;
+    child_ = child_io::read;
     transport_data_ = data;
     transport_size_ = static_cast<std::size_t>(available);
     child_operation_.template emplace_from<read_operation_type>([this] {
       return bexec::connect(
-          ssl_make_transport_read_sender(scheduler_, *stream_, transport_data_,
-                                         transport_size_),
+          make_transport_read_sender(scheduler_, *stream_, transport_data_,
+                                     transport_size_),
           child_receiver(*this));
     });
     child_operation_.start();
   }
 
   void submit_transport_write() noexcept {
-    child_ = ssl_child_io::write;
+    child_ = child_io::write;
     child_operation_.template emplace_from<write_operation_type>([this] {
       return bexec::connect(
-          ssl_make_transport_write_sender(scheduler_, *stream_, transport_data_,
-                                          transport_size_),
+          make_transport_write_sender(scheduler_, *stream_, transport_data_,
+                                      transport_size_),
           child_receiver(*this));
     });
     child_operation_.start();
@@ -321,17 +320,17 @@ class ssl_async_operation_base {
       return;
     }
 
-    const ssl_child_io completed_child = child_;
-    child_ = ssl_child_io::none;
+    const child_io completed_child = child_;
+    child_ = child_io::none;
 
     switch (completed_child) {
-      case ssl_child_io::read:
+      case child_io::read:
         handle_read_complete(result);
         return;
-      case ssl_child_io::write:
+      case child_io::write:
         handle_write_complete(result);
         return;
-      case ssl_child_io::none:
+      case child_io::none:
         post_complete_error(std::make_error_code(std::errc::protocol_error));
         return;
     }
@@ -342,13 +341,13 @@ class ssl_async_operation_base {
     // handle_transport_complete
 
     char* data = nullptr;
-    clear_ssl_errors();
+    base::clear_errors();
     const int committed =
         BIO_nwrite(read_bio(*stream_), &data, bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
-      post_complete_error(last_ssl_error());  // Invariant violation: goes
-                                              // through deliver_terminal ->
-                                              // deliver_value -> set_value(ec)
+      post_complete_error(base::last_error());  // Invariant violation: goes
+                                                // through deliver_terminal ->
+                                                // deliver_value -> set_value(ec)
       return;
     }
 
@@ -360,66 +359,66 @@ class ssl_async_operation_base {
     // handle_transport_complete
 
     char* data = nullptr;
-    clear_ssl_errors();
+    base::clear_errors();
     const int consumed =
         BIO_nread(write_bio(*stream_), &data, bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {
-      post_complete_error(last_ssl_error());  // Invariant violation: goes
-                                              // through deliver_terminal ->
-                                              // deliver_value -> set_value(ec)
+      post_complete_error(base::last_error());  // Invariant violation: goes
+                                                // through deliver_terminal ->
+                                                // deliver_value -> set_value(ec)
       return;
     }
 
     switch (load_output_chunk()) {
-      case ssl_output_chunk_state::ready:
+      case output_chunk_state::ready:
         submit_transport_write();
         return;
-      case ssl_output_chunk_state::none:
+      case output_chunk_state::none:
         resume_after_flush();
         return;
-      case ssl_output_chunk_state::error:
+      case output_chunk_state::error:
         return;
     }
   }
 
   void resume_after_flush() noexcept {
-    const ssl_resume_action action = after_flush_;
-    if (action == ssl_resume_action::transport_read) {
+    const resume_action action = after_flush_;
+    if (action == resume_action::transport_read) {
       submit_transport_read();
       return;
     }
     resume(action);
   }
 
-  void resume(ssl_resume_action action) noexcept {
+  void resume(resume_action action) noexcept {
     static_cast<Derived*>(this)->resume(action);
   }
 
   void deliver_terminal() noexcept {
     switch (completion_) {
-      case ssl_completion_kind::value:
-      case ssl_completion_kind::error:
+      case completion_kind::value:
+      case completion_kind::error:
         static_cast<Derived*>(this)->deliver_value(ec_);
         break;
-      case ssl_completion_kind::stopped:
+      case completion_kind::stopped:
         bexec::set_stopped(std::move(receiver_));
         break;
     }
   }
 
   child_operations_type child_operation_;
-  std::error_code ec_ = bnio::detail::empty_error_code;
+  std::error_code ec_ = base::empty_error_code;
   char* transport_data_ = nullptr;
   std::size_t transport_size_ = 0;
-  ssl_child_io child_ = ssl_child_io::none;
-  ssl_completion_kind completion_ = ssl_completion_kind::value;
-  ssl_resume_action after_read_ = ssl_resume_action::handshake;
-  ssl_resume_action after_flush_ = ssl_resume_action::handshake;
+  child_io child_ = child_io::none;
+  completion_kind completion_ = completion_kind::value;
+  resume_action after_read_ = resume_action::handshake;
+  resume_action after_flush_ = resume_action::handshake;
 };
 
 }  // namespace detail
 /** @endcond */
 
-}  // namespace bnio
+}  // namespace bnio::ssl
 
-#endif  // BNIO_DETAIL_SSL_ASYNC_OPERATIONS_STATE_MACHINE_H_
+#endif  // BNIO_SSL_DETAIL_STATE_MACHINE_H_

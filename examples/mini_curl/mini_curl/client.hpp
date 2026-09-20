@@ -104,8 +104,8 @@ class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
   operation_registry& registry_;
   request_options options_;
   bnio::tcp_socket socket_;
-  bnio::ssl_context ssl_context_{bnio::ssl_context_method::tls_client};
-  std::unique_ptr<bnio::ssl_stream<bnio::tcp_socket>> ssl_stream_;
+  bnio::ssl::context ssl_context_{bnio::ssl::context_method::tls_client};
+  std::unique_ptr<bnio::ssl::tcp::stream<bnio::tcp_socket>> ssl_stream_;
   std::array<bnio::ip::endpoint, k_max_endpoints> endpoints_{};
   std::array<char, k_receive_size> receive_buffer_{};
   std::size_t endpoint_count_ = 0;

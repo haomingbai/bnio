@@ -31,7 +31,7 @@ std::string_view as_string_view(std::span<const unsigned char> bytes) {
 // Records what the high-level (set_alpn_callback) callback observed.
 struct alpn_probe {
   bool invoked = false;
-  bnio::ssl_context* seen_context = nullptr;
+  bnio::ssl::context* seen_context = nullptr;
   bool wire_match = false;
   int bound_magic = 0;
   std::string seen_protocol;
@@ -75,15 +75,15 @@ void expect_selected_alpn(SSL* ssl, std::string_view expected) {
 // Drives a client/server handshake over an AF_UNIX socketpair and asserts the
 // negotiated protocol on both peers before the streams are destroyed.
 std::shared_ptr<handshake_state> run_socketpair_handshake(
-    bnio::io_context& context, bnio::ssl_context& client_ctx,
-    bnio::ssl_context& server_ctx, std::span<const unsigned char> client_protos,
+    bnio::io_context& context, bnio::ssl::context& client_ctx,
+    bnio::ssl::context& server_ctx, std::span<const unsigned char> client_protos,
     std::string_view expected_alpn) {
   int sockets[2] = {-1, -1};
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_ctx};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_ctx};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_ctx};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_ctx};
 
   if (!client_protos.empty()) {
     // SSL_set_alpn_protos returns 0 on success (inverted convention).
@@ -96,10 +96,10 @@ std::shared_ptr<handshake_state> run_socketpair_handshake(
   auto scheduler = context.get_post_scheduler();
 
   auto client_operation = bexec::connect(
-      client.async_handshake(scheduler, bnio::ssl_handshake_type::client),
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client),
       handshake_receiver{state, &context});
   auto server_operation = bexec::connect(
-      server.async_handshake(scheduler, bnio::ssl_handshake_type::server),
+      server.async_handshake(scheduler, bnio::ssl::handshake_type::server),
       handshake_receiver{state, &context});
   bexec::start(client_operation);
   bexec::start(server_operation);
@@ -114,16 +114,16 @@ std::shared_ptr<handshake_state> run_socketpair_handshake(
 // returns the shared outcome state. Unlike run_socketpair_handshake, the
 // streams outlive this call, so tests can query them afterwards.
 std::shared_ptr<handshake_state> handshake_live_streams(
-    bnio::io_context& context, bnio::ssl_stream<bnio::tcp_socket>& client,
-    bnio::ssl_stream<bnio::tcp_socket>& server) {
+    bnio::io_context& context, bnio::ssl::tcp::stream<bnio::tcp_socket>& client,
+    bnio::ssl::tcp::stream<bnio::tcp_socket>& server) {
   auto state = std::make_shared<handshake_state>();
   auto scheduler = context.get_post_scheduler();
 
   auto client_operation = bexec::connect(
-      client.async_handshake(scheduler, bnio::ssl_handshake_type::client),
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client),
       handshake_receiver{state, &context});
   auto server_operation = bexec::connect(
-      server.async_handshake(scheduler, bnio::ssl_handshake_type::server),
+      server.async_handshake(scheduler, bnio::ssl::handshake_type::server),
       handshake_receiver{state, &context});
   bexec::start(client_operation);
   bexec::start(server_operation);
@@ -141,7 +141,7 @@ TEST(SslAlpnTest, template_callback_selects_h2_and_receives_bindings) {
 
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -151,7 +151,7 @@ TEST(SslAlpnTest, template_callback_selects_h2_and_receives_bindings) {
 
   alpn_probe probe;
   server_context.set_alpn_callback(
-      [](bnio::ssl_context& ctx, bnio::ssl_context::alpn_out& out,
+      [](bnio::ssl::context& ctx, bnio::ssl::context::alpn_out& out,
          std::span<const unsigned char> protocols, const std::string& protocol,
          int magic, alpn_probe* probe) -> int {
         probe->invoked = true;
@@ -167,7 +167,7 @@ TEST(SslAlpnTest, template_callback_selects_h2_and_receives_bindings) {
       },
       std::string(k_h2), 42, &probe);
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -198,7 +198,7 @@ TEST(SslAlpnTest, native_select_cb_selects_http11_and_passes_arg) {
 
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -210,7 +210,7 @@ TEST(SslAlpnTest, native_select_cb_selects_http11_and_passes_arg) {
   selector.protocol = std::string(k_http11);
   server_context.set_alpn_select_cb(&native_alpn_select, &selector);
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -240,7 +240,7 @@ TEST(SslAlpnTest, noack_leaves_alpn_unselected_but_handshake_succeeds) {
 
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -248,13 +248,13 @@ TEST(SslAlpnTest, noack_leaves_alpn_unselected_but_handshake_succeeds) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  server_context.set_alpn_callback([](bnio::ssl_context&,
-                                      bnio::ssl_context::alpn_out&,
+  server_context.set_alpn_callback([](bnio::ssl::context&,
+                                      bnio::ssl::context::alpn_out&,
                                       std::span<const unsigned char>) -> int {
     return SSL_TLSEXT_ERR_NOACK;
   });
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -277,7 +277,7 @@ TEST(SslAlpnTest, replacement_installs_latest_callback_only) {
 
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -288,7 +288,7 @@ TEST(SslAlpnTest, replacement_installs_latest_callback_only) {
   alpn_probe probe_a;
   alpn_probe probe_b;
   server_context.set_alpn_callback(
-      [](bnio::ssl_context&, bnio::ssl_context::alpn_out& out,
+      [](bnio::ssl::context&, bnio::ssl::context::alpn_out& out,
          std::span<const unsigned char>, alpn_probe* probe) -> int {
         probe->invoked = true;
         out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
@@ -297,7 +297,7 @@ TEST(SslAlpnTest, replacement_installs_latest_callback_only) {
       },
       &probe_a);
   server_context.set_alpn_callback(
-      [](bnio::ssl_context&, bnio::ssl_context::alpn_out& out,
+      [](bnio::ssl::context&, bnio::ssl::context::alpn_out& out,
          std::span<const unsigned char>, alpn_probe* probe) -> int {
         probe->invoked = true;
         out.set(reinterpret_cast<const unsigned char*>(k_http11.data()),
@@ -306,7 +306,7 @@ TEST(SslAlpnTest, replacement_installs_latest_callback_only) {
       },
       &probe_b);
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -363,7 +363,7 @@ TEST(SslAlpnTest, alert_fatal_aborts_handshake) {
 
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -371,13 +371,13 @@ TEST(SslAlpnTest, alert_fatal_aborts_handshake) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  server_context.set_alpn_callback([](bnio::ssl_context&,
-                                      bnio::ssl_context::alpn_out&,
+  server_context.set_alpn_callback([](bnio::ssl::context&,
+                                      bnio::ssl::context::alpn_out&,
                                       std::span<const unsigned char>) -> int {
     return SSL_TLSEXT_ERR_ALERT_FATAL;
   });
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -385,8 +385,8 @@ TEST(SslAlpnTest, alert_fatal_aborts_handshake) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
@@ -397,10 +397,10 @@ TEST(SslAlpnTest, alert_fatal_aborts_handshake) {
   auto scheduler = context.get_post_scheduler();
 
   auto client_operation = bexec::connect(
-      client.async_handshake(scheduler, bnio::ssl_handshake_type::client),
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client),
       alert_handshake_receiver{state, &context});
   auto server_operation = bexec::connect(
-      server.async_handshake(scheduler, bnio::ssl_handshake_type::server),
+      server.async_handshake(scheduler, bnio::ssl::handshake_type::server),
       alert_handshake_receiver{state, &context});
   bexec::start(client_operation);
   bexec::start(server_operation);
@@ -423,10 +423,10 @@ TEST(SslAlpnTest, lifecycle_smoke_install_replace_destroy) {
   alpn_probe probe_a;
   alpn_probe probe_b;
   {
-    bnio::ssl_context context(bnio::ssl_context_method::tls_server);
+    bnio::ssl::context context(bnio::ssl::context_method::tls_server);
     test_require(context.valid());
     context.set_alpn_callback(
-        [](bnio::ssl_context&, bnio::ssl_context::alpn_out& out,
+        [](bnio::ssl::context&, bnio::ssl::context::alpn_out& out,
            std::span<const unsigned char>, alpn_probe* probe) -> int {
           probe->invoked = true;
           out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
@@ -435,7 +435,7 @@ TEST(SslAlpnTest, lifecycle_smoke_install_replace_destroy) {
         },
         &probe_a);
     context.set_alpn_callback(
-        [](bnio::ssl_context&, bnio::ssl_context::alpn_out& out,
+        [](bnio::ssl::context&, bnio::ssl::context::alpn_out& out,
            std::span<const unsigned char>, alpn_probe* probe) -> int {
           probe->invoked = true;
           out.set(reinterpret_cast<const unsigned char*>(k_http11.data()),
@@ -463,7 +463,7 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
 
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -471,15 +471,15 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  server_context.set_alpn_callback([](bnio::ssl_context&,
-                                      bnio::ssl_context::alpn_out& out,
+  server_context.set_alpn_callback([](bnio::ssl::context&,
+                                      bnio::ssl::context::alpn_out& out,
                                       std::span<const unsigned char>) -> int {
     out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
             static_cast<unsigned char>(k_h2.size()));
     return SSL_TLSEXT_ERR_OK;
   });
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -487,8 +487,8 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
@@ -502,8 +502,8 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
 
   // The high-level view must be readable through const references and name
   // the selected protocol on both peers.
-  const bnio::ssl_stream<bnio::tcp_socket>& const_client = client;
-  const bnio::ssl_stream<bnio::tcp_socket>& const_server = server;
+  const bnio::ssl::tcp::stream<bnio::tcp_socket>& const_client = client;
+  const bnio::ssl::tcp::stream<bnio::tcp_socket>& const_server = server;
   EXPECT_EQ(as_string_view(const_client.get_alpn_selected()), k_h2);
   EXPECT_EQ(as_string_view(const_server.get_alpn_selected()), k_h2);
 
@@ -522,7 +522,7 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
 
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -530,13 +530,13 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  server_context.set_alpn_callback([](bnio::ssl_context&,
-                                      bnio::ssl_context::alpn_out&,
+  server_context.set_alpn_callback([](bnio::ssl::context&,
+                                      bnio::ssl::context::alpn_out&,
                                       std::span<const unsigned char>) -> int {
     return SSL_TLSEXT_ERR_NOACK;
   });
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -544,8 +544,8 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
@@ -557,8 +557,8 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
   EXPECT_EQ(state->errors, 0);
   EXPECT_EQ(state->stopped, 0);
 
-  const bnio::ssl_stream<bnio::tcp_socket>& const_client = client;
-  const bnio::ssl_stream<bnio::tcp_socket>& const_server = server;
+  const bnio::ssl::tcp::stream<bnio::tcp_socket>& const_client = client;
+  const bnio::ssl::tcp::stream<bnio::tcp_socket>& const_server = server;
   EXPECT_TRUE(const_client.get_alpn_selected().empty());
   EXPECT_TRUE(const_server.get_alpn_selected().empty());
 }
@@ -571,17 +571,17 @@ TEST(SslAlpnTest, get_alpn_selected_empty_before_handshake) {
     return;
   }
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
 
   int sockets[2] = {-1, -1};
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   // No handshake has run yet, so nothing can have been selected.
   EXPECT_TRUE(client.get_alpn_selected().empty());

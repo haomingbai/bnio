@@ -4,12 +4,13 @@
  */
 
 #pragma once
-#ifndef BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SENDERS_H_
-#define BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SENDERS_H_
+#ifndef BNIO_SSL_DETAIL_SENDERS_H_
+#define BNIO_SSL_DETAIL_SENDERS_H_
 
-#include <bnio/detail/ssl/async_operations/handshake.h>
-#include <bnio/detail/ssl/async_operations/read_write.h>
-#include <bnio/detail/ssl/async_operations/shutdown.h>
+#include <bnio/ssl/context.h>
+#include <bnio/ssl/detail/handshake.h>
+#include <bnio/ssl/detail/read_write.h>
+#include <bnio/ssl/detail/shutdown.h>
 
 #include <bexec/completion_signatures.hpp>
 #include <cstddef>
@@ -17,113 +18,113 @@
 #include <type_traits>
 #include <utility>
 
-namespace bnio {
+namespace bnio::ssl {
 
 /** @cond BNIO_DETAIL */
 namespace detail {
 
 template <class Scheduler, class NextLayer>
-class ssl_handshake_sender {
+class handshake_sender {
  public:
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  ssl_handshake_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
-                       ssl_handshake_type type) noexcept
+  handshake_sender(Scheduler scheduler, tcp::stream<NextLayer>& stream,
+                   handshake_type type) noexcept
       : scheduler_(std::move(scheduler)), stream_(&stream), type_(type) {}
 
   template <class Receiver>
   auto connect(Receiver receiver) const {
-    return ssl_handshake_operation<Scheduler, NextLayer,
-                                   std::remove_cvref_t<Receiver>>(
+    return handshake_operation<Scheduler, NextLayer,
+                               std::remove_cvref_t<Receiver>>(
         scheduler_, *stream_, type_, std::move(receiver));
   }
 
  private:
   Scheduler scheduler_;
-  ssl_stream<NextLayer>* stream_;
-  ssl_handshake_type type_;
+  tcp::stream<NextLayer>* stream_;
+  handshake_type type_;
 };
 
 template <class Scheduler, class NextLayer, class Holder>
-class ssl_read_sender {
+class read_sender {
  public:
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
-  ssl_read_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
-                  Holder buffer)
+  read_sender(Scheduler scheduler, tcp::stream<NextLayer>& stream,
+              Holder buffer)
       : scheduler_(std::move(scheduler)),
         stream_(&stream),
         buffer_(std::move(buffer)) {}
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return ssl_read_operation<Scheduler, NextLayer, Holder,
-                              std::remove_cvref_t<Receiver>>(
+    return read_operation<Scheduler, NextLayer, Holder,
+                          std::remove_cvref_t<Receiver>>(
         std::move(scheduler_), *stream_, std::move(buffer_),
         std::move(receiver));
   }
 
  private:
   Scheduler scheduler_;
-  ssl_stream<NextLayer>* stream_;
+  tcp::stream<NextLayer>* stream_;
   Holder buffer_;
 };
 
 template <class Scheduler, class NextLayer, class Holder, bool CompleteBuffer>
-class ssl_write_sender {
+class write_sender {
  public:
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
-  ssl_write_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream,
-                   Holder buffer)
+  write_sender(Scheduler scheduler, tcp::stream<NextLayer>& stream,
+               Holder buffer)
       : scheduler_(std::move(scheduler)),
         stream_(&stream),
         buffer_(std::move(buffer)) {}
 
   template <class Receiver>
   auto connect(Receiver receiver) && {
-    return ssl_io_operation<Scheduler, NextLayer, Holder,
-                            std::remove_cvref_t<Receiver>,
-                            ssl_application_io::write, CompleteBuffer>(
+    return io_operation<Scheduler, NextLayer, Holder,
+                        std::remove_cvref_t<Receiver>,
+                        application_io::write, CompleteBuffer>(
         std::move(scheduler_), *stream_, std::move(buffer_),
         std::move(receiver));
   }
 
  private:
   Scheduler scheduler_;
-  ssl_stream<NextLayer>* stream_;
+  tcp::stream<NextLayer>* stream_;
   Holder buffer_;
 };
 
 template <class Scheduler, class NextLayer>
-class ssl_shutdown_sender {
+class shutdown_sender {
  public:
   using completion_signatures =
       bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                    bexec::set_stopped_t()>;
 
-  ssl_shutdown_sender(Scheduler scheduler, ssl_stream<NextLayer>& stream)
+  shutdown_sender(Scheduler scheduler, tcp::stream<NextLayer>& stream)
       : scheduler_(std::move(scheduler)), stream_(&stream) {}
 
   template <class Receiver>
   auto connect(Receiver receiver) const {
-    return ssl_shutdown_operation<Scheduler, NextLayer,
-                                  std::remove_cvref_t<Receiver>>(
+    return shutdown_operation<Scheduler, NextLayer,
+                              std::remove_cvref_t<Receiver>>(
         scheduler_, *stream_, std::move(receiver));
   }
 
  private:
   Scheduler scheduler_;
-  ssl_stream<NextLayer>* stream_;
+  tcp::stream<NextLayer>* stream_;
 };
 
 }  // namespace detail
 /** @endcond */
 
-}  // namespace bnio
+}  // namespace bnio::ssl
 
-#endif  // BNIO_DETAIL_SSL_ASYNC_OPERATIONS_SENDERS_H_
+#endif  // BNIO_SSL_DETAIL_SENDERS_H_

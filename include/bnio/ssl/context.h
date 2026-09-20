@@ -7,7 +7,7 @@
 #ifndef BNIO_SSL_CONTEXT_H_
 #define BNIO_SSL_CONTEXT_H_
 
-#include <bnio/export.h>
+#include <bnio/ssl/base.h>
 #include <openssl/ssl.h>
 
 #include <cstddef>
@@ -19,12 +19,12 @@
 #include <type_traits>
 #include <utility>
 
-namespace bnio {
+namespace bnio::ssl {
 
 /**
  * OpenSSL SSL_CTX method selector.
  */
-enum class ssl_context_method {
+enum class context_method {
   /**
    * Generic TLS method.
    */
@@ -44,7 +44,7 @@ enum class ssl_context_method {
 /**
  * Direction used when starting an SSL/TLS handshake.
  */
-enum class ssl_handshake_type {
+enum class handshake_type {
   /**
    * Start a client-side handshake.
    */
@@ -59,14 +59,12 @@ enum class ssl_handshake_type {
 /**
  * Returns the error category used for OpenSSL library errors.
  */
-[[nodiscard]] BNIO_EXPORT const std::error_category&
-openssl_error_category() noexcept;
+using base::openssl_error_category;
 
 /**
  * Creates an error_code in the OpenSSL error category.
  */
-[[nodiscard]] BNIO_EXPORT std::error_code make_openssl_error(
-    unsigned long code) noexcept;
+using base::make_openssl_error;
 
 /**
  * Returns the error_code bnio reports when an SSL operation's failure path
@@ -75,92 +73,45 @@ openssl_error_category() noexcept;
  * category, never collides with a real OpenSSL error code, and does not
  * represent any TLS-level failure.
  */
-[[nodiscard]] BNIO_EXPORT std::error_code make_no_ssl_error() noexcept;
+using base::make_no_ssl_error;
+
+namespace detail {
+
+/**
+ * Translates a context_method selector into the OpenSSL SSL_METHOD passed
+ * to the context_base constructor.
+ */
+[[nodiscard]] inline const SSL_METHOD* select_context_method(
+    context_method method) noexcept {
+  switch (method) {
+    case context_method::tls:
+      return TLS_method();
+    case context_method::tls_client:
+      return TLS_client_method();
+    case context_method::tls_server:
+      return TLS_server_method();
+  }
+  return TLS_method();
+}
+
+}  // namespace detail
 
 /**
  * RAII owner for an OpenSSL SSL_CTX object.
  *
- * ssl_context owns the native context and frees it on destruction. It is
- * move-only because the native SSL_CTX ownership is unique.
+ * context owns the native context and frees it on destruction. It is
+ * move-only because the native SSL_CTX ownership is unique: copy operations
+ * are deleted by base::context_base. Native-handle access, the certificate
+ * and verification configuration surface, and raw ALPN callback
+ * installation are inherited from base::context_base.
  */
-class BNIO_EXPORT ssl_context {
+class context : public base::context_base {
  public:
   /**
    * Creates an SSL context for the selected TLS method.
    */
-  explicit ssl_context(
-      ssl_context_method method = ssl_context_method::tls) noexcept;
-
-  /**
-   * Frees the owned SSL_CTX, if any.
-   */
-  ~ssl_context() noexcept;
-
-  /**
-   * Copy construction is disabled because the context owns an SSL_CTX.
-   */
-  ssl_context(const ssl_context&) = delete;
-
-  /**
-   * Copy assignment is disabled because the context owns an SSL_CTX.
-   */
-  ssl_context& operator=(const ssl_context&) = delete;
-
-  /**
-   * Moves SSL_CTX ownership from another context.
-   */
-  ssl_context(ssl_context&& other) noexcept;
-
-  /**
-   * Frees the current SSL_CTX and moves ownership from another context.
-   */
-  ssl_context& operator=(ssl_context&& other) noexcept;
-
-  /**
-   * Returns the owned native SSL_CTX pointer, or nullptr when invalid.
-   */
-  [[nodiscard]] SSL_CTX* native_handle() const noexcept { return context_; }
-
-  /**
-   * Returns whether this context owns a native SSL_CTX.
-   */
-  [[nodiscard]] bool valid() const noexcept { return context_ != nullptr; }
-
-  /**
-   * Loads a certificate chain file into the context.
-   */
-  [[nodiscard]] std::error_code use_certificate_chain_file(
-      const char* path) noexcept;
-
-  /**
-   * Loads a PEM private key file into the context.
-   */
-  [[nodiscard]] std::error_code use_private_key_file(const char* path) noexcept;
-
-  /**
-   * Checks whether the loaded private key matches the certificate.
-   */
-  [[nodiscard]] std::error_code check_private_key() noexcept;
-
-  /**
-   * Sets OpenSSL certificate verification flags for the context.
-   */
-  void set_verify_mode(int mode) noexcept;
-
-  /**
-   * Callback signature matching OpenSSL's SSL_CTX_set_alpn_select_cb
-   * protocol. Returns SSL_TLSEXT_ERR_OK, SSL_TLSEXT_ERR_NOACK,
-   * SSL_TLSEXT_ERR_ALERT_FATAL, etc.
-   */
-  using alpn_select_cb = int (*)(SSL* ssl, const unsigned char** out,
-                                 unsigned char* outlen, const unsigned char* in,
-                                 unsigned int inlen, void* arg);
-
-  /**
-   * Installs an ALPN selection callback. The context does not own arg; the
-   * caller must keep it alive for the lifetime of the context.
-   */
-  void set_alpn_select_cb(alpn_select_cb cb, void* arg) noexcept;
+  explicit context(context_method method = context_method::tls) noexcept
+      : base::context_base(detail::select_context_method(method)) {}
 
   /**
    * Write-back proxy handed to an ALPN selection callback installed through
@@ -193,9 +144,9 @@ class BNIO_EXPORT ssl_context {
    * closure state owned by the context; installing replaces and destroys any
    * previously installed closure.
    *
-   * The user callable is invoked as: int fn(ssl_context& ctx, alpn_out& out,
+   * The user callable is invoked as: int fn(context& ctx, alpn_out& out,
    * std::span<const unsigned char> protocols, BoundArgs... args) where ctx is
-   * the context this callback was installed on (do not move the ssl_context
+   * the context this callback was installed on (do not move the context
    * after installing: the callback would receive a dangling reference), out
    * writes the selected protocol via set(), and protocols covers OpenSSL's
    * wire-format protocol list. The returned int is passed through to OpenSSL
@@ -237,26 +188,6 @@ class BNIO_EXPORT ssl_context {
 
  private:
   /**
-   * Destruction interface for callback state owned by ssl_context. Concrete
-   * argument types know their own allocator and implement destroy() to
-   * destroy and deallocate themselves; ssl_context only ever calls
-   * destroy() and never deletes through this base pointer.
-   */
-  class alpn_arg_base {
-   public:
-    /**
-     * Destroys and deallocates the concrete argument object.
-     */
-    virtual void destroy() noexcept = 0;
-
-   protected:
-    // Protected non-virtual destructor: destruction always goes through
-    // destroy(), never through a base-class delete.
-    alpn_arg_base() = default;
-    ~alpn_arg_base() = default;
-  };
-
-  /**
    * Heap closure state for set_alpn_callback: the owning context, the
    * rebound allocator copy used to allocate this object, and a single bound
    * callable formed from the decay-copied user callable and its decay-copied
@@ -265,7 +196,7 @@ class BNIO_EXPORT ssl_context {
    * user code may mutate them across calls.
    */
   template <class Allocator, class Callback, class... BoundArgs>
-  class alpn_closure final : public alpn_arg_base {
+  class alpn_closure final : public base::alpn_arg_base {
    private:
     /**
      * Forms the single bound callable: binds the user callable to the
@@ -276,7 +207,7 @@ class BNIO_EXPORT ssl_context {
     template <class F, class... As>
     static auto make_bound(F&& f, As&&... as) {
       return [f = std::forward<F>(f), ... captured = std::forward<As>(as)](
-                 ssl_context& ctx, alpn_out& out,
+                 context& ctx, alpn_out& out,
                  std::span<const unsigned char> protocols) mutable -> int {
         return std::invoke(f, ctx, out, protocols, unwrap_arg(captured)...);
       };
@@ -300,7 +231,7 @@ class BNIO_EXPORT ssl_context {
     }
 
    public:
-    alpn_closure(ssl_context* owner, const Allocator& alloc, Callback fn,
+    alpn_closure(context* owner, const Allocator& alloc, Callback fn,
                  BoundArgs... args)
         : owner_(owner),
           allocator_(alloc),
@@ -334,21 +265,13 @@ class BNIO_EXPORT ssl_context {
     }
 
    private:
-    ssl_context* owner_;
+    context* owner_;
     Allocator allocator_;
     decltype(make_bound(std::declval<Callback>(),
                         std::declval<BoundArgs>()...)) bound_;
   };
-
-  SSL_CTX* context_ = nullptr;
-  alpn_arg_base* owned_alpn_arg_ = nullptr;
-
-  /**
-   * Takes ownership of owned_arg, destroying any previously owned argument.
-   */
-  void store_owned_alpn_arg(alpn_arg_base* owned_arg) noexcept;
 };
 
-}  // namespace bnio
+}  // namespace bnio::ssl
 
 #endif  // BNIO_SSL_CONTEXT_H_

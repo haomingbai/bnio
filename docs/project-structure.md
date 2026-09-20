@@ -132,16 +132,18 @@ High-level async runtime, stream owners, and buffer types.
   readiness/retry and SQE/CQE lifecycles cannot be represented by an alias
   alone.
 - `detail/posix/io_context/scheduler_operations.h` — scheduler-level I/O senders.
-- `detail/ssl/async_operations.h` — umbrella for SSL async operations.
-- `detail/ssl/async_operations/common.h` — shared SSL operation helpers.
-- `detail/ssl/async_operations/handshake.h` — TLS handshake operation.
-- `detail/ssl/async_operations/read_write.h` — TLS read/write umbrella.
-- `detail/ssl/async_operations/read_write/operation.h` — TLS read/write operation.
-- `detail/ssl/async_operations/read_write/state.h` — TLS read/write state.
-- `detail/ssl/async_operations/read_write/step.h` — TLS read/write state machine.
-- `detail/ssl/async_operations/senders.h` — SSL sender factories.
-- `detail/ssl/async_operations/shutdown.h` — TLS shutdown operation.
-- `detail/ssl/async_operations/state_machine.h` — SSL state machine helpers.
+- `ssl/detail/common.h` — shared SSL operation helpers.
+- `ssl/detail/buffers.h` — borrow-level buffer adapters for SSL operations.
+- `ssl/detail/state_machine.h` — shared SSL operation state machine base.
+- `ssl/detail/handshake.h` — TLS handshake operation.
+- `ssl/detail/shutdown.h` — TLS shutdown operation.
+- `ssl/detail/senders.h` — SSL sender types.
+- `ssl/detail/read_write.h` — TLS read/write umbrella.
+- `ssl/detail/read_write/state.h` — TLS read/write state.
+- `ssl/detail/read_write/step.h` — TLS read/write state machine steps.
+- `ssl/detail/read_write/operation.h` — TLS read/write operation.
+- `ssl/detail/async_operations.h` — umbrella for SSL async operation
+  implementations.
 - `detail/tcp/async_operations.h` — TCP async operation sender factories.
 - `detail/udp/async_operations.h` — UDP datagram sender factories.
 - `buffer/` — buffer types:
@@ -153,16 +155,27 @@ High-level async runtime, stream owners, and buffer types.
   - `socket.h` — `tcp::socket` class (`tcp_socket` compatibility alias).
   - `acceptor.h` — `tcp::acceptor` class (`tcp_acceptor` compatibility alias).
   - `async_operations.h` — TCP async sender factories.
-  - `layers.h` — TCP layer type list for `ssl_stream`.
+  - `layers.h` — TCP layer type list for SSL streams.
 - `udp/` — UDP datagram owner and sender factories:
   - `socket.h` — `udp::socket` lifecycle and async sender declarations.
   - `async_operations.h` — connected and endpoint-aware UDP senders.
 - `ssl/` — TLS integration:
-  - `context.h` — `ssl_context` class (RAII `SSL_CTX` owner).
-  - `stream_class.h` — `ssl_stream<NextLayer>` class definition.
-  - `stream.h` — `ssl_stream` template implementation.
-  - `stream_operations.h` — SSL sender factories.
+  - `base.h` — aggregate for the SSL base layer.
+  - `base/errors.h` — OpenSSL error category and error_code helpers.
+  - `base/context_base.h` — `ssl::base::context_base` class (RAII `SSL_CTX`
+    owner base).
+  - `base/alpn.h` — destruction interface for context-owned ALPN callback
+    state.
+  - `base/bio_pair.h` — memory BIO pair assembly facility.
+  - `context.h` — `ssl::context` class (inherits `base::context_base`; adds
+    the method selector and the `set_alpn_callback` closure).
+  - `tcp/stream_class.h` — `ssl::tcp::stream<NextLayer>` class definition.
+  - `tcp/stream_operations.h` — SSL stream async sender factories.
+  - `stream.h` — aggregate for the ssl stream.
   - `cpo.h` — SSL CPOs (`async_handshake`, `async_shutdown`).
+  - `detail/` — internal SSL async operation implementation (common helpers,
+    buffer borrows, state machine, handshake/shutdown/read-write operations,
+    sender types).
 - `io_context_cpo/` — I/O CPOs and concepts:
   - `instances.h` — CPO object instances.
   - `concepts.h` — `reads_bytes`, `writes_bytes`, etc.
@@ -207,7 +220,8 @@ High-level async runtime, stream owners, and buffer types.
   lifecycle, queue, timer, and timer-state implementations selected through
   `detail::native_context`.
 - `src/posix/tcp.cpp` — TCP socket and acceptor methods.
-- `src/posix/ssl.cpp` — SSL context and stream methods.
+- `src/posix/ssl.cpp` — SSL base layer: OpenSSL error category and
+  `ssl::base::context_base` methods.
 - `src/posix/udp.cpp` — UDP socket methods.
 
 ## Tests (`tests/`)
@@ -231,8 +245,10 @@ High-level async runtime, stream owners, and buffer types.
     `io_context_sender_concept_test.cpp`, `io_context_accept_connect_test.cpp`,
     `io_context_read_write_test.cpp`, `io_context_poll_test.cpp`.
   - `tcp_test.cpp`, `buffer_test.cpp`, `dns_test.cpp`.
-  - `ssl_test.cpp`, `ssl_handshake_test.cpp`, `ssl_transfer_test.cpp`,
-    `ssl_concept_test.cpp`.
+  - `ssl_concept_test.cpp`, `ssl_handshake_test.cpp`, `ssl_transfer_test.cpp`,
+    `ssl_alpn_test.cpp`, `ssl_error_precedence_test.cpp`,
+    `ssl_error_queue_hygiene_test.cpp`, plus
+    `tests/support/io_context/ssl_test_support.h`.
   - `steady_timer_test.cpp`.
   - `header_self_contained_test.cpp`.
   - Various `*_test_support.h` files for shared test infrastructure.

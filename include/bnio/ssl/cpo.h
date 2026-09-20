@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace bnio {
+namespace bnio::ssl {
 
 /**
  * Customization point object for Provider::async_handshake.
@@ -22,7 +22,7 @@ struct async_handshake_t {
    */
   template <class Provider, class Stream>
   constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
-                                      ssl_handshake_type type) const {
+                                      handshake_type type) const {
     return std::forward<Stream>(stream).async_handshake(
         std::forward<Provider>(provider), type);
   }
@@ -53,6 +53,6 @@ inline constexpr async_handshake_t async_handshake{};
  */
 inline constexpr async_shutdown_t async_shutdown{};
 
-}  // namespace bnio
+}  // namespace bnio::ssl
 
 #endif  // BNIO_SSL_CPO_H_

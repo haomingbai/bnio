@@ -200,8 +200,8 @@ what work they start and what value they send on success.
 | Descriptor polling | `async_poll(...)` | `unsigned` ready mask |
 | DNS resolution | `async_resolve(...)` | `std::size_t` result count |
 | Timer wait | `steady_timer::async_wait()` | `()` |
-| TLS handshake/shutdown | `ssl_stream::async_handshake(...)`, `async_shutdown(...)` | `()` |
-| TLS reads/writes | `ssl_stream::async_read(...)`, `async_write(...)` | `std::size_t` |
+| TLS handshake/shutdown | `ssl::tcp::stream::async_handshake(...)`, `async_shutdown(...)` | `()` |
+| TLS reads/writes | `ssl::tcp::stream::async_read(...)`, `async_write(...)` | `std::size_t` |
 
 For `async_poll(...)`, the `unsigned` ready mask is meaningful only on success
 (`ec == {}`). When the operation fails or is cancelled the mask is delivered as
@@ -228,7 +228,7 @@ only these two completion channels; `set_error` is not part of it — no bnio
 TLS streams encode EOF and close results the same way as plain descriptors
 and TCP sockets:
 
-- `ssl_stream::async_read()` and `ssl_stream::async_read_some()` both mean
+- `ssl::tcp::stream::async_read()` and `ssl::tcp::stream::async_read_some()` both mean
   one plaintext `SSL_read` attempt. There is no read-all form for TLS: TLS
   record boundaries do not map to a caller's buffer size, so a call reports
   the bytes of a single `SSL_read` step.
@@ -238,7 +238,7 @@ and TCP sockets:
 - A transport-level close without `close_notify` is a truncated stream: the
   read completes with `set_value(connection_reset, n)`, the same pass-through
   a TCP socket reports on `ECONNRESET`.
-- `ssl_stream::async_write()` is write-all. If the peer disappears mid-write
+- `ssl::tcp::stream::async_write()` is write-all. If the peer disappears mid-write
   (a transport write of 0 bytes, or `SSL_ERROR_ZERO_RETURN` during a write
   step), the write completes with `set_value(broken_pipe, n)`, matching the
   write-all zero-byte encoding for TCP.
@@ -250,7 +250,7 @@ failed handshake, read, write, or shutdown completes with is the error that
 call recorded — never a leftover from earlier OpenSSL work on the same
 thread. When a failure path reports no OpenSSL error at all (for example, a
 handshake on an invalid stream never reaches OpenSSL), the operation
-completes with `bnio::make_no_ssl_error()`: a dedicated value in the OpenSSL
+completes with `bnio::ssl::make_no_ssl_error()`: a dedicated value in the OpenSSL
 error category whose message is "no OpenSSL error was recorded". It never
 collides with a real OpenSSL error code and does not represent any TLS-level
 failure.
@@ -358,7 +358,7 @@ auto echo_once(Scheduler scheduler, Stream& stream,
 }
 ```
 
-This pattern works for `tcp_socket`, `ssl_stream`, descriptor views, and any
+This pattern works for `tcp_socket`, `ssl::tcp::stream`, descriptor views, and any
 future type that satisfies the same CPO contract.
 
 ## 4. Passive I/O submission

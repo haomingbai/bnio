@@ -57,7 +57,9 @@ bnio/bnio.h  (umbrella)
 ├── bnio/tcp.h
 │   └── tcp/{socket, acceptor, async_operations, layers}.h
 ├── bnio/ssl.h
-│   └── ssl/{context, stream_class, stream, stream_operations, cpo}.h
+│   └── ssl/{base, context, cpo, stream}.h
+│       ├── ssl/base/{alpn, bio_pair, context_base, errors}.h
+│       └── ssl/tcp/{stream_class, stream_operations}.h
 ├── bnio/io_context_cpo.h
 │   └── io_context_cpo/{instances, concepts, read, write,
 │                       connection, poll, resolve}.h
@@ -129,8 +131,13 @@ bnio
 │   └── socket                            RAII UDP datagram socket owner
 ├── tcp_socket / tcp_acceptor             compatibility aliases
 ├── udp_socket                            compatibility alias
-├── ssl_context                           RAII SSL_CTX owner
-├── ssl_stream<NextLayer>                 RAII SSL + BIO + transport owner
+├── ssl
+│   ├── context                           RAII SSL_CTX owner
+│   ├── tcp::stream<NextLayer>            RAII SSL + BIO + transport owner
+│   └── base                              OpenSSL-domain base layer
+│       ├── context_base                  native SSL_CTX owner base
+│       ├── alpn_arg_base                 owned ALPN callback argument interface
+│       └── bio_pair                      memory BIO pair assembly
 ├── mutable_buffer                        non-owning mutable byte view
 ├── const_buffer                          non-owning const byte view
 ├── dynamic_string_buffer                 dynamic buffer adapter (std::string)

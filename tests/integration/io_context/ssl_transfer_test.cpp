@@ -11,7 +11,7 @@ namespace {
 TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -19,7 +19,7 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -27,8 +27,8 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   {
     bnio::io_context context;
@@ -42,9 +42,9 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
     handshake_receiver server_receiver{state, &context};
 
     auto client_sender =
-        client.async_handshake(scheduler, bnio::ssl_handshake_type::client);
+        client.async_handshake(scheduler, bnio::ssl::handshake_type::client);
     auto server_sender =
-        server.async_handshake(scheduler, bnio::ssl_handshake_type::server);
+        server.async_handshake(scheduler, bnio::ssl::handshake_type::server);
 
     auto client_operation =
         bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -165,7 +165,7 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
 TEST(SslTransferTest, inflight_ssl_read_aborted_by_io_context_stop) {
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -173,7 +173,7 @@ TEST(SslTransferTest, inflight_ssl_read_aborted_by_io_context_stop) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -181,8 +181,8 @@ TEST(SslTransferTest, inflight_ssl_read_aborted_by_io_context_stop) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   // Handshake in a separate io_context (same pattern as the transfer test).
   {
@@ -197,9 +197,9 @@ TEST(SslTransferTest, inflight_ssl_read_aborted_by_io_context_stop) {
     handshake_receiver server_receiver{state, &context};
 
     auto client_sender =
-        client.async_handshake(scheduler, bnio::ssl_handshake_type::client);
+        client.async_handshake(scheduler, bnio::ssl::handshake_type::client);
     auto server_sender =
-        server.async_handshake(scheduler, bnio::ssl_handshake_type::server);
+        server.async_handshake(scheduler, bnio::ssl::handshake_type::server);
 
     auto client_operation =
         bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -284,7 +284,7 @@ TEST(SslTransferTest, inflight_ssl_read_aborted_by_io_context_stop) {
 TEST(SslTransferTest, pre_stopped_ssl_read_stops) {
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -292,7 +292,7 @@ TEST(SslTransferTest, pre_stopped_ssl_read_stops) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -300,8 +300,8 @@ TEST(SslTransferTest, pre_stopped_ssl_read_stops) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   // Handshake first.
   {
@@ -316,9 +316,9 @@ TEST(SslTransferTest, pre_stopped_ssl_read_stops) {
     handshake_receiver server_receiver{hs_state, &context};
 
     auto client_sender =
-        client.async_handshake(scheduler, bnio::ssl_handshake_type::client);
+        client.async_handshake(scheduler, bnio::ssl::handshake_type::client);
     auto server_sender =
-        server.async_handshake(scheduler, bnio::ssl_handshake_type::server);
+        server.async_handshake(scheduler, bnio::ssl::handshake_type::server);
 
     auto client_operation =
         bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -372,7 +372,7 @@ TEST(SslTransferTest, pre_stopped_ssl_read_stops) {
 TEST(SslTransferTest, empty_buffer_ssl_read_reports_success) {
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -380,7 +380,7 @@ TEST(SslTransferTest, empty_buffer_ssl_read_reports_success) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
@@ -388,8 +388,8 @@ TEST(SslTransferTest, empty_buffer_ssl_read_reports_success) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   // Handshake first.
   {
@@ -404,9 +404,9 @@ TEST(SslTransferTest, empty_buffer_ssl_read_reports_success) {
     handshake_receiver server_receiver{hs_state, &context};
 
     auto client_sender =
-        client.async_handshake(scheduler, bnio::ssl_handshake_type::client);
+        client.async_handshake(scheduler, bnio::ssl::handshake_type::client);
     auto server_sender =
-        server.async_handshake(scheduler, bnio::ssl_handshake_type::server);
+        server.async_handshake(scheduler, bnio::ssl::handshake_type::server);
 
     auto client_operation =
         bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -454,7 +454,7 @@ TEST(SslTransferTest, empty_buffer_ssl_read_reports_success) {
 TEST(SslTransferTest, zero_return_read_completes_with_empty_ec) {
   test_certificate_files files;
 
-  bnio::ssl_context server_context(bnio::ssl_context_method::tls_server);
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
   test_require(server_context.valid());
   test_require(!server_context.use_certificate_chain_file(
       files.certificate.string().c_str()));
@@ -462,15 +462,15 @@ TEST(SslTransferTest, zero_return_read_completes_with_empty_ec) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  bnio::ssl_context client_context(bnio::ssl_context_method::tls_client);
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
 
   int sockets[2] = {-1, -1};
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
-  bnio::ssl_stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl_stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
+  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
 
   // Handshake both directions first.
   {
@@ -481,10 +481,10 @@ TEST(SslTransferTest, zero_return_read_completes_with_empty_ec) {
     auto scheduler = context.get_post_scheduler();
     auto state = std::make_shared<handshake_state>();
     auto client_operation = bexec::connect(
-        client.async_handshake(scheduler, bnio::ssl_handshake_type::client),
+        client.async_handshake(scheduler, bnio::ssl::handshake_type::client),
         handshake_receiver{state, &context});
     auto server_operation = bexec::connect(
-        server.async_handshake(scheduler, bnio::ssl_handshake_type::server),
+        server.async_handshake(scheduler, bnio::ssl::handshake_type::server),
         handshake_receiver{state, &context});
     bexec::start(client_operation);
     bexec::start(server_operation);
