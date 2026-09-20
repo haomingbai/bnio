@@ -109,6 +109,39 @@ jobs:
           path: coverage/
           if-no-files-found: error
 
+  doc-coverage:
+    name: Documentation coverage report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6.0.2
+
+      - name: Install doxygen
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y doxygen
+
+      - name: Generate documentation coverage report
+        run: |
+          cmake -E make_directory doc-coverage
+          bash scripts/doc_coverage_report.sh --output-dir doc-coverage \
+            | tee "${RUNNER_TEMP}/doc-coverage-summary.md"
+
+      - name: Add documentation coverage to job summary
+        run: >-
+          cat "${RUNNER_TEMP}/doc-coverage-summary.md"
+          >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload documentation coverage report
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: doc-coverage
+          path: doc-coverage/
+          if-no-files-found: error
+          retention-days: 14
+
   package:
     name: Test package consumers (Linux)
     needs: test
