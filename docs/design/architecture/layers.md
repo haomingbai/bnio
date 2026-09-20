@@ -6,7 +6,7 @@ graph TB
         C3_ctx["io_context<br/>(event loop + scheduler factory)"]
         C3_tcp["tcp_socket / tcp_acceptor<br/>(RAII fd owners)"]
         C3_udp["udp::socket<br/>(RAII fd owner)"]
-        C3_ssl["ssl_context / ssl_stream<br/>(RAII SSL owners)"]
+        C3_ssl["ssl::context / ssl::tcp::stream<br/>(RAII SSL owners)"]
         C3_buf["mutable_buffer / const_buffer<br/>dynamic_string_buffer<br/>(non-owning views / adapters)"]
     end
 
@@ -48,7 +48,7 @@ are **non-owning references**:
 |-------|-----------------|-------------|
 | Layer 1 (`base`) | `submission_queue_entry`, `completion_queue_entry`, `event`, `event_list_view` | `ring`, `probe`, `kqueue` |
 | Layer 2 (`async_io`) | `buffer_view`, `descriptor_view`, `stream_socket_view`, `datagram_socket_view` | `linux_native::io_uring_context` |
-| Layer 3 (`io_context`) | `mutable_buffer`, `const_buffer`, `dynamic_string_buffer` | `tcp::socket`, `tcp::acceptor`, `udp::socket`, `ssl_context`, `ssl_stream`, `io_context` |
+| Layer 3 (`io_context`) | `mutable_buffer`, `const_buffer`, `dynamic_string_buffer` | `tcp::socket`, `tcp::acceptor`, `udp::socket`, `ssl::context`, `ssl::tcp::stream`, `io_context` |
 
 **Key invariant:** Layer 2 (`bnio::async_io`) vocabulary types are deliberately
 non-owning views or pure value types. The `linux_native::io_uring_context` is

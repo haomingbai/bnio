@@ -21,7 +21,7 @@ cmake -S . -B build -DBNIO_BUILD_EXAMPLES=OFF
 ## Running an `io_context` Event Loop
 
 `bnio::io_context` owns the event loop. Streams such as `tcp_socket`,
-`tcp_acceptor`, and `ssl_stream` expose the high-level async I/O sender
+`tcp_acceptor`, and `ssl::tcp::stream` expose the high-level async I/O sender
 factories. The scheduler provides the low-level ability to operate on socket
 views and file descriptors. Calling an async factory creates a sender.
 Connecting the sender creates an operation state. Starting that operation
@@ -143,7 +143,7 @@ Key patterns demonstrated:
 - **Endpoint fallback** — resolved endpoints are tried sequentially;
   connection failures advance to the next endpoint.
 - **TLS handshake integration** — after TCP connect, the socket is moved into
-  an `ssl_stream`; handshake, encrypted read/write, and shutdown all flow
+  an `ssl::tcp::stream`; handshake, encrypted read/write, and shutdown all flow
   through the same scheduler API.
 - **Write-all semantics** — `async_write()` retries short writes until the
   whole buffer is accepted; `async_write_some()` is available when callers want

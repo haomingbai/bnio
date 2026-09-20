@@ -18,8 +18,8 @@ graph TB
         O4["tcp_socket → socket fd"]
         O5["tcp_acceptor → socket fd"]
         O5b["udp::socket → socket fd"]
-        O6["ssl_context → SSL_CTX*"]
-        O7["ssl_stream → SSL* + BIO* + NextLayer"]
+        O6["ssl::context → SSL_CTX*"]
+        O7["ssl::tcp::stream → SSL* + BIO* + NextLayer"]
         O8["io_context → native workers + timer heap"]
         O9["linux_native::io_uring_context → base::ring (non-movable)"]
         O10["bsd_native::kqueue_context → base::kqueue (non-movable)"]
@@ -70,7 +70,7 @@ graph TB
     UserBuf["caller-owned byte storage"] -->|"must outlive"| BufView["buffer_view"]
     UserBuf -->|"must outlive"| MBuf["mutable_buffer / const_buffer"]
 
-    SSLCtx["ssl_context"] -->|"must outlive"| SSLStream["ssl_stream"]
+    SSLCtx["ssl::context"] -->|"must outlive"| SSLStream["ssl::tcp::stream"]
     SSLStream -->|"owns"| Inner["tcp_socket (NextLayer)"]
 ```
 
@@ -177,26 +177,26 @@ ring.cqe_seen(cqe);                 // ✓ mark seen last
 // cqe.res() after cqe_seen() → undefined behavior
 ```
 
-### Rule 6: `ssl_context` must outlive all `ssl_stream` objects created from it
+### Rule 6: `ssl::context` must outlive all `ssl::tcp::stream` objects created from it
 
-`ssl_stream` creates an `SSL*` from the `SSL_CTX*` owned by `ssl_context`.
-If the context is destroyed first, the stream's `SSL*` becomes a dangling
-pointer.
+`ssl::tcp::stream` creates an `SSL*` from the `SSL_CTX*` owned by
+`ssl::context`. If the context is destroyed first, the stream's `SSL*`
+becomes a dangling pointer.
 
 ```cpp
-// WRONG — ssl_ctx dies, ssl_stream holds SSL* from that SSL_CTX*
-bnio::ssl_stream<bnio::tcp_socket> make_stream() {
-    bnio::ssl_context ctx;                     // local
+// WRONG — ssl_ctx dies, stream holds SSL* from that SSL_CTX*
+bnio::ssl::tcp::stream<bnio::tcp_socket> make_stream() {
+    bnio::ssl::context ctx;                    // local
     bnio::tcp_socket sock;
     sock.open(bnio::ip::tcp::v4());
-    return bnio::ssl_stream(std::move(sock), ctx);
+    return bnio::ssl::tcp::stream(std::move(sock), ctx);
 }   // ctx destroyed → SSL_CTX freed → returned stream's SSL* dangles
 
-// RIGHT — ssl_context outlives ssl_stream
-bnio::ssl_context ctx;                         // outer scope
+// RIGHT — ssl::context outlives ssl::tcp::stream
+bnio::ssl::context ctx;                        // outer scope
 bnio::tcp_socket sock;
 sock.open(bnio::ip::tcp::v4());
-bnio::ssl_stream stream(std::move(sock), ctx); // ctx outlives stream
+bnio::ssl::tcp::stream stream(std::move(sock), ctx); // ctx outlives stream
 ```
 
 ## Operation Lifecycle
@@ -286,8 +286,8 @@ own unique resources:
 | `base::kqueue` | kqueue fd |
 | `tcp_socket` | socket file descriptor |
 | `tcp_acceptor` | socket file descriptor |
-| `ssl_context` | `SSL_CTX*` |
-| `ssl_stream<NextLayer>` | `SSL*` + `BIO*` + `NextLayer` |
+| `ssl::context` | `SSL_CTX*` |
+| `ssl::tcp::stream<NextLayer>` | `SSL*` + `BIO*` + `NextLayer` |
 
 The following types are **non-movable** (both copy and move deleted) because
 they own non-transferable runtime state:
@@ -320,7 +320,7 @@ Before writing bnio code, verify:
 - [ ] Every buffer outlives the I/O operation that uses it.
 - [ ] All CQE fields are read **before** `cqe_seen()`.
 - [ ] All SQE fields are set **before** `ring::submit()`.
-- [ ] `ssl_context` outlives all `ssl_stream` objects created from it.
+- [ ] `ssl::context` outlives all `ssl::tcp::stream` objects created from it.
 - [ ] Views from `view()` do not outlive their owner.
 - [ ] Move-only types are moved, not copied.
 

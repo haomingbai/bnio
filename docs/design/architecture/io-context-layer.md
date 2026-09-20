@@ -207,12 +207,12 @@ otherwise. See the note below the Scheduler Level table for the full contract.
 | `socket.async_receive_from(scheduler, buffer, endpoint, flags)` | `udp::socket` | one datagram byte count |
 | `socket.async_send(scheduler, buffer, flags)` | connected `udp::socket` | one datagram byte count |
 | `socket.async_receive(scheduler, buffer, flags)` | connected `udp::socket` | one datagram byte count |
-| `stream.async_handshake(scheduler, type)` | `ssl_stream` | `()` |
-| `stream.async_read(scheduler, buffer, flags)` | `ssl_stream` | `size_t` plaintext bytes read by one operation |
-| `stream.async_read_some(scheduler, buffer, flags)` | `ssl_stream` | `size_t` plaintext bytes read by one operation |
-| `stream.async_write(scheduler, buffer, flags)` | `ssl_stream` | `size_t` total plaintext bytes written |
-| `stream.async_write_some(scheduler, buffer, flags)` | `ssl_stream` | `size_t` plaintext bytes accepted by one SSL write step |
-| `stream.async_shutdown(scheduler)` | `ssl_stream` | `()` |
+| `stream.async_handshake(scheduler, type)` | `ssl::tcp::stream` | `()` |
+| `stream.async_read(scheduler, buffer, flags)` | `ssl::tcp::stream` | `size_t` plaintext bytes read by one operation |
+| `stream.async_read_some(scheduler, buffer, flags)` | `ssl::tcp::stream` | `size_t` plaintext bytes read by one operation |
+| `stream.async_write(scheduler, buffer, flags)` | `ssl::tcp::stream` | `size_t` total plaintext bytes written |
+| `stream.async_write_some(scheduler, buffer, flags)` | `ssl::tcp::stream` | `size_t` plaintext bytes accepted by one SSL write step |
+| `stream.async_shutdown(scheduler)` | `ssl::tcp::stream` | `()` |
 
 #### Scheduler Level
 
@@ -469,15 +469,15 @@ attempt uses `async_write_some()` and enters the same passive I/O path.
 
 #### SSL Use of the Same Pattern
 
-`ssl_stream` already drives OpenSSL through a state machine. The transport side
+`ssl::tcp::stream` already drives OpenSSL through a state machine. The transport side
 now always uses the lower layer's `async_read_some*` and `async_write_some*`
 because BIO flush/refill operations need native-attempt semantics. Plaintext
-`ssl_stream::async_write()` uses the same repeat idea at the SSL layer: it
+`ssl::tcp::stream::async_write()` uses the same repeat idea at the SSL layer: it
 tracks plaintext bytes accepted by `SSL_write`, flushes encrypted BIO output,
 and repeats until the whole plaintext buffer is accepted and flushed.
 
-`ssl_stream::async_write_some()` is the escape hatch for callers that want one
-SSL write step and their own retry policy. `ssl_stream::async_read()` remains a
+`ssl::tcp::stream::async_write_some()` is the escape hatch for callers that want one
+SSL write step and their own retry policy. `ssl::tcp::stream::async_read()` remains a
 read-some operation because TLS records and application protocol frames do not
 map cleanly to a caller's buffer size.
 
@@ -527,7 +527,7 @@ rules:
 
 1. Every OpenSSL call whose failure is reported through the queue
    (`SSL_do_handshake`, `SSL_shutdown`, `SSL_read`, `SSL_write`, the
-   memory-BIO steps, and the `ssl_context` loaders) is immediately preceded
+   memory-BIO steps, and the `ssl::context` loaders) is immediately preceded
    by `detail::clear_ssl_errors()`. The first entry popped after a failure
    is then necessarily one the failing call itself enqueued. Clearing again
    after `last_ssl_error()` pops its entry discards the rest of that
@@ -624,8 +624,8 @@ auto s = bnio::async_read(scheduler, socket, buffer);
 | `bnio::async_write(provider, file, buf, offset)` | `provider.async_write(file, buf, offset)` (positioned) | `io_context_cpo.h` |
 | `bnio::async_write_some(provider, file, buf, offset)` | `provider.async_write_some(file, buf, offset)` (positioned) | `io_context_cpo.h` |
 | `bnio::async_poll` | `provider.async_poll(descriptor, mask)` | `io_context_cpo.h` |
-| `bnio::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
-| `bnio::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
+| `bnio::ssl::async_handshake` | `stream.async_handshake(provider, type)` | `ssl.h` |
+| `bnio::ssl::async_shutdown` | `stream.async_shutdown(provider)` | `ssl.h` |
 
 Provider concepts:
 
