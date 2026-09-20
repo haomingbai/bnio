@@ -32,9 +32,32 @@ inline constexpr std::size_t bio_buffer_capacity = 64 * 1024;
  */
 class bio_pair {
  public:
+  /**
+   * SSL-side read half of the read pair: handed to SSL_set_bio and freed
+   * with the SSL object. Unbounded on the ssl side; pairs with
+   * transport_read.
+   */
   BIO* ssl_read = nullptr;
+
+  /**
+   * SSL-side write half of the write pair: handed to SSL_set_bio and freed
+   * with the SSL object. Bounded on the ssl side (bio_buffer_capacity);
+   * pairs with transport_write.
+   */
   BIO* ssl_write = nullptr;
+
+  /**
+   * Caller-owned read half of the read pair: encrypted bytes received from
+   * the peer are written here and become readable by the SSL object through
+   * ssl_read. Must be freed explicitly.
+   */
   BIO* transport_read = nullptr;
+
+  /**
+   * Caller-owned write half of the write pair: encrypted output produced by
+   * the SSL object becomes readable here through ssl_write and is sent to
+   * the peer. Must be freed explicitly.
+   */
   BIO* transport_write = nullptr;
 
   /**

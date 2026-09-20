@@ -120,6 +120,10 @@ class context : public base::context_base {
    */
   class alpn_out {
    public:
+    /**
+     * Internal: wraps OpenSSL's out parameters for the framework trampoline.
+     * User callbacks receive an alpn_out and never construct one directly.
+     */
     alpn_out(const unsigned char** out, unsigned char* outlen) noexcept
         : out_(out), outlen_(outlen) {}
 

@@ -46,27 +46,35 @@ openssl_error_category() noexcept;
  */
 inline void clear_errors() noexcept { ERR_clear_error(); }
 
+/**
+ * Drains the thread-local OpenSSL error queue after a failing OpenSSL call,
+ * returning the first recorded error as an error_code in the OpenSSL error
+ * category.
+ *
+ * The queue must have been cleared right before the failing call (see
+ * clear_errors), so the first popped error belongs to that call. One failed
+ * call can enqueue several error codes; the rest are cleared so nothing
+ * leaks into a later queue reader. An empty queue (the failure path recorded
+ * no OpenSSL error at all, for example when the call never reached OpenSSL)
+ * yields the dedicated no-OpenSSL-error value instead of impersonating a
+ * real TLS-level failure.
+ */
 [[nodiscard]] inline std::error_code last_error() noexcept {
-  // The queue was cleared right before the failing OpenSSL call, so the
-  // first popped error belongs to that call. One failed call can enqueue
-  // several error codes; clear the rest so nothing leaks into a later
-  // queue reader.
   const unsigned long error = ERR_get_error();
   ERR_clear_error();
   if (error == 0) {
-    // The failure path recorded no OpenSSL error (it may never have reached
-    // OpenSSL): report the dedicated no-OpenSSL-error value instead of
-    // impersonating a real TLS error. Never protocol_error, which would
-    // fabricate a TLS-level meaning.
     return make_no_ssl_error();
   }
   return make_openssl_error(error);
 }
 
-// Reuse a single empty error code on success completion paths instead of
-// default-constructing std::error_code{}, whose default constructor consults
-// system_category() on every call. This value uses the same category as the
-// default constructor, so `ec == std::error_code{}` semantics are preserved.
+/**
+ * Shared empty error code for success completion paths, instead of
+ * default-constructing std::error_code{}, whose default constructor
+ * consults system_category() on every call. This value uses the same
+ * category as the default constructor, so `ec == std::error_code{}`
+ * semantics are preserved.
+ */
 inline const std::error_code empty_error_code{0, std::system_category()};
 
 }  // namespace bnio::ssl::base
