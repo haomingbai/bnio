@@ -93,6 +93,15 @@ jobs:
           gcovr --config gcovr.cfg \
             --gcov-executable "xcrun llvm-cov gcov" build
 
+      - name: Generate coverage summary
+        run: >-
+          python3 scripts/coverage_summary.py
+          --cobertura coverage/coverage.xml
+          --output-dir coverage
+
+      - name: Add coverage summary to job summary
+        run: cat coverage/coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload coverage report
         uses: actions/upload-artifact@v7.0.1
         with:
