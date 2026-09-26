@@ -264,6 +264,12 @@ class BNIO_EXPORT stream_socket_view {
    */
   [[nodiscard]] std::error_code set_reuse_address(bool enabled) noexcept;
 
+  /**
+   * Stores the connected peer endpoint into @p endpoint.
+   */
+  [[nodiscard]] std::error_code remote_endpoint(
+      ip::endpoint& endpoint) const noexcept;
+
  private:
   socket_view socket_;
 };

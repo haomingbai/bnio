@@ -149,6 +149,10 @@ std::error_code socket::set_reuse_address(bool enabled) noexcept {
   return view().set_reuse_address(enabled);
 }
 
+std::error_code socket::remote_endpoint(ip::endpoint& endpoint) const noexcept {
+  return view().remote_endpoint(endpoint);
+}
+
 acceptor::~acceptor() noexcept { (void)close(); }
 
 acceptor::acceptor(acceptor&& other) noexcept

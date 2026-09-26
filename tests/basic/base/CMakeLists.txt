@@ -30,4 +30,5 @@ bnio_add_basic_base_header_test(probe BNIO_HEADER_TEST_PROBE)
 bnio_add_basic_base_header_test(ring BNIO_HEADER_TEST_RING)
 bnio_add_basic_base_header_test(submission_queue_entry
                                 BNIO_HEADER_TEST_SUBMISSION_QUEUE_ENTRY)
+bnio_add_basic_base_header_test(socket BNIO_HEADER_TEST_SOCKET)
 bnio_add_basic_base_header_test(bnio BNIO_HEADER_TEST_BNIO)

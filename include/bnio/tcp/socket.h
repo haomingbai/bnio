@@ -201,6 +201,12 @@ class BNIO_EXPORT socket {
    */
   [[nodiscard]] std::error_code set_reuse_address(bool enabled) noexcept;
 
+  /**
+   * Stores the connected peer endpoint into @p endpoint.
+   */
+  [[nodiscard]] std::error_code remote_endpoint(
+      ip::endpoint& endpoint) const noexcept;
+
  private:
   native_handle_type fd_ = -1;
 };

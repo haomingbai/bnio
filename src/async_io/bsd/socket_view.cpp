@@ -6,10 +6,12 @@
 #include <bnio/async_io/bsd/socket_address.h>
 #include <bnio/async_io/ip/endpoint.h>
 #include <bnio/async_io/socket_view.h>
+#include <bnio/base/socket.h>
 #include <bnio/detail/error_code.h>
 #include <sys/socket.h>
 
 #include <cerrno>
+#include <cstddef>
 #include <system_error>
 namespace bnio::async_io {
 namespace {
@@ -38,19 +40,19 @@ std::error_code connect_socket(int descriptor,
 
 std::error_code get_socket_endpoint(int descriptor, bool peer,
                                     ip::endpoint& endpoint) noexcept {
-  sockaddr_storage address{};
-  socklen_t size = sizeof(address);
+  // Stack-allocated byte storage for the native address, parsed into the
+  // C++ endpoint object below.
+  alignas(sockaddr_storage) std::byte storage[sizeof(sockaddr_storage)]{};
+  auto* const address = reinterpret_cast<sockaddr*>(storage);
+  socklen_t size = sizeof(storage);
   const int result =
-      peer ? ::getpeername(descriptor, reinterpret_cast<sockaddr*>(&address),
-                           &size)
-           : ::getsockname(descriptor, reinterpret_cast<sockaddr*>(&address),
-                           &size);
+      peer ? bnio::base::peer_address(descriptor, address, &size)
+           : bnio::base::local_address(descriptor, address, &size);
   if (result != 0) {
     endpoint.reset();
     return last_error();
   }
-  const auto converted = bsd_native::make_endpoint(
-      reinterpret_cast<const sockaddr*>(&address), size);
+  const auto converted = bsd_native::make_endpoint(address, size);
   if (!converted.has_value()) {
     endpoint.reset();
     return std::make_error_code(std::errc::address_family_not_supported);
@@ -83,6 +85,11 @@ std::error_code stream_socket_view::set_reuse_address(bool enabled) noexcept {
   const int value = enabled ? 1 : 0;
   return result_to_error_code(::setsockopt(
       native_handle(), SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)));
+}
+
+std::error_code stream_socket_view::remote_endpoint(
+    ip::endpoint& endpoint) const noexcept {
+  return get_socket_endpoint(native_handle(), true, endpoint);
 }
 
 std::error_code datagram_socket_view::bind(

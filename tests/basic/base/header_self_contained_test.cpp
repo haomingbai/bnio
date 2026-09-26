@@ -10,6 +10,8 @@
 #include <bnio/base/linux/ring.h>
 #elif defined(BNIO_HEADER_TEST_SUBMISSION_QUEUE_ENTRY)
 #include <bnio/base/linux/submission_queue_entry.h>
+#elif defined(BNIO_HEADER_TEST_SOCKET)
+#include <bnio/base/socket.h>
 #elif defined(BNIO_HEADER_TEST_BNIO)
 #include <bnio/bnio.h>
 #else

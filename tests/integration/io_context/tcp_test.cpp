@@ -1,6 +1,8 @@
 #include <bnio/tcp.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -139,6 +141,70 @@ TEST(TcpTest, socket_destructor_and_close_error) {
   EXPECT_FALSE(invalid_family.is_open());
   EXPECT_TRUE(invalid_family.shutdown(SHUT_RDWR) ==
               std::error_code(EBADF, std::generic_category()));
+}
+
+TEST(TcpTest, socket_remote_endpoint) {
+  bnio::tcp::acceptor listener;
+  ASSERT_FALSE(listener.open(AF_INET));
+  ASSERT_FALSE(listener.set_reuse_address(true));
+  ASSERT_FALSE(listener.bind(bnio::ip::endpoint::loopback_v4(0)));
+  ASSERT_FALSE(listener.listen(1));
+
+  // The acceptor opens nonblocking; restore blocking mode so the raw accept
+  // below waits for the synchronous connect.
+  const int listener_flags = ::fcntl(listener.native_handle(), F_GETFL, 0);
+  ASSERT_GE(listener_flags, 0);
+  ASSERT_EQ(
+      ::fcntl(listener.native_handle(), F_SETFL, listener_flags & ~O_NONBLOCK),
+      0);
+
+  sockaddr_in listener_address{};
+  socklen_t listener_address_size = sizeof(listener_address);
+  ASSERT_EQ(::getsockname(listener.native_handle(),
+                          reinterpret_cast<sockaddr*>(&listener_address),
+                          &listener_address_size),
+            0);
+  const bnio::ip::endpoint listener_endpoint(bnio::ip::address::loopback_v4(),
+                                             ntohs(listener_address.sin_port));
+
+  // A blocking raw descriptor connects synchronously through the stream
+  // socket view; tcp::socket then takes ownership for the endpoint query.
+  const int client_fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  ASSERT_GE(client_fd, 0);
+  ASSERT_FALSE(
+      bnio::async_io::stream_socket_view(client_fd).connect(listener_endpoint));
+  bnio::tcp::socket client(client_fd);
+
+  const int accepted_fd = ::accept(listener.native_handle(), nullptr, nullptr);
+  ASSERT_GE(accepted_fd, 0);
+  bnio::tcp::socket accepted(accepted_fd);
+
+  // The connected client sees the listener endpoint as its remote peer.
+  bnio::ip::endpoint peer;
+  EXPECT_FALSE(client.remote_endpoint(peer));
+  EXPECT_TRUE(peer.address().is_v4());
+  EXPECT_EQ(peer.address().to_v4(), bnio::ip::address::loopback_v4().to_v4());
+  EXPECT_EQ(peer.port(), listener_endpoint.port());
+
+  // The accepted connection sees the client's ephemeral endpoint as its
+  // remote peer, cross-checked against the client's bound address.
+  sockaddr_in client_address{};
+  socklen_t client_address_size = sizeof(client_address);
+  ASSERT_EQ(::getsockname(client.native_handle(),
+                          reinterpret_cast<sockaddr*>(&client_address),
+                          &client_address_size),
+            0);
+  bnio::ip::endpoint accepted_peer;
+  EXPECT_FALSE(accepted.remote_endpoint(accepted_peer));
+  EXPECT_TRUE(accepted_peer.address().is_v4());
+  EXPECT_EQ(accepted_peer.port(), ntohs(client_address.sin_port));
+
+  // A closed socket reports EBADF and resets the output endpoint.
+  bnio::tcp::socket closed;
+  bnio::ip::endpoint stale = bnio::ip::endpoint::loopback_v4(1234);
+  EXPECT_EQ(closed.remote_endpoint(stale),
+            std::error_code(EBADF, std::generic_category()));
+  EXPECT_EQ(stale.version(), bnio::ip::address::version::unspecified);
 }
 
 TEST(TcpTest, acceptor_owns_and_replaces_descriptors) {

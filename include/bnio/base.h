@@ -25,4 +25,9 @@
 #include <bnio/base/bsd/kqueue.h>
 #endif
 
+// POSIX socket descriptor queries shared by the Linux and BSD backends.
+#if defined(BNIO_HAS_BASE_POSIX)
+#include <bnio/base/socket.h>
+#endif
+
 #endif  // BNIO_BASE_H_

@@ -107,6 +107,9 @@ TEST(SocketViewTest, invalid_socket) {
   stale = bnio::async_io::ip::endpoint::loopback_v4(1234);
   check_error(datagram.remote_endpoint(stale), EBADF);
   EXPECT_EQ(stale.version(), bnio::async_io::ip::address::version::unspecified);
+  stale = bnio::async_io::ip::endpoint::loopback_v4(1234);
+  check_error(stream.remote_endpoint(stale), EBADF);
+  EXPECT_EQ(stale.version(), bnio::async_io::ip::address::version::unspecified);
 }
 
 TEST(SocketViewTest, datagram_lifecycle) {
@@ -161,6 +164,14 @@ TEST(SocketViewTest, loopback_setup) {
   bnio::async_io::stream_socket_view client(client_fd.get());
   EXPECT_FALSE(client.connect(remote));
 
+  // The connected client sees the listener as its remote peer.
+  bnio::async_io::ip::endpoint client_peer;
+  EXPECT_FALSE(client.remote_endpoint(client_peer));
+  EXPECT_TRUE(client_peer.address().is_v4());
+  EXPECT_EQ(client_peer.address().to_v4(),
+            bnio::async_io::ip::address::loopback_v4().to_v4());
+  EXPECT_EQ(client_peer.port(), remote.port());
+
 #if defined(BNIO_SYSTEM_LINUX) || defined(BNIO_SYSTEM_FREEBSD)
   unique_fd accepted_fd(
       ::accept4(listener.native_handle(), nullptr, nullptr, SOCK_CLOEXEC));
@@ -170,6 +181,22 @@ TEST(SocketViewTest, loopback_setup) {
   EXPECT_TRUE(accepted_fd.get() >= 0);
 
   bnio::async_io::stream_socket_view accepted(accepted_fd.get());
+
+  // The accepted connection sees the client's ephemeral endpoint as its
+  // remote peer, cross-checked against the client's bound address.
+  sockaddr_in client_address{};
+  socklen_t client_address_size = sizeof(client_address);
+  EXPECT_EQ(::getsockname(client.native_handle(),
+                          reinterpret_cast<sockaddr*>(&client_address),
+                          &client_address_size),
+            0);
+  bnio::async_io::ip::endpoint accepted_peer;
+  EXPECT_FALSE(accepted.remote_endpoint(accepted_peer));
+  EXPECT_TRUE(accepted_peer.address().is_v4());
+  EXPECT_EQ(accepted_peer.address().to_v4(),
+            bnio::async_io::ip::address::loopback_v4().to_v4());
+  EXPECT_EQ(accepted_peer.port(), ntohs(client_address.sin_port));
+
   EXPECT_FALSE(accepted.shutdown(SHUT_RDWR));
 }
 
