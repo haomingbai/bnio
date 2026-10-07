@@ -1,3 +1,4 @@
+#include <bnio/local.h>
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -108,8 +109,8 @@ TEST(IoContextReadWriteTest, ready_socket_read_completes_without_queue) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   constexpr std::string_view payload = "ready";
   EXPECT_EQ(::send(sender_socket.native_handle(), payload.data(),
@@ -140,8 +141,8 @@ TEST(IoContextReadWriteTest, passive_drain_reads_io) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   std::array<char, 16> bytes{};
   byte_receiver receiver;
@@ -172,8 +173,8 @@ TEST(IoContextReadWriteTest, ready_socket_write_completes_without_queue) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket sender_socket(sockets[0]);
-  bnio::tcp_socket receiver_socket(sockets[1]);
+  bnio::local::stream_socket sender_socket(sockets[0]);
+  bnio::local::stream_socket receiver_socket(sockets[1]);
 
   constexpr std::string_view payload = "ready write";
   byte_receiver receiver;
@@ -205,8 +206,8 @@ TEST(IoContextReadWriteTest, blocked_socket_write_falls_back_to_queue) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket sender_socket(sockets[0]);
-  bnio::tcp_socket receiver_socket(sockets[1]);
+  bnio::local::stream_socket sender_socket(sockets[0]);
+  bnio::local::stream_socket receiver_socket(sockets[1]);
 
   const int sender_flags = ::fcntl(sender_socket.native_handle(), F_GETFL, 0);
   EXPECT_TRUE(sender_flags >= 0);
@@ -272,8 +273,8 @@ TEST(IoContextReadWriteTest, io_idle_drain_reads) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   std::array<char, 16> bytes{};
   byte_receiver receiver;
@@ -304,8 +305,8 @@ TEST(IoContextReadWriteTest, io_idle_drain_read_write_pair) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   constexpr std::string_view payload = "auto pair";
   std::array<char, 32> bytes{};
@@ -583,8 +584,8 @@ TEST(IoContextReadWriteTest, file_write_and_read) {
 TEST(IoContextReadWriteTest, socketpair_70kb_write_all) {
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket writer_socket(sockets[0]);
-  bnio::tcp_socket reader_socket(sockets[1]);
+  bnio::local::stream_socket writer_socket(sockets[0]);
+  bnio::local::stream_socket reader_socket(sockets[1]);
 
   constexpr std::size_t payload_size = 70 * 1024;
   std::vector<unsigned char> payload(payload_size);
@@ -671,8 +672,8 @@ TEST(IoContextReadWriteTest, inflight_socket_read_aborted_by_io_context_stop) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   // Peer never writes: the read-all operation parks on its first child read
   // until interrupted.
@@ -748,8 +749,8 @@ TEST(IoContextReadWriteTest, inflight_write_all_aborted_by_io_context_stop) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket sender_socket(sockets[0]);
-  bnio::tcp_socket receiver_socket(sockets[1]);  // peer never reads
+  bnio::local::stream_socket sender_socket(sockets[0]);
+  bnio::local::stream_socket receiver_socket(sockets[1]);  // peer never reads
 
   // Payload larger than the default Unix socket buffer so write_some parks.
   constexpr std::size_t payload_size = 1 * 1024 * 1024;
@@ -822,8 +823,8 @@ TEST(IoContextReadWriteTest, zero_size_buffer_write_reports_success) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket sender_socket(sockets[0]);
-  bnio::tcp_socket receiver_socket(sockets[1]);
+  bnio::local::stream_socket sender_socket(sockets[0]);
+  bnio::local::stream_socket receiver_socket(sockets[1]);
 
   constexpr std::string_view payload = "never written";
   byte_receiver receiver;
@@ -860,8 +861,8 @@ TEST(IoContextReadWriteTest, write_all_stop_token_mid_loop_stops) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket sender_socket(sockets[0]);
-  bnio::tcp_socket receiver_socket(sockets[1]);  // peer never reads
+  bnio::local::stream_socket sender_socket(sockets[0]);
+  bnio::local::stream_socket receiver_socket(sockets[1]);  // peer never reads
 
   // Set sender non-blocking and fill the send buffer so write_some parks.
   const int sender_flags = ::fcntl(sender_socket.native_handle(), F_GETFL, 0);

@@ -8,6 +8,7 @@
 #define BNIO_ASYNC_IO_LINUX_SOCKET_ADDRESS_H_
 
 #include <bnio/async_io/ip/endpoint.h>
+#include <bnio/async_io/local/endpoint.h>
 #include <bnio/export.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -24,6 +25,13 @@ class BNIO_EXPORT socket_address {
 
   /** Stores @p endpoint as a native sockaddr value. */
   explicit socket_address(const ip::endpoint& endpoint) noexcept;
+
+  /**
+   * Stores a local endpoint as a native sockaddr_un value. An endpoint
+   * with no representable address (unspecified kind) leaves the storage
+   * empty.
+   */
+  explicit socket_address(const local::endpoint& endpoint) noexcept;
 
   /** Copies the stored address bytes. */
   socket_address(const socket_address&) noexcept = default;
@@ -82,6 +90,19 @@ class BNIO_EXPORT socket_address {
  *         family is neither AF_INET nor AF_INET6.
  */
 [[nodiscard]] BNIO_EXPORT std::optional<ip::endpoint> make_endpoint(
+    const sockaddr* address, socklen_t size) noexcept;
+
+/**
+ * Converts a native sockaddr into a local (AF_UNIX) endpoint.
+ *
+ * @param[in] address Native socket address bytes.
+ * @param[in] size    Byte length of @p address.
+ * @return The converted endpoint, or std::nullopt when @p address is null,
+ *         @p size is too small for the address family it claims, or the
+ *         family is not AF_UNIX. An address of exactly the family field
+ *         size decodes to an unspecified endpoint (unnamed socket).
+ */
+[[nodiscard]] BNIO_EXPORT std::optional<local::endpoint> make_local_endpoint(
     const sockaddr* address, socklen_t size) noexcept;
 
 }  // namespace bnio::async_io::linux_native

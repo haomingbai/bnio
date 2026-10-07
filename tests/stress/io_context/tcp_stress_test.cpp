@@ -1,5 +1,6 @@
 #include <bnio/io_context.h>
 #include <bnio/ip.h>
+#include <bnio/local.h>
 #include <bnio/tcp.h>
 #include <gtest/gtest.h>
 
@@ -144,8 +145,8 @@ TEST(TcpStressTest, high_concurrency_read_write) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket server_socket(sockets[0]);
-  bnio::tcp_socket client_socket(sockets[1]);
+  bnio::local::stream_socket server_socket(sockets[0]);
+  bnio::local::stream_socket client_socket(sockets[1]);
 
   constexpr int num_ops = 1000;
   constexpr unsigned target = static_cast<unsigned>(num_ops * 2);

@@ -1,3 +1,4 @@
+#include <bnio/local.h>
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -27,8 +28,10 @@ TEST(SslTransferTest, socketpair_read_write_transfers_plaintext) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   {
     bnio::io_context context;
@@ -181,8 +184,10 @@ TEST(SslTransferTest, inflight_ssl_read_aborted_by_io_context_stop) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   // Handshake in a separate io_context (same pattern as the transfer test).
   {
@@ -300,8 +305,10 @@ TEST(SslTransferTest, pre_stopped_ssl_read_stops) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   // Handshake first.
   {
@@ -388,8 +395,10 @@ TEST(SslTransferTest, empty_buffer_ssl_read_reports_success) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   // Handshake first.
   {
@@ -469,8 +478,10 @@ TEST(SslTransferTest, zero_return_read_completes_with_empty_ec) {
   int sockets[2] = {-1, -1};
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   // Handshake both directions first.
   {

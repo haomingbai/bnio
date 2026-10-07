@@ -12,6 +12,8 @@
 #include <bnio/async_io/bsd/socket_address.h>
 #include <bnio/async_io/buffer_view.h>
 #include <bnio/async_io/ip/endpoint.h>
+#include <bnio/async_io/local/endpoint.h>
+#include <bnio/async_io/local/socket_view.h>
 #include <bnio/async_io/socket_view.h>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -216,6 +218,85 @@ class kqueue_receive_from_request {
   int flags_;
 };
 
+/** One nonblocking recvfrom request with endpoint conversion for the local
+ *  family. Identical wire-up to kqueue_receive_from_request with a
+ *  local::endpoint output and the local decoder. */
+class kqueue_local_receive_from_request {
+ public:
+  /** Completion signals: set_value(ec, bytes) or set_stopped(). */
+  using completion_signatures = detail::size_completion_signatures;
+
+  /** Constructs the request from the socket, receive buffer, destination
+   *  endpoint, and native recvfrom flags. */
+  kqueue_local_receive_from_request(local::datagram_socket_view socket,
+                                    buffer_view buffer,
+                                    local::endpoint& endpoint,
+                                    int flags) noexcept
+      : descriptor_(socket.native_handle()),
+        buffer_(buffer),
+        endpoint_(&endpoint),
+        flags_(flags) {}
+
+  /** Registers the descriptor for read readiness with @p helper. */
+  void prepare(kqueue_helper& helper) noexcept {
+    helper.prep_read(descriptor_);
+  }
+
+  /** Attempts one immediate nonblocking receive-from. */
+  [[nodiscard]] int start_io() noexcept { return perform_io(); }
+
+  /** Performs one nonblocking recvfrom, capturing the peer address for
+   *  later conversion. */
+  [[nodiscard]] int perform_io() noexcept {
+    if (buffer_.size > 0 && buffer_.data == nullptr) {
+      return -EFAULT;
+    }
+    remote_address_ = {};
+    socklen_t size = sizeof(remote_address_);
+    const ssize_t result =
+        ::recvfrom(descriptor_, buffer_.data,
+                   detail::bounded_io_size(buffer_.size), flags_ | MSG_DONTWAIT,
+                   reinterpret_cast<sockaddr*>(&remote_address_), &size);
+    if (result >= 0) {
+      remote_size_ = size;
+    }
+    return detail::nonblocking_io_result(result);
+  }
+
+  /** Delivers the byte count to @p receiver; on success the captured peer
+   *  address is converted into the endpoint, and an undecodable address
+   *  family reports address_family_not_supported with a reset endpoint. */
+  template <class Receiver>
+  void set_value(Receiver&& receiver, std::error_code ec, int result,
+                 unsigned) noexcept {
+    if (result >= 0 && !ec) {
+      const auto endpoint = make_local_endpoint(
+          reinterpret_cast<const sockaddr*>(&remote_address_), remote_size_);
+      if (!endpoint.has_value()) {
+        // endpoint decode failure: override ec with
+        // address_family_not_supported
+        *endpoint_ = local::endpoint();
+        bexec::set_value(
+            std::forward<Receiver>(receiver),
+            std::make_error_code(std::errc::address_family_not_supported),
+            std::size_t{0});
+        return;
+      }
+      *endpoint_ = *endpoint;
+    }
+    bexec::set_value(std::forward<Receiver>(receiver), ec,
+                     static_cast<std::size_t>(std::max(0, result)));
+  }
+
+ private:
+  int descriptor_;
+  buffer_view buffer_;
+  local::endpoint* endpoint_;
+  sockaddr_storage remote_address_{};
+  socklen_t remote_size_ = sizeof(remote_address_);
+  int flags_;
+};
+
 /** One nonblocking sendto request with owned native destination storage. */
 class kqueue_send_to_request {
  public:
@@ -226,6 +307,17 @@ class kqueue_send_to_request {
    *  endpoint, and native sendto flags. */
   kqueue_send_to_request(datagram_socket_view socket, const void* data,
                          std::size_t size, const ip::endpoint& endpoint,
+                         int flags) noexcept
+      : descriptor_(socket.native_handle()),
+        data_(data),
+        size_(size),
+        remote_address_(endpoint),
+        flags_(flags) {}
+
+  /** Constructs the request for a local datagram socket with a local
+   *  destination endpoint. */
+  kqueue_send_to_request(local::datagram_socket_view socket, const void* data,
+                         std::size_t size, const local::endpoint& endpoint,
                          int flags) noexcept
       : descriptor_(socket.native_handle()),
         data_(data),
@@ -280,6 +372,11 @@ class kqueue_accept_request {
   /** Constructs the request from the listening socket and native accept
    *  flags. */
   kqueue_accept_request(stream_socket_view socket, int flags) noexcept
+      : descriptor_(socket.native_handle()), flags_(flags) {}
+
+  /** Constructs the request from a listening local stream socket and
+   *  native accept flags. */
+  kqueue_accept_request(local::stream_socket_view socket, int flags) noexcept
       : descriptor_(socket.native_handle()), flags_(flags) {}
 
   /** Registers the listening socket for read readiness with @p helper. */
@@ -347,6 +444,12 @@ class kqueue_connect_request {
   /** Constructs the request from the socket and the remote endpoint. */
   kqueue_connect_request(stream_socket_view socket,
                          const ip::endpoint& endpoint) noexcept
+      : descriptor_(socket.native_handle()), address_(endpoint) {}
+
+  /** Constructs the request for a local stream socket and a local remote
+   *  endpoint. */
+  kqueue_connect_request(local::stream_socket_view socket,
+                         const local::endpoint& endpoint) noexcept
       : descriptor_(socket.native_handle()), address_(endpoint) {}
 
   /** Registers the socket for write readiness with @p helper. */

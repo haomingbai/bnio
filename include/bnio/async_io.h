@@ -16,6 +16,9 @@
 #include <bnio/async_io/ip/endpoint.h>
 #include <bnio/async_io/ip/tcp.h>
 #include <bnio/async_io/ip/udp.h>
+#include <bnio/async_io/local/endpoint.h>
+#include <bnio/async_io/local/protocol.h>
+#include <bnio/async_io/local/socket_view.h>
 #include <bnio/async_io/random_access_file.h>
 #include <bnio/async_io/socket_view.h>
 #include <bnio/async_io/time.h>

@@ -13,6 +13,7 @@
 // io_uring backends.
 
 #include <arpa/inet.h>
+#include <bnio/local.h>
 #include <bnio/udp.h>
 #include <gtest/gtest.h>
 #include <netinet/in.h>
@@ -208,8 +209,8 @@ void recv_ready_success() {
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   constexpr std::string_view payload = "eager-ready";
   EXPECT_EQ(::send(sender_socket.native_handle(), payload.data(),
@@ -238,8 +239,8 @@ void recv_eagain_then_ready() {
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   std::array<char, 32> bytes{};
   byte_receiver receiver;
@@ -271,8 +272,8 @@ void recv_eof() {
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   // Peer sends nothing and half-closes: recv must observe EOF (ec={}, size 0).
   EXPECT_EQ(::shutdown(sender_socket.native_handle(), SHUT_WR), 0);
@@ -298,8 +299,8 @@ void send_ready_success() {
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket sender_socket(sockets[0]);
-  bnio::tcp_socket receiver_socket(sockets[1]);
+  bnio::local::stream_socket sender_socket(sockets[0]);
+  bnio::local::stream_socket receiver_socket(sockets[1]);
 
   constexpr std::string_view payload = "eager-send";
   byte_receiver receiver;
@@ -328,8 +329,8 @@ void send_eagain_then_ready() {
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket sender_socket(sockets[0]);
-  bnio::tcp_socket receiver_socket(sockets[1]);
+  bnio::local::stream_socket sender_socket(sockets[0]);
+  bnio::local::stream_socket receiver_socket(sockets[1]);
 
   const int sender_flags = ::fcntl(sender_socket.native_handle(), F_GETFL, 0);
   EXPECT_TRUE(sender_flags >= 0);
@@ -659,8 +660,8 @@ void pre_stopped_token_stops() {
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   bexec::inplace_stop_source source;
   EXPECT_TRUE(source.request_stop());
@@ -689,8 +690,8 @@ void io_context_stop_aborts_inflight_read() {
   auto scheduler = context.get_post_scheduler();
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);  // peer never writes
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);  // peer never writes
 
   std::array<char, 16> bytes{};
   pair_byte_receiver receiver;

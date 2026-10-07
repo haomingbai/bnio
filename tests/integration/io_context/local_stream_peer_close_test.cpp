@@ -23,8 +23,8 @@
 // All waits are event-driven (completion flag / deadline-bounded yield
 // loops); no sleeps synchronize the scenario.
 
+#include <bnio/async_io/local/socket_view.h>
 #include <gtest/gtest.h>
-
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -138,9 +138,7 @@ void run_peer_close_midway(bool eager) {
 
   int fds[2] = {-1, -1};
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds), 0);
-  // This is the pre-split wrapping; it migrates to
-  // bnio::async_io::local::stream_socket_view with the local-socket split.
-  const bnio::async_io::stream_socket_view writer(fds[0]);
+  const bnio::async_io::local::stream_socket_view writer(fds[0]);
 
   // 1 MiB payload far exceeds the AF_UNIX send buffer, so the write-all is
   // guaranteed to still be in flight when the peer closes.
@@ -227,7 +225,7 @@ TEST(LocalStreamPeerCloseTest,
 
   int fds[2] = {-1, -1};
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds), 0);
-  const bnio::async_io::stream_socket_view writer(fds[0]);
+  const bnio::async_io::local::stream_socket_view writer(fds[0]);
 
   constexpr std::size_t kPayloadSize = 1U << 20;
   std::vector<unsigned char> payload(kPayloadSize, 'x');

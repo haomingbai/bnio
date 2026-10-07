@@ -5,6 +5,7 @@
 
 #include <arpa/inet.h>
 #include <bnio/async_io/linux/socket_address.h>
+#include <sys/un.h>
 
 #include <cstring>
 namespace bnio::async_io::linux_native {
@@ -59,6 +60,36 @@ socket_address::socket_address(const ip::endpoint& endpoint) noexcept {
   }
 }
 
+socket_address::socket_address(const local::endpoint& endpoint) noexcept {
+  if (endpoint.kind() == local::endpoint_kind::unspecified) {
+    return;
+  }
+
+  auto* native = reinterpret_cast<sockaddr_un*>(&storage_);
+  *native = {};
+  native->sun_family = static_cast<sa_family_t>(AF_UNIX);
+  const std::string_view path = endpoint.path();
+
+  if (endpoint.kind() == local::endpoint_kind::abstract) {
+    // Abstract form: the leading NUL is part of the address bytes.
+    native->sun_path[0] = '\0';
+    if (!path.empty()) {
+      std::memcpy(native->sun_path + 1, path.data(), path.size());
+    }
+    size_ = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 +
+                                   path.size());
+    return;
+  }
+
+  // Path-name form: NUL-terminated whenever the terminator fits.
+  if (!path.empty()) {
+    std::memcpy(native->sun_path, path.data(), path.size());
+  }
+  const socklen_t terminator = path.size() < sizeof(native->sun_path) ? 1 : 0;
+  size_ = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + path.size() +
+                                 terminator);
+}
+
 bool socket_address::valid() const noexcept { return size_ != 0; }
 
 int socket_address::family() const noexcept {
@@ -102,6 +133,45 @@ std::optional<ip::endpoint> make_endpoint(const sockaddr* address,
     default:
       return std::nullopt;
   }
+}
+
+std::optional<local::endpoint> make_local_endpoint(const sockaddr* address,
+                                                   socklen_t size) noexcept {
+  if (address == nullptr ||
+      size < static_cast<socklen_t>(sizeof(sa_family_t))) {
+    // A zero-length address is the kernel's unnamed-peer signal on the
+    // recvfrom(2) path (no address was ever bound): the storage stays
+    // zeroed and no family is reported.
+    if (address != nullptr && size == 0) {
+      return local::endpoint();
+    }
+    return std::nullopt;
+  }
+  if (address->sa_family != AF_UNIX) {
+    return std::nullopt;
+  }
+
+  constexpr socklen_t path_offset =
+      static_cast<socklen_t>(offsetof(sockaddr_un, sun_path));
+  // Exactly the family field: an unnamed (never bound) socket.
+  if (size <= path_offset) {
+    return local::endpoint();
+  }
+
+  const auto* native = reinterpret_cast<const sockaddr_un*>(address);
+  const std::size_t name_bytes = size - path_offset;
+
+  // Abstract form: the kernel reports the leading NUL inside the name
+  // area, and the name is the bytes after it.
+  if (native->sun_path[0] == '\0') {
+    return local::endpoint::abstract(
+        std::string_view(native->sun_path + 1, name_bytes - 1));
+  }
+
+  // Path-name form: NUL-terminated by the binder in the common case, but
+  // a full-capacity path may not carry a terminator.
+  const std::size_t length = ::strnlen(native->sun_path, name_bytes);
+  return local::endpoint(std::string_view(native->sun_path, length));
 }
 
 }  // namespace bnio::async_io::linux_native

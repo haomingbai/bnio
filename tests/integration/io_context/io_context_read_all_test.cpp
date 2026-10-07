@@ -8,6 +8,7 @@
 // Callers that need single-read behavior use async_read_some (see
 // io_context_read_write_test.cpp).
 
+#include <bnio/local.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -32,8 +33,8 @@ TEST(IoContextReadAllTest, read_all_fills_buffer_exactly) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   // Payload exactly the size of the buffer: read-all fills the buffer and
   // completes with size == payload size.
@@ -67,8 +68,8 @@ TEST(IoContextReadAllTest, read_all_completes_on_eof_with_partial_data) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   // Send fewer bytes than the buffer, then half-close: read-all observes the
   // partial chunk followed by EOF and completes successfully with the bytes
@@ -103,8 +104,8 @@ TEST(IoContextReadAllTest, read_all_empty_eof_completes_success) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   // Peer closes immediately: the empty EOF is a successful zero-byte read.
   EXPECT_EQ(::shutdown(sender_socket.native_handle(), SHUT_WR), 0);
@@ -157,8 +158,8 @@ TEST(IoContextReadAllTest,
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   std::array<char, 8> bytes{};
   byte_receiver receiver;
@@ -188,8 +189,8 @@ TEST(IoContextReadAllTest, read_all_loops_until_buffer_full) {
 
   int sockets[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets), 0);
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   // Shrink the receiver buffer so the payload must be delivered in several
   // kernel chunks, forcing read-all to loop across multiple read attempts.

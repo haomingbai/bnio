@@ -1,4 +1,5 @@
 #include <bnio/io_context.h>
+#include <bnio/local.h>
 #include <bnio/tcp.h>
 #include <gtest/gtest.h>
 
@@ -77,8 +78,8 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
 
   int type_fds[2] = {-1, -1};
   EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, type_fds), 0);
-  bnio::tcp_socket type_writer(type_fds[0]);
-  bnio::tcp_socket type_reader(type_fds[1]);
+  bnio::local::stream_socket type_writer(type_fds[0]);
+  bnio::local::stream_socket type_reader(type_fds[1]);
 
   using read_op_type = decltype(bexec::connect(
       std::declval<decltype(type_reader.async_read(
@@ -112,8 +113,8 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
 
     EXPECT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, rt->fds), 0);
 
-    bnio::tcp_socket writer(rt->fds[0]);
-    bnio::tcp_socket reader(rt->fds[1]);
+    bnio::local::stream_socket writer(rt->fds[0]);
+    bnio::local::stream_socket reader(rt->fds[1]);
 
     auto scheduler = rt->context->get_post_scheduler();
     std::size_t idx = static_cast<std::size_t>(i);
@@ -135,7 +136,7 @@ TEST(ReadWriteStressTest, many_contexts_random_payloads) {
     });
     bexec::start(*rt->read_op);
 
-    // Both tcp_socket objects release their fds; context_runtime owns them.
+    // Both stream_socket objects release their fds; context_runtime owns them.
     (void)writer.release();
     (void)reader.release();
 

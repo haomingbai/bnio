@@ -18,6 +18,7 @@ This repository is a CMake-based C++20 async I/O library.
 - `io_context_cpo.h` — CPO umbrella for generic scheduler/stream operations.
 - `buffer.h` — buffer types umbrella.
 - `tcp.h` — TCP socket/acceptor umbrella.
+- `local.h` — local (AF_UNIX) socket/acceptor umbrella.
 - `ssl.h` — SSL context/stream umbrella.
 - `ip.h` — IP address/endpoint convenience re-exports.
 
@@ -60,6 +61,10 @@ This repository is a CMake-based C++20 async I/O library.
 - `ip/endpoint.h` — address + port value type.
 - `ip/tcp.h` — TCP protocol tag.
 - `ip/udp.h` — UDP protocol tag.
+- `local/endpoint.h` — local (AF_UNIX) endpoint value type and address-form enum.
+- `local/protocol.h` — local stream/datagram protocol tags with Asio-style
+  discovery typedefs.
+- `local/socket_view.h` — non-owning local stream/datagram socket views.
 - `linux/io_uring_context.h` — umbrella for the Linux native context.
 - `linux/io_uring_context_base.h` — umbrella for context, operation bases, and options.
 - `linux/io_uring_context_base/context.h` — `io_uring_context` class definition.
@@ -146,6 +151,8 @@ High-level async runtime, stream owners, and buffer types.
   implementations.
 - `detail/tcp/async_operations.h` — TCP async operation sender factories.
 - `detail/udp/async_operations.h` — UDP datagram sender factories.
+- `detail/local/async_operations.h` — local (AF_UNIX) async operation sender
+  factories.
 - `buffer/` — buffer types:
   - `basic.h` — `mutable_buffer` and `const_buffer`.
   - `dynamic_string.h` — `dynamic_string_buffer`.
@@ -159,6 +166,13 @@ High-level async runtime, stream owners, and buffer types.
 - `udp/` — UDP datagram owner and sender factories:
   - `socket.h` — `udp::socket` lifecycle and async sender declarations.
   - `async_operations.h` — connected and endpoint-aware UDP senders.
+- `local/` — local (AF_UNIX) stream/datagram owners and sender factories:
+  - `socket.h` — `local::stream_socket` and `local::datagram_socket` lifecycle
+    and async sender declarations.
+  - `acceptor.h` — `local::stream_acceptor` lifecycle and async sender
+    declarations.
+  - `async_operations.h` — stream read/write/connect/accept and datagram
+    send/receive/send-to/receive-from senders.
 - `ssl/` — TLS integration:
   - `base.h` — aggregate for the SSL base layer.
   - `base/errors.h` — OpenSSL error category and error_code helpers.
@@ -197,7 +211,7 @@ High-level async runtime, stream owners, and buffer types.
 - `src/base/bsd/` — base-layer BSD method implementations:
   - `kqueue.cpp`, `event.cpp`, `event_list_view.cpp`.
 - `src/async_io/posix/` — POSIX-shared async_io implementations:
-  - `address.cpp`, `tcp_endpoint.cpp`.
+  - `address.cpp`, `tcp_endpoint.cpp`, `local_endpoint.cpp`.
 - `src/async_io/linux/` — Linux-specific async_io implementations:
   - `address.cpp`, `dns.cpp`, `socket_address.cpp`, `socket_view.cpp` — Linux-native address, DNS, and socket adapters.
   - `io_uring_context.cpp` — lifecycle and queue init/exit.
@@ -220,6 +234,7 @@ High-level async runtime, stream owners, and buffer types.
   lifecycle, queue, timer, and timer-state implementations selected through
   `detail::native_context`.
 - `src/posix/tcp.cpp` — TCP socket and acceptor methods.
+- `src/posix/local.cpp` — local (AF_UNIX) socket and acceptor methods.
 - `src/posix/ssl.cpp` — SSL base layer: OpenSSL error category and
   `ssl::base::context_base` methods.
 - `src/posix/udp.cpp` — UDP socket methods.

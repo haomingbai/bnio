@@ -16,3 +16,4 @@ progress.
 - [Layer 3: `bnio::io_context`](architecture/io-context-layer.md)
 - [Worker scheduling: suspend list, directed wakeup, non-atomic local queue](architecture/worker-scheduling.md)
 - [Header dependency graph and namespace map](architecture/header-namespace-map.md)
+- [Local (AF_UNIX) socket type family split](architecture/local-socket-split.md)

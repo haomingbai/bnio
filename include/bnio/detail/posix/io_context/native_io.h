@@ -93,6 +93,70 @@ inline auto io_context::async_send_to(async_io::datagram_socket_view socket,
       detail::make_datagram_send_to_request(socket, buffer, endpoint, flags));
 }
 
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_read(async_io::local::stream_socket_view socket,
+                                   mutable_buffer buffer, int flags) {
+  return detail::write_all_sender<detail::local_socket_read_all_state<Kind> >(
+      detail::local_socket_read_all_state<Kind>(*this, socket, buffer, flags));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_read_some(
+    async_io::local::stream_socket_view socket, mutable_buffer buffer,
+    int flags) {
+  return detail::make_io_sender<Kind>(
+      *this, detail::make_local_stream_read_request(socket, buffer, flags));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_write(async_io::local::stream_socket_view socket,
+                                    const_buffer buffer, int flags) {
+  return detail::write_all_sender<detail::local_socket_write_all_state<Kind> >(
+      detail::local_socket_write_all_state<Kind>(*this, socket, buffer, flags));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_write_some(
+    async_io::local::stream_socket_view socket, const_buffer buffer,
+    int flags) {
+  return detail::make_io_sender<Kind>(
+      *this, detail::make_local_stream_write_request(socket, buffer, flags));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_receive(
+    async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+    int flags) {
+  return detail::make_io_sender<Kind>(
+      *this,
+      detail::make_local_datagram_receive_request(socket, buffer, flags));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_send(async_io::local::datagram_socket_view socket,
+                                   const_buffer buffer, int flags) {
+  return detail::make_io_sender<Kind>(
+      *this, detail::make_local_datagram_send_request(socket, buffer, flags));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_receive_from(
+    async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+    async_io::local::endpoint& endpoint, int flags) {
+  return detail::make_io_sender<Kind>(
+      *this, detail::make_local_datagram_receive_from_request(socket, buffer,
+                                                              endpoint, flags));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_send_to(
+    async_io::local::datagram_socket_view socket, const_buffer buffer,
+    const async_io::local::endpoint& endpoint, int flags) {
+  return detail::make_io_sender<Kind>(
+      *this, detail::make_local_datagram_send_to_request(socket, buffer,
+                                                         endpoint, flags));
+}
+
 }  // namespace bnio
 
 #include <bnio/detail/posix/io_context/random_access_file_io.h>
@@ -112,6 +176,21 @@ inline auto io_context::async_connect(async_io::stream_socket_view socket,
                                       const ip::endpoint& endpoint) {
   return detail::make_io_sender<Kind>(
       *this, detail::make_connect_request(socket, endpoint));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_accept(async_io::local::stream_socket_view socket,
+                                     int flags) {
+  return detail::make_io_sender<Kind>(
+      *this, detail::make_local_accept_request(socket, flags));
+}
+
+template <io_context::schedule_kind Kind>
+inline auto io_context::async_connect(
+    async_io::local::stream_socket_view socket,
+    const async_io::local::endpoint& endpoint) {
+  return detail::make_io_sender<Kind>(
+      *this, detail::make_local_connect_request(socket, endpoint));
 }
 
 template <io_context::schedule_kind Kind>
@@ -192,6 +271,62 @@ auto io_context::basic_scheduler<Kind>::async_send_to(
 }
 
 template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_read(
+    async_io::local::stream_socket_view socket, mutable_buffer buffer,
+    int flags) const {
+  return context_->async_read<Kind>(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_read_some(
+    async_io::local::stream_socket_view socket, mutable_buffer buffer,
+    int flags) const {
+  return context_->async_read_some<Kind>(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_write(
+    async_io::local::stream_socket_view socket, const_buffer buffer,
+    int flags) const {
+  return context_->async_write<Kind>(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_write_some(
+    async_io::local::stream_socket_view socket, const_buffer buffer,
+    int flags) const {
+  return context_->async_write_some<Kind>(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_receive(
+    async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+    int flags) const {
+  return context_->async_receive<Kind>(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_send(
+    async_io::local::datagram_socket_view socket, const_buffer buffer,
+    int flags) const {
+  return context_->async_send<Kind>(socket, buffer, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_receive_from(
+    async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+    async_io::local::endpoint& endpoint, int flags) const {
+  return context_->async_receive_from<Kind>(socket, buffer, endpoint, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_send_to(
+    async_io::local::datagram_socket_view socket, const_buffer buffer,
+    const async_io::local::endpoint& endpoint, int flags) const {
+  return context_->async_send_to<Kind>(socket, buffer, endpoint, flags);
+}
+
+template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_accept(
     async_io::stream_socket_view socket, int flags) const {
   return context_->async_accept<Kind>(socket, flags);
@@ -200,6 +335,19 @@ auto io_context::basic_scheduler<Kind>::async_accept(
 template <io_context::schedule_kind Kind>
 auto io_context::basic_scheduler<Kind>::async_connect(
     async_io::stream_socket_view socket, const ip::endpoint& endpoint) const {
+  return context_->async_connect<Kind>(socket, endpoint);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_accept(
+    async_io::local::stream_socket_view socket, int flags) const {
+  return context_->async_accept<Kind>(socket, flags);
+}
+
+template <io_context::schedule_kind Kind>
+auto io_context::basic_scheduler<Kind>::async_connect(
+    async_io::local::stream_socket_view socket,
+    const async_io::local::endpoint& endpoint) const {
   return context_->async_connect<Kind>(socket, endpoint);
 }
 

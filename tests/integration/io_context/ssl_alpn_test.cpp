@@ -1,3 +1,4 @@
+#include <bnio/local.h>
 #include <gtest/gtest.h>
 #include <openssl/ssl.h>
 
@@ -76,14 +77,17 @@ void expect_selected_alpn(SSL* ssl, std::string_view expected) {
 // negotiated protocol on both peers before the streams are destroyed.
 std::shared_ptr<handshake_state> run_socketpair_handshake(
     bnio::io_context& context, bnio::ssl::context& client_ctx,
-    bnio::ssl::context& server_ctx, std::span<const unsigned char> client_protos,
+    bnio::ssl::context& server_ctx,
+    std::span<const unsigned char> client_protos,
     std::string_view expected_alpn) {
   int sockets[2] = {-1, -1};
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_ctx};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_ctx};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_ctx};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_ctx};
 
   if (!client_protos.empty()) {
     // SSL_set_alpn_protos returns 0 on success (inverted convention).
@@ -114,8 +118,9 @@ std::shared_ptr<handshake_state> run_socketpair_handshake(
 // returns the shared outcome state. Unlike run_socketpair_handshake, the
 // streams outlive this call, so tests can query them afterwards.
 std::shared_ptr<handshake_state> handshake_live_streams(
-    bnio::io_context& context, bnio::ssl::tcp::stream<bnio::tcp_socket>& client,
-    bnio::ssl::tcp::stream<bnio::tcp_socket>& server) {
+    bnio::io_context& context,
+    bnio::ssl::tcp::stream<bnio::local::stream_socket>& client,
+    bnio::ssl::tcp::stream<bnio::local::stream_socket>& server) {
   auto state = std::make_shared<handshake_state>();
   auto scheduler = context.get_post_scheduler();
 
@@ -385,8 +390,10 @@ TEST(SslAlpnTest, alert_fatal_aborts_handshake) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
@@ -487,8 +494,10 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
@@ -502,8 +511,10 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
 
   // The high-level view must be readable through const references and name
   // the selected protocol on both peers.
-  const bnio::ssl::tcp::stream<bnio::tcp_socket>& const_client = client;
-  const bnio::ssl::tcp::stream<bnio::tcp_socket>& const_server = server;
+  const bnio::ssl::tcp::stream<bnio::local::stream_socket>& const_client =
+      client;
+  const bnio::ssl::tcp::stream<bnio::local::stream_socket>& const_server =
+      server;
   EXPECT_EQ(as_string_view(const_client.get_alpn_selected()), k_h2);
   EXPECT_EQ(as_string_view(const_server.get_alpn_selected()), k_h2);
 
@@ -544,8 +555,10 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
@@ -557,8 +570,10 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
   EXPECT_EQ(state->errors, 0);
   EXPECT_EQ(state->stopped, 0);
 
-  const bnio::ssl::tcp::stream<bnio::tcp_socket>& const_client = client;
-  const bnio::ssl::tcp::stream<bnio::tcp_socket>& const_server = server;
+  const bnio::ssl::tcp::stream<bnio::local::stream_socket>& const_client =
+      client;
+  const bnio::ssl::tcp::stream<bnio::local::stream_socket>& const_server =
+      server;
   EXPECT_TRUE(const_client.get_alpn_selected().empty());
   EXPECT_TRUE(const_server.get_alpn_selected().empty());
 }
@@ -580,8 +595,10 @@ TEST(SslAlpnTest, get_alpn_selected_empty_before_handshake) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   // No handshake has run yet, so nothing can have been selected.
   EXPECT_TRUE(client.get_alpn_selected().empty());

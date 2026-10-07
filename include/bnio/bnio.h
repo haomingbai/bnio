@@ -16,6 +16,7 @@
 
 #if defined(BNIO_HAS_IO_CONTEXT)
 #include <bnio/io_context.h>
+#include <bnio/local.h>
 #include <bnio/ssl.h>
 #include <bnio/tcp.h>
 #include <bnio/udp.h>

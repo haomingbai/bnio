@@ -87,7 +87,7 @@ struct first_receiver {
     // because Phase 3b keeps calling consume_io_tasks() until both
     // I/O queues stay empty.
     auto sched = ctx->get_post_scheduler();
-    auto view = bnio::async_io::stream_socket_view(fd);
+    auto view = bnio::async_io::local::stream_socket_view(fd);
     auto sender =
         sched.async_read_some(view, bnio::buffer(second_buf, second_buf_size));
 
@@ -134,7 +134,7 @@ TEST(LifecycleTest, finish_phase3_operation_leak) {
   // There is no data to read, so it registers with kqueue and waits.
   char first_buf[64];
   auto first_sched = ctx->get_post_scheduler();
-  auto first_view = bnio::async_io::stream_socket_view(sv[0]);
+  auto first_view = bnio::async_io::local::stream_socket_view(sv[0]);
   auto first_sender = first_sched.async_read_some(
       first_view, bnio::buffer(first_buf, sizeof(first_buf)));
 

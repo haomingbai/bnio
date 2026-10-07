@@ -24,6 +24,12 @@ bnio_add_integration_io_context_test(io_context_read_write
                                      io_context_read_write_test.cpp)
 bnio_add_integration_io_context_test(local_stream_peer_close
                                      local_stream_peer_close_test.cpp)
+bnio_add_integration_io_context_test(local_stream_lifecycle
+                                     local_stream_lifecycle_test.cpp)
+bnio_add_integration_io_context_test(local_io_context
+                                     local_io_context_test.cpp)
+bnio_add_integration_io_context_test(local_datagram local_datagram_test.cpp)
+bnio_add_integration_io_context_test(local_error local_error_test.cpp)
 bnio_add_integration_io_context_test(io_context_scheduler
                                      io_context_scheduler_test.cpp
                                      PROPERTIES TIMEOUT 10)

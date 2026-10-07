@@ -10,6 +10,7 @@ bnio/bnio.h  (umbrella)
 │   ├── async_io/{buffer_view, descriptor_view, random_access_file,
 │   │             socket_view, time, address, tcp_endpoint, config}.h
 │   ├── async_io/ip/{address, endpoint, tcp, udp}.h
+│   ├── async_io/local/{endpoint, protocol, socket_view}.h
 │   └── async_io/dns/{query, result, resolve, types}.h
 ├── bnio/io_context.h
 │   ├── detail/posix/io_context/class.h
@@ -56,6 +57,8 @@ bnio/bnio.h  (umbrella)
 │   └── buffer/{basic, dynamic_string, dynamic_byte_vector, holders}.h
 ├── bnio/tcp.h
 │   └── tcp/{socket, acceptor, async_operations, layers}.h
+├── bnio/local.h
+│   └── local/{socket, acceptor, async_operations}.h
 ├── bnio/ssl.h
 │   └── ssl/{base, context, cpo, stream}.h
 │       ├── ssl/base/{alpn, bio_pair, context_base, errors}.h
@@ -96,6 +99,13 @@ bnio
 │   │   ├── endpoint                      address + port
 │   │   ├── tcp                           TCP protocol tag
 │   │   └── udp                           UDP protocol tag
+│   ├── local
+│   │   ├── endpoint                      AF_UNIX endpoint (fixed path buffer)
+│   │   ├── endpoint_kind                 unspecified / path_name / abstract
+│   │   ├── stream_protocol               AF_UNIX SOCK_STREAM tag
+│   │   ├── datagram_protocol             AF_UNIX SOCK_DGRAM tag
+│   │   ├── stream_socket_view            non-owning local stream socket
+│   │   └── datagram_socket_view          non-owning local datagram socket
 │   ├── dns_query                         DNS query description
 │   ├── dns_result_view                   DNS result storage view
 │   ├── linux_native                      Linux-specific event loop
@@ -129,6 +139,10 @@ bnio
 │   └── acceptor                          RAII TCP listening socket owner
 ├── udp
 │   └── socket                            RAII UDP datagram socket owner
+├── local
+│   ├── stream_socket                     RAII AF_UNIX stream socket owner
+│   ├── stream_acceptor                   RAII AF_UNIX listening socket owner
+│   └── datagram_socket                   RAII AF_UNIX datagram socket owner
 ├── tcp_socket / tcp_acceptor             compatibility aliases
 ├── udp_socket                            compatibility alias
 ├── ssl

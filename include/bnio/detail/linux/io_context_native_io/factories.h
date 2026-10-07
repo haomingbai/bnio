@@ -16,46 +16,100 @@
 
 namespace bnio::detail {
 
+// Network (IP) factories — keyed on the generic views.
 [[nodiscard]] inline auto make_stream_read_request(
     async_io::stream_socket_view socket, mutable_buffer buffer, int flags) {
-  return socket_read_model(socket, buffer, flags);
+  return socket_read_model(socket.native_handle(), buffer, flags);
 }
 
 [[nodiscard]] inline auto make_stream_write_request(
     async_io::stream_socket_view socket, const_buffer buffer, int flags) {
-  return socket_write_model(socket, buffer, flags);
+  return socket_write_model(socket.native_handle(), buffer, flags);
 }
 
 [[nodiscard]] inline auto make_datagram_receive_request(
     async_io::datagram_socket_view socket, mutable_buffer buffer, int flags) {
-  return datagram_receive_model(socket, buffer, flags);
+  return datagram_receive_model(socket.native_handle(), buffer, flags);
 }
 
 [[nodiscard]] inline auto make_datagram_send_request(
     async_io::datagram_socket_view socket, const_buffer buffer, int flags) {
-  return datagram_send_model(socket, buffer, flags);
+  return datagram_send_model(socket.native_handle(), buffer, flags);
 }
 
 [[nodiscard]] inline auto make_datagram_receive_from_request(
     async_io::datagram_socket_view socket, mutable_buffer buffer,
     ip::endpoint& endpoint, int flags) {
-  return datagram_receive_from_model(socket, buffer, endpoint, flags);
+  return datagram_receive_from_model(socket.native_handle(), buffer, endpoint,
+                                     flags);
 }
 
 [[nodiscard]] inline auto make_datagram_send_to_request(
     async_io::datagram_socket_view socket, const_buffer buffer,
     const ip::endpoint& endpoint, int flags) {
-  return datagram_send_to_model(socket, buffer, endpoint, flags);
+  return datagram_send_to_model(socket.native_handle(), buffer, endpoint,
+                                flags);
 }
 
 [[nodiscard]] inline auto make_accept_request(
     async_io::stream_socket_view socket, int flags) {
-  return accept_model(socket, flags);
+  return accept_model(socket.native_handle(), flags);
 }
 
 [[nodiscard]] inline auto make_connect_request(
     async_io::stream_socket_view socket, const ip::endpoint& endpoint) {
-  return connect_model(socket, endpoint);
+  return connect_model(socket.native_handle(), endpoint);
+}
+
+// Local (AF_UNIX) factories — keyed on the local views; the plain
+// send/recv models, never a network-specific model.
+[[nodiscard]] inline auto make_local_stream_read_request(
+    async_io::local::stream_socket_view socket, mutable_buffer buffer,
+    int flags) {
+  return socket_read_model(socket.native_handle(), buffer, flags);
+}
+
+[[nodiscard]] inline auto make_local_stream_write_request(
+    async_io::local::stream_socket_view socket, const_buffer buffer,
+    int flags) {
+  return socket_write_model(socket.native_handle(), buffer, flags);
+}
+
+[[nodiscard]] inline auto make_local_datagram_receive_request(
+    async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+    int flags) {
+  return datagram_receive_model(socket.native_handle(), buffer, flags);
+}
+
+[[nodiscard]] inline auto make_local_datagram_send_request(
+    async_io::local::datagram_socket_view socket, const_buffer buffer,
+    int flags) {
+  return datagram_send_model(socket.native_handle(), buffer, flags);
+}
+
+[[nodiscard]] inline auto make_local_datagram_receive_from_request(
+    async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+    async_io::local::endpoint& endpoint, int flags) {
+  return local_datagram_receive_from_model(socket.native_handle(), buffer,
+                                           endpoint, flags);
+}
+
+[[nodiscard]] inline auto make_local_datagram_send_to_request(
+    async_io::local::datagram_socket_view socket, const_buffer buffer,
+    const async_io::local::endpoint& endpoint, int flags) {
+  return local_datagram_send_to_model(socket.native_handle(), buffer, endpoint,
+                                      flags);
+}
+
+[[nodiscard]] inline auto make_local_accept_request(
+    async_io::local::stream_socket_view socket, int flags) {
+  return accept_model(socket.native_handle(), flags);
+}
+
+[[nodiscard]] inline auto make_local_connect_request(
+    async_io::local::stream_socket_view socket,
+    const async_io::local::endpoint& endpoint) {
+  return connect_model(socket.native_handle(), endpoint);
 }
 
 /** Creates the descriptor-poll sender for the context. */

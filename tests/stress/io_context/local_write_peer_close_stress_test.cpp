@@ -1,9 +1,10 @@
-// Stress-scale twin of tests/integration/io_context/local_stream_peer_close_test.cpp.
+// Stress-scale twin of
+// tests/integration/io_context/local_stream_peer_close_test.cpp.
 //
 // Pinned contract for the local-socket split
 // (docs/design/architecture/local-socket-split.md §7.2): on AF_UNIX
-// SOCK_STREAM pairs (wrapped in stream_socket_view today; this file migrates
-// to async_io::local::stream_socket_view with the split), a 1 MiB write-all
+// SOCK_STREAM pairs (wrapped in async_io::local::stream_socket_view since
+// the local-socket split), a 1 MiB write-all
 // whose peer drains a quota and then closes mid-transfer must terminate with
 // exactly one completion, error class EPIPE (std::generic_category,
 // MSG_NOSIGNAL), partial bytes preserved, and never set_stopped — across 20
@@ -14,8 +15,8 @@
 // All waits are event-driven (completion flags / deadline-bounded yield
 // loops); no sleeps synchronize the scenario.
 
+#include <bnio/async_io/local/socket_view.h>
 #include <gtest/gtest.h>
-
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -102,8 +103,8 @@ struct pair_state {
 TEST(LocalWritePeerCloseStressTest,
      concurrent_write_all_peer_close_terminates_epipe_once) {
   constexpr int kPairs = 20;
-  constexpr std::size_t kPayloadSize = 1U << 20;      // 1 MiB ≫ AF_UNIX sndbuf
-  constexpr std::size_t kQuotaBase = 64U * 1024;      // per-pair drain quota
+  constexpr std::size_t kPayloadSize = 1U << 20;  // 1 MiB ≫ AF_UNIX sndbuf
+  constexpr std::size_t kQuotaBase = 64U * 1024;  // per-pair drain quota
   constexpr unsigned kWorkers = 4;
 
   bnio::io_context_options options;
@@ -116,12 +117,12 @@ TEST(LocalWritePeerCloseStressTest,
 
   // All pairs share one operation type: identical view/buffer/flags types.
   using sender_type = decltype(scheduler.async_write(
-      std::declval<bnio::async_io::stream_socket_view>(),
+      std::declval<bnio::async_io::local::stream_socket_view>(),
       std::declval<decltype(bnio::buffer(
           static_cast<const unsigned char*>(nullptr), std::size_t{0}))>(),
       std::declval<int>()));
-  using op_type = decltype(bexec::connect(std::declval<sender_type>(),
-                                          std::declval<write_contract_receiver>()));
+  using op_type = decltype(bexec::connect(
+      std::declval<sender_type>(), std::declval<write_contract_receiver>()));
 
   std::vector<std::unique_ptr<pair_state>> pairs;
   std::vector<std::unique_ptr<op_type>> ops;
@@ -138,15 +139,14 @@ TEST(LocalWritePeerCloseStressTest,
     }
 
     auto sender = scheduler.async_write(
-        bnio::async_io::stream_socket_view(pair->fds[0]),
+        bnio::async_io::local::stream_socket_view(pair->fds[0]),
         bnio::buffer(static_cast<const unsigned char*>(pair->payload.data()),
                      pair->payload.size()),
         MSG_NOSIGNAL);
     // write_all_operation is non-movable: construct in place via new, as
     // read_write_stress_test.cpp does.
-    ops.emplace_back(
-        new op_type(bexec::connect(std::move(sender),
-                                   write_contract_receiver{&pair->record})));
+    ops.emplace_back(new op_type(bexec::connect(
+        std::move(sender), write_contract_receiver{&pair->record})));
     bexec::start(*ops.back());
     pairs.push_back(std::move(pair));
   }
@@ -161,8 +161,7 @@ TEST(LocalWritePeerCloseStressTest,
   readers.reserve(static_cast<std::size_t>(kPairs));
   for (int i = 0; i < kPairs; ++i) {
     pair_state& pair = *pairs[static_cast<std::size_t>(i)];
-    const std::size_t quota =
-        kQuotaBase + static_cast<std::size_t>(i) * 1024U;
+    const std::size_t quota = kQuotaBase + static_cast<std::size_t>(i) * 1024U;
     readers.emplace_back([&pair, quota, deadline] {
       pair.reader_ok.store(drain_then_close(pair.fds[1], quota, deadline),
                            std::memory_order_release);

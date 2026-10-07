@@ -35,18 +35,22 @@ descriptor.
 
 #### Socket View Family
 
-Socket-kind-specific non-owning views built on `socket_view`:
+Socket-kind-specific non-owning views built on `socket_view`. Since the
+local (AF_UNIX) split (see [local-socket-split.md](local-socket-split.md)),
+their endpoint-taking contract is narrowed to network (IP) sockets; local
+sockets have their own views:
 
 | Type | Native Kind | Operations |
 |------|-------------|------------|
 | `socket_view` | Unspecified | Descriptor access only |
-| `stream_socket_view` | `SOCK_STREAM` | `bind()`, `listen()`, `connect()`, `shutdown()`, socket options |
-| `datagram_socket_view` | `SOCK_DGRAM` | `bind()`, `connect()`, endpoint queries; transfer is async-only |
+| `stream_socket_view` | `SOCK_STREAM` (IP) | `bind()`, `listen()`, `connect()`, `shutdown()`, socket options |
+| `datagram_socket_view` | `SOCK_DGRAM` (IP) | `bind()`, `connect()`, endpoint queries; transfer is async-only |
+| `local::stream_socket_view` | `SOCK_STREAM` (AF_UNIX) | `bind()`, `listen()`, `connect()`, `shutdown()`, endpoint queries |
+| `local::datagram_socket_view` | `SOCK_DGRAM` (AF_UNIX) | `bind()`, `connect()`, `shutdown()`, endpoint queries; transfer is async-only |
 
-Typed views can be constructed from `socket_view` and all hold the same fd
-value. Listening is a lifecycle state of a stream socket, not a separate
-socket kind. Stream and datagram operations remain distinct so stream partial
-I/O rules cannot be applied to a datagram.
+Typed views hold the same fd value. Listening is a lifecycle state of a
+stream socket, not a separate socket kind. Stream and datagram operations
+remain distinct so stream partial I/O rules cannot be applied to a datagram.
 
 ### Value Types
 
@@ -56,6 +60,9 @@ I/O rules cannot be applied to a datagram.
 | `async_io::ip::endpoint` | IP address + port number |
 | `async_io::ip::tcp` | TCP protocol tag (v4/v6/any) |
 | `async_io::ip::udp` | UDP protocol tag |
+| `async_io::local::endpoint` | AF_UNIX endpoint (path / abstract / unspecified) |
+| `async_io::local::stream_protocol` | AF_UNIX stream protocol tag |
+| `async_io::local::datagram_protocol` | AF_UNIX datagram protocol tag |
 
 These are copyable, self-contained value types.
 

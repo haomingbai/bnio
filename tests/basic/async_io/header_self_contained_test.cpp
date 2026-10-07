@@ -20,6 +20,12 @@
 #include <bnio/async_io/linux/io_uring_context.h>
 #elif defined(BNIO_HEADER_TEST_LINUX_SOCKET_ADDRESS)
 #include <bnio/async_io/linux/socket_address.h>
+#elif defined(BNIO_HEADER_TEST_LOCAL_ENDPOINT)
+#include <bnio/async_io/local/endpoint.h>
+#elif defined(BNIO_HEADER_TEST_LOCAL_PROTOCOL)
+#include <bnio/async_io/local/protocol.h>
+#elif defined(BNIO_HEADER_TEST_LOCAL_SOCKET_VIEW)
+#include <bnio/async_io/local/socket_view.h>
 #elif defined(BNIO_HEADER_TEST_BSD_KQUEUE_CONTEXT)
 #include <bnio/async_io/bsd/kqueue_context.h>
 #elif defined(BNIO_HEADER_TEST_BSD_KQUEUE_HELPER)

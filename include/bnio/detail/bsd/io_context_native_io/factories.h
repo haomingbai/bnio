@@ -75,6 +75,61 @@ namespace bnio::detail {
   return async_io::bsd_native::kqueue_connect_request(socket, endpoint);
 }
 
+// Local (AF_UNIX) factories — keyed on the local views; the plain
+// send/recv requests, never a network-specific variant.
+[[nodiscard]] inline auto make_local_stream_read_request(
+    async_io::local::stream_socket_view socket, mutable_buffer buffer,
+    int flags) {
+  return async_io::bsd_native::kqueue_receive_request(socket.native_handle(),
+                                                      buffer.view(), flags);
+}
+
+[[nodiscard]] inline auto make_local_stream_write_request(
+    async_io::local::stream_socket_view socket, const_buffer buffer,
+    int flags) {
+  return async_io::bsd_native::kqueue_send_request(
+      socket.native_handle(), buffer.data(), buffer.size(), flags);
+}
+
+[[nodiscard]] inline auto make_local_datagram_receive_request(
+    async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+    int flags) {
+  return async_io::bsd_native::kqueue_receive_request(socket.native_handle(),
+                                                      buffer.view(), flags);
+}
+
+[[nodiscard]] inline auto make_local_datagram_send_request(
+    async_io::local::datagram_socket_view socket, const_buffer buffer,
+    int flags) {
+  return async_io::bsd_native::kqueue_send_request(
+      socket.native_handle(), buffer.data(), buffer.size(), flags);
+}
+
+[[nodiscard]] inline auto make_local_datagram_receive_from_request(
+    async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+    async_io::local::endpoint& endpoint, int flags) {
+  return async_io::bsd_native::kqueue_local_receive_from_request(
+      socket, buffer.view(), endpoint, flags);
+}
+
+[[nodiscard]] inline auto make_local_datagram_send_to_request(
+    async_io::local::datagram_socket_view socket, const_buffer buffer,
+    const async_io::local::endpoint& endpoint, int flags) {
+  return async_io::bsd_native::kqueue_send_to_request(
+      socket, buffer.data(), buffer.size(), endpoint, flags);
+}
+
+[[nodiscard]] inline auto make_local_accept_request(
+    async_io::local::stream_socket_view socket, int flags) {
+  return async_io::bsd_native::kqueue_accept_request(socket, flags);
+}
+
+[[nodiscard]] inline auto make_local_connect_request(
+    async_io::local::stream_socket_view socket,
+    const async_io::local::endpoint& endpoint) {
+  return async_io::bsd_native::kqueue_connect_request(socket, endpoint);
+}
+
 /** Creates the descriptor-poll sender for the context. */
 template <io_context::schedule_kind Kind = io_context::schedule_kind::post>
 [[nodiscard]] inline auto make_poll_sender(io_context& context,

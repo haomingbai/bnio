@@ -80,6 +80,55 @@ class socket_write_all_state {
   bool eager = true;
 };
 
+// Local (AF_UNIX) twin of socket_write_all_state: identical wire-up, but
+// the step operation goes through the local write factory, so model
+// selection is decided by the socket type instead of kernel capability.
+template <io_context::schedule_kind Kind>
+class local_socket_write_all_state {
+ public:
+  static constexpr bool zero_byte_is_error = true;
+
+  local_socket_write_all_state(io_context& context,
+                               async_io::local::stream_socket_view socket,
+                               const_buffer buffer, int flags) noexcept
+      : context(&context), socket(socket), buffer(buffer), flags(flags) {}
+
+  [[nodiscard]] std::size_t remaining() const noexcept {
+    return buffer.size() - transferred;
+  }
+
+  [[nodiscard]] bool empty() const noexcept { return buffer.size() == 0; }
+
+  [[nodiscard]] const_buffer current_buffer() const noexcept {
+    const auto* data = static_cast<const char*>(buffer.data());
+    return const_buffer(data + transferred, remaining());
+  }
+
+  [[nodiscard]] auto make_sender() noexcept {
+    return make_io_sender<Kind>(
+        *context,
+        make_local_stream_write_request(socket, current_buffer(), flags),
+        adaptive_eager_control<local_socket_write_all_state<Kind> >{this});
+  }
+
+  void advance(std::size_t bytes) noexcept {
+    transferred += bytes;
+    if (transferred >= buffer.size()) {
+      done = true;
+    }
+  }
+
+  io_context* context;
+  async_io::local::stream_socket_view socket;
+  const_buffer buffer;
+  int flags;
+  std::size_t transferred = 0;
+  bool done = false;
+  // Adaptive eager probing: cleared when the previous step had a short
+  // transfer, so the next step skips the immediate-completion probe.
+  bool eager = true;
+};
+
 }  // namespace bnio::detail
 
 #include <bnio/detail/posix/io_context/random_access_write_all.h>

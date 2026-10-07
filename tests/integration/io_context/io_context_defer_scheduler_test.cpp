@@ -1,3 +1,4 @@
+#include <bnio/local.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -604,8 +605,8 @@ TEST(IoContextDeferSchedulerTest,
   }
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket receiver_socket(sockets[0]);
-  bnio::tcp_socket sender_socket(sockets[1]);
+  bnio::local::stream_socket receiver_socket(sockets[0]);
+  bnio::local::stream_socket sender_socket(sockets[1]);
 
   constexpr std::string_view payload = "defer-eager";
   EXPECT_EQ(::send(sender_socket.native_handle(), payload.data(),
@@ -653,8 +654,8 @@ TEST(IoContextDeferSchedulerTest,
   }
 
   auto sockets = make_socketpair();
-  bnio::tcp_socket sender_socket(sockets[0]);
-  bnio::tcp_socket receiver_socket(sockets[1]);
+  bnio::local::stream_socket sender_socket(sockets[0]);
+  bnio::local::stream_socket receiver_socket(sockets[1]);
 
   constexpr std::string_view payload = "defer-eager";
   byte_receiver receiver;

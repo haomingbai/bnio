@@ -1,3 +1,4 @@
+#include <bnio/local.h>
 #include <gtest/gtest.h>
 #include <openssl/err.h>
 
@@ -30,8 +31,10 @@ TEST(SslHandshakeTest, socketpair_handshake_is_io_context_driven) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
 
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   auto state = std::make_shared<handshake_state>();
   handshake_receiver client_receiver{state, &context};
@@ -102,7 +105,8 @@ TEST(SslHandshakeTest, closed_transport_reports_handshake_error) {
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
   test_require(::close(sockets[1]) == 0);
-  bnio::ssl::tcp::stream stream{bnio::tcp_socket(sockets[0]), ssl_context};
+  bnio::ssl::tcp::stream stream{bnio::local::stream_socket(sockets[0]),
+                                ssl_context};
 
   auto state = std::make_shared<handshake_state>();
   auto sender =
@@ -136,8 +140,10 @@ TEST(SslHandshakeTest, socketpair_shutdown_exchanges_close_notify) {
   int sockets[2] = {-1, -1};
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
-  bnio::ssl::tcp::stream client{bnio::tcp_socket(sockets[0]), client_context};
-  bnio::ssl::tcp::stream server{bnio::tcp_socket(sockets[1]), server_context};
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                server_context};
 
   {
     bnio::io_context context;

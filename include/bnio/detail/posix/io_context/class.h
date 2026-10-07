@@ -7,6 +7,7 @@
 #ifndef BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 #define BNIO_DETAIL_POSIX_IO_CONTEXT_CLASS_H_
 
+#include <bnio/async_io/local/socket_view.h>
 #include <bnio/async_io/random_access_file.h>
 #include <bnio/async_io/socket_view.h>
 #include <bnio/async_io/time.h>
@@ -315,6 +316,35 @@ class BNIO_EXPORT io_context {
                                         int flags = 0) const;
 
     /**
+     * Creates a sender that reads the whole buffer from a local stream
+     * socket.
+     */
+    [[nodiscard]] auto async_read(async_io::local::stream_socket_view socket,
+                                  mutable_buffer buffer, int flags = 0) const;
+
+    /**
+     * Creates a sender for one local stream socket read operation.
+     */
+    [[nodiscard]] auto async_read_some(
+        async_io::local::stream_socket_view socket, mutable_buffer buffer,
+        int flags = 0) const;
+
+    /**
+     * Creates a sender that writes the whole buffer to a local stream
+     * socket.
+     */
+    [[nodiscard]] auto async_write(async_io::local::stream_socket_view socket,
+                                   const_buffer buffer, int flags = 0) const;
+
+    /**
+     * Creates a sender for one local stream socket write operation without
+     * retrying short writes.
+     */
+    [[nodiscard]] auto async_write_some(
+        async_io::local::stream_socket_view socket, const_buffer buffer,
+        int flags = 0) const;
+
+    /**
      * Creates a sender that performs one datagram receive on a connected
      * socket.
      */
@@ -345,6 +375,38 @@ class BNIO_EXPORT io_context {
     [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                      const_buffer buffer,
                                      const ip::endpoint& endpoint,
+                                     int flags = 0) const;
+
+    /**
+     * Creates a sender that performs one local datagram receive on a
+     * connected socket.
+     */
+    [[nodiscard]] auto async_receive(async_io::local::datagram_socket_view,
+                                     mutable_buffer buffer,
+                                     int flags = 0) const;
+
+    /**
+     * Creates a sender that performs one local datagram send on a connected
+     * socket.
+     */
+    [[nodiscard]] auto async_send(async_io::local::datagram_socket_view socket,
+                                  const_buffer buffer, int flags = 0) const;
+
+    /**
+     * Creates a sender that performs one local datagram receive and stores
+     * the source endpoint into @p endpoint.
+     */
+    [[nodiscard]] auto async_receive_from(
+        async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+        async_io::local::endpoint& endpoint, int flags = 0) const;
+
+    /**
+     * Creates a sender that performs one local datagram send to @p endpoint,
+     * without requiring a connected socket.
+     */
+    [[nodiscard]] auto async_send_to(async_io::local::datagram_socket_view,
+                                     const_buffer buffer,
+                                     const async_io::local::endpoint& endpoint,
                                      int flags = 0) const;
     /**
      * Creates a sender that reads the whole buffer from a descriptor,
@@ -416,6 +478,21 @@ class BNIO_EXPORT io_context {
      */
     [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                      const ip::endpoint& endpoint) const;
+
+    /**
+     * Creates a sender that accepts one connection from a listening local
+     * stream socket.
+     */
+    [[nodiscard]] auto async_accept(async_io::local::stream_socket_view socket,
+                                    int flags = 0) const;
+
+    /**
+     * Creates a sender that connects a local stream socket to a local
+     * endpoint.
+     */
+    [[nodiscard]] auto async_connect(
+        async_io::local::stream_socket_view socket,
+        const async_io::local::endpoint& endpoint) const;
 
     /**
      * Creates a sender that waits for descriptor events.
@@ -721,6 +798,36 @@ class BNIO_EXPORT io_context {
                                       const_buffer buffer, int flags = 0);
 
   /**
+   * Creates a sender that reads the whole buffer from a local stream
+   * socket view.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_read(async_io::local::stream_socket_view socket,
+                                mutable_buffer buffer, int flags = 0);
+
+  /**
+   * Creates a sender for one local stream socket read operation.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_read_some(async_io::local::stream_socket_view,
+                                     mutable_buffer buffer, int flags = 0);
+
+  /**
+   * Creates a sender that writes the whole buffer to a local stream
+   * socket view.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_write(async_io::local::stream_socket_view socket,
+                                 const_buffer buffer, int flags = 0);
+
+  /**
+   * Creates a sender for one local stream socket write operation.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_write_some(async_io::local::stream_socket_view,
+                                      const_buffer buffer, int flags = 0);
+
+  /**
    * Creates a sender that reads bytes from a file descriptor, advancing the
    * kernel file position.
    */
@@ -817,6 +924,41 @@ class BNIO_EXPORT io_context {
   [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                    const_buffer buffer,
                                    const ip::endpoint& endpoint, int flags = 0);
+
+  /**
+   * Creates a sender that performs one local datagram receive on a
+   * connected socket.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_receive(async_io::local::datagram_socket_view,
+                                   mutable_buffer buffer, int flags = 0);
+
+  /**
+   * Creates a sender that performs one local datagram send on a connected
+   * socket.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_send(async_io::local::datagram_socket_view socket,
+                                const_buffer buffer, int flags = 0);
+
+  /**
+   * Creates a sender that performs one local datagram receive and stores
+   * the source endpoint into @p endpoint.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_receive_from(
+      async_io::local::datagram_socket_view socket, mutable_buffer buffer,
+      async_io::local::endpoint& endpoint, int flags = 0);
+
+  /**
+   * Creates a sender that performs one local datagram send to @p endpoint,
+   * without requiring a connected socket.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_send_to(async_io::local::datagram_socket_view,
+                                   const_buffer buffer,
+                                   const async_io::local::endpoint& endpoint,
+                                   int flags = 0);
   /**
    * Creates a sender that accepts one connection from a non-owning
    * listening socket view.
@@ -831,6 +973,21 @@ class BNIO_EXPORT io_context {
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                    const ip::endpoint& endpoint);
+
+  /**
+   * Creates a sender that accepts one connection from a listening local
+   * stream socket view.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_accept(async_io::local::stream_socket_view socket,
+                                  int flags = 0);
+
+  /**
+   * Creates a sender that connects a non-owning local stream socket view.
+   */
+  template <schedule_kind Kind = schedule_kind::post>
+  [[nodiscard]] auto async_connect(async_io::local::stream_socket_view socket,
+                                   const async_io::local::endpoint& endpoint);
 
   /**
    * Creates a sender that waits for events on a file descriptor.

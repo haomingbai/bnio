@@ -230,8 +230,11 @@ TEST(TimerStressTest, concurrent_timer_rekey) {
   EXPECT_EQ(state.stopped.load(std::memory_order_acquire), 0);
 
   // Clean up
+  using rekey_op_type = decltype(bexec::connect(
+      std::declval<bnio::steady_timer&>().async_wait(),
+      std::declval<rekey_receiver>()));
   for (void* ptr : ops_storage) {
-    delete static_cast<char*>(ptr);  // type-erased cleanup
+    delete static_cast<rekey_op_type*>(ptr);  // type-erased storage, typed delete
   }
 }
 
