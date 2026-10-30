@@ -8,8 +8,10 @@
 #define BNIO_SSL_CONTEXT_H_
 
 #include <bnio/ssl/base.h>
+#include <bnio/ssl/stream_view.h>
 #include <openssl/ssl.h>
 
+#include <concepts>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -94,6 +96,43 @@ namespace detail {
   return TLS_method();
 }
 
+/**
+ * The lvalue type an ALPN callback bound argument is forwarded as on every
+ * invocation: a stored std::reference_wrapper<T> unwraps to T&, any other
+ * stored (decay-copied) argument is passed as an lvalue of its own type.
+ */
+template <class T>
+struct bound_arg_lvalue {
+  using type = T&;
+};
+
+template <class T>
+struct bound_arg_lvalue<std::reference_wrapper<T>> {
+  using type = T&;
+};
+
+template <class T>
+using bound_arg_lvalue_t = typename bound_arg_lvalue<T>::type;
+
+/**
+ * Constraint on the callable accepted by context::set_alpn_callback. After
+ * decay, Fn must be invocable as a non-const lvalue with the framework
+ * arguments (owning context, connection view, alpn_out proxy, wire-format
+ * protocol span) followed by the bound arguments forwarded as lvalues, and its
+ * result must convert to the int OpenSSL consumes. Callables that cannot be
+ * invoked this way are rejected at overload resolution instead of failing deep
+ * inside the closure instantiation.
+ */
+template <class Fn, class Context, class Ssl, class Out, class... BoundArgs>
+concept alpn_callback_invocable =
+    requires(Fn& fn, Context& ctx, Ssl ssl, Out& out,
+             std::span<const unsigned char> protocols,
+             bound_arg_lvalue_t<BoundArgs>... args) {
+      {
+        std::invoke(fn, ctx, ssl, out, protocols, args...)
+      } -> std::convertible_to<int>;
+    };
+
 }  // namespace detail
 
 /**
@@ -148,12 +187,14 @@ class context : public base::context_base {
    * closure state owned by the context; installing replaces and destroys any
    * previously installed closure.
    *
-   * The user callable is invoked as: int fn(context& ctx, alpn_out& out,
-   * std::span<const unsigned char> protocols, BoundArgs... args) where ctx is
-   * the context this callback was installed on (do not move the context
-   * after installing: the callback would receive a dangling reference), out
-   * writes the selected protocol via set(), and protocols covers OpenSSL's
-   * wire-format protocol list. The returned int is passed through to OpenSSL
+   * The user callable is invoked as: int fn(context& ctx, stream_view ssl,
+   * alpn_out& out, std::span<const unsigned char> protocols, BoundArgs...
+   * args) where ctx is the context this callback was installed on (do not
+   * move the context after installing: the callback would receive a dangling
+   * reference), ssl is a non-owning view of the connection being handshaken,
+   * out writes the selected protocol via set(), and protocols covers
+   * OpenSSL's wire-format protocol list. The view must not outlive the
+   * connection it refers to. The returned int is passed through to OpenSSL
    * (SSL_TLSEXT_ERR_OK, SSL_TLSEXT_ERR_NOACK, ...). Exceptions escaping fn
    * are swallowed and reported as SSL_TLSEXT_ERR_ALERT_FATAL.
    *
@@ -165,9 +206,16 @@ class context : public base::context_base {
    * state; a default-constructed instance is used. To supply one, name it as
    * the first template argument: ctx.set_alpn_callback<MyAlloc>(fn, args...).
    * Allocation and construction may throw (like std::thread construction).
+   *
+   * Fn is constrained by detail::alpn_callback_invocable: after decay it must
+   * be invocable as a non-const lvalue with exactly the arguments described
+   * above and its result must convert to int. A callable that cannot be
+   * invoked that way is rejected at overload resolution.
    */
   template <class Allocator = std::allocator<std::byte>, class Fn,
             class... Args>
+    requires detail::alpn_callback_invocable<
+        std::decay_t<Fn>, context, stream_view, alpn_out, std::decay_t<Args>...>
   void set_alpn_callback(Fn&& f, Args&&... args) {
     using closure_type =
         alpn_closure<Allocator, std::decay_t<Fn>, std::decay_t<Args>...>;
@@ -204,16 +252,17 @@ class context : public base::context_base {
    private:
     /**
      * Forms the single bound callable: binds the user callable to the
-     * framework parameters (context, out proxy, protocol list) followed by
-     * the bound arguments. reference_wrapper captures stay wrapped here and
-     * are unwrapped per invocation by unwrap_arg.
+     * framework parameters (context, connection view, out proxy, protocol
+     * list) followed by the bound arguments. reference_wrapper captures stay
+     * wrapped here and are unwrapped per invocation by unwrap_arg.
      */
     template <class F, class... As>
     static auto make_bound(F&& f, As&&... as) {
       return [f = std::forward<F>(f), ... captured = std::forward<As>(as)](
-                 context& ctx, alpn_out& out,
+                 context& ctx, stream_view ssl, alpn_out& out,
                  std::span<const unsigned char> protocols) mutable -> int {
-        return std::invoke(f, ctx, out, protocols, unwrap_arg(captured)...);
+        return std::invoke(f, ctx, ssl, out, protocols,
+                           unwrap_arg(captured)...);
       };
     }
 
@@ -251,7 +300,9 @@ class context : public base::context_base {
       std::allocator_traits<closure_alloc_t>::deallocate(alloc, this, 1);
     }
 
-    static int trampoline(SSL* /*ssl*/, const unsigned char** out,
+    // OpenSSL's callback ABI fixes the raw SSL* parameter; wrap it in the
+    // non-owning view the user-facing callable receives.
+    static int trampoline(SSL* ssl, const unsigned char** out,
                           unsigned char* outlen, const unsigned char* in,
                           unsigned int inlen, void* raw) noexcept {
       // OpenSSL holds the arg as void*. The closure object was constructed in
@@ -261,7 +312,8 @@ class context : public base::context_base {
       auto* closure = std::launder(static_cast<alpn_closure*>(raw));
       try {
         alpn_out out_proxy(out, outlen);
-        return std::invoke(closure->bound_, *closure->owner_, out_proxy,
+        return std::invoke(closure->bound_, *closure->owner_, stream_view(ssl),
+                           out_proxy,
                            std::span<const unsigned char>(in, inlen));
       } catch (...) {
         return SSL_TLSEXT_ERR_ALERT_FATAL;

@@ -37,6 +37,16 @@ template <class NextLayer>
   return stream.native_write_bio();
 }
 
+/**
+ * Returns the raw native SSL handle behind a stream's non-owning view. Keeps
+ * the view-to-handle unwrapping in one place so OpenSSL call sites do not
+ * repeat native_handle().native_handle().
+ */
+template <class NextLayer>
+[[nodiscard]] SSL* native_ssl(const tcp::stream<NextLayer>& stream) noexcept {
+  return stream.native_handle().native_handle();
+}
+
 enum class resume_action {
   handshake,
   application_read,

@@ -43,9 +43,9 @@ class handshake_operation
     }
 
     if (type_ == handshake_type::client) {
-      SSL_set_connect_state(this->stream_->native_handle());
+      SSL_set_connect_state(native_ssl(*this->stream_));
     } else {
-      SSL_set_accept_state(this->stream_->native_handle());
+      SSL_set_accept_state(native_ssl(*this->stream_));
     }
     run_handshake();
   }
@@ -71,7 +71,7 @@ class handshake_operation
  private:
   void run_handshake() noexcept {
     bnio::ssl::base::clear_errors();
-    const int result = SSL_do_handshake(this->stream_->native_handle());
+    const int result = SSL_do_handshake(native_ssl(*this->stream_));
     if (result == 1) {
       this->flush_then(resume_action::finish);
       return;

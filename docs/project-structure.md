@@ -183,6 +183,8 @@ High-level async runtime, stream owners, and buffer types.
   - `base/bio_pair.h` — memory BIO pair assembly facility.
   - `context.h` — `ssl::context` class (inherits `base::context_base`; adds
     the method selector and the `set_alpn_callback` closure).
+  - `stream_view.h` — `ssl::stream_view` non-owning view over a native SSL
+    connection.
   - `tcp/stream_class.h` — `ssl::tcp::stream<NextLayer>` class definition.
   - `tcp/stream_operations.h` — SSL stream async sender factories.
   - `stream.h` — aggregate for the ssl stream.

@@ -54,7 +54,7 @@ class shutdown_operation
  private:
   void run_shutdown() noexcept {
     bnio::ssl::base::clear_errors();
-    const int result = SSL_shutdown(this->stream_->native_handle());
+    const int result = SSL_shutdown(native_ssl(*this->stream_));
     if (result == 1) {
       this->flush_then(resume_action::finish);
       return;

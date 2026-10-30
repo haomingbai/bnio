@@ -32,6 +32,9 @@ std::string_view as_string_view(std::span<const unsigned char> bytes) {
 // Records what the high-level (set_alpn_callback) callback observed.
 struct alpn_probe {
   bool invoked = false;
+  bool seen_connection = false;
+  bool connection_matches_context = false;
+  bool is_server_connection = false;
   bnio::ssl::context* seen_context = nullptr;
   bool wire_match = false;
   int bound_magic = 0;
@@ -57,12 +60,13 @@ int native_alpn_select(SSL* /*ssl*/, const unsigned char** out,
   return SSL_TLSEXT_ERR_OK;
 }
 
-// Asserts the negotiated ALPN protocol on one peer's SSL handle. An empty
+// Asserts the negotiated ALPN protocol on one peer's SSL connection. An empty
 // expected value means "no protocol selected".
-void expect_selected_alpn(SSL* ssl, std::string_view expected) {
+void expect_selected_alpn(bnio::ssl::stream_view ssl,
+                          std::string_view expected) {
   const unsigned char* data = nullptr;
   unsigned int len = 0;
-  SSL_get0_alpn_selected(ssl, &data, &len);
+  SSL_get0_alpn_selected(ssl.native_handle(), &data, &len);
   if (expected.empty()) {
     EXPECT_EQ(len, 0u);
     return;
@@ -92,7 +96,8 @@ std::shared_ptr<handshake_state> run_socketpair_handshake(
   if (!client_protos.empty()) {
     // SSL_set_alpn_protos returns 0 on success (inverted convention).
     test_require(SSL_set_alpn_protos(
-                     client.native_handle(), client_protos.data(),
+                     client.native_handle().native_handle(),
+                     client_protos.data(),
                      static_cast<unsigned int>(client_protos.size())) == 0);
   }
 
@@ -156,11 +161,16 @@ TEST(SslAlpnTest, template_callback_selects_h2_and_receives_bindings) {
 
   alpn_probe probe;
   server_context.set_alpn_callback(
-      [](bnio::ssl::context& ctx, bnio::ssl::context::alpn_out& out,
+      [](bnio::ssl::context& ctx, bnio::ssl::stream_view ssl,
+         bnio::ssl::context::alpn_out& out,
          std::span<const unsigned char> protocols, const std::string& protocol,
          int magic, alpn_probe* probe) -> int {
         probe->invoked = true;
         probe->seen_context = &ctx;
+        probe->seen_connection = ssl.valid();
+        probe->connection_matches_context =
+            SSL_get_SSL_CTX(ssl.native_handle()) == ctx.native_handle();
+        probe->is_server_connection = SSL_is_server(ssl.native_handle()) != 0;
         probe->seen_protocol = protocol;
         probe->bound_magic = magic;
         probe->wire_match = protocols.size() == k_client_protos.size() &&
@@ -186,6 +196,11 @@ TEST(SslAlpnTest, template_callback_selects_h2_and_receives_bindings) {
   EXPECT_TRUE(probe.invoked);
   // The callback must observe the very context it was installed on.
   EXPECT_EQ(probe.seen_context, &server_context);
+  // The connection view must wrap a live server-side SSL object created from
+  // that same context.
+  EXPECT_TRUE(probe.seen_connection);
+  EXPECT_TRUE(probe.connection_matches_context);
+  EXPECT_TRUE(probe.is_server_connection);
   // protocols must carry the client's wire-format list byte for byte.
   EXPECT_TRUE(probe.wire_match);
   // Bound arguments must arrive verbatim.
@@ -253,11 +268,11 @@ TEST(SslAlpnTest, noack_leaves_alpn_unselected_but_handshake_succeeds) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  server_context.set_alpn_callback([](bnio::ssl::context&,
-                                      bnio::ssl::context::alpn_out&,
-                                      std::span<const unsigned char>) -> int {
-    return SSL_TLSEXT_ERR_NOACK;
-  });
+  server_context.set_alpn_callback(
+      [](bnio::ssl::context&, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out&, std::span<const unsigned char>) -> int {
+        return SSL_TLSEXT_ERR_NOACK;
+      });
 
   bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
@@ -293,8 +308,9 @@ TEST(SslAlpnTest, replacement_installs_latest_callback_only) {
   alpn_probe probe_a;
   alpn_probe probe_b;
   server_context.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::context::alpn_out& out,
-         std::span<const unsigned char>, alpn_probe* probe) -> int {
+      [](bnio::ssl::context&, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
+         alpn_probe* probe) -> int {
         probe->invoked = true;
         out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
                 static_cast<unsigned char>(k_h2.size()));
@@ -302,8 +318,9 @@ TEST(SslAlpnTest, replacement_installs_latest_callback_only) {
       },
       &probe_a);
   server_context.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::context::alpn_out& out,
-         std::span<const unsigned char>, alpn_probe* probe) -> int {
+      [](bnio::ssl::context&, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
+         alpn_probe* probe) -> int {
         probe->invoked = true;
         out.set(reinterpret_cast<const unsigned char*>(k_http11.data()),
                 static_cast<unsigned char>(k_http11.size()));
@@ -376,11 +393,11 @@ TEST(SslAlpnTest, alert_fatal_aborts_handshake) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  server_context.set_alpn_callback([](bnio::ssl::context&,
-                                      bnio::ssl::context::alpn_out&,
-                                      std::span<const unsigned char>) -> int {
-    return SSL_TLSEXT_ERR_ALERT_FATAL;
-  });
+  server_context.set_alpn_callback(
+      [](bnio::ssl::context&, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out&, std::span<const unsigned char>) -> int {
+        return SSL_TLSEXT_ERR_ALERT_FATAL;
+      });
 
   bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
@@ -397,7 +414,8 @@ TEST(SslAlpnTest, alert_fatal_aborts_handshake) {
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
-                   client.native_handle(), k_client_protos.data(),
+                   client.native_handle().native_handle(),
+                   k_client_protos.data(),
                    static_cast<unsigned int>(k_client_protos.size())) == 0);
 
   auto state = std::make_shared<handshake_state>();
@@ -433,8 +451,9 @@ TEST(SslAlpnTest, lifecycle_smoke_install_replace_destroy) {
     bnio::ssl::context context(bnio::ssl::context_method::tls_server);
     test_require(context.valid());
     context.set_alpn_callback(
-        [](bnio::ssl::context&, bnio::ssl::context::alpn_out& out,
-           std::span<const unsigned char>, alpn_probe* probe) -> int {
+        [](bnio::ssl::context&, bnio::ssl::stream_view,
+           bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
+           alpn_probe* probe) -> int {
           probe->invoked = true;
           out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
                   static_cast<unsigned char>(k_h2.size()));
@@ -442,8 +461,9 @@ TEST(SslAlpnTest, lifecycle_smoke_install_replace_destroy) {
         },
         &probe_a);
     context.set_alpn_callback(
-        [](bnio::ssl::context&, bnio::ssl::context::alpn_out& out,
-           std::span<const unsigned char>, alpn_probe* probe) -> int {
+        [](bnio::ssl::context&, bnio::ssl::stream_view,
+           bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
+           alpn_probe* probe) -> int {
           probe->invoked = true;
           out.set(reinterpret_cast<const unsigned char*>(k_http11.data()),
                   static_cast<unsigned char>(k_http11.size()));
@@ -479,6 +499,7 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
   test_require(!server_context.check_private_key());
 
   server_context.set_alpn_callback([](bnio::ssl::context&,
+                                      bnio::ssl::stream_view,
                                       bnio::ssl::context::alpn_out& out,
                                       std::span<const unsigned char>) -> int {
     out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
@@ -501,7 +522,8 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
-                   client.native_handle(), k_client_protos.data(),
+                   client.native_handle().native_handle(),
+                   k_client_protos.data(),
                    static_cast<unsigned int>(k_client_protos.size())) == 0);
 
   auto state = handshake_live_streams(context, client, server);
@@ -541,11 +563,11 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  server_context.set_alpn_callback([](bnio::ssl::context&,
-                                      bnio::ssl::context::alpn_out&,
-                                      std::span<const unsigned char>) -> int {
-    return SSL_TLSEXT_ERR_NOACK;
-  });
+  server_context.set_alpn_callback(
+      [](bnio::ssl::context&, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out&, std::span<const unsigned char>) -> int {
+        return SSL_TLSEXT_ERR_NOACK;
+      });
 
   bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
@@ -562,7 +584,8 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
 
   // SSL_set_alpn_protos returns 0 on success (inverted convention).
   test_require(SSL_set_alpn_protos(
-                   client.native_handle(), k_client_protos.data(),
+                   client.native_handle().native_handle(),
+                   k_client_protos.data(),
                    static_cast<unsigned int>(k_client_protos.size())) == 0);
 
   auto state = handshake_live_streams(context, client, server);

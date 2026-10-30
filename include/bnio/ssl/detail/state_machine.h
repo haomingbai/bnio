@@ -208,7 +208,7 @@ class operation_base {
   }
 
   void handle_ssl_error(int ssl_result, resume_action action) noexcept {
-    const int error = SSL_get_error(stream_->native_handle(), ssl_result);
+    const int error = SSL_get_error(native_ssl(*stream_), ssl_result);
     switch (error) {
       case SSL_ERROR_WANT_READ:
         after_read_ = action;

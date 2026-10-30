@@ -147,6 +147,7 @@ bnio
 ├── udp_socket                            compatibility alias
 ├── ssl
 │   ├── context                           RAII SSL_CTX owner
+│   ├── stream_view                       non-owning view over a native SSL connection
 │   ├── tcp::stream<NextLayer>            RAII SSL + BIO + transport owner
 │   └── base                              OpenSSL-domain base layer
 │       ├── context_base                  native SSL_CTX owner base

@@ -7,6 +7,7 @@
 #ifndef BNIO_SSL_STREAM_H_
 #define BNIO_SSL_STREAM_H_
 
+#include <bnio/ssl/stream_view.h>
 #include <bnio/ssl/tcp/stream_class.h>
 #include <bnio/ssl/tcp/stream_operations.h>
 

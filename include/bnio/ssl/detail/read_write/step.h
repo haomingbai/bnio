@@ -157,14 +157,14 @@ class step_operation {
     base::clear_errors();
     if constexpr (State::application == application_io::read) {
       void* data = state_->buffer.data();
-      const int result = SSL_read(state_->stream->native_handle(), data,
+      const int result = SSL_read(native_ssl(*state_->stream), data,
                                   bounded_int_size(state_->buffer.size()));
       handle_application_result(result);
     } else {
       const auto* data = static_cast<const char*>(state_->buffer.data());
       const std::size_t remaining = state_->buffer.size() - state_->bytes;
       const int result =
-          SSL_write(state_->stream->native_handle(), data + state_->bytes,
+          SSL_write(native_ssl(*state_->stream), data + state_->bytes,
                     bounded_int_size(remaining));
       handle_application_result(result);
     }
@@ -198,8 +198,7 @@ class step_operation {
   }
 
   void handle_ssl_error(int ssl_result) noexcept {
-    const int error =
-        SSL_get_error(state_->stream->native_handle(), ssl_result);
+    const int error = SSL_get_error(native_ssl(*state_->stream), ssl_result);
     switch (error) {
       case SSL_ERROR_WANT_READ:
         state_->after_flush = resume_action::transport_read;

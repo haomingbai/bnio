@@ -11,10 +11,10 @@
 #include <bnio/ssl/base/bio_pair.h>
 #include <bnio/ssl/base/context_base.h>
 #include <bnio/ssl/context.h>
+#include <bnio/ssl/stream_view.h>
 #include <bnio/tcp.h>
 #include <openssl/ssl.h>
 
-#include <cstddef>
 #include <span>
 #include <utility>
 
@@ -58,7 +58,7 @@ class stream {
    */
   stream(stream&& other) noexcept
       : next_layer_(std::move(other.next_layer_)),
-        ssl_(std::exchange(other.ssl_, nullptr)),
+        ssl_(std::exchange(other.ssl_, stream_view{})),
         read_bio_(std::exchange(other.read_bio_, nullptr)),
         write_bio_(std::exchange(other.write_bio_, nullptr)) {}
 
@@ -69,7 +69,7 @@ class stream {
     if (this != &other) {
       release();
       next_layer_ = std::move(other.next_layer_);
-      ssl_ = std::exchange(other.ssl_, nullptr);
+      ssl_ = std::exchange(other.ssl_, stream_view{});
       read_bio_ = std::exchange(other.read_bio_, nullptr);
       write_bio_ = std::exchange(other.write_bio_, nullptr);
     }
@@ -103,21 +103,23 @@ class stream {
   }
 
   /**
-   * Returns the owned native SSL pointer, or nullptr when invalid.
+   * Returns a non-owning view of the owned native SSL object, or an invalid
+   * view when this stream owns no connection.
    */
-  [[nodiscard]] SSL* native_handle() const noexcept { return ssl_; }
+  [[nodiscard]] stream_view native_handle() const noexcept { return ssl_; }
 
   /**
-   * Returns the owned native SSL pointer, or nullptr when invalid.
+   * Returns a non-owning view of the owned native SSL object, or an invalid
+   * view when this stream owns no connection.
    */
-  [[nodiscard]] SSL* get_native_handle() const noexcept {
+  [[nodiscard]] stream_view get_native_handle() const noexcept {
     return native_handle();
   }
 
   /**
    * Returns whether this stream owns a native SSL object.
    */
-  [[nodiscard]] bool valid() const noexcept { return ssl_ != nullptr; }
+  [[nodiscard]] bool valid() const noexcept { return ssl_.valid(); }
 
   /**
    * Returns the transport BIO used for encrypted input.
@@ -139,10 +141,7 @@ class stream {
    */
   [[nodiscard]] std::span<const unsigned char> get_alpn_selected()
       const noexcept {
-    const unsigned char* data = nullptr;
-    unsigned int len = 0;
-    SSL_get0_alpn_selected(ssl_, &data, &len);
-    return {data, len};
+    return ssl_.alpn_selected();
   }
 
   /**
@@ -193,9 +192,9 @@ class stream {
 
  private:
   void release() noexcept {
-    if (ssl_ != nullptr) {
-      SSL_free(ssl_);
-      ssl_ = nullptr;
+    if (ssl_.valid()) {
+      SSL_free(ssl_.native_handle());
+      ssl_ = stream_view{};
     }
     if (read_bio_ != nullptr) {
       BIO_free(read_bio_);
@@ -208,27 +207,27 @@ class stream {
   }
 
   void reset(base::context_base& context) noexcept {
-    ssl_ = SSL_new(context.native_handle());
-    if (ssl_ == nullptr) {
+    ssl_ = stream_view(SSL_new(context.native_handle()));
+    if (!ssl_.valid()) {
       return;
     }
 
     const base::bio_pair pair = base::bio_pair::make();
     if (!pair.valid()) {
-      SSL_free(ssl_);
-      ssl_ = nullptr;
+      SSL_free(ssl_.native_handle());
+      ssl_ = stream_view{};
       return;
     }
 
-    SSL_set_bio(ssl_, pair.ssl_read, pair.ssl_write);
+    SSL_set_bio(ssl_.native_handle(), pair.ssl_read, pair.ssl_write);
     read_bio_ = pair.transport_read;
     write_bio_ = pair.transport_write;
-    SSL_set_mode(ssl_, SSL_MODE_ENABLE_PARTIAL_WRITE |
-                           SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+    SSL_set_mode(ssl_.native_handle(), SSL_MODE_ENABLE_PARTIAL_WRITE |
+                                           SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
   }
 
   NextLayer next_layer_;
-  SSL* ssl_ = nullptr;
+  stream_view ssl_;
   BIO* read_bio_ = nullptr;
   BIO* write_bio_ = nullptr;
 };
