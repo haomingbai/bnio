@@ -177,20 +177,35 @@ ring.cqe_seen(cqe);                 // ✓ mark seen last
 // cqe.res() after cqe_seen() → undefined behavior
 ```
 
-### Rule 6: `ssl::context` must outlive all `ssl::tcp::stream` objects created from it
+### Rule 6: `ssl::context` must outlive all `ssl::tcp::stream` objects that reference it
 
-`ssl::tcp::stream` creates an `SSL*` from the `SSL_CTX*` owned by
-`ssl::context`. If the context is destroyed first, the stream's `SSL*`
-becomes a dangling pointer.
+`ssl::tcp::stream` keeps a bnio-level reference to the `ssl::context` it was
+constructed with, and to any context later installed with
+`ssl::tcp::stream::set_context()`. That context owns the ALPN closure and its
+bound arguments, and the callback is invoked with `context&`. OpenSSL's
+`SSL_new` and `SSL_set_SSL_CTX` take their own reference to the native
+`SSL_CTX`, and the constructor context's native `SSL_CTX` also remains
+referenced as the connection's `session_ctx` until `SSL_free`. Destroying the
+bnio context first therefore does not immediately free the native `SSL_CTX`;
+instead, it destroys the ALPN closure and bound arguments while the live SSL
+object may still call them, for example on the next handshake. Treat every
+context passed to the constructor or to `set_context()` as required to
+outlive each stream that references it; a context may be destroyed only after
+all such streams.
+
+`ssl::context::set_alpn_callback()` also stores a pointer to the context
+object itself, because the callback is invoked with `context&`. Do not move a
+context after installing an ALPN callback on it: the callback would receive a
+reference to the moved-from object.
 
 ```cpp
-// WRONG — ssl_ctx dies, stream holds SSL* from that SSL_CTX*
+// WRONG — ctx dies while the returned stream still references bnio state it owns
 bnio::ssl::tcp::stream<bnio::tcp_socket> make_stream() {
     bnio::ssl::context ctx;                    // local
     bnio::tcp_socket sock;
     sock.open(bnio::ip::tcp::v4());
     return bnio::ssl::tcp::stream(std::move(sock), ctx);
-}   // ctx destroyed → SSL_CTX freed → returned stream's SSL* dangles
+}   // ctx destroyed → ALPN closure/bound args freed; the SSL still references them
 
 // RIGHT — ssl::context outlives ssl::tcp::stream
 bnio::ssl::context ctx;                        // outer scope

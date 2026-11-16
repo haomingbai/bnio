@@ -10,12 +10,14 @@
 #include <bnio/io_context.h>
 #include <bnio/ssl/base/bio_pair.h>
 #include <bnio/ssl/base/context_base.h>
+#include <bnio/ssl/base/errors.h>
 #include <bnio/ssl/context.h>
 #include <bnio/ssl/stream_view.h>
 #include <bnio/tcp.h>
 #include <openssl/ssl.h>
 
 #include <span>
+#include <system_error>
 #include <utility>
 
 namespace bnio::ssl::tcp {
@@ -120,6 +122,43 @@ class stream {
    * Returns whether this stream owns a native SSL object.
    */
   [[nodiscard]] bool valid() const noexcept { return ssl_.valid(); }
+
+  /**
+   * Replaces the context backing this stream's SSL object, mirroring
+   * OpenSSL's SSL_set_SSL_CTX primitive.
+   *
+   * This is a low-level primitive only: it performs no context or certificate
+   * selection and no SNI handling. It is not a reset: the SSL object and its
+   * BIO pair are preserved, and no certificates are validated here. Expect to
+   * call it before the handshake. The context must outlive this stream, and
+   * once a context has been installed here (or an ALPN callback has been
+   * installed on it) do not move it. Calling it after the handshake may
+   * succeed, but it never retroactively changes an already established
+   * connection.
+   *
+   * Passing the current context is a successful no-op. On failure the
+   * previous context and certificates remain in effect. Returns
+   * make_no_ssl_error() when this stream owns no SSL object,
+   * std::errc::invalid_argument when context is invalid (this is detected
+   * before OpenSSL is called, because SSL_set_SSL_CTX(ssl, nullptr) silently
+   * switches to the session context instead of failing), and the recorded
+   * OpenSSL error when SSL_set_SSL_CTX fails.
+   */
+  [[nodiscard]] std::error_code set_context(
+      base::context_base& context) noexcept {
+    if (!valid()) {
+      return base::make_no_ssl_error();
+    }
+    if (!context.valid()) {
+      return std::make_error_code(std::errc::invalid_argument);
+    }
+    base::clear_errors();
+    if (SSL_set_SSL_CTX(ssl_.native_handle(), context.native_handle()) ==
+        nullptr) {
+      return base::last_error();
+    }
+    return base::empty_error_code;
+  }
 
   /**
    * Returns the transport BIO used for encrypted input.

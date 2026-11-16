@@ -225,6 +225,15 @@ receiver environment is cancelled. The bnio sender/receiver contract uses
 only these two completion channels; `set_error` is not part of it — no bnio
 `completion_signatures` include it, and no bnio receiver implements it.
 
+`ssl::tcp::stream::set_context(context)` is the synchronous TLS control
+primitive: it mirrors OpenSSL's `SSL_set_SSL_CTX` by replacing the context
+behind an existing stream without rebuilding the SSL object or its BIOs. It
+performs no certificate or SNI selection of its own, does not validate
+certificates, and is intended to be called before the handshake. The new
+context must outlive the stream, and a context must not be moved after an
+ALPN callback has been installed on it. The call returns `std::error_code`,
+not a sender.
+
 TLS streams encode EOF and close results the same way as plain descriptors
 and TCP sockets:
 
