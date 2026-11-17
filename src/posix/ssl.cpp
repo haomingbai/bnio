@@ -4,6 +4,7 @@
  */
 
 #include <bnio/ssl/base.h>
+#include <bnio/ssl/handshake_pause.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 
@@ -36,7 +37,56 @@ class openssl_category final : public std::error_category {
   }
 };
 
+class handshake_pause_category_impl final : public std::error_category {
+ public:
+  [[nodiscard]] const char* name() const noexcept override {
+    return "bnio.ssl.handshake_pause";
+  }
+
+  [[nodiscard]] std::string message(int value) const override {
+    switch (static_cast<ssl::handshake_pause_reason>(value)) {
+      case ssl::handshake_pause_reason::none:
+        return "no handshake pause";
+      case ssl::handshake_pause_reason::want_read:
+        return "handshake paused waiting for readable transport data";
+      case ssl::handshake_pause_reason::want_write:
+        return "handshake paused waiting for writable transport data";
+      case ssl::handshake_pause_reason::x509_lookup:
+        return "handshake paused for an X509 lookup";
+      case ssl::handshake_pause_reason::async:
+        return "handshake paused for an asynchronous engine operation";
+      case ssl::handshake_pause_reason::async_job:
+        return "handshake paused for an asynchronous job to be assigned";
+      case ssl::handshake_pause_reason::client_hello_cb:
+        return "handshake paused in the client hello callback";
+      case ssl::handshake_pause_reason::retry_verify:
+        return "handshake paused for certificate verification retry";
+    }
+    return "unknown handshake pause reason";
+  }
+};
+
 }  // namespace
+
+namespace ssl {
+
+const std::error_category& handshake_pause_category() noexcept {
+  // A function-local static keeps the category a single object for every
+  // translation unit and shared object that links against the bnio library.
+  static handshake_pause_category_impl category;
+  return category;
+}
+
+std::error_code make_handshake_pause_error(
+    handshake_pause_reason reason) noexcept {
+  const int value = static_cast<int>(reason);
+  if (value == static_cast<int>(handshake_pause_reason::none)) {
+    return std::error_code{};
+  }
+  return std::error_code(value, handshake_pause_category());
+}
+
+}  // namespace ssl
 
 namespace ssl::base {
 

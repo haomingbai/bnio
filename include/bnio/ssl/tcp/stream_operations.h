@@ -26,6 +26,19 @@ auto stream<NextLayer>::async_handshake(Scheduler scheduler,
 }
 
 template <class NextLayer>
+template <class Scheduler, class Factory>
+  requires detail::handshake_retry_factory<Factory>
+auto stream<NextLayer>::async_handshake(Scheduler scheduler,
+                                        bnio::ssl::handshake_type type,
+                                        Factory&& factory) {
+  using scheduler_type = std::remove_cvref_t<Scheduler>;
+  using factory_type = std::remove_cvref_t<Factory>;
+  return detail::handshake_retry_sender<scheduler_type, NextLayer,
+                                        factory_type>(
+      std::move(scheduler), *this, type, std::forward<Factory>(factory));
+}
+
+template <class NextLayer>
 template <class Scheduler, class Buffer>
 auto stream<NextLayer>::async_read(Scheduler scheduler, Buffer&& buffer,
                                    int) {

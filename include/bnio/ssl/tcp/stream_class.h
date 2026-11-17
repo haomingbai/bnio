@@ -12,6 +12,7 @@
 #include <bnio/ssl/base/context_base.h>
 #include <bnio/ssl/base/errors.h>
 #include <bnio/ssl/context.h>
+#include <bnio/ssl/detail/handshake_concepts.h>
 #include <bnio/ssl/stream_view.h>
 #include <bnio/tcp.h>
 #include <openssl/ssl.h>
@@ -190,6 +191,26 @@ class stream {
   template <class Scheduler>
   [[nodiscard]] auto async_handshake(
       Scheduler scheduler, bnio::ssl::handshake_type type);
+
+  /**
+   * Creates a handshake sender that runs the SSL attempt first and invokes
+   * `factory` only when the attempt pauses.
+   *
+   * This is the full retry surface: the factory receives the pause code and
+   * returns a sender (for example make_handshake_wait_sender) that performs
+   * one wait step; an empty completion resumes the handshake, a non-empty
+   * one becomes the terminal result, and set_stopped cancels. The receiver
+   * contract is unchanged from the 2-argument overload: exactly
+   * set_value(std::error_code) plus set_stopped(), and pause codes never
+   * reach the public receiver. Everything is stored inline; connecting and
+   * starting do not allocate. The factory is invoked zero times when the
+   * stream is invalid or the attempt finishes without pausing.
+   */
+  template <class Scheduler, class Factory>
+    requires detail::handshake_retry_factory<Factory>
+  [[nodiscard]] auto async_handshake(Scheduler scheduler,
+                                     bnio::ssl::handshake_type type,
+                                     Factory&& factory);
 
   /**
    * Creates a sender for one plaintext SSL read operation. The operation may

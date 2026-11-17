@@ -9,6 +9,7 @@
 
 #include <bnio/ssl/detail/common.h>
 #include <bnio/ssl/detail/handshake.h>
+#include <bnio/ssl/detail/handshake_retry.h>
 #include <bnio/ssl/detail/read_write.h>
 #include <bnio/ssl/detail/senders.h>
 #include <bnio/ssl/detail/shutdown.h>

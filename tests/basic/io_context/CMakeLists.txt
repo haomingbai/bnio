@@ -12,6 +12,34 @@ bnio_add_basic_io_context_test(buffer buffer_test.cpp)
 bnio_add_basic_io_context_test(io_context_sender_concept
                                io_context_sender_concept_test.cpp)
 bnio_add_basic_io_context_test(ssl_concept ssl_concept_test.cpp)
+bnio_add_basic_io_context_test(ssl_handshake_pause
+                               ssl_handshake_pause_test.cpp)
+bnio_add_basic_io_context_test(ssl_handshake_retry_concept
+                               ssl_handshake_retry_concept_test.cpp)
+# The inline-terminal lifetime regression is only meaningful when the
+# use-after-free is actually detected, so this one target is instrumented with
+# AddressSanitizer. The operation lives in headers, so instrumenting the test
+# translation unit instruments the code under test too.
+bnio_add_basic_io_context_test(ssl_handshake_retry_lifetime
+                               ssl_handshake_retry_lifetime_test.cpp
+                               PROPERTIES TIMEOUT 20)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT BNIO_ENABLE_TSAN)
+  target_compile_options(
+    bnio_basic_io_context_ssl_handshake_retry_lifetime_test
+    PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(
+    bnio_basic_io_context_ssl_handshake_retry_lifetime_test
+    PRIVATE -fsanitize=address)
+endif()
+bnio_add_basic_io_context_test(ssl_handshake_retry_noheap
+                               ssl_handshake_retry_noheap_test.cpp
+                               PROPERTIES TIMEOUT 20)
+bnio_add_basic_io_context_test(ssl_handshake_retry_runtime
+                               ssl_handshake_retry_runtime_test.cpp
+                               PROPERTIES TIMEOUT 20)
+bnio_add_basic_io_context_test(ssl_handshake_wait
+                               ssl_handshake_wait_test.cpp
+                               PROPERTIES TIMEOUT 20)
 bnio_add_basic_io_context_test(timer_state timer_state_test.cpp)
 
 function(bnio_add_basic_io_context_header_test name definition)

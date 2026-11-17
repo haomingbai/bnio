@@ -57,6 +57,9 @@ enum class resume_action {
   // Delivered after the hard-failure flush completes: complete the
   // operation with the staged SSL error (see operation_base).
   fail,
+  // Delivered after the output flush of a paused handshake attempt: the
+  // factory-driven retry operation invokes its factory for the staged pause.
+  pause,
 };
 
 [[nodiscard]] inline int bounded_int_size(std::size_t size) noexcept {

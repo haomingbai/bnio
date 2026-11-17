@@ -43,6 +43,15 @@ bnio_add_integration_io_context_test(ssl_error_queue_hygiene
                                      ssl_error_queue_hygiene_test.cpp
                                      PROPERTIES TIMEOUT 10)
 bnio_add_integration_io_context_test(ssl_handshake ssl_handshake_test.cpp)
+bnio_add_integration_io_context_test(ssl_handshake_retry
+                                     ssl_handshake_retry_test.cpp
+                                     PROPERTIES TIMEOUT 30)
+bnio_add_integration_io_context_test(ssl_handshake_retry_category
+                                     ssl_handshake_retry_category_test.cpp
+                                     PROPERTIES TIMEOUT 10)
+target_sources(
+  bnio_integration_io_context_ssl_handshake_retry_category_test
+  PRIVATE ssl_handshake_retry_category_peer.cpp)
 bnio_add_integration_io_context_test(ssl_transfer ssl_transfer_test.cpp)
 bnio_add_integration_io_context_test(ssl_alpn ssl_alpn_test.cpp)
 bnio_add_integration_io_context_test(ssl_context_switch

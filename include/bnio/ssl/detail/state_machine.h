@@ -180,18 +180,41 @@ class operation_base {
 
   void post_complete_value(std::error_code ec) noexcept {
     complete_value(ec);
-    submit_post();
+    submit_completion();
   }
 
   void post_complete_error(std::error_code error) noexcept {
     complete_error(error);
-    submit_post();
+    submit_completion();
   }
 
   void post_complete_stopped() noexcept {
     complete_stopped();
-    submit_post();
+    submit_completion();
   }
+
+  /**
+   * Submits the completion staged by post_complete_*.
+   *
+   * A derived driver loop that defines on_terminal_staged() receives the
+   * staged completion instead, because the schedule post may complete inline
+   * and destroy the operation: the post must be the driver loop's last action,
+   * not a nested flush/transport/child-completion callback's. Operations
+   * without the hook keep the immediate-post behavior.
+   */
+  void submit_completion() noexcept {
+    if constexpr (requires(Derived& derived) {
+                    derived.on_terminal_staged();
+                  }) {
+      static_cast<Derived*>(this)->on_terminal_staged();
+    } else {
+      submit_post();
+    }
+  }
+
+  // Submits the already staged completion; the caller must not touch the
+  // operation afterwards (the post may complete inline and destroy it).
+  void submit_staged_completion() noexcept { submit_post(); }
 
   void flush_then(resume_action action) noexcept {
     after_flush_ = action;

@@ -26,6 +26,19 @@ struct async_handshake_t {
     return std::forward<Stream>(stream).async_handshake(
         std::forward<Provider>(provider), type);
   }
+
+  /**
+   * Invokes the factory-driven retry overload of async_handshake on a
+   * stream. The stream's member function enforces the factory concept; this
+   * overload only forwards.
+   */
+  template <class Provider, class Stream, class Factory>
+  constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
+                                      handshake_type type,
+                                      Factory&& factory) const {
+    return std::forward<Stream>(stream).async_handshake(
+        std::forward<Provider>(provider), type, std::forward<Factory>(factory));
+  }
 };
 
 /**
