@@ -22,6 +22,13 @@ namespace bnio::ssl {
  * the pointer: the SSL object remains owned and freed by its RAII owner
  * (ssl::tcp::stream), and the view stays valid only while that owner keeps the
  * connection alive.
+ *
+ * The native context behind the connection is equally non-owning here: the
+ * SSL object references its SSL_CTX, but callback registrations and the
+ * closures behind them are owned by the ssl::context. That owner must stay
+ * alive for the ALPN callback to remain installed and effective on this
+ * connection; destroying it clears the registrations even while the
+ * connection itself is still alive.
  */
 class stream_view {
  public:

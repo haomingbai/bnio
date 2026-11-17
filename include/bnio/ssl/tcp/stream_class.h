@@ -10,8 +10,10 @@
 #include <bnio/io_context.h>
 #include <bnio/ssl/base/bio_pair.h>
 #include <bnio/ssl/base/context_base.h>
+#include <bnio/ssl/base/context_view.h>
 #include <bnio/ssl/base/errors.h>
 #include <bnio/ssl/context.h>
+#include <bnio/ssl/context_view.h>
 #include <bnio/ssl/detail/handshake_concepts.h>
 #include <bnio/ssl/stream_view.h>
 #include <bnio/tcp.h>
@@ -34,9 +36,44 @@ template <class NextLayer = bnio::tcp_socket>
 class stream {
  public:
   /**
-   * Creates an SSL stream over a next layer using an existing context.
+   * Creates an SSL stream over a next layer using an owning context.
+   *
+   * This is the primary constructor. The stream takes no ownership of the
+   * context and keeps no bnio reference to it: it only needs the native
+   * SSL_CTX, and SSL_new takes its own OpenSSL reference, so the stream may
+   * safely outlive the bnio context. The context only has to outlive every
+   * stream whose handshake should still invoke its ALPN/keylog callbacks.
+   * Destroying the context clears those native registrations and the closures
+   * even while the connection itself stays alive.
+   */
+  stream(NextLayer next_layer, bnio::ssl::context& context) noexcept
+      : next_layer_(std::move(next_layer)) {
+    reset(context);
+  }
+
+  /**
+   * Creates an SSL stream over a next layer using an owning base context.
+   * Equivalent to the ssl::context overload: only the native SSL_CTX is
+   * needed, and SSL_new takes its own OpenSSL reference to it.
    */
   stream(NextLayer next_layer, base::context_base& context) noexcept
+      : next_layer_(std::move(next_layer)) {
+    reset(context);
+  }
+
+  /**
+   * Creates an SSL stream from a non-owning context view.
+   *
+   * Use this only when the caller already holds a non-owning handle; passing
+   * the owning ssl::context is the primary entry point. The stream takes no
+   * ownership of the context. SSL_new keeps the native SSL_CTX alive through
+   * the SSL object's own reference, so the stream may safely outlive the bnio
+   * context; the context only has to outlive every stream whose handshake
+   * should still invoke its ALPN/keylog callbacks. Destroying the context
+   * clears those native registrations and the closures even while the
+   * connection itself stays alive.
+   */
+  stream(NextLayer next_layer, context_view context) noexcept
       : next_layer_(std::move(next_layer)) {
     reset(context);
   }
@@ -128,14 +165,23 @@ class stream {
    * Replaces the context backing this stream's SSL object, mirroring
    * OpenSSL's SSL_set_SSL_CTX primitive.
    *
+   * The owning ssl::context overload is the primary entry point; the
+   * context_view overload is for callers that only hold a non-owning handle
+   * (and for internal delegation). The stream keeps no bnio reference to the
+   * context: SSL_set_SSL_CTX keeps the native SSL_CTX alive through the SSL
+   * object's own reference, so the stream may safely outlive the owning
+   * context. The owning context only has to outlive every stream whose
+   * handshake should still invoke its ALPN/keylog callbacks; destroying it
+   * clears those native registrations and the closures even while the
+   * connection stays alive. Moving the context is safe because callback
+   * registrations point at heap closure state owned by the context slot.
+   * Calling it after the handshake may succeed, but it never retroactively
+   * changes an already established connection.
+   *
    * This is a low-level primitive only: it performs no context or certificate
    * selection and no SNI handling. It is not a reset: the SSL object and its
    * BIO pair are preserved, and no certificates are validated here. Expect to
-   * call it before the handshake. The context must outlive this stream, and
-   * once a context has been installed here (or an ALPN callback has been
-   * installed on it) do not move it. Calling it after the handshake may
-   * succeed, but it never retroactively changes an already established
-   * connection.
+   * call it before the handshake.
    *
    * Passing the current context is a successful no-op. On failure the
    * previous context and certificates remain in effect. Returns
@@ -146,7 +192,25 @@ class stream {
    * OpenSSL error when SSL_set_SSL_CTX fails.
    */
   [[nodiscard]] std::error_code set_context(
+      bnio::ssl::context& context) noexcept {
+    return set_context(context.view());
+  }
+
+  /**
+   * Replaces the context backing this stream's SSL object from an owning base
+   * context. Equivalent to the ssl::context overload.
+   */
+  [[nodiscard]] std::error_code set_context(
       base::context_base& context) noexcept {
+    return set_context(context.view());
+  }
+
+  /**
+   * Replaces the context backing this stream's SSL object from a non-owning
+   * context view. Use this only when the caller already holds a non-owning
+   * handle; passing the owning ssl::context is the primary entry point.
+   */
+  [[nodiscard]] std::error_code set_context(context_view context) noexcept {
     if (!valid()) {
       return base::make_no_ssl_error();
     }
@@ -189,8 +253,8 @@ class stream {
    * submission path.
    */
   template <class Scheduler>
-  [[nodiscard]] auto async_handshake(
-      Scheduler scheduler, bnio::ssl::handshake_type type);
+  [[nodiscard]] auto async_handshake(Scheduler scheduler,
+                                     bnio::ssl::handshake_type type);
 
   /**
    * Creates a handshake sender that runs the SSL attempt first and invokes
@@ -266,7 +330,11 @@ class stream {
     }
   }
 
-  void reset(base::context_base& context) noexcept {
+  void reset(bnio::ssl::context& context) noexcept { reset(context.view()); }
+
+  void reset(base::context_base& context) noexcept { reset(context.view()); }
+
+  void reset(context_view context) noexcept {
     ssl_ = stream_view(SSL_new(context.native_handle()));
     if (!ssl_.valid()) {
       return;

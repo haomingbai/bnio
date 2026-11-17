@@ -54,6 +54,19 @@ target_sources(
   PRIVATE ssl_handshake_retry_category_peer.cpp)
 bnio_add_integration_io_context_test(ssl_transfer ssl_transfer_test.cpp)
 bnio_add_integration_io_context_test(ssl_alpn ssl_alpn_test.cpp)
+# The ALPN context-lifetime regressions (context destroyed or moved while
+# streams are still live) are only meaningful when a use-after-free is
+# actually detected, so this target is instrumented with AddressSanitizer.
+# The context and closure code lives in headers, which instruments the code
+# under test through this translation unit.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT BNIO_ENABLE_TSAN)
+  target_compile_options(
+    bnio_integration_io_context_ssl_alpn_test
+    PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(
+    bnio_integration_io_context_ssl_alpn_test
+    PRIVATE -fsanitize=address)
+endif()
 bnio_add_integration_io_context_test(ssl_context_switch
                                      ssl_context_switch_test.cpp)
 bnio_add_integration_io_context_test(steady_timer steady_timer_test.cpp

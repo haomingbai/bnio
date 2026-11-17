@@ -1,6 +1,7 @@
 /**
  * @file ssl.cpp
- * @brief SSL base layer: OpenSSL error category and context_base implementation.
+ * @brief SSL base layer: OpenSSL error category, context_base owner, and
+ * context_view operations.
  */
 
 #include <bnio/ssl/base.h>
@@ -107,31 +108,25 @@ context_base::context_base(const SSL_METHOD* method) noexcept
     : context_(SSL_CTX_new(method)) {}
 
 context_base::~context_base() noexcept {
-  store_owned_alpn_arg(nullptr);
   if (context_ != nullptr) {
     SSL_CTX_free(context_);
   }
 }
 
 context_base::context_base(context_base&& other) noexcept
-    : context_(std::exchange(other.context_, nullptr)),
-      owned_alpn_arg_(std::exchange(other.owned_alpn_arg_, nullptr)) {}
+    : context_(std::exchange(other.context_, nullptr)) {}
 
 context_base& context_base::operator=(context_base&& other) noexcept {
   if (this != &other) {
-    if (owned_alpn_arg_ != nullptr) {
-      owned_alpn_arg_->destroy();
-    }
     if (context_ != nullptr) {
       SSL_CTX_free(context_);
     }
     context_ = std::exchange(other.context_, nullptr);
-    owned_alpn_arg_ = std::exchange(other.owned_alpn_arg_, nullptr);
   }
   return *this;
 }
 
-std::error_code context_base::use_certificate_chain_file(
+std::error_code context_view::use_certificate_chain_file(
     const char* path) noexcept {
   clear_errors();
   if (SSL_CTX_use_certificate_chain_file(context_, path) == 1) {
@@ -140,7 +135,7 @@ std::error_code context_base::use_certificate_chain_file(
   return last_error();
 }
 
-std::error_code context_base::use_private_key_file(const char* path) noexcept {
+std::error_code context_view::use_private_key_file(const char* path) noexcept {
   clear_errors();
   if (SSL_CTX_use_PrivateKey_file(context_, path, SSL_FILETYPE_PEM) == 1) {
     return empty_error_code;
@@ -148,7 +143,7 @@ std::error_code context_base::use_private_key_file(const char* path) noexcept {
   return last_error();
 }
 
-std::error_code context_base::check_private_key() noexcept {
+std::error_code context_view::check_private_key() noexcept {
   clear_errors();
   if (SSL_CTX_check_private_key(context_) == 1) {
     return empty_error_code;
@@ -156,19 +151,12 @@ std::error_code context_base::check_private_key() noexcept {
   return last_error();
 }
 
-void context_base::set_verify_mode(int mode) noexcept {
+void context_view::set_verify_mode(int mode) noexcept {
   SSL_CTX_set_verify(context_, mode, nullptr);
 }
 
-void context_base::set_alpn_select_cb(alpn_select_cb cb, void* arg) noexcept {
+void context_view::set_alpn_select_cb(alpn_select_cb cb, void* arg) noexcept {
   SSL_CTX_set_alpn_select_cb(context_, cb, arg);
-}
-
-void context_base::store_owned_alpn_arg(alpn_arg_base* owned_arg) noexcept {
-  if (owned_alpn_arg_ != nullptr) {
-    owned_alpn_arg_->destroy();
-  }
-  owned_alpn_arg_ = owned_arg;
 }
 
 }  // namespace ssl::base

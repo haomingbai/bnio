@@ -260,7 +260,7 @@ struct throwing_connect_factory {
 // queues in the write BIO while the attempt fails.
 void install_fatal_alpn_callback(bnio::ssl::context& context) {
   context.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::stream_view,
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
          bnio::ssl::context::alpn_out&,
          std::span<const unsigned char>) -> int {
         return SSL_TLSEXT_ERR_ALERT_FATAL;

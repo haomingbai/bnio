@@ -60,8 +60,9 @@ bnio/bnio.h  (umbrella)
 ├── bnio/local.h
 │   └── local/{socket, acceptor, async_operations}.h
 ├── bnio/ssl.h
-│   └── ssl/{base, context, cpo, stream}.h
-│       ├── ssl/base/{alpn, bio_pair, context_base, errors}.h
+│   └── ssl/{base, context, context_view, cpo, stream}.h
+│       ├── ssl/base/{alpn, bio_pair, context_base, context_view, errors}.h
+│       ├── ssl/detail/callback_slot.h
 │       └── ssl/tcp/{stream_class, stream_operations}.h
 ├── bnio/io_context_cpo.h
 │   └── io_context_cpo/{instances, concepts, read, write,
@@ -146,12 +147,16 @@ bnio
 ├── tcp_socket / tcp_acceptor             compatibility aliases
 ├── udp_socket                            compatibility alias
 ├── ssl
-│   ├── context                           RAII SSL_CTX owner
+│   ├── context                           RAII SSL_CTX + owned callback closure slot
+│   ├── context_view                      non-owning view over a native SSL_CTX
 │   ├── stream_view                       non-owning view over a native SSL connection
 │   ├── tcp::stream<NextLayer>            RAII SSL + BIO + transport owner
+│   ├── detail
+│   │   └── callback_slot                 inline closure ownership for ssl::context
 │   └── base                              OpenSSL-domain base layer
-│       ├── context_base                  native SSL_CTX owner base
-│       ├── alpn_arg_base                 owned ALPN callback argument interface
+│       ├── context_base                  native SSL_CTX owner base (forwards to context_view)
+│       ├── context_view                  non-owning native SSL_CTX view
+│       ├── alpn_arg_base                 heap callback argument destruction interface
 │       └── bio_pair                      memory BIO pair assembly
 ├── mutable_buffer                        non-owning mutable byte view
 ├── const_buffer                          non-owning const byte view

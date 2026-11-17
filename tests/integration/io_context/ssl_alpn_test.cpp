@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "../../support/io_context/ssl_test_support.h"
@@ -35,7 +37,7 @@ struct alpn_probe {
   bool seen_connection = false;
   bool connection_matches_context = false;
   bool is_server_connection = false;
-  bnio::ssl::context* seen_context = nullptr;
+  bnio::ssl::context_view seen_context;
   bool wire_match = false;
   int bound_magic = 0;
   std::string seen_protocol;
@@ -161,12 +163,12 @@ TEST(SslAlpnTest, template_callback_selects_h2_and_receives_bindings) {
 
   alpn_probe probe;
   server_context.set_alpn_callback(
-      [](bnio::ssl::context& ctx, bnio::ssl::stream_view ssl,
+      [](bnio::ssl::context_view ctx, bnio::ssl::stream_view ssl,
          bnio::ssl::context::alpn_out& out,
          std::span<const unsigned char> protocols, const std::string& protocol,
          int magic, alpn_probe* probe) -> int {
         probe->invoked = true;
-        probe->seen_context = &ctx;
+        probe->seen_context = ctx;
         probe->seen_connection = ssl.valid();
         probe->connection_matches_context =
             SSL_get_SSL_CTX(ssl.native_handle()) == ctx.native_handle();
@@ -194,8 +196,9 @@ TEST(SslAlpnTest, template_callback_selects_h2_and_receives_bindings) {
   EXPECT_EQ(state->stopped, 0);
 
   EXPECT_TRUE(probe.invoked);
-  // The callback must observe the very context it was installed on.
-  EXPECT_EQ(probe.seen_context, &server_context);
+  // The callback must observe a view of the very context it was installed
+  // on, identified by the native handle.
+  EXPECT_EQ(probe.seen_context.native_handle(), server_context.native_handle());
   // The connection view must wrap a live server-side SSL object created from
   // that same context.
   EXPECT_TRUE(probe.seen_connection);
@@ -269,7 +272,7 @@ TEST(SslAlpnTest, noack_leaves_alpn_unselected_but_handshake_succeeds) {
   test_require(!server_context.check_private_key());
 
   server_context.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::stream_view,
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
          bnio::ssl::context::alpn_out&, std::span<const unsigned char>) -> int {
         return SSL_TLSEXT_ERR_NOACK;
       });
@@ -308,7 +311,7 @@ TEST(SslAlpnTest, replacement_installs_latest_callback_only) {
   alpn_probe probe_a;
   alpn_probe probe_b;
   server_context.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::stream_view,
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
          bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
          alpn_probe* probe) -> int {
         probe->invoked = true;
@@ -318,7 +321,7 @@ TEST(SslAlpnTest, replacement_installs_latest_callback_only) {
       },
       &probe_a);
   server_context.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::stream_view,
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
          bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
          alpn_probe* probe) -> int {
         probe->invoked = true;
@@ -394,7 +397,7 @@ TEST(SslAlpnTest, alert_fatal_aborts_handshake) {
   test_require(!server_context.check_private_key());
 
   server_context.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::stream_view,
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
          bnio::ssl::context::alpn_out&, std::span<const unsigned char>) -> int {
         return SSL_TLSEXT_ERR_ALERT_FATAL;
       });
@@ -451,7 +454,7 @@ TEST(SslAlpnTest, lifecycle_smoke_install_replace_destroy) {
     bnio::ssl::context context(bnio::ssl::context_method::tls_server);
     test_require(context.valid());
     context.set_alpn_callback(
-        [](bnio::ssl::context&, bnio::ssl::stream_view,
+        [](bnio::ssl::context_view, bnio::ssl::stream_view,
            bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
            alpn_probe* probe) -> int {
           probe->invoked = true;
@@ -461,7 +464,7 @@ TEST(SslAlpnTest, lifecycle_smoke_install_replace_destroy) {
         },
         &probe_a);
     context.set_alpn_callback(
-        [](bnio::ssl::context&, bnio::ssl::stream_view,
+        [](bnio::ssl::context_view, bnio::ssl::stream_view,
            bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
            alpn_probe* probe) -> int {
           probe->invoked = true;
@@ -498,7 +501,7 @@ TEST(SslAlpnTest, get_alpn_selected_returns_negotiated_protocol) {
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
 
-  server_context.set_alpn_callback([](bnio::ssl::context&,
+  server_context.set_alpn_callback([](bnio::ssl::context_view,
                                       bnio::ssl::stream_view,
                                       bnio::ssl::context::alpn_out& out,
                                       std::span<const unsigned char>) -> int {
@@ -564,7 +567,7 @@ TEST(SslAlpnTest, get_alpn_selected_empty_after_noack) {
   test_require(!server_context.check_private_key());
 
   server_context.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::stream_view,
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
          bnio::ssl::context::alpn_out&, std::span<const unsigned char>) -> int {
         return SSL_TLSEXT_ERR_NOACK;
       });
@@ -624,6 +627,283 @@ TEST(SslAlpnTest, get_alpn_selected_empty_before_handshake) {
                                 server_context};
 
   // No handshake has run yet, so nothing can have been selected.
+  EXPECT_TRUE(client.get_alpn_selected().empty());
+  EXPECT_TRUE(server.get_alpn_selected().empty());
+}
+
+// Scenario 10: moving a context after installing an ALPN callback keeps the
+// native registration and heap closure intact. The callback receives a view
+// whose native handle matches the moved-to context, with no dangling owner.
+TEST(SslAlpnTest, move_after_alpn_install_keeps_callback_valid) {
+  bnio::io_context context;
+  if (!context.is_open()) {
+    return;
+  }
+
+  test_certificate_files files;
+
+  bnio::ssl::context original(bnio::ssl::context_method::tls_server);
+  test_require(original.valid());
+  test_require(
+      !original.use_certificate_chain_file(files.certificate.string().c_str()));
+  test_require(
+      !original.use_private_key_file(files.private_key.string().c_str()));
+  test_require(!original.check_private_key());
+
+  alpn_probe probe;
+  original.set_alpn_callback(
+      [](bnio::ssl::context_view view, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
+         alpn_probe* probe) -> int {
+        probe->invoked = true;
+        probe->seen_context = view;
+        out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
+                static_cast<unsigned char>(k_h2.size()));
+        return SSL_TLSEXT_ERR_OK;
+      },
+      &probe);
+
+  // Exercise both move construction and move assignment after the callback
+  // was installed.
+  bnio::ssl::context moved(std::move(original));
+  EXPECT_FALSE(original.valid());
+  ASSERT_TRUE(moved.valid());
+
+  bnio::ssl::context assigned(bnio::ssl::context_method::tls_server);
+  ASSERT_TRUE(assigned.valid());
+  assigned = std::move(moved);
+  EXPECT_FALSE(moved.valid());
+  ASSERT_TRUE(assigned.valid());
+
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  test_require(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+
+  auto state = run_socketpair_handshake(context, client_context, assigned,
+                                        k_client_protos, k_h2);
+
+  ASSERT_EQ(state->values, 2);
+  EXPECT_EQ(state->errors, 0);
+  EXPECT_EQ(state->stopped, 0);
+  EXPECT_TRUE(probe.invoked);
+  EXPECT_EQ(probe.seen_context.native_handle(), assigned.native_handle());
+}
+
+// Scenario 10b: a stream created while its context owner is alive keeps
+// working after that owner is move-constructed. The native registration and
+// heap closure do not move; closure ownership transfers to the moved-to
+// context, so the handshake still invokes the callback and observes the
+// moved-to owner's native handle.
+TEST(SslAlpnTest, stream_created_before_context_move_uses_moved_callback) {
+  bnio::io_context context;
+  if (!context.is_open()) {
+    return;
+  }
+
+  test_certificate_files files;
+
+  bnio::ssl::context original(bnio::ssl::context_method::tls_server);
+  test_require(original.valid());
+  test_require(
+      !original.use_certificate_chain_file(files.certificate.string().c_str()));
+  test_require(
+      !original.use_private_key_file(files.private_key.string().c_str()));
+  test_require(!original.check_private_key());
+
+  alpn_probe probe;
+  original.set_alpn_callback(
+      [](bnio::ssl::context_view view, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
+         alpn_probe* probe) -> int {
+        probe->invoked = true;
+        probe->seen_context = view;
+        out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
+                static_cast<unsigned char>(k_h2.size()));
+        return SSL_TLSEXT_ERR_OK;
+      },
+      &probe);
+
+  int sockets[2] = {-1, -1};
+  test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
+               0);
+
+  // Create the stream first, then move the context owning its closure.
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                original};
+  ASSERT_TRUE(server.valid());
+  SSL_CTX* const native_context = original.native_handle();
+  bnio::ssl::context moved(std::move(original));
+  EXPECT_FALSE(original.valid());
+  ASSERT_TRUE(moved.valid());
+  EXPECT_EQ(moved.native_handle(), native_context);
+  EXPECT_EQ(SSL_get_SSL_CTX(server.native_handle().native_handle()),
+            native_context);
+
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  test_require(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  test_require(SSL_set_alpn_protos(
+                   client.native_handle().native_handle(),
+                   k_client_protos.data(),
+                   static_cast<unsigned int>(k_client_protos.size())) == 0);
+
+  auto state = handshake_live_streams(context, client, server);
+
+  ASSERT_EQ(state->values, 2);
+  EXPECT_EQ(state->errors, 0);
+  EXPECT_EQ(state->stopped, 0);
+  EXPECT_TRUE(probe.invoked);
+  EXPECT_EQ(probe.seen_context.native_handle(), moved.native_handle());
+  EXPECT_EQ(as_string_view(server.get_alpn_selected()), k_h2);
+}
+
+// Scenario 11: a context destroyed before its server stream handshakes must
+// not leave the connection calling a freed closure. Destroying the bnio
+// context clears the native registration (the native SSL_CTX itself stays
+// alive through the SSL object's own reference), so the handshake succeeds
+// without ALPN and without touching freed memory.
+TEST(SslAlpnTest, context_destroyed_before_stream_handshake_skips_callback) {
+  bnio::io_context context;
+  if (!context.is_open()) {
+    return;
+  }
+
+  test_certificate_files files;
+
+  int sockets[2] = {-1, -1};
+  test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
+               0);
+
+  alpn_probe probe;
+  auto server_context = std::make_unique<bnio::ssl::context>(
+      bnio::ssl::context_method::tls_server);
+  test_require(server_context->valid());
+  test_require(!server_context->use_certificate_chain_file(
+      files.certificate.string().c_str()));
+  test_require(!server_context->use_private_key_file(
+      files.private_key.string().c_str()));
+  test_require(!server_context->check_private_key());
+  server_context->set_alpn_callback(
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
+         alpn_probe* probe) -> int {
+        probe->invoked = true;
+        out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
+                static_cast<unsigned char>(k_h2.size()));
+        return SSL_TLSEXT_ERR_OK;
+      },
+      &probe);
+
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]),
+                                *server_context};
+  ASSERT_TRUE(server.valid());
+  SSL* const server_ssl = server.native_handle().native_handle();
+  SSL_CTX* const native_context = server_context->native_handle();
+  ASSERT_EQ(SSL_get_SSL_CTX(server_ssl), native_context);
+
+  // The bnio owner (and with it the owned closure) is gone before the
+  // handshake. The native SSL_CTX survives because the SSL object holds its
+  // own reference.
+  server_context.reset();
+  EXPECT_EQ(SSL_get_SSL_CTX(server_ssl), native_context);
+
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  test_require(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  test_require(SSL_set_alpn_protos(
+                   client.native_handle().native_handle(),
+                   k_client_protos.data(),
+                   static_cast<unsigned int>(k_client_protos.size())) == 0);
+
+  auto state = handshake_live_streams(context, client, server);
+
+  ASSERT_EQ(state->values, 2);
+  EXPECT_EQ(state->errors, 0);
+  EXPECT_EQ(state->stopped, 0);
+  EXPECT_FALSE(probe.invoked);
+  EXPECT_TRUE(client.get_alpn_selected().empty());
+  EXPECT_TRUE(server.get_alpn_selected().empty());
+}
+
+// Scenario 12: move-assigning a context over another one clears the old
+// context's native callback registration before its closure is destroyed.
+// Streams still referencing the old native SSL_CTX keep handshaking safely
+// and never invoke the destroyed callback.
+TEST(SslAlpnTest,
+     move_assignment_clears_callbacks_of_streams_using_the_old_context) {
+  bnio::io_context context;
+  if (!context.is_open()) {
+    return;
+  }
+
+  test_certificate_files files;
+
+  bnio::ssl::context target(bnio::ssl::context_method::tls_server);
+  test_require(target.valid());
+  test_require(
+      !target.use_certificate_chain_file(files.certificate.string().c_str()));
+  test_require(
+      !target.use_private_key_file(files.private_key.string().c_str()));
+  test_require(!target.check_private_key());
+
+  alpn_probe probe;
+  target.set_alpn_callback(
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
+         bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
+         alpn_probe* probe) -> int {
+        probe->invoked = true;
+        out.set(reinterpret_cast<const unsigned char*>(k_h2.data()),
+                static_cast<unsigned char>(k_h2.size()));
+        return SSL_TLSEXT_ERR_OK;
+      },
+      &probe);
+
+  int sockets[2] = {-1, -1};
+  test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
+               0);
+  bnio::ssl::tcp::stream server{bnio::local::stream_socket(sockets[1]), target};
+  ASSERT_TRUE(server.valid());
+  SSL* const server_ssl = server.native_handle().native_handle();
+  SSL_CTX* const old_native = target.native_handle();
+  ASSERT_EQ(SSL_get_SSL_CTX(server_ssl), old_native);
+
+  bnio::ssl::context replacement(bnio::ssl::context_method::tls_server);
+  test_require(replacement.valid());
+  test_require(!replacement.use_certificate_chain_file(
+      files.certificate.string().c_str()));
+  test_require(
+      !replacement.use_private_key_file(files.private_key.string().c_str()));
+  test_require(!replacement.check_private_key());
+  SSL_CTX* const replacement_native = replacement.native_handle();
+
+  target = std::move(replacement);
+  EXPECT_FALSE(replacement.valid());
+  ASSERT_TRUE(target.valid());
+  EXPECT_EQ(target.native_handle(), replacement_native);
+  // The live stream keeps referencing the old native context, whose callback
+  // registration was cleared by the move assignment.
+  EXPECT_EQ(SSL_get_SSL_CTX(server_ssl), old_native);
+
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  test_require(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+  bnio::ssl::tcp::stream client{bnio::local::stream_socket(sockets[0]),
+                                client_context};
+  test_require(SSL_set_alpn_protos(
+                   client.native_handle().native_handle(),
+                   k_client_protos.data(),
+                   static_cast<unsigned int>(k_client_protos.size())) == 0);
+
+  auto state = handshake_live_streams(context, client, server);
+
+  ASSERT_EQ(state->values, 2);
+  EXPECT_EQ(state->errors, 0);
+  EXPECT_EQ(state->stopped, 0);
+  EXPECT_FALSE(probe.invoked);
   EXPECT_TRUE(client.get_alpn_selected().empty());
   EXPECT_TRUE(server.get_alpn_selected().empty());
 }

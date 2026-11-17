@@ -177,12 +177,19 @@ High-level async runtime, stream owners, and buffer types.
   - `base.h` — aggregate for the SSL base layer.
   - `base/errors.h` — OpenSSL error category and error_code helpers.
   - `base/context_base.h` — `ssl::base::context_base` class (RAII `SSL_CTX`
-    owner base).
-  - `base/alpn.h` — destruction interface for context-owned ALPN callback
-    state.
+    owner; keeps the configuration/query surface and routes every method to
+    the non-owning `view()`; holds no callback storage).
+  - `base/context_view.h` — `ssl::base::context_view` non-owning view over a
+    native `SSL_CTX` with the configuration/query surface.
+  - `base/alpn.h` — destruction interface for heap-allocated callback
+    arguments.
   - `base/bio_pair.h` — memory BIO pair assembly facility.
-  - `context.h` — `ssl::context` class (inherits `base::context_base`; adds
-    the method selector and the `set_alpn_callback` closure).
+  - `context_view.h` — public `ssl::context_view` alias for the base view.
+  - `context.h` — `ssl::context` class (composes `base::context_base` with an
+    inline `detail::callback_slot`; adds the method selector, forwarding
+    configuration methods, and the `set_alpn_callback` closure).
+  - `detail/callback_slot.h` — `detail::callback_base` destruction interface
+    and the inline `detail::callback_slot` owning the context's closures.
   - `stream_view.h` — `ssl::stream_view` non-owning view over a native SSL
     connection.
   - `tcp/stream_class.h` — `ssl::tcp::stream<NextLayer>` class definition.
@@ -237,8 +244,9 @@ High-level async runtime, stream owners, and buffer types.
   `detail::native_context`.
 - `src/posix/tcp.cpp` — TCP socket and acceptor methods.
 - `src/posix/local.cpp` — local (AF_UNIX) socket and acceptor methods.
-- `src/posix/ssl.cpp` — SSL base layer: OpenSSL error category and
-  `ssl::base::context_base` methods.
+- `src/posix/ssl.cpp` — SSL base layer: OpenSSL error category,
+  `ssl::base::context_base` ownership, and `ssl::base::context_view`
+  operations.
 - `src/posix/udp.cpp` — UDP socket methods.
 
 ## Tests (`tests/`)

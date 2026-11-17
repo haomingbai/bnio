@@ -70,7 +70,7 @@ graph TB
     UserBuf["caller-owned byte storage"] -->|"must outlive"| BufView["buffer_view"]
     UserBuf -->|"must outlive"| MBuf["mutable_buffer / const_buffer"]
 
-    SSLCtx["ssl::context"] -->|"must outlive"| SSLStream["ssl::tcp::stream"]
+    SSLCtx["ssl::context"] -->|"must outlive for callbacks"| SSLStream["ssl::tcp::stream"]
     SSLStream -->|"owns"| Inner["tcp_socket (NextLayer)"]
 ```
 
@@ -177,35 +177,48 @@ ring.cqe_seen(cqe);                 // ✓ mark seen last
 // cqe.res() after cqe_seen() → undefined behavior
 ```
 
-### Rule 6: `ssl::context` must outlive all `ssl::tcp::stream` objects that reference it
+### Rule 6: `ssl::context` must outlive all `ssl::tcp::stream` objects that should keep its callbacks
 
-`ssl::tcp::stream` keeps a bnio-level reference to the `ssl::context` it was
-constructed with, and to any context later installed with
-`ssl::tcp::stream::set_context()`. That context owns the ALPN closure and its
-bound arguments, and the callback is invoked with `context&`. OpenSSL's
-`SSL_new` and `SSL_set_SSL_CTX` take their own reference to the native
-`SSL_CTX`, and the constructor context's native `SSL_CTX` also remains
-referenced as the connection's `session_ctx` until `SSL_free`. Destroying the
-bnio context first therefore does not immediately free the native `SSL_CTX`;
-instead, it destroys the ALPN closure and bound arguments while the live SSL
-object may still call them, for example on the next handshake. Treat every
-context passed to the constructor or to `set_context()` as required to
-outlive each stream that references it; a context may be destroyed only after
-all such streams.
+`ssl::tcp::stream` keeps only a non-owning `ssl::context_view` internally,
+even when it is constructed from (or switched to) an owning `ssl::context`.
+The stream constructor and `ssl::tcp::stream::set_context()` take the owning
+`ssl::context&` directly; the `context_view` overloads remain for callers
+that already hold a non-owning handle. The view neither keeps the context
+alive nor frees it. OpenSSL's `SSL_new` and `SSL_set_SSL_CTX` take their own
+reference to the native `SSL_CTX`, and the constructor context's native
+`SSL_CTX` also remains referenced as the connection's `session_ctx` until
+`SSL_free`, so a live stream can outlive the bnio context without freeing the
+native context.
 
-`ssl::context::set_alpn_callback()` also stores a pointer to the context
-object itself, because the callback is invoked with `context&`. Do not move a
-context after installing an ALPN callback on it: the callback would receive a
-reference to the moved-from object.
+The bnio owner matters for callbacks. `ssl::context::set_alpn_callback()`
+owns the heap closure in the context's inline callback slot and registers the
+closure pointer on the native `SSL_CTX`. The callback is invoked with a
+freshly constructed `context_view`, never with a bnio context reference, so
+moving the context after installing the callback is safe: the native
+registration and the heap closure do not move, and only the owning slot
+changes hands.
+
+Destroying the bnio context clears its native callback registrations and
+then destroys the closures. A stream created before that can still handshake
+— the native `SSL_CTX` survives through the stream's own reference — but the
+ALPN callback will not run. Treat the context supplied to the constructor or
+to `set_context()` as required to outlive every stream for which that
+callback should remain effective; destroy the context only after those
+streams.
+
+Pass the owning context directly to the constructor or `set_context()`, e.g.
+`stream.set_context(ctx)`. The `context_view` overload is only for call sites
+that already hold a non-owning handle.
 
 ```cpp
-// WRONG — ctx dies while the returned stream still references bnio state it owns
+// WRONG for ALPN — ctx dies before the handshake; the stream can still
+// handshake through its native reference, but the callback is gone.
 bnio::ssl::tcp::stream<bnio::tcp_socket> make_stream() {
     bnio::ssl::context ctx;                    // local
     bnio::tcp_socket sock;
     sock.open(bnio::ip::tcp::v4());
     return bnio::ssl::tcp::stream(std::move(sock), ctx);
-}   // ctx destroyed → ALPN closure/bound args freed; the SSL still references them
+}   // ctx destroyed → callback cleared and closure freed; ALPN will not run
 
 // RIGHT — ssl::context outlives ssl::tcp::stream
 bnio::ssl::context ctx;                        // outer scope
@@ -335,7 +348,10 @@ Before writing bnio code, verify:
 - [ ] Every buffer outlives the I/O operation that uses it.
 - [ ] All CQE fields are read **before** `cqe_seen()`.
 - [ ] All SQE fields are set **before** `ring::submit()`.
-- [ ] `ssl::context` outlives all `ssl::tcp::stream` objects created from it.
+- [ ] `ssl::context` outlives all `ssl::tcp::stream` objects whose callbacks
+      should stay effective. A stream may otherwise safely outlive the
+      context: the SSL object keeps the native `SSL_CTX` alive, but the
+      context's callback registrations are cleared when it is destroyed.
 - [ ] Views from `view()` do not outlive their owner.
 - [ ] Move-only types are moved, not copied.
 

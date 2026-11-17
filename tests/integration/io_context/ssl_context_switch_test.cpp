@@ -110,7 +110,7 @@ TEST(SslContextSwitchTest,
   alpn_probe probe_a;
   alpn_probe probe_b;
   context_a.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::stream_view,
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
          bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
          alpn_probe* probe) -> int {
         probe->invoked = true;
@@ -120,7 +120,7 @@ TEST(SslContextSwitchTest,
       },
       &probe_a);
   context_b.set_alpn_callback(
-      [](bnio::ssl::context&, bnio::ssl::stream_view,
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
          bnio::ssl::context::alpn_out& out, std::span<const unsigned char>,
          alpn_probe* probe) -> int {
         probe->invoked = true;
@@ -328,7 +328,9 @@ TEST(SslContextSwitchTest, post_handshake_switch_keeps_connection_usable) {
     ASSERT_EQ(state->stopped, 0);
   }
 
-  const std::error_code switch_error = server.set_context(context_b);
+  // The non-owning context_view overload stays available for callers that
+  // only hold a view; the owning ssl::context overload is covered above.
+  const std::error_code switch_error = server.set_context(context_b.view());
   EXPECT_FALSE(switch_error);
   EXPECT_EQ(SSL_get_SSL_CTX(server.native_handle().native_handle()),
             context_b.native_handle());

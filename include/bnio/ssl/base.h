@@ -10,6 +10,7 @@
 #include <bnio/ssl/base/alpn.h>
 #include <bnio/ssl/base/bio_pair.h>
 #include <bnio/ssl/base/context_base.h>
+#include <bnio/ssl/base/context_view.h>
 #include <bnio/ssl/base/errors.h>
 
 #endif  // BNIO_SSL_BASE_H_
