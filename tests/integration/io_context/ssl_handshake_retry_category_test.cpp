@@ -37,8 +37,8 @@ TEST(SslHandshakeRetryCategoryTest, category_identity_is_shared_across_tus) {
             "bnio.ssl.handshake_pause");
 
   // A pause minted here is classified by the peer's inline helpers.
-  const std::error_code pause = bnio::ssl::make_handshake_pause_error(
-      handshake_pause_reason::want_write);
+  const std::error_code pause =
+      bnio::ssl::make_handshake_pause_error(handshake_pause_reason::want_write);
   EXPECT_TRUE(is_handshake_pause_from_other_tu(pause));
   EXPECT_EQ(handshake_pause_reason_from_other_tu(pause),
             handshake_pause_reason::want_write);
@@ -68,9 +68,8 @@ TEST(SslHandshakeRetryCategoryTest, category_identity_is_shared_across_tus) {
 
   // The peer's category constructor and this TU's classifier agree on the
   // empty code.
-  const std::error_code empty =
-      make_handshake_pause_error_from_other_tu(
-          static_cast<int>(handshake_pause_reason::none));
+  const std::error_code empty = make_handshake_pause_error_from_other_tu(
+      static_cast<int>(handshake_pause_reason::none));
   EXPECT_FALSE(empty);
   EXPECT_FALSE(is_handshake_pause_from_other_tu(empty));
 }

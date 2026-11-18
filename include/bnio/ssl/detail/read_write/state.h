@@ -46,9 +46,8 @@ struct io_state {
   static constexpr application_io application = Application;
   static constexpr bool complete_buffer = CompleteBuffer;
   static constexpr resume_action application_action =
-      Application == application_io::read
-          ? resume_action::application_read
-          : resume_action::application_write;
+      Application == application_io::read ? resume_action::application_read
+                                          : resume_action::application_write;
 
   io_state(scheduler_type scheduler, tcp::stream<NextLayer>& stream,
            Holder buffer)

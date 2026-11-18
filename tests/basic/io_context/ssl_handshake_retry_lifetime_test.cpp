@@ -36,9 +36,7 @@ using bnio::ssl::handshake_type;
 struct inline_scheduler {
   bool operator==(const inline_scheduler&) const = default;
 
-  [[nodiscard]] auto schedule() const {
-    return bexec::just(std::error_code{});
-  }
+  [[nodiscard]] auto schedule() const { return bexec::just(std::error_code{}); }
 };
 
 // Transport step completing synchronously with a caller-chosen result.
@@ -185,15 +183,13 @@ struct wait_factory {
 };
 
 template <class Factory>
-using sender_type =
-    decltype(std::declval<stream_type&>().async_handshake(
-        std::declval<scheduler_type>(), std::declval<handshake_type>(),
-        std::declval<Factory>()));
+using sender_type = decltype(std::declval<stream_type&>().async_handshake(
+    std::declval<scheduler_type>(), std::declval<handshake_type>(),
+    std::declval<Factory>()));
 
 template <class Factory>
-using operation_type =
-    decltype(bexec::connect(std::declval<sender_type<Factory>>(),
-                            std::declval<victim_receiver>()));
+using operation_type = decltype(bexec::connect(
+    std::declval<sender_type<Factory>>(), std::declval<victim_receiver>()));
 
 template <class Operation>
 void destroy_operation(void* pointer) noexcept {
@@ -221,9 +217,8 @@ class SslHandshakeRetryLifetimeTest : public ::testing::Test {
                                      handshake_type type,
                                      FactoryBuilder build_factory,
                                      completion_record& record) {
-    bnio::ssl::context& ssl_context = type == handshake_type::server
-                                          ? *server_context_
-                                          : *client_context_;
+    bnio::ssl::context& ssl_context =
+        type == handshake_type::server ? *server_context_ : *client_context_;
     stream_type stream{std::move(transport), ssl_context};
     EXPECT_TRUE(stream.valid());
 
@@ -233,11 +228,10 @@ class SslHandshakeRetryLifetimeTest : public ::testing::Test {
 
     handle_t owner{nullptr, operation_deleter{&destroy_operation<operation_t>}};
 
-    auto sender = stream.async_handshake(scheduler_type{}, type,
-                                         build_factory(stream));
-    auto* operation =
-        new operation_t(bexec::connect(std::move(sender),
-                                       victim_receiver{&record, &owner}));
+    auto sender =
+        stream.async_handshake(scheduler_type{}, type, build_factory(stream));
+    auto* operation = new operation_t(
+        bexec::connect(std::move(sender), victim_receiver{&record, &owner}));
     owner.reset(operation);
 
     bexec::start(*operation);
@@ -348,7 +342,9 @@ TEST_F(SslHandshakeRetryLifetimeTest,
 
   ASSERT_TRUE(run_and_destroy(
       std::move(transport), handshake_type::client,
-      [](stream_type& stream) { return wait_factory{inline_scheduler{}, &stream}; },
+      [](stream_type& stream) {
+        return wait_factory{inline_scheduler{}, &stream};
+      },
       record));
 
   EXPECT_EQ(record.errors, 1U);

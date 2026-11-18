@@ -348,8 +348,8 @@ class step_operation {
 
     char* data = nullptr;
     base::clear_errors();
-    const int committed = BIO_nwrite(read_bio(*state_->stream), &data,
-                                     bounded_int_size(result));
+    const int committed =
+        BIO_nwrite(read_bio(*state_->stream), &data, bounded_int_size(result));
     if (committed != static_cast<int>(result)) {
       complete_error(base::last_error());  // Invariant violation: passed
                                            // through set_value(ec, bytes)
@@ -366,8 +366,8 @@ class step_operation {
 
     char* data = nullptr;
     base::clear_errors();
-    const int consumed = BIO_nread(write_bio(*state_->stream), &data,
-                                   bounded_int_size(result));
+    const int consumed =
+        BIO_nread(write_bio(*state_->stream), &data, bounded_int_size(result));
     if (consumed != static_cast<int>(result)) {
       complete_error(base::last_error());  // Invariant violation: passed
                                            // through set_value(ec, bytes)

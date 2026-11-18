@@ -74,8 +74,7 @@ class io_operation {
       std::declval<repeat_sender_type>(), std::declval<repeat_receiver>()));
 
   io_operation(std::remove_cvref_t<Scheduler> scheduler,
-               tcp::stream<NextLayer>& stream, Holder buffer,
-               Receiver receiver)
+               tcp::stream<NextLayer>& stream, Holder buffer, Receiver receiver)
       : state_(std::move(scheduler), stream, std::move(buffer)),
         receiver_(std::move(receiver)) {
     repeat_operation_.emplace_from([this] {
@@ -128,19 +127,17 @@ class io_operation {
 };
 
 template <class Scheduler, class NextLayer, class Holder, class Receiver>
-using read_operation =
-    io_operation<Scheduler, NextLayer, Holder, Receiver,
-                 application_io::read, false>;
+using read_operation = io_operation<Scheduler, NextLayer, Holder, Receiver,
+                                    application_io::read, false>;
 
 template <class Scheduler, class NextLayer, class Holder, class Receiver>
-using write_operation =
-    io_operation<Scheduler, NextLayer, Holder, Receiver,
-                 application_io::write, true>;
+using write_operation = io_operation<Scheduler, NextLayer, Holder, Receiver,
+                                     application_io::write, true>;
 
 template <class Scheduler, class NextLayer, class Holder, class Receiver>
 using write_some_operation =
-    io_operation<Scheduler, NextLayer, Holder, Receiver,
-                 application_io::write, false>;
+    io_operation<Scheduler, NextLayer, Holder, Receiver, application_io::write,
+                 false>;
 
 }  // namespace detail
 /** @endcond */

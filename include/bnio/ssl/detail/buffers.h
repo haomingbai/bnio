@@ -37,8 +37,7 @@ concept dynamic_buffer_like = requires(T buffer, std::size_t size) {
  * static borrow, a forward to the user buffer's commit for a dynamic one).
  */
 template <class Buffer>
-  requires std::same_as<Buffer, mutable_buffer> ||
-           dynamic_buffer_like<Buffer>
+  requires std::same_as<Buffer, mutable_buffer> || dynamic_buffer_like<Buffer>
 class read_buffer_borrow {
  public:
   explicit read_buffer_borrow(Buffer buffer) : buffer_(std::move(buffer)) {

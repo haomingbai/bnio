@@ -113,9 +113,7 @@ using scheduler_type = bnio::io_context::post_scheduler;
 struct inline_scheduler {
   bool operator==(const inline_scheduler&) const = default;
 
-  [[nodiscard]] auto schedule() const {
-    return bexec::just(std::error_code{});
-  }
+  [[nodiscard]] auto schedule() const { return bexec::just(std::error_code{}); }
 };
 
 struct sync_io_sender {
@@ -370,8 +368,7 @@ TEST(SslHandshakeRetryNoHeapTest,
   EXPECT_EQ(calls, 1u);
   EXPECT_EQ(observed.values, 1u);
   EXPECT_EQ(observed.stopped, 0u);
-  EXPECT_EQ(observed.error,
-            std::make_error_code(std::errc::connection_reset));
+  EXPECT_EQ(observed.error, std::make_error_code(std::errc::connection_reset));
 }
 
 }  // namespace

@@ -88,10 +88,10 @@ class write_sender {
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return io_operation<Scheduler, NextLayer, Holder,
-                        std::remove_cvref_t<Receiver>,
-                        application_io::write, CompleteBuffer>(
-        std::move(scheduler_), *stream_, std::move(buffer_),
-        std::move(receiver));
+                        std::remove_cvref_t<Receiver>, application_io::write,
+                        CompleteBuffer>(std::move(scheduler_), *stream_,
+                                        std::move(buffer_),
+                                        std::move(receiver));
   }
 
  private:

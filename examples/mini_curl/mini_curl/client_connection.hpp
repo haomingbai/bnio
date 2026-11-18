@@ -133,9 +133,9 @@ inline void mini_curl_client::do_handshake() noexcept {
       std::move(socket_), ssl_context_);
 
   const auto scheduler = context_.get_post_scheduler();
-  registry_.spawn(
-      ssl_stream_->async_handshake(scheduler, bnio::ssl::handshake_type::client),
-      handshake_receiver{shared_from_this()});
+  registry_.spawn(ssl_stream_->async_handshake(
+                      scheduler, bnio::ssl::handshake_type::client),
+                  handshake_receiver{shared_from_this()});
 }
 
 inline void mini_curl_client::on_handshake_complete() noexcept {

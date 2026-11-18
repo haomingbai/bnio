@@ -1,6 +1,7 @@
 /**
  * @file ssl_handshake_retry_category_peer.cpp
- * @brief Second translation unit for the handshake-pause category identity test.
+ * @brief Second translation unit for the handshake-pause category identity
+ * test.
  */
 
 #include <bnio/ssl.h>

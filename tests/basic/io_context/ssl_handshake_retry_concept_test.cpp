@@ -181,9 +181,9 @@ static_assert(handshake_retry_factory<by_value_factory&&>);
 // bexec::connect(int, retry_receiver) and fail here.
 static_assert(handshake_retry_factory<dual_overload_factory>);
 using dual_sender = retry_sender_type<dual_overload_factory>;
-static_assert(bexec::operation_state<
-              decltype(bexec::connect(std::declval<dual_sender>(),
-                                      std::declval<retry_test_receiver>()))>);
+static_assert(
+    bexec::operation_state<decltype(bexec::connect(
+        std::declval<dual_sender>(), std::declval<retry_test_receiver>()))>);
 
 // A fully noexcept factory (invocation, sender move, and connect) instantiates
 // the retry operation's nothrow builder branch; without a noexcept factory in
@@ -356,9 +356,9 @@ TEST(SslHandshakeRetryConceptTest, resume_fallback_reports_protocol_error) {
   using operation_type = bnio::ssl::detail::handshake_retry_operation<
       scheduler_type, bnio::tcp_socket, fallback_receiver, fallback_factory>;
 
-  operation_type operation(
-      scheduler, source, handshake_type::client, fallback_factory{},
-      fallback_receiver{&record, &context});
+  operation_type operation(scheduler, source, handshake_type::client,
+                           fallback_factory{},
+                           fallback_receiver{&record, &context});
 
   // No other resume_action reaches the retry operation in production; feed
   // one directly and verify the contract-preserving terminal.

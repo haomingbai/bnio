@@ -40,8 +40,7 @@ auto stream<NextLayer>::async_handshake(Scheduler scheduler,
 
 template <class NextLayer>
 template <class Scheduler, class Buffer>
-auto stream<NextLayer>::async_read(Scheduler scheduler, Buffer&& buffer,
-                                   int) {
+auto stream<NextLayer>::async_read(Scheduler scheduler, Buffer&& buffer, int) {
   auto holder = detail::make_read_buffer(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
@@ -51,8 +50,8 @@ auto stream<NextLayer>::async_read(Scheduler scheduler, Buffer&& buffer,
 
 template <class NextLayer>
 template <class Scheduler, class Buffer>
-auto stream<NextLayer>::async_read_some(Scheduler scheduler,
-                                        Buffer&& buffer, int) {
+auto stream<NextLayer>::async_read_some(Scheduler scheduler, Buffer&& buffer,
+                                        int) {
   auto holder = detail::make_read_buffer(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
@@ -62,8 +61,7 @@ auto stream<NextLayer>::async_read_some(Scheduler scheduler,
 
 template <class NextLayer>
 template <class Scheduler, class Buffer>
-auto stream<NextLayer>::async_write(Scheduler scheduler, Buffer&& buffer,
-                                    int) {
+auto stream<NextLayer>::async_write(Scheduler scheduler, Buffer&& buffer, int) {
   auto holder = detail::make_write_buffer(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
@@ -73,14 +71,13 @@ auto stream<NextLayer>::async_write(Scheduler scheduler, Buffer&& buffer,
 
 template <class NextLayer>
 template <class Scheduler, class Buffer>
-auto stream<NextLayer>::async_write_some(Scheduler scheduler,
-                                         Buffer&& buffer, int) {
+auto stream<NextLayer>::async_write_some(Scheduler scheduler, Buffer&& buffer,
+                                         int) {
   auto holder = detail::make_write_buffer(std::forward<Buffer>(buffer));
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   using holder_type = decltype(holder);
-  return detail::write_sender<scheduler_type, NextLayer, holder_type,
-                              false>(std::move(scheduler), *this,
-                                     std::move(holder));
+  return detail::write_sender<scheduler_type, NextLayer, holder_type, false>(
+      std::move(scheduler), *this, std::move(holder));
 }
 
 template <class NextLayer>

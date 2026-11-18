@@ -246,8 +246,7 @@ struct throwing_connect_factory {
   EXPECT_EQ(result, -1);
   EXPECT_EQ(SSL_get_error(ssl, result), SSL_ERROR_WANT_READ);
 
-  const std::size_t hello_size =
-      BIO_ctrl_pending(generator.native_write_bio());
+  const std::size_t hello_size = BIO_ctrl_pending(generator.native_write_bio());
   EXPECT_GT(hello_size, std::size_t{0});
   std::vector<char> hello(hello_size);
   EXPECT_EQ(BIO_read(generator.native_write_bio(), hello.data(),
@@ -259,12 +258,11 @@ struct throwing_connect_factory {
 // The server rejects every ALPN protocol with a fatal alert, which OpenSSL
 // queues in the write BIO while the attempt fails.
 void install_fatal_alpn_callback(bnio::ssl::context& context) {
-  context.set_alpn_callback(
-      [](bnio::ssl::context_view, bnio::ssl::stream_view,
-         bnio::ssl::context::alpn_out&,
-         std::span<const unsigned char>) -> int {
-        return SSL_TLSEXT_ERR_ALERT_FATAL;
-      });
+  context.set_alpn_callback([](bnio::ssl::context_view, bnio::ssl::stream_view,
+                               bnio::ssl::context::alpn_out&,
+                               std::span<const unsigned char>) -> int {
+    return SSL_TLSEXT_ERR_ALERT_FATAL;
+  });
 }
 
 class SslHandshakeRetryRuntimeTest : public ::testing::Test {
@@ -447,8 +445,8 @@ TEST_F(SslHandshakeRetryRuntimeTest,
   // deleted entirely.
   EXPECT_EQ(BIO_ctrl_pending(stream->native_write_bio()), std::size_t{0});
   std::array<char, 64> alert{};
-  const ssize_t received = ::recv(sockets_.peer(), alert.data(), alert.size(),
-                                  MSG_DONTWAIT);
+  const ssize_t received =
+      ::recv(sockets_.peer(), alert.data(), alert.size(), MSG_DONTWAIT);
   ASSERT_GT(received, 0) << "the fatal alert never reached the peer";
   EXPECT_EQ(static_cast<unsigned char>(alert[0]), 0x15U)
       << "the first flushed record is not a TLS alert";
@@ -488,8 +486,7 @@ TEST_F(SslHandshakeRetryRuntimeTest,
   EXPECT_EQ(result.stopped, 0U);
   EXPECT_FALSE(result.saw_pause_code);
   ASSERT_TRUE(result.last_error);
-  EXPECT_NE(result.last_error.category(),
-            bnio::ssl::openssl_error_category())
+  EXPECT_NE(result.last_error.category(), bnio::ssl::openssl_error_category())
       << "the transport failure must win over the staged SSL error";
 }
 
@@ -560,9 +557,8 @@ TEST_F(SslHandshakeRetryRuntimeTest,
   const std::error_code terminal =
       std::make_error_code(std::errc::permission_denied);
 
-  auto sender = stream->async_handshake(
-      scheduler_, handshake_type::server,
-      noexcept_terminal_factory{terminal});
+  auto sender = stream->async_handshake(scheduler_, handshake_type::server,
+                                        noexcept_terminal_factory{terminal});
   auto operation =
       bexec::connect(std::move(sender), result_receiver{&result, &context_});
   bexec::start(operation);
@@ -575,8 +571,7 @@ TEST_F(SslHandshakeRetryRuntimeTest,
   EXPECT_EQ(result.last_error, terminal);
 }
 
-TEST_F(SslHandshakeRetryRuntimeTest,
-       lvalue_connect_runs_the_sender_copy_path) {
+TEST_F(SslHandshakeRetryRuntimeTest, lvalue_connect_runs_the_sender_copy_path) {
   auto stream = make_server_stream();
   ASSERT_NE(stream, nullptr);
   ASSERT_TRUE(stream->valid());
@@ -591,8 +586,7 @@ TEST_F(SslHandshakeRetryRuntimeTest,
                               terminal_error_factory{&record, terminal});
   // Connect through a non-const lvalue: the sender copies its scheduler and
   // factory into the operation. The sender must outlive the operation.
-  auto operation =
-      bexec::connect(sender, result_receiver{&result, &context_});
+  auto operation = bexec::connect(sender, result_receiver{&result, &context_});
   bexec::start(operation);
   context_.run();
 
