@@ -232,11 +232,97 @@ performs no certificate or SNI selection of its own, does not validate
 certificates, and is intended to be called before the handshake. Pass the
 owning `ssl::context` directly; a `context_view` overload remains for callers
 that only hold a non-owning handle. The stream keeps no bnio reference to the
-context. The underlying context must outlive the stream for its ALPN callback
-to remain effective, but moving the owning context after installing a callback
-is safe because registrations point at heap closure state; destroying the
-context clears the registrations. The call returns `std::error_code`, not a
-sender.
+context. For dynamically looked-up callbacks (ALPN, SNI, client_hello), the
+stream may outlive the owning context because destroying it clears those
+registrations. A context with a certificate callback must outlive the stream
+instead (see "Copied callbacks and lifetime" below). Moving the owning context
+after installing a callback is safe because registrations point at heap
+closure state. The call returns `std::error_code`, not a sender.
+
+### TLS callbacks: ALPN, SNI, ClientHello, and certificate selection
+
+`ssl::context` owns callback closures installed through
+`set_alpn_callback()`, `set_servername_callback()`,
+`set_client_hello_callback()`, and `set_cert_callback()`. All four use
+`std::thread`-style argument binding: the callable and every bound argument
+are decay-copied into a closure owned by the context, `std::reference_wrapper`
+arguments are forwarded by reference, and reinstalling replaces and destroys
+the previous closure. Every callable is invoked as
+
+```cpp
+result fn(context_view ctx, stream_view ssl, out_proxy& out, BoundArgs... args)
+```
+
+where both views are non-owning and valid only for the duration of the call.
+Exceptions thrown by a callback never cross the OpenSSL C boundary; they fail
+closed (ALPN and SNI send a fatal internal-error alert, ClientHello returns
+`SSL_CLIENT_HELLO_ERROR` with an internal-error alert, certificate selection
+aborts the handshake).
+
+- **SNI** — `int fn(context_view, stream_view, sni_out&, ...)`. The returned
+  `int` is passed through to OpenSSL (`SSL_TLSEXT_ERR_OK`,
+  `SSL_TLSEXT_ERR_NOACK`, `SSL_TLSEXT_ERR_ALERT_FATAL`, ...).
+  `sni_out::set_context(ctx)` mirrors `SSL_set_SSL_CTX` and switches the
+  connection to another context; `sni_out::set_alert()` records the alert sent
+  when the callback returns a fatal result. `ssl::stream_view::servername()`
+  reports the offered name.
+- **ClientHello** — `client_hello_result fn(context_view, stream_view,
+  alert_out&, ...)`. `success`, `error`, and `retry` map directly to the
+  matching `SSL_CLIENT_HELLO_*` values; `alert_out::set()` records the alert
+  sent for `error`.
+- **Certificate selection** — `cert_result fn(context_view, stream_view,
+  cert_out&, ...)`. `cert_out::use_certificate()` and
+  `cert_out::use_private_key()` mirror `SSL_use_certificate` and
+  `SSL_use_PrivateKey`; OpenSSL increments the reference, so the caller keeps
+  ownership. Both return `std::error_code`: success is an empty code, and a
+  failed call reports the OpenSSL error that call recorded
+  (`make_no_ssl_error()` is reserved for failures that never reached OpenSSL,
+  such as a null connection). `fail` aborts the handshake; `ok` continues.
+
+`context_view::use_certificate()` and `context_view::use_private_key()` install
+an identity from memory on the native `SSL_CTX`, mirroring
+`SSL_CTX_use_certificate` and `SSL_CTX_use_PrivateKey`.
+
+**Context switching.** `sni_out::set_context()` inside an SNI callback and
+`ssl::tcp::stream::set_context()` before the handshake both mirror
+`SSL_set_SSL_CTX`. The SSL object takes its own reference to the native
+`SSL_CTX`, so for dynamically looked-up callbacks (ALPN, SNI, client_hello)
+the bnio owner may be destroyed afterwards: its registrations are cleared,
+and none of those callbacks runs for the connection. Certificate selection is
+different: `SSL_set_SSL_CTX` duplicates the target context's `cert_cb` and
+`cert_cb_arg` into the connection, so a target context with a certificate
+callback must outlive the stream. Switching to a context that is destroyed
+earlier is unsupported.
+
+**Callback-driven retry.** `client_hello_result::retry` and
+`cert_result::retry` pause the handshake. Resume them with the 3-argument
+`async_handshake(scheduler, type, factory)` overload: the factory receives
+`handshake_pause_reason::client_hello_cb` or
+`handshake_pause_reason::x509_lookup` and returns a sender that performs one
+wait step (for example `make_handshake_wait_sender`). The 2-argument overload
+has no resume surface, so a callback-driven pause is reported there as a
+terminal handshake error.
+
+**Copied callbacks and lifetime.** Callbacks split into two lifetime rules.
+ALPN, SNI servername, and ClientHello registrations are looked up through the
+connection's current `SSL_CTX` at invocation time, so a stream may outlive the
+owning context; destroying the context disables those callbacks. The
+certificate callback is copied by OpenSSL into each SSL at `SSL_new` and
+`SSL_set_SSL_CTX` time, so the owning `ssl::context` must outlive every stream
+that may invoke it, and the callback must not be replaced or cleared while
+such a stream is alive. The same rule will apply to future copied-argument
+callbacks. If you need a stream to outlive a context with a certificate
+callback, use the raw native setter through `context_view::native_handle()`
+and manage the callback and its argument lifetime yourself; the owning API
+does not support that pattern.
+
+**Lifetime.** A context with a certificate callback must outlive every stream
+that may invoke it. For ALPN, SNI, and ClientHello the owning context only
+needs to outlive the streams whose handshake should still invoke those
+callbacks; destroying it disables them for connections that outlive it
+without leaving them with dangling state. Moving a context is safe in either
+case. See Rule 6 in [`design/lifecycle.md`](../design/lifecycle.md) for the
+per-channel details.
 
 TLS streams encode EOF and close results the same way as plain descriptors
 and TCP sockets:

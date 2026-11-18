@@ -40,11 +40,14 @@ class stream {
    *
    * This is the primary constructor. The stream takes no ownership of the
    * context and keeps no bnio reference to it: it only needs the native
-   * SSL_CTX, and SSL_new takes its own OpenSSL reference, so the stream may
-   * safely outlive the bnio context. The context only has to outlive every
-   * stream whose handshake should still invoke its ALPN/keylog callbacks.
-   * Destroying the context clears those native registrations and the closures
-   * even while the connection itself stays alive.
+   * SSL_CTX, and SSL_new takes its own OpenSSL reference. For callbacks that
+   * OpenSSL looks up dynamically through the connection's current SSL_CTX
+   * (ALPN, SNI servername, client_hello), the stream may safely outlive the
+   * bnio context: destroying the context clears those native registrations
+   * and disables the callbacks. A context with a copied-argument callback
+   * installed (currently certificate selection) must outlive every stream
+   * that may invoke it, because SSL_new copies cert_cb and cert_cb_arg into
+   * the connection; see context::set_cert_callback.
    */
   stream(NextLayer next_layer, bnio::ssl::context& context) noexcept
       : next_layer_(std::move(next_layer)) {
@@ -67,11 +70,14 @@ class stream {
    * Use this only when the caller already holds a non-owning handle; passing
    * the owning ssl::context is the primary entry point. The stream takes no
    * ownership of the context. SSL_new keeps the native SSL_CTX alive through
-   * the SSL object's own reference, so the stream may safely outlive the bnio
-   * context; the context only has to outlive every stream whose handshake
-   * should still invoke its ALPN/keylog callbacks. Destroying the context
-   * clears those native registrations and the closures even while the
-   * connection itself stays alive.
+   * the SSL object's own reference. For callbacks that OpenSSL looks up
+   * dynamically through the connection's current SSL_CTX (ALPN, SNI
+   * servername, client_hello), the stream may safely outlive the bnio
+   * context: destroying the context clears those native registrations and
+   * disables the callbacks. A context with a copied-argument callback
+   * installed (currently certificate selection) must outlive every stream
+   * that may invoke it, because SSL_new copies cert_cb and cert_cb_arg into
+   * the connection; see context::set_cert_callback.
    */
   stream(NextLayer next_layer, context_view context) noexcept
       : next_layer_(std::move(next_layer)) {
@@ -169,12 +175,16 @@ class stream {
    * context_view overload is for callers that only hold a non-owning handle
    * (and for internal delegation). The stream keeps no bnio reference to the
    * context: SSL_set_SSL_CTX keeps the native SSL_CTX alive through the SSL
-   * object's own reference, so the stream may safely outlive the owning
-   * context. The owning context only has to outlive every stream whose
-   * handshake should still invoke its ALPN/keylog callbacks; destroying it
-   * clears those native registrations and the closures even while the
-   * connection stays alive. Moving the context is safe because callback
-   * registrations point at heap closure state owned by the context slot.
+   * object's own reference. For callbacks that OpenSSL looks up dynamically
+   * through the connection's current SSL_CTX (ALPN, SNI servername,
+   * client_hello), the stream may safely outlive the owning context:
+   * destroying it clears those native registrations and disables the
+   * callbacks. A context with a copied-argument callback installed
+   * (currently certificate selection) must outlive every stream that may
+   * invoke it, because SSL_set_SSL_CTX copies the target's cert_cb and
+   * cert_cb_arg into the connection; see context::set_cert_callback. Moving
+   * the context is safe because callback registrations point at heap closure
+   * state owned by the context slot.
    * Calling it after the handshake may succeed, but it never retroactively
    * changes an already established connection.
    *

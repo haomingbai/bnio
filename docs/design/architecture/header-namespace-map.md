@@ -60,9 +60,9 @@ bnio/bnio.h  (umbrella)
 ├── bnio/local.h
 │   └── local/{socket, acceptor, async_operations}.h
 ├── bnio/ssl.h
-│   └── ssl/{base, context, context_view, cpo, stream}.h
+│   └── ssl/{base, callback, context, context_view, cpo, stream}.h
 │       ├── ssl/base/{alpn, bio_pair, context_base, context_view, errors}.h
-│       ├── ssl/detail/callback_slot.h
+│       ├── ssl/detail/{callback_slot, owned_callback}.h
 │       └── ssl/tcp/{stream_class, stream_operations}.h
 ├── bnio/io_context_cpo.h
 │   └── io_context_cpo/{instances, concepts, read, write,
@@ -150,9 +150,19 @@ bnio
 │   ├── context                           RAII SSL_CTX + owned callback closure slot
 │   ├── context_view                      non-owning view over a native SSL_CTX
 │   ├── stream_view                       non-owning view over a native SSL connection
+│   ├── client_hello_result               ClientHello callback result enumerator
+│   ├── cert_result                       certificate callback result enumerator
+│   ├── alert_out                         callback proxy for the handshake alert code
+│   ├── sni_out                           callback proxy for SNI context switch and alert
+│   ├── cert_out                          callback proxy for per-connection identity
 │   ├── tcp::stream<NextLayer>            RAII SSL + BIO + transport owner
 │   ├── detail
-│   │   └── callback_slot                 inline closure ownership for ssl::context
+│   │   ├── callback_slot                 inline closure ownership for ssl::context
+│   │   ├── bound_invoker                 stored callable plus bound arguments
+│   │   ├── alpn_closure                  owned ALPN closure + trampoline
+│   │   ├── servername_closure            owned SNI closure + trampoline
+│   │   ├── client_hello_closure          owned ClientHello closure + trampoline
+│   │   └── cert_closure                  owned certificate closure + trampoline
 │   └── base                              OpenSSL-domain base layer
 │       ├── context_base                  native SSL_CTX owner base (forwards to context_view)
 │       ├── context_view                  non-owning native SSL_CTX view

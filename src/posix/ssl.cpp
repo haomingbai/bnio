@@ -5,6 +5,7 @@
  */
 
 #include <bnio/ssl/base.h>
+#include <bnio/ssl/callback.h>
 #include <bnio/ssl/handshake_pause.h>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -87,6 +88,66 @@ std::error_code make_handshake_pause_error(
   return std::error_code(value, handshake_pause_category());
 }
 
+alert_out::alert_out(int* alert) noexcept : alert_(alert) {}
+
+void alert_out::set(int alert) noexcept {
+  if (alert_ != nullptr) {
+    *alert_ = alert;
+  }
+}
+
+sni_out::sni_out(SSL* ssl, int* alert) noexcept : ssl_(ssl), alert_(alert) {}
+
+std::error_code sni_out::set_context(context_view ctx) noexcept {
+  if (ssl_ == nullptr || !ctx.valid()) {
+    return base::make_no_ssl_error();
+  }
+  base::clear_errors();
+  // SSL_set_SSL_CTX takes its own reference to the new context and releases
+  // the connection's previous reference, so the bnio owner may be destroyed
+  // after a successful switch.
+  if (SSL_set_SSL_CTX(ssl_, ctx.native_handle()) == nullptr) {
+    return base::last_error();
+  }
+  return base::empty_error_code;
+}
+
+void sni_out::set_alert(int alert) noexcept {
+  if (alert_ != nullptr) {
+    *alert_ = alert;
+  }
+}
+
+cert_out::cert_out(SSL* ssl) noexcept : ssl_(ssl) {}
+
+std::error_code cert_out::use_certificate(X509* cert) noexcept {
+  if (ssl_ == nullptr) {
+    return base::make_no_ssl_error();
+  }
+  base::clear_errors();
+  // On success SSL_use_certificate takes its own reference to the certificate
+  // (and releases the connection's previous one), so the caller keeps
+  // ownership of cert and may release it independently.
+  if (SSL_use_certificate(ssl_, cert) == 1) {
+    return base::empty_error_code;
+  }
+  return base::last_error();
+}
+
+std::error_code cert_out::use_private_key(EVP_PKEY* key) noexcept {
+  if (ssl_ == nullptr) {
+    return base::make_no_ssl_error();
+  }
+  base::clear_errors();
+  // On success SSL_use_PrivateKey takes its own reference to the key (and
+  // releases the connection's previous one), so the caller keeps ownership of
+  // key and may release it independently.
+  if (SSL_use_PrivateKey(ssl_, key) == 1) {
+    return base::empty_error_code;
+  }
+  return base::last_error();
+}
+
 }  // namespace ssl
 
 namespace ssl::base {
@@ -157,6 +218,44 @@ void context_view::set_verify_mode(int mode) noexcept {
 
 void context_view::set_alpn_select_cb(alpn_select_cb cb, void* arg) noexcept {
   SSL_CTX_set_alpn_select_cb(context_, cb, arg);
+}
+
+void context_view::set_tlsext_servername_callback(servername_cb cb) noexcept {
+  SSL_CTX_set_tlsext_servername_callback(context_, cb);
+}
+
+void context_view::set_tlsext_servername_arg(void* arg) noexcept {
+  SSL_CTX_set_tlsext_servername_arg(context_, arg);
+}
+
+void context_view::set_client_hello_cb(client_hello_cb cb, void* arg) noexcept {
+  SSL_CTX_set_client_hello_cb(context_, cb, arg);
+}
+
+void context_view::set_cert_cb(cert_cb cb, void* arg) noexcept {
+  SSL_CTX_set_cert_cb(context_, cb, arg);
+}
+
+std::error_code context_view::use_certificate(X509* cert) noexcept {
+  clear_errors();
+  // On success SSL_CTX_use_certificate takes its own reference to the
+  // certificate (and releases the context's previous one), so the caller
+  // keeps ownership of cert and may release it independently.
+  if (SSL_CTX_use_certificate(context_, cert) == 1) {
+    return empty_error_code;
+  }
+  return last_error();
+}
+
+std::error_code context_view::use_private_key(EVP_PKEY* key) noexcept {
+  clear_errors();
+  // On success SSL_CTX_use_PrivateKey takes its own reference to the key (and
+  // releases the context's previous one), so the caller keeps ownership of
+  // key and may release it independently.
+  if (SSL_CTX_use_PrivateKey(context_, key) == 1) {
+    return empty_error_code;
+  }
+  return last_error();
 }
 
 }  // namespace ssl::base

@@ -99,6 +99,21 @@ class BNIO_EXPORT context_base {
   using alpn_select_cb = context_view::alpn_select_cb;
 
   /**
+   * Native SNI servername callback signature re-exported from context_view.
+   */
+  using servername_cb = context_view::servername_cb;
+
+  /**
+   * Native client_hello callback signature re-exported from context_view.
+   */
+  using client_hello_cb = context_view::client_hello_cb;
+
+  /**
+   * Native certificate callback signature re-exported from context_view.
+   */
+  using cert_cb = context_view::cert_cb;
+
+  /**
    * Loads a certificate chain file into the context. Forwards to view().
    */
   [[nodiscard]] std::error_code use_certificate_chain_file(
@@ -135,6 +150,59 @@ class BNIO_EXPORT context_base {
    */
   void set_alpn_select_cb(alpn_select_cb cb, void* arg) noexcept {
     view().set_alpn_select_cb(cb, arg);
+  }
+
+  /**
+   * Installs a native SNI servername callback. The context does not own cb;
+   * the caller must keep it valid for as long as the native SSL_CTX may
+   * invoke the callback. Forwards to view().
+   */
+  void set_tlsext_servername_callback(servername_cb cb) noexcept {
+    view().set_tlsext_servername_callback(cb);
+  }
+
+  /**
+   * Sets the opaque argument OpenSSL passes to the SNI servername callback.
+   * The context does not own arg. Forwards to view().
+   */
+  void set_tlsext_servername_arg(void* arg) noexcept {
+    view().set_tlsext_servername_arg(arg);
+  }
+
+  /**
+   * Installs a native client_hello callback. The context does not own cb or
+   * arg; the caller must keep them valid for as long as the native SSL_CTX
+   * may invoke the callback. Forwards to view().
+   */
+  void set_client_hello_cb(client_hello_cb cb, void* arg) noexcept {
+    view().set_client_hello_cb(cb, arg);
+  }
+
+  /**
+   * Installs a native certificate callback. The context does not own cb or
+   * arg; the caller must keep them valid for as long as the native SSL_CTX
+   * may invoke the callback. Forwards to view().
+   */
+  void set_cert_cb(cert_cb cb, void* arg) noexcept {
+    view().set_cert_cb(cb, arg);
+  }
+
+  /**
+   * Installs an in-memory certificate on the context, mirroring
+   * SSL_CTX_use_certificate. The caller keeps ownership of cert. Forwards to
+   * view().
+   */
+  [[nodiscard]] std::error_code use_certificate(X509* cert) noexcept {
+    return view().use_certificate(cert);
+  }
+
+  /**
+   * Installs an in-memory private key on the context, mirroring
+   * SSL_CTX_use_PrivateKey. The caller keeps ownership of key. Forwards to
+   * view().
+   */
+  [[nodiscard]] std::error_code use_private_key(EVP_PKEY* key) noexcept {
+    return view().use_private_key(key);
   }
 
   /**

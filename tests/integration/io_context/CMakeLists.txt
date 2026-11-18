@@ -67,6 +67,28 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT BNIO_ENABLE_TSAN)
     bnio_integration_io_context_ssl_alpn_test
     PRIVATE -fsanitize=address)
 endif()
+bnio_add_integration_io_context_test(ssl_sni ssl_sni_test.cpp
+                                     PROPERTIES TIMEOUT 30)
+bnio_add_integration_io_context_test(ssl_client_hello
+                                     ssl_client_hello_test.cpp
+                                     PROPERTIES TIMEOUT 30)
+bnio_add_integration_io_context_test(ssl_cert_callback
+                                     ssl_cert_callback_test.cpp
+                                     PROPERTIES TIMEOUT 30)
+# The callback-lifetime tests move and destroy context owners while streams
+# are still live, so they are only meaningful under AddressSanitizer (same
+# pattern as ALPN). The closure code lives in headers and is instrumented
+# through these translation units.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT BNIO_ENABLE_TSAN)
+  foreach(target
+          bnio_integration_io_context_ssl_sni_test
+          bnio_integration_io_context_ssl_client_hello_test
+          bnio_integration_io_context_ssl_cert_callback_test)
+    target_compile_options(${target}
+                           PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(${target} PRIVATE -fsanitize=address)
+  endforeach()
+endif()
 bnio_add_integration_io_context_test(ssl_context_switch
                                      ssl_context_switch_test.cpp)
 bnio_add_integration_io_context_test(steady_timer steady_timer_test.cpp

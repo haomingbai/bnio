@@ -20,7 +20,7 @@ void self_move_assign(Owner& owner) {
 
 // ALPN callback whose first parameter takes the context view with the given
 // value category. The framework invokes user callbacks with an lvalue context
-// view (see context::alpn_closure::make_bound), so the concept must accept
+// view (see detail::alpn_closure::trampoline), so the concept must accept
 // by-value, const lvalue reference, and non-const lvalue reference parameters
 // and reject an rvalue reference parameter.
 template <class ContextArg>

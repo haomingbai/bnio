@@ -50,6 +50,27 @@ class BNIO_EXPORT context_view {
                                  unsigned int inlen, void* arg);
 
   /**
+   * Callback signature matching OpenSSL's SNI servername callback protocol
+   * (SSL_CTX_set_tlsext_servername_callback). Returns SSL_TLSEXT_ERR_OK,
+   * SSL_TLSEXT_ERR_NOACK, SSL_TLSEXT_ERR_ALERT_FATAL, etc.
+   */
+  using servername_cb = int (*)(SSL* ssl, int* al, void* arg);
+
+  /**
+   * Callback signature matching OpenSSL's client_hello callback protocol
+   * (SSL_CTX_set_client_hello_cb). Returns SSL_CLIENT_HELLO_SUCCESS,
+   * SSL_CLIENT_HELLO_ERROR, or SSL_CLIENT_HELLO_RETRY.
+   */
+  using client_hello_cb = int (*)(SSL* ssl, int* al, void* arg);
+
+  /**
+   * Callback signature matching OpenSSL's certificate callback protocol
+   * (SSL_CTX_set_cert_cb). Returns 1 on success, 0 to abort the handshake, or
+   * -1 to pause with SSL_ERROR_WANT_X509_LOOKUP.
+   */
+  using cert_cb = int (*)(SSL* ssl, void* arg);
+
+  /**
    * Creates an invalid view.
    */
   constexpr context_view() noexcept = default;
@@ -108,6 +129,55 @@ class BNIO_EXPORT context_view {
    * through ssl::context::set_alpn_callback instead.
    */
   void set_alpn_select_cb(alpn_select_cb cb, void* arg) noexcept;
+
+  /**
+   * Installs a native SNI servername callback on the SSL_CTX. The view does
+   * not own cb or the argument registered separately through
+   * set_tlsext_servername_arg; the caller must keep them valid for as long as
+   * the native SSL_CTX may invoke the callback. High-level callbacks with
+   * owned closure state are installed through
+   * ssl::context::set_servername_callback instead.
+   */
+  void set_tlsext_servername_callback(servername_cb cb) noexcept;
+
+  /**
+   * Sets the opaque argument OpenSSL passes to the SNI servername callback
+   * registered on this SSL_CTX. The view does not own arg.
+   */
+  void set_tlsext_servername_arg(void* arg) noexcept;
+
+  /**
+   * Installs a native client_hello callback on the SSL_CTX. The view does not
+   * own cb or arg; the caller must keep them valid for as long as the native
+   * SSL_CTX may invoke the callback. High-level callbacks with owned closure
+   * state are installed through ssl::context::set_client_hello_callback
+   * instead.
+   */
+  void set_client_hello_cb(client_hello_cb cb, void* arg) noexcept;
+
+  /**
+   * Installs a native certificate callback on the SSL_CTX. The view does not
+   * own cb or arg; the caller must keep them valid for as long as the native
+   * SSL_CTX may invoke the callback. High-level callbacks with owned closure
+   * state are installed through ssl::context::set_cert_callback instead.
+   */
+  void set_cert_cb(cert_cb cb, void* arg) noexcept;
+
+  /**
+   * Installs an in-memory certificate on the SSL_CTX, mirroring
+   * SSL_CTX_use_certificate. OpenSSL increments the certificate reference
+   * count; the caller keeps ownership of cert. Returns an empty error_code on
+   * success and the OpenSSL error recorded by the failed call otherwise.
+   */
+  [[nodiscard]] std::error_code use_certificate(X509* cert) noexcept;
+
+  /**
+   * Installs an in-memory private key on the SSL_CTX, mirroring
+   * SSL_CTX_use_PrivateKey. OpenSSL increments the key reference count; the
+   * caller keeps ownership of key. Returns an empty error_code on success and
+   * the OpenSSL error recorded by the failed call otherwise.
+   */
+  [[nodiscard]] std::error_code use_private_key(EVP_PKEY* key) noexcept;
 
   /**
    * Loads a single certificate file (SSL_FILETYPE_PEM or SSL_FILETYPE_ASN1).

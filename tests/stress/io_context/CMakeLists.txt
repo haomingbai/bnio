@@ -27,3 +27,17 @@ bnio_add_stress_io_context_test(timer_stop_race timer_stop_race_stress_test.cpp
 bnio_add_stress_io_context_test(ssl_handshake_retry_stress
                                 ssl_handshake_retry_stress_test.cpp
                                 PROPERTIES TIMEOUT 60)
+bnio_add_stress_io_context_test(ssl_callback_stress
+                                ssl_callback_stress_test.cpp
+                                PROPERTIES TIMEOUT 120)
+# The stress test moves and destroys callback owners across handshakes and
+# asserts no closure runs after its context is gone; a use-after-free is only
+# observable under AddressSanitizer (same pattern as ssl_alpn).
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT BNIO_ENABLE_TSAN)
+  target_compile_options(
+    bnio_stress_io_context_ssl_callback_stress_test
+    PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+  target_link_options(
+    bnio_stress_io_context_ssl_callback_stress_test
+    PRIVATE -fsanitize=address)
+endif()

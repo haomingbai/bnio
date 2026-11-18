@@ -6,7 +6,7 @@ resolution, timers, and composed writes are all built in.
 
 > **Status:** Linux runs on io_uring, macOS and BSD on kqueue. Both backends
 > share the same `io_context`, TCP, UDP, DNS, timer, and TLS APIs. TLS needs
-> OpenSSL ≥ 1.1.
+> OpenSSL ≥ 1.1.1.
 
 ---
 

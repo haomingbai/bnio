@@ -12,6 +12,7 @@ bnio_add_basic_io_context_test(buffer buffer_test.cpp)
 bnio_add_basic_io_context_test(io_context_sender_concept
                                io_context_sender_concept_test.cpp)
 bnio_add_basic_io_context_test(ssl_concept ssl_concept_test.cpp)
+bnio_add_basic_io_context_test(ssl_callback_unit ssl_callback_unit_test.cpp)
 bnio_add_basic_io_context_test(ssl_handshake_pause
                                ssl_handshake_pause_test.cpp)
 bnio_add_basic_io_context_test(ssl_handshake_retry_concept

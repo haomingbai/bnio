@@ -13,7 +13,7 @@ see [`usage/index.md`](usage/index.md); for runnable samples see
 | C++ compiler  | C++20           | GCC 12+ or Clang 16+                 |
 | CMake         | 3.20            |                                      |
 | liburing      | 2.1             | Linux only; `pkg-config` required    |
-| OpenSSL       | 1.1             | `pkg-config` required; TLS feature   |
+| OpenSSL       | 1.1.1           | `pkg-config` required; TLS feature   |
 | bexec         | 0.0.1           | Package, source tree, or FetchContent |
 
 ## Quick build

@@ -7,6 +7,7 @@
 #ifndef BNIO_SSL_H_
 #define BNIO_SSL_H_
 
+#include <bnio/ssl/callback.h>
 #include <bnio/ssl/context.h>
 #include <bnio/ssl/context_view.h>
 #include <bnio/ssl/cpo.h>

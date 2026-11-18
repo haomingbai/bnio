@@ -184,12 +184,22 @@ High-level async runtime, stream owners, and buffer types.
   - `base/alpn.h` — destruction interface for heap-allocated callback
     arguments.
   - `base/bio_pair.h` — memory BIO pair assembly facility.
+  - `callback.h` — callback result enumerators (`client_hello_result`,
+    `cert_result`) and the framework-built proxies (`alert_out`, `sni_out`,
+    `cert_out`) passed to user callbacks.
   - `context_view.h` — public `ssl::context_view` alias for the base view.
   - `context.h` — `ssl::context` class (composes `base::context_base` with an
     inline `detail::callback_slot`; adds the method selector, forwarding
-    configuration methods, and the `set_alpn_callback` closure).
+    configuration methods, the callback-invocability concepts, and the
+    `set_alpn_callback`, `set_servername_callback`,
+    `set_client_hello_callback`, and `set_cert_callback` closure installers).
   - `detail/callback_slot.h` — `detail::callback_base` destruction interface
     and the inline `detail::callback_slot` owning the context's closures.
+  - `detail/owned_callback.h` — shared owned-closure helpers
+    (`callback_closure_base`, `bound_invoker`, `make_closure`) and the concrete
+    channel closures and trampolines (ALPN, SNI servername, client_hello,
+    certificate). Every closure is reached directly through the native
+    callback's `void*` argument.
   - `stream_view.h` — `ssl::stream_view` non-owning view over a native SSL
     connection.
   - `tcp/stream_class.h` — `ssl::tcp::stream<NextLayer>` class definition.
@@ -272,8 +282,11 @@ High-level async runtime, stream owners, and buffer types.
   - `tcp_test.cpp`, `buffer_test.cpp`, `dns_test.cpp`.
   - `ssl_concept_test.cpp`, `ssl_handshake_test.cpp`, `ssl_transfer_test.cpp`,
     `ssl_alpn_test.cpp`, `ssl_error_precedence_test.cpp`,
-    `ssl_error_queue_hygiene_test.cpp`, plus
+    `ssl_error_queue_hygiene_test.cpp`, `ssl_sni_test.cpp`,
+    `ssl_client_hello_test.cpp`, `ssl_cert_callback_test.cpp`,
+    `ssl_callback_unit_test.cpp`, plus
     `tests/support/io_context/ssl_test_support.h`.
+  - `ssl_callback_stress_test.cpp` (under `tests/stress/io_context/`).
   - `steady_timer_test.cpp`.
   - `header_self_contained_test.cpp`.
   - Various `*_test_support.h` files for shared test infrastructure.
