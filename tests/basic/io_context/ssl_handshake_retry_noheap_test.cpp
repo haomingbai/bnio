@@ -8,11 +8,22 @@
  * completion machinery without touching OpenSSL), and asserts the count is
  * zero. OpenSSL, context, and stream construction happen before the measured
  * window; the factory is stateless.
+ *
+ * The pause test measures a callback-driven pause: a preloaded ClientHello
+ * plus a client_hello callback returning retry. The factory starts the
+ * measurement and resumes the handshake with an empty error code, so the
+ * internal transport step for the next want_read (including operation_base's
+ * flush/read child setup) runs inside the measured window. The synchronous
+ * fake transport completes the read inline with EOF, terminalizing the
+ * operation; the memory-BIO work itself does not allocate.
  */
 
+#include <bnio/local.h>
 #include <bnio/ssl.h>
 #include <bnio/ssl/detail/handshake_concepts.h>
 #include <gtest/gtest.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 
 #include <atomic>
 #include <bexec/just.hpp>
@@ -24,6 +35,9 @@
 #include <system_error>
 #include <type_traits>
 #include <utility>
+#include <vector>
+
+#include "../../support/io_context/ssl_test_support.h"
 
 namespace {
 
@@ -105,9 +119,10 @@ using stream_type = bnio::ssl::tcp::stream<bnio::tcp_socket>;
 using scheduler_type = bnio::io_context::post_scheduler;
 
 // ---------------------------------------------------------------------------
-// Inline scheduler and synchronous fake transport: the pause flush, factory
-// invocation, wait step, and terminal post all run inside start(), which lets
-// the allocation window cover the whole pause -> factory -> wait cycle.
+// Inline scheduler and synchronous fake transport. The callback pause and the
+// factory invocation run inside start(); the inline scheduler delivers the
+// terminal post before start() returns, so the allocation window covers the
+// factory invocation and the terminal post.
 // ---------------------------------------------------------------------------
 
 struct inline_scheduler {
@@ -141,39 +156,68 @@ struct sync_io_sender {
 };
 
 struct sync_transport {
-  bool accept_all_writes = false;
-
   sync_transport& lowest_layer() noexcept { return *this; }
   const sync_transport& lowest_layer() const noexcept { return *this; }
 
   template <class Scheduler>
   auto async_write_some(Scheduler&, bnio::const_buffer buffer, int) {
-    const std::size_t accepted = accept_all_writes ? buffer.size() : 0;
-    return sync_io_sender{std::error_code{}, accepted};
+    // Accept the whole pending chunk so the resumed attempt's output flush
+    // completes inline; the transport read below then reaches EOF.
+    return sync_io_sender{std::error_code{}, buffer.size()};
   }
 
   template <class Scheduler>
   auto async_read_some(Scheduler&, bnio::mutable_buffer) {
-    // Zero bytes with an empty error is transport EOF: the wait step reports
-    // connection_reset, which terminalizes the retry operation.
     return sync_io_sender{};
   }
 };
 
 using fake_stream_type = bnio::ssl::tcp::stream<sync_transport>;
+using generator_stream_type =
+    bnio::ssl::tcp::stream<bnio::local::stream_socket>;
 
-struct heap_probe_wait_factory {
-  inline_scheduler scheduler;
-  fake_stream_type* stream = nullptr;
+// Generates a real ClientHello with a standalone client SSL object. The
+// transport endpoint is never used: the hello is written into the server's
+// read BIO by the pause test below.
+[[nodiscard]] std::vector<char> make_client_hello() {
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  EXPECT_TRUE(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+
+  generator_stream_type generator{bnio::local::stream_socket(-1),
+                                  client_context};
+  EXPECT_TRUE(generator.valid());
+  SSL* const ssl = generator.native_handle().native_handle();
+  EXPECT_NE(ssl, nullptr);
+  SSL_set_connect_state(ssl);
+  ERR_clear_error();
+  const int result = SSL_do_handshake(ssl);
+  EXPECT_EQ(result, -1);
+  EXPECT_EQ(SSL_get_error(ssl, result), SSL_ERROR_WANT_READ);
+
+  const std::size_t hello_size = BIO_ctrl_pending(generator.native_write_bio());
+  EXPECT_GT(hello_size, std::size_t{0});
+  std::vector<char> hello(hello_size);
+  EXPECT_EQ(BIO_read(generator.native_write_bio(), hello.data(),
+                     static_cast<int>(hello.size())),
+            static_cast<int>(hello.size()));
+  return hello;
+}
+
+// Starts the allocation measurement when the factory is reached and resumes
+// the handshake with an empty error code. The resumed attempt asks for the
+// next transport record, so operation_base's internal flush/read step runs
+// inside the measured window.
+struct heap_probe_resume_factory {
   allocation_probe* probe = nullptr;
   unsigned* calls = nullptr;
+  std::error_code* seen_pause = nullptr;
 
   auto operator()(const std::error_code& ec) const {
-    // Start measuring exactly when the factory is reached: the first SSL
-    // attempt (and its OpenSSL allocations) already happened.
     probe->begin();
+    *seen_pause = ec;
     ++*calls;
-    return bnio::ssl::make_handshake_wait_sender(scheduler, *stream, ec);
+    return bexec::just(std::error_code{});
   }
 };
 
@@ -338,36 +382,69 @@ TEST(SslHandshakeRetryNoHeapTest,
 }
 
 TEST(SslHandshakeRetryNoHeapTest,
-     pause_factory_wait_step_and_terminal_post_do_not_allocate) {
-  bnio::ssl::context ssl_context(bnio::ssl::context_method::tls_client);
+     callback_pause_factory_and_transport_step_do_not_allocate) {
+  // Certificate loading happens before the measured window.
+  test_certificate_files files;
+  bnio::ssl::context ssl_context(bnio::ssl::context_method::tls_server);
   ASSERT_TRUE(ssl_context.valid());
-  ssl_context.set_verify_mode(SSL_VERIFY_NONE);
+  ASSERT_FALSE(ssl_context.use_certificate_chain_file(
+      files.certificate.string().c_str()));
+  ASSERT_FALSE(
+      ssl_context.use_private_key_file(files.private_key.string().c_str()));
+  ASSERT_FALSE(ssl_context.check_private_key());
+  // Retry exactly once so the factory runs; the resumed attempt then succeeds
+  // past the callback and reaches the internal transport step.
+  unsigned callback_calls = 0;
+  ssl_context.set_client_hello_callback(
+      [](bnio::ssl::context_view, bnio::ssl::stream_view, bnio::ssl::alert_out&,
+         unsigned* calls) -> bnio::ssl::client_hello_result {
+        return ++*calls == 1 ? bnio::ssl::client_hello_result::retry
+                             : bnio::ssl::client_hello_result::success;
+      },
+      &callback_calls);
 
+  // Generate the ClientHello and install the context callback before the
+  // measured window: both may allocate.
+  const std::vector<char> hello = make_client_hello();
   sync_transport transport;
-  transport.accept_all_writes = true;
   fake_stream_type stream{std::move(transport), ssl_context};
   ASSERT_TRUE(stream.valid());
+  ASSERT_EQ(BIO_write(stream.native_read_bio(), hello.data(),
+                      static_cast<int>(hello.size())),
+            static_cast<int>(hello.size()));
 
   unsigned calls = 0;
+  std::error_code seen_pause;
   observation observed;
   allocation_probe probe;
 
-  // The inline scheduler delivers the terminal post inside start(); the fake
-  // transport completes the pause flush and the wait read synchronously.
+  // The preloaded ClientHello drives the first attempt into the client_hello
+  // callback, which retries. The factory starts measuring, records the pause,
+  // and resumes the handshake. The resumed attempt asks for the next
+  // transport record; the fake transport completes that read inline with EOF,
+  // so operation_base's flush/read child setup and the terminal post all run
+  // inside the measured window.
   auto sender = stream.async_handshake(
-      inline_scheduler{}, bnio::ssl::handshake_type::client,
-      heap_probe_wait_factory{inline_scheduler{}, &stream, &probe, &calls});
+      inline_scheduler{}, bnio::ssl::handshake_type::server,
+      heap_probe_resume_factory{&probe, &calls, &seen_pause});
   auto operation =
       bexec::connect(std::move(sender), observing_receiver{&observed});
   bexec::start(operation);
   const std::size_t allocations = probe.end();
 
   EXPECT_EQ(allocations, 0u)
-      << "the pause -> factory -> wait step and terminal post must not "
-         "allocate";
+      << "the factory invocation, the internal transport step, and the "
+         "terminal post must not allocate";
   EXPECT_EQ(calls, 1u);
+  EXPECT_GE(callback_calls, 2u)
+      << "the resumed attempt did not pass the client_hello callback";
+  EXPECT_TRUE(bnio::ssl::is_handshake_pause(seen_pause));
+  EXPECT_EQ(bnio::ssl::handshake_pause_reason_of(seen_pause),
+            bnio::ssl::handshake_pause_reason::client_hello_cb);
   EXPECT_EQ(observed.values, 1u);
   EXPECT_EQ(observed.stopped, 0u);
+  // The resumed attempt flushed its flight and the transport read then
+  // completed with EOF.
   EXPECT_EQ(observed.error, std::make_error_code(std::errc::connection_reset));
 }
 

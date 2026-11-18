@@ -22,7 +22,7 @@ auto stream<NextLayer>::async_handshake(Scheduler scheduler,
                                         bnio::ssl::handshake_type type) {
   using scheduler_type = std::remove_cvref_t<Scheduler>;
   return detail::handshake_sender<scheduler_type, NextLayer>(
-      std::move(scheduler), *this, type);
+      std::move(scheduler), *this, type, detail::handshake_default_factory{});
 }
 
 template <class NextLayer>

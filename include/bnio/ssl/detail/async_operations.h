@@ -8,7 +8,6 @@
 #define BNIO_SSL_DETAIL_ASYNC_OPERATIONS_H_
 
 #include <bnio/ssl/detail/common.h>
-#include <bnio/ssl/detail/handshake.h>
 #include <bnio/ssl/detail/handshake_retry.h>
 #include <bnio/ssl/detail/read_write.h>
 #include <bnio/ssl/detail/senders.h>

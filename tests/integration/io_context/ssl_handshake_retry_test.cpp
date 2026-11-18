@@ -2,23 +2,30 @@
  * @file ssl_handshake_retry_test.cpp
  * @brief Integration tests for the factory-driven SSL handshake retry API.
  *
- * These tests exercise the public retry surface only: the 3-argument
- * async_handshake, bnio::ssl::make_handshake_wait_sender, and the public
- * handshake-pause error category. No bnio detail header is included.
+ * These tests exercise the public retry surface only: the 2- and 3-argument
+ * async_handshake and the public handshake-pause error category. Transport
+ * pauses (SSL_ERROR_WANT_READ / SSL_ERROR_WANT_WRITE) are driven inside the
+ * retry operation and never reach the factory, so tests that expect a factory
+ * invocation install a client_hello or certificate callback that returns
+ * retry. No bnio detail header is included.
  */
 
 #include <bnio/local.h>
 #include <bnio/ssl.h>
 #include <gtest/gtest.h>
 #include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <bexec/just.hpp>
 #include <bexec/operation_state.hpp>
+#include <bexec/query.hpp>
+#include <bexec/scheduler.hpp>
 #include <bexec/sender.hpp>
 #include <bexec/stop_token.hpp>
+#include <bexec/then.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstring>
@@ -26,6 +33,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -34,8 +42,11 @@
 namespace {
 
 using client_stream_type = bnio::ssl::tcp::stream<bnio::local::stream_socket>;
-using post_scheduler_type =
-    decltype(std::declval<bnio::io_context&>().get_post_scheduler());
+
+// Marker queued into the SSL write BIO by the ordering test's certificate
+// callback; the retry operation must flush it to the transport before the
+// factory runs.
+constexpr char k_pause_output[] = "bnio-pause-output";
 
 // The pause-reason enum values are part of the public contract: 1..7 in the
 // documented order, deliberately unrelated to the SSL_ERROR_* numbers.
@@ -81,21 +92,93 @@ struct retry_record {
   unsigned calls = 0;
 };
 
-// Records every factory invocation and returns the public wait helper, which
-// is exactly the intended user composition for a real handshake.
-struct recording_wait_factory {
-  post_scheduler_type scheduler;
-  client_stream_type* stream = nullptr;
+// Records every factory invocation and resumes the handshake synchronously.
+// Only callback-driven pauses reach the factory now; transport pauses are
+// driven internally by the retry operation.
+struct recording_resume_factory {
   std::shared_ptr<retry_record> record;
-  std::atomic<bool>* paused = nullptr;
 
   auto operator()(const std::error_code& ec) const {
     ++record->calls;
     record->pauses.push_back(ec);
-    if (paused != nullptr) {
-      paused->store(true, std::memory_order_release);
+    return bexec::just(std::error_code{});
+  }
+};
+
+// Factory whose sender completes asynchronously through the io_context
+// schedule sender. The factory child therefore finishes after start_wait_round
+// returns: the driver wins the epoch CAS, and the child's later completion
+// takes the failed-CAS path and kicks the driver. This is the shape of real
+// user work such as a timer or a remote certificate fetch.
+struct async_resume_factory {
+  bnio::io_context::post_scheduler scheduler;
+  std::shared_ptr<retry_record> record;
+
+  auto operator()(const std::error_code& ec) const {
+    ++record->calls;
+    record->pauses.push_back(ec);
+    return bexec::then(
+        bexec::schedule(scheduler),
+        [](std::error_code) noexcept { return std::error_code{}; });
+  }
+};
+
+// Factory sender that completes only when the downstream stop token fires.
+// The receiver environment is its sole stop source: with a default or empty
+// env the registration is a no-op and the handshake never completes, so a
+// test using it fails instead of passing by accident when
+// retry_receiver::get_env stops forwarding the token.
+struct stop_wait_sender {
+  using completion_signatures =
+      bexec::completion_signatures<bexec::set_value_t(std::error_code),
+                                   bexec::set_stopped_t()>;
+
+  template <class Receiver>
+  class operation {
+   public:
+    using env_type = decltype(bexec::get_env(std::declval<Receiver&>()));
+    using token_type = decltype(bexec::query(std::declval<env_type&>(),
+                                             bexec::get_stop_token));
+
+    struct on_stop {
+      operation* self = nullptr;
+
+      void operator()() const noexcept {
+        bexec::set_stopped(std::move(self->receiver_));
+      }
+    };
+
+    using callback_type = typename token_type::template callback_type<on_stop>;
+
+    explicit operation(Receiver receiver)
+        : receiver_(std::move(receiver)),
+          callback_(
+              bexec::query(bexec::get_env(receiver_), bexec::get_stop_token),
+              on_stop{this}) {}
+
+    void start() noexcept {
+      // The registration fires inline when the token is already canceled;
+      // otherwise the operation stays parked until cancellation.
     }
-    return bnio::ssl::make_handshake_wait_sender(scheduler, *stream, ec);
+
+   private:
+    Receiver receiver_;
+    callback_type callback_;
+  };
+
+  template <class Receiver>
+  operation<Receiver> connect(Receiver receiver) && {
+    return operation<Receiver>(std::move(receiver));
+  }
+};
+
+struct stop_wait_factory {
+  std::shared_ptr<retry_record> record;
+
+  auto operator()(const std::error_code& ec) const {
+    ++record->calls;
+    record->pauses.push_back(ec);
+    return stop_wait_sender{};
   }
 };
 
@@ -116,7 +199,6 @@ struct terminal_error_factory {
 // already reached the transport: the write BIO is empty and the peer socket
 // has bytes available. Completes terminally so the test ends immediately.
 struct ordering_check_factory {
-  post_scheduler_type scheduler;
   client_stream_type* stream = nullptr;
   int peer_fd = -1;
   std::shared_ptr<retry_record> record;
@@ -138,6 +220,44 @@ struct ordering_check_factory {
     return bexec::just(std::make_error_code(std::errc::permission_denied));
   }
 };
+
+// Installs a client_hello callback that retries the first invocation of every
+// connection and succeeds on every later one. Keying by the connection's
+// native handle keeps the retry count per connection rather than per context.
+void install_retry_once_client_hello(bnio::ssl::context& context) {
+  auto retried = std::make_shared<std::unordered_set<SSL*>>();
+  context.set_client_hello_callback(
+      [retried](bnio::ssl::context_view, bnio::ssl::stream_view ssl,
+                bnio::ssl::alert_out&) -> bnio::ssl::client_hello_result {
+        if (retried->insert(ssl.native_handle()).second) {
+          return bnio::ssl::client_hello_result::retry;
+        }
+        return bnio::ssl::client_hello_result::success;
+      });
+}
+
+// Generates a real ClientHello with a standalone client SSL object. Its
+// transport endpoint is never used: the returned hello is injected into the
+// server's read BIO by the caller. The generator stream is destroyed here.
+std::vector<char> generate_client_hello(bnio::ssl::context& client_context) {
+  client_stream_type generator{bnio::local::stream_socket(-1), client_context};
+  test_require(generator.valid());
+  SSL* const generator_ssl = generator.native_handle().native_handle();
+  test_require(generator_ssl != nullptr);
+  SSL_set_connect_state(generator_ssl);
+  ERR_clear_error();
+  const int hello_result = SSL_do_handshake(generator_ssl);
+  test_require(hello_result == -1);
+  test_require(SSL_get_error(generator_ssl, hello_result) ==
+               SSL_ERROR_WANT_READ);
+  const std::size_t hello_size = BIO_ctrl_pending(generator.native_write_bio());
+  test_require(hello_size > 0);
+  std::vector<char> hello(hello_size);
+  test_require(BIO_read(generator.native_write_bio(), hello.data(),
+                        static_cast<int>(hello.size())) ==
+               static_cast<int>(hello.size()));
+  return hello;
+}
 
 // Never-invoked factory used by the invalid-stream case; returning a valid
 // sender type keeps the concept satisfied while the count stays at zero.
@@ -247,7 +367,7 @@ TEST(SslHandshakeRetryTest, pause_error_public_contract) {
             bnio::ssl::handshake_pause_reason::none);
 }
 
-TEST(SslHandshakeRetryTest, socketpair_handshake_drives_factory_waits) {
+TEST(SslHandshakeRetryTest, socketpair_handshake_drives_factory_on_callback) {
   test_certificate_files files;
 
   bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
@@ -257,6 +377,9 @@ TEST(SslHandshakeRetryTest, socketpair_handshake_drives_factory_waits) {
   test_require(
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
+  // One callback-driven pause per connection: the factory is reached exactly
+  // once, and only after the client_hello callback returns retry.
+  install_retry_once_client_hello(server_context);
 
   bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
@@ -282,11 +405,11 @@ TEST(SslHandshakeRetryTest, socketpair_handshake_drives_factory_waits) {
   handshake_receiver client_receiver{state, &context};
   handshake_receiver server_receiver{state, &context};
 
-  auto client_sender = client.async_handshake(
-      scheduler, bnio::ssl::handshake_type::client,
-      recording_wait_factory{scheduler, &client, record, nullptr});
+  auto client_sender =
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client);
   auto server_sender =
-      server.async_handshake(scheduler, bnio::ssl::handshake_type::server);
+      server.async_handshake(scheduler, bnio::ssl::handshake_type::server,
+                             recording_resume_factory{record});
 
   auto client_operation =
       bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -302,11 +425,157 @@ TEST(SslHandshakeRetryTest, socketpair_handshake_drives_factory_waits) {
   EXPECT_EQ(state->stopped, 0u);
   EXPECT_FALSE(state->error);
 
-  ASSERT_GE(record->calls, 1u);
-  ASSERT_EQ(record->pauses.size(), record->calls);
+  ASSERT_EQ(record->calls, 1u);
+  ASSERT_EQ(record->pauses.size(), 1u);
   for (const auto& ec : record->pauses) {
     expect_pause_code(ec);
+    EXPECT_EQ(bnio::ssl::handshake_pause_reason_of(ec),
+              bnio::ssl::handshake_pause_reason::client_hello_cb);
   }
+}
+
+TEST(SslHandshakeRetryTest, async_factory_child_resumes_after_driver_parks) {
+  test_certificate_files files;
+
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
+  test_require(server_context.valid());
+  test_require(!server_context.use_certificate_chain_file(
+      files.certificate.string().c_str()));
+  test_require(
+      !server_context.use_private_key_file(files.private_key.string().c_str()));
+  test_require(!server_context.check_private_key());
+  install_retry_once_client_hello(server_context);
+
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  test_require(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+
+  bnio::io_context context;
+  if (!context.is_open()) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
+               0);
+  client_stream_type client{bnio::local::stream_socket(sockets[0]),
+                            client_context};
+  client_stream_type server{bnio::local::stream_socket(sockets[1]),
+                            server_context};
+
+  auto record = std::make_shared<retry_record>();
+  auto state = std::make_shared<handshake_state>();
+  handshake_receiver client_receiver{state, &context};
+  handshake_receiver server_receiver{state, &context};
+
+  auto client_sender =
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client);
+  auto server_sender =
+      server.async_handshake(scheduler, bnio::ssl::handshake_type::server,
+                             async_resume_factory{scheduler, record});
+
+  auto client_operation =
+      bexec::connect(std::move(client_sender), std::move(client_receiver));
+  auto server_operation =
+      bexec::connect(std::move(server_sender), std::move(server_receiver));
+
+  bexec::start(client_operation);
+  bexec::start(server_operation);
+  context.run();
+
+  // The factory child completed from the io_context after the driver parked;
+  // its empty result resumed the handshake to completion.
+  EXPECT_EQ(state->values, 2u);
+  EXPECT_EQ(state->errors, 0u);
+  EXPECT_EQ(state->stopped, 0u);
+  EXPECT_FALSE(state->error);
+  ASSERT_EQ(record->calls, 1u);
+  ASSERT_EQ(record->pauses.size(), 1u);
+  expect_pause_code(record->pauses.front());
+  EXPECT_EQ(bnio::ssl::handshake_pause_reason_of(record->pauses.front()),
+            bnio::ssl::handshake_pause_reason::client_hello_cb);
+}
+
+TEST(SslHandshakeRetryTest,
+     factory_wait_is_canceled_through_the_downstream_stop_token) {
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
+  test_require(server_context.valid());
+  // Always retry: the first attempt pauses in the client_hello callback and
+  // the factory therefore runs before any peer input arrives.
+  server_context.set_client_hello_callback(
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
+         bnio::ssl::alert_out&) -> bnio::ssl::client_hello_result {
+        return bnio::ssl::client_hello_result::retry;
+      });
+
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  test_require(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+
+  bnio::io_context context;
+  if (!context.is_open()) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  int sockets[2] = {-1, -1};
+  test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
+               0);
+  client_stream_type server{bnio::local::stream_socket(sockets[0]),
+                            server_context};
+  test_require(server.valid());
+  const std::vector<char> hello = generate_client_hello(client_context);
+  test_require(BIO_write(server.native_read_bio(), hello.data(),
+                         static_cast<int>(hello.size())) ==
+               static_cast<int>(hello.size()));
+
+  bexec::inplace_stop_source source;
+  auto record = std::make_shared<retry_record>();
+  auto observation = std::make_shared<client_observation>();
+
+  stop_observing_handshake_receiver receiver;
+  receiver.observation = observation;
+  receiver.context = &context;
+  receiver.env = stop_env{source.get_token()};
+
+  auto sender = server.async_handshake(
+      scheduler, bnio::ssl::handshake_type::server, stop_wait_factory{record});
+  auto operation = bexec::connect(std::move(sender), std::move(receiver));
+  bexec::start(operation);
+
+  // The factory's wait sender is parked on the downstream stop token. The
+  // token reaches it only through retry_receiver::get_env; without that
+  // forwarding the registration would be a no-op and no completion would be
+  // delivered. The watchdog bounds that regression to a test failure instead
+  // of an indefinite run(); on success it exits immediately.
+  std::atomic<bool> completed{false};
+  std::thread watchdog([&context, &completed] {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!completed.load(std::memory_order_acquire)) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        (void)context.stop();
+        return;
+      }
+      std::this_thread::yield();
+    }
+  });
+
+  source.request_stop();
+  context.run();
+  completed.store(true, std::memory_order_release);
+  watchdog.join();
+
+  EXPECT_EQ(observation->values, 0u);
+  EXPECT_EQ(observation->errors, 0u);
+  EXPECT_EQ(observation->stopped, 1u);
+  EXPECT_FALSE(observation->saw_pause_code);
+  ASSERT_EQ(record->calls, 1u);
+  ASSERT_EQ(record->pauses.size(), 1u);
+  expect_pause_code(record->pauses.front());
+  EXPECT_EQ(bnio::ssl::handshake_pause_reason_of(record->pauses.front()),
+            bnio::ssl::handshake_pause_reason::client_hello_cb);
 }
 
 TEST(SslHandshakeRetryTest, invalid_stream_skips_factory_entirely) {
@@ -343,6 +612,16 @@ TEST(SslHandshakeRetryTest, invalid_stream_skips_factory_entirely) {
 }
 
 TEST(SslHandshakeRetryTest, factory_terminal_error_completes_without_retry) {
+  // A preloaded ClientHello plus an always-retrying client_hello callback
+  // makes the callback-driven pause deterministic without a live peer.
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
+  test_require(server_context.valid());
+  server_context.set_client_hello_callback(
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
+         bnio::ssl::alert_out&) -> bnio::ssl::client_hello_result {
+        return bnio::ssl::client_hello_result::retry;
+      });
+
   bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
@@ -356,10 +635,13 @@ TEST(SslHandshakeRetryTest, factory_terminal_error_completes_without_retry) {
   int sockets[2] = {-1, -1};
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
-  client_stream_type client{bnio::local::stream_socket(sockets[0]),
-                            client_context};
-  client_stream_type peer{bnio::local::stream_socket(sockets[1]),
-                          client_context};
+  client_stream_type server{bnio::local::stream_socket(sockets[0]),
+                            server_context};
+
+  const std::vector<char> hello = generate_client_hello(client_context);
+  test_require(BIO_write(server.native_read_bio(), hello.data(),
+                         static_cast<int>(hello.size())) ==
+               static_cast<int>(hello.size()));
 
   auto record = std::make_shared<retry_record>();
   auto observation = std::make_shared<client_observation>();
@@ -369,7 +651,7 @@ TEST(SslHandshakeRetryTest, factory_terminal_error_completes_without_retry) {
   // Exercise the 4-argument customization point object as the public
   // spelling of the retry surface.
   auto sender = bnio::ssl::async_handshake(
-      scheduler, client, bnio::ssl::handshake_type::client,
+      scheduler, server, bnio::ssl::handshake_type::server,
       terminal_error_factory{record, terminal});
   auto operation = bexec::connect(
       std::move(sender), observing_handshake_receiver{observation, &context});
@@ -379,6 +661,8 @@ TEST(SslHandshakeRetryTest, factory_terminal_error_completes_without_retry) {
   ASSERT_EQ(record->calls, 1u);
   ASSERT_EQ(record->pauses.size(), 1u);
   expect_pause_code(record->pauses.front());
+  EXPECT_EQ(bnio::ssl::handshake_pause_reason_of(record->pauses.front()),
+            bnio::ssl::handshake_pause_reason::client_hello_cb);
   EXPECT_EQ(observation->values, 0u);
   EXPECT_EQ(observation->errors, 1u);
   EXPECT_EQ(observation->stopped, 0u);
@@ -415,9 +699,9 @@ TEST(SslHandshakeRetryTest, pre_stopped_token_stops_without_factory) {
   receiver.context = &context;
   receiver.env = stop_env{source.get_token()};
 
-  auto sender = client.async_handshake(
-      scheduler, bnio::ssl::handshake_type::client,
-      recording_wait_factory{scheduler, &client, record, nullptr});
+  auto sender =
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client,
+                             recording_resume_factory{record});
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
   context.run();
@@ -451,7 +735,6 @@ TEST(SslHandshakeRetryTest, stop_token_after_start_completes_stopped) {
   bexec::inplace_stop_source source;
   auto record = std::make_shared<retry_record>();
   auto observation = std::make_shared<client_observation>();
-  std::atomic<bool> paused{false};
 
   stop_observing_handshake_receiver receiver;
   receiver.observation = observation;
@@ -461,29 +744,40 @@ TEST(SslHandshakeRetryTest, stop_token_after_start_completes_stopped) {
   receiver.context = nullptr;
   receiver.env = stop_env{source.get_token()};
 
-  auto sender = client.async_handshake(
-      scheduler, bnio::ssl::handshake_type::client,
-      recording_wait_factory{scheduler, &client, record, &paused});
+  // Transport pauses are internal: this factory must never run even though
+  // the handshake pauses on want_read. The recording is an assertion, not a
+  // resume mechanism.
+  auto sender =
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client,
+                             recording_resume_factory{record});
   auto operation = bexec::connect(std::move(sender), std::move(receiver));
   bexec::start(operation);
 
   std::thread worker([&context] { context.run(); });
 
+  // Hand off on transport progress instead of a factory invocation: wait
+  // until the ClientHello reaches the peer socket. The handshake has then
+  // been driven through its first transport pause and is parked in (or about
+  // to enter) its internal read, which cannot complete because the passive
+  // peer never writes.
   const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  while (!paused.load(std::memory_order_acquire)) {
+  for (;;) {
+    char byte = 0;
+    if (::recv(sockets[1], &byte, sizeof(byte), MSG_PEEK | MSG_DONTWAIT) > 0) {
+      break;
+    }
     if (std::chrono::steady_clock::now() >= deadline) {
       (void)context.stop();
       worker.join();
-      FAIL() << "the retry factory was never invoked";
+      FAIL() << "the ClientHello never reached the transport";
     }
     std::this_thread::yield();
   }
 
-  // Cancel immediately after the factory ran; no sleep-based handshake with
-  // the worker. The stop token must win wherever the wait sender is: either
-  // its transport read is already parked and is aborted, or it observes the
-  // cancellation before starting transport work. Both deliver stopped.
+  // Cancel while the internal transport read is parked (or before it starts:
+  // its start checks the token). The stop token must win and deliver
+  // stopped.
   source.request_stop();
   (void)context.stop();
   worker.join();
@@ -492,17 +786,43 @@ TEST(SslHandshakeRetryTest, stop_token_after_start_completes_stopped) {
   EXPECT_EQ(observation->errors, 0u);
   EXPECT_EQ(observation->stopped, 1u);
   EXPECT_FALSE(observation->saw_pause_code);
-  ASSERT_GE(record->calls, 1u);
-  for (const auto& ec : record->pauses) {
-    expect_pause_code(ec);
-  }
+  EXPECT_EQ(record->calls, 0u) << "a transport pause reached the retry factory";
 }
 
 TEST(SslHandshakeRetryTest,
      factory_runs_only_after_pause_output_reached_transport) {
+  // OpenSSL invokes both the client_hello and the certificate callback before
+  // it queues the server flight, so a plain callback pause carries no output
+  // of its own. To observe the retry operation's flush-before-factory
+  // contract, the certificate callback queues a marker record in the SSL
+  // write BIO and then retries; the operation must drain that output to the
+  // transport before it invokes the factory. This keeps the original
+  // assertion (write BIO empty and peer already received bytes when the
+  // factory runs) meaningful instead of vacuously true.
+  test_certificate_files files;
+
+  bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
+  test_require(server_context.valid());
+  test_require(!server_context.use_certificate_chain_file(
+      files.certificate.string().c_str()));
+  test_require(
+      !server_context.use_private_key_file(files.private_key.string().c_str()));
+  test_require(!server_context.check_private_key());
+  test_require(!server_context.set_min_proto_version(TLS1_3_VERSION));
+  server_context.set_cert_callback(
+      [](bnio::ssl::context_view, bnio::ssl::stream_view ssl,
+         bnio::ssl::cert_out&) -> bnio::ssl::cert_result {
+        test_require(BIO_write(SSL_get_wbio(ssl.native_handle()),
+                               k_pause_output,
+                               static_cast<int>(sizeof(k_pause_output) - 1)) ==
+                     static_cast<int>(sizeof(k_pause_output) - 1));
+        return bnio::ssl::cert_result::retry;
+      });
+
   bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
   client_context.set_verify_mode(SSL_VERIFY_NONE);
+  test_require(!client_context.set_min_proto_version(TLS1_3_VERSION));
 
   bnio::io_context context;
   if (!context.is_open()) {
@@ -510,21 +830,26 @@ TEST(SslHandshakeRetryTest,
   }
   auto scheduler = context.get_post_scheduler();
 
+  const std::vector<char> hello = generate_client_hello(client_context);
+
   int sockets[2] = {-1, -1};
   test_require(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, sockets) ==
                0);
-  client_stream_type client{bnio::local::stream_socket(sockets[0]),
-                            client_context};
+  client_stream_type server{bnio::local::stream_socket(sockets[0]),
+                            server_context};
+  test_require(server.valid());
+  test_require(BIO_write(server.native_read_bio(), hello.data(),
+                         static_cast<int>(hello.size())) ==
+               static_cast<int>(hello.size()));
 
   auto record = std::make_shared<retry_record>();
   auto observation = std::make_shared<client_observation>();
   auto drained = std::make_shared<std::atomic<bool>>(false);
   auto received = std::make_shared<std::atomic<bool>>(false);
 
-  auto sender = client.async_handshake(
-      scheduler, bnio::ssl::handshake_type::client,
-      ordering_check_factory{scheduler, &client, sockets[1], record, drained,
-                             received});
+  auto sender = server.async_handshake(
+      scheduler, bnio::ssl::handshake_type::server,
+      ordering_check_factory{&server, sockets[1], record, drained, received});
   auto operation = bexec::connect(
       std::move(sender), observing_handshake_receiver{observation, &context});
   bexec::start(operation);
@@ -532,36 +857,16 @@ TEST(SslHandshakeRetryTest,
 
   ASSERT_EQ(record->calls, 1u);
   expect_pause_code(record->pauses.front());
+  EXPECT_EQ(bnio::ssl::handshake_pause_reason_of(record->pauses.front()),
+            bnio::ssl::handshake_pause_reason::x509_lookup);
   EXPECT_TRUE(drained->load(std::memory_order_acquire))
       << "the factory saw pending write-BIO output; the pause flush was not "
          "completed first";
   EXPECT_TRUE(received->load(std::memory_order_acquire))
-      << "the ClientHello had not reached the transport when the factory ran";
+      << "the output queued by the pausing attempt had not reached the "
+         "transport when the factory ran";
   EXPECT_EQ(observation->last_error,
             std::make_error_code(std::errc::permission_denied));
-}
-
-// Generates a real ClientHello with a standalone client SSL object. Its
-// transport endpoint is never used: the returned hello is injected into the
-// server's read BIO by the caller. The generator stream is destroyed here.
-std::vector<char> generate_client_hello(bnio::ssl::context& client_context) {
-  client_stream_type generator{bnio::local::stream_socket(-1), client_context};
-  test_require(generator.valid());
-  SSL* const generator_ssl = generator.native_handle().native_handle();
-  test_require(generator_ssl != nullptr);
-  SSL_set_connect_state(generator_ssl);
-  ERR_clear_error();
-  const int hello_result = SSL_do_handshake(generator_ssl);
-  test_require(hello_result == -1);
-  test_require(SSL_get_error(generator_ssl, hello_result) ==
-               SSL_ERROR_WANT_READ);
-  const std::size_t hello_size = BIO_ctrl_pending(generator.native_write_bio());
-  test_require(hello_size > 0);
-  std::vector<char> hello(hello_size);
-  test_require(BIO_read(generator.native_write_bio(), hello.data(),
-                        static_cast<int>(hello.size())) ==
-               static_cast<int>(hello.size()));
-  return hello;
 }
 
 // TLS 1.2 accepts a plaintext close_notify alert before the handshake keys are
@@ -608,7 +913,9 @@ TEST(SslHandshakeRetryTest,
   test_require(server.valid());
 
   // The first attempt consumes the ClientHello from the read BIO, so the
-  // pause is want_read with the server flight queued for flushing.
+  // pause is want_read with the server flight queued for flushing. The retry
+  // operation drives that transport pause internally: it flushes the flight,
+  // performs the transport read that consumes the close_notify, and retries.
   test_require(BIO_write(server.native_read_bio(), hello.data(),
                          static_cast<int>(hello.size())) ==
                static_cast<int>(hello.size()));
@@ -618,16 +925,16 @@ TEST(SslHandshakeRetryTest,
   auto record = std::make_shared<retry_record>();
   auto observation = std::make_shared<client_observation>();
 
-  auto sender = server.async_handshake(
-      scheduler, bnio::ssl::handshake_type::server,
-      recording_wait_factory{scheduler, &server, record, nullptr});
+  auto sender =
+      server.async_handshake(scheduler, bnio::ssl::handshake_type::server,
+                             recording_resume_factory{record});
   auto operation = bexec::connect(
       std::move(sender), observing_handshake_receiver{observation, &context});
   bexec::start(operation);
   context.run();
 
-  ASSERT_EQ(record->calls, 1u);
-  expect_pause_code(record->pauses.front());
+  // The pause was transport-driven, so the factory was never involved.
+  EXPECT_EQ(record->calls, 0u) << "a transport pause reached the retry factory";
   EXPECT_EQ(observation->values, 0u);
   EXPECT_EQ(observation->errors, 1u);
   EXPECT_EQ(observation->stopped, 0u);
@@ -638,7 +945,7 @@ TEST(SslHandshakeRetryTest,
   EXPECT_EQ(BIO_ctrl_pending(server.native_write_bio()), std::size_t{0});
 }
 
-TEST(SslHandshakeRetryTest, lvalue_connected_client_completes_handshake) {
+TEST(SslHandshakeRetryTest, lvalue_connected_server_completes_handshake) {
   test_certificate_files files;
 
   bnio::ssl::context server_context(bnio::ssl::context_method::tls_server);
@@ -648,6 +955,9 @@ TEST(SslHandshakeRetryTest, lvalue_connected_client_completes_handshake) {
   test_require(
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
+  // One callback-driven pause, so the factory connected through the lvalue
+  // copy path actually runs.
+  install_retry_once_client_hello(server_context);
 
   bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
@@ -672,19 +982,19 @@ TEST(SslHandshakeRetryTest, lvalue_connected_client_completes_handshake) {
   handshake_receiver client_receiver{state, &context};
   handshake_receiver server_receiver{state, &context};
 
-  auto client_sender = client.async_handshake(
-      scheduler, bnio::ssl::handshake_type::client,
-      recording_wait_factory{scheduler, &client, record, nullptr});
+  auto client_sender =
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client);
   auto server_sender =
-      server.async_handshake(scheduler, bnio::ssl::handshake_type::server);
+      server.async_handshake(scheduler, bnio::ssl::handshake_type::server,
+                             recording_resume_factory{record});
 
   // Connect the retry sender through an lvalue: the const& overload copies
   // the scheduler and factory into the operation. The sender lives until the
   // handshake finishes.
   auto client_operation =
-      bexec::connect(client_sender, std::move(client_receiver));
+      bexec::connect(std::move(client_sender), std::move(client_receiver));
   auto server_operation =
-      bexec::connect(std::move(server_sender), std::move(server_receiver));
+      bexec::connect(server_sender, std::move(server_receiver));
 
   bexec::start(client_operation);
   bexec::start(server_operation);
@@ -694,9 +1004,11 @@ TEST(SslHandshakeRetryTest, lvalue_connected_client_completes_handshake) {
   EXPECT_EQ(state->errors, 0u);
   EXPECT_EQ(state->stopped, 0u);
   EXPECT_FALSE(state->error);
-  ASSERT_GE(record->calls, 1u);
+  ASSERT_EQ(record->calls, 1u);
   for (const auto& ec : record->pauses) {
     expect_pause_code(ec);
+    EXPECT_EQ(bnio::ssl::handshake_pause_reason_of(ec),
+              bnio::ssl::handshake_pause_reason::client_hello_cb);
   }
 }
 

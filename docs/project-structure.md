@@ -140,9 +140,13 @@ High-level async runtime, stream owners, and buffer types.
 - `ssl/detail/common.h` — shared SSL operation helpers.
 - `ssl/detail/buffers.h` — borrow-level buffer adapters for SSL operations.
 - `ssl/detail/state_machine.h` — shared SSL operation state machine base.
-- `ssl/detail/handshake.h` — TLS handshake operation.
+- `ssl/detail/handshake_retry.h` — factory-driven TLS handshake operation and
+  sender (`handshake_retry_operation` / `handshake_retry_sender`); the
+  2-argument handshake uses it with the default factory.
 - `ssl/detail/shutdown.h` — TLS shutdown operation.
-- `ssl/detail/senders.h` — SSL sender types.
+- `ssl/detail/senders.h` — SSL sender types; the `handshake_sender` alias
+  instantiates the retry sender with the default factory, which reports
+  callback-driven pauses as `std::errc::operation_not_supported`.
 - `ssl/detail/read_write.h` — TLS read/write umbrella.
 - `ssl/detail/read_write/state.h` — TLS read/write state.
 - `ssl/detail/read_write/step.h` — TLS read/write state machine steps.

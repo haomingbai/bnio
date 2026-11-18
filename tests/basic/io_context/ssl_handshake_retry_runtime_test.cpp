@@ -2,10 +2,13 @@
  * @file ssl_handshake_retry_runtime_test.cpp
  * @brief Runtime unit tests for the factory-driven handshake retry step.
  *
- * These tests use the public API only. A server-side stream with no peer
- * bytes pauses deterministically with want_read, which lets them exercise
- * the attempt-before-factory order, the factory invocation contract, and the
- * terminal mapping of factory results without any peer handshake.
+ * These tests use the public API only. The retry operation drives transport
+ * pauses internally, so the factory is only reached for callback-driven
+ * pauses. A server-side stream with a preloaded ClientHello and a
+ * client_hello callback returning retry pauses deterministically with
+ * client_hello_cb, which lets the tests exercise the attempt-before-factory
+ * order, the factory invocation contract, and the terminal mapping of factory
+ * results without any live peer.
  */
 
 #include <bnio/local.h>
@@ -277,8 +280,8 @@ class SslHandshakeRetryRuntimeTest : public ::testing::Test {
     ASSERT_TRUE(ssl_context_->valid());
   }
 
-  // A fresh server-side stream whose peer never sends a ClientHello; the
-  // first attempt must pause with want_read.
+  // A fresh server-side stream. Tests that expect the factory to run preload
+  // a ClientHello into its read BIO before starting.
   [[nodiscard]] std::unique_ptr<stream_type> make_server_stream() {
     if (!sockets_.valid()) {
       return nullptr;
@@ -288,6 +291,25 @@ class SslHandshakeRetryRuntimeTest : public ::testing::Test {
         *ssl_context_);
   }
 
+  // Installs a client_hello callback that always retries, so the first server
+  // attempt pauses deterministically for a callback-driven reason.
+  void install_retry_client_hello_callback() {
+    ssl_context_->set_client_hello_callback(
+        [](bnio::ssl::context_view, bnio::ssl::stream_view,
+           bnio::ssl::alert_out&) -> bnio::ssl::client_hello_result {
+          return bnio::ssl::client_hello_result::retry;
+        });
+  }
+
+  // Preloads a complete ClientHello into the stream's read BIO; the server
+  // attempt consumes it and reaches the client_hello callback.
+  void preload_client_hello(stream_type& stream) {
+    const std::vector<char> hello = make_client_hello_with_alpn();
+    ASSERT_EQ(BIO_write(stream.native_read_bio(), hello.data(),
+                        static_cast<int>(hello.size())),
+              static_cast<int>(hello.size()));
+  }
+
   bnio::io_context context_;
   scheduler_type scheduler_ = context_.get_post_scheduler();
   std::unique_ptr<bnio::ssl::context> ssl_context_;
@@ -295,10 +317,12 @@ class SslHandshakeRetryRuntimeTest : public ::testing::Test {
 };
 
 TEST_F(SslHandshakeRetryRuntimeTest,
-       server_attempt_pauses_before_factory_and_reports_terminal_value) {
+       attempt_pauses_before_factory_and_reports_terminal_value) {
+  install_retry_client_hello_callback();
   auto stream = make_server_stream();
   ASSERT_NE(stream, nullptr);
   ASSERT_TRUE(stream->valid());
+  preload_client_hello(*stream);
 
   retry_record record;
   public_result result;
@@ -313,11 +337,12 @@ TEST_F(SslHandshakeRetryRuntimeTest,
   bexec::start(operation);
   context_.run();
 
-  // The attempt ran first and paused; the factory saw exactly that pause.
+  // The attempt ran first and paused in the client_hello callback; the
+  // factory saw exactly that pause.
   EXPECT_EQ(record.calls, 1U);
   ASSERT_TRUE(is_handshake_pause(record.last_pause));
   EXPECT_EQ(handshake_pause_reason_of(record.last_pause),
-            handshake_pause_reason::want_read);
+            handshake_pause_reason::client_hello_cb);
 
   // The factory's non-empty result is the terminal value, and the pause code
   // never reaches the public receiver.
@@ -330,9 +355,11 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 
 TEST_F(SslHandshakeRetryRuntimeTest,
        factory_returned_pause_code_is_protocol_error) {
+  install_retry_client_hello_callback();
   auto stream = make_server_stream();
   ASSERT_NE(stream, nullptr);
   ASSERT_TRUE(stream->valid());
+  preload_client_hello(*stream);
 
   retry_record record;
   public_result result;
@@ -346,6 +373,8 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 
   EXPECT_EQ(record.calls, 1U);
   EXPECT_TRUE(is_handshake_pause(record.last_pause));
+  EXPECT_EQ(handshake_pause_reason_of(record.last_pause),
+            handshake_pause_reason::client_hello_cb);
   EXPECT_EQ(result.values, 0U);
   EXPECT_EQ(result.errors, 1U);
   EXPECT_EQ(result.stopped, 0U);
@@ -355,9 +384,11 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 
 TEST_F(SslHandshakeRetryRuntimeTest,
        throwing_factory_maps_to_protocol_error_without_leaking) {
+  install_retry_client_hello_callback();
   auto stream = make_server_stream();
   ASSERT_NE(stream, nullptr);
   ASSERT_TRUE(stream->valid());
+  preload_client_hello(*stream);
 
   retry_record record;
   public_result result;
@@ -371,6 +402,8 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 
   EXPECT_EQ(record.calls, 1U);
   EXPECT_TRUE(is_handshake_pause(record.last_pause));
+  EXPECT_EQ(handshake_pause_reason_of(record.last_pause),
+            handshake_pause_reason::client_hello_cb);
   EXPECT_EQ(result.values, 0U);
   EXPECT_EQ(result.errors, 1U);
   EXPECT_EQ(result.stopped, 0U);
@@ -380,9 +413,11 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 
 TEST_F(SslHandshakeRetryRuntimeTest,
        throwing_connect_maps_to_protocol_error_without_leaking) {
+  install_retry_client_hello_callback();
   auto stream = make_server_stream();
   ASSERT_NE(stream, nullptr);
   ASSERT_TRUE(stream->valid());
+  preload_client_hello(*stream);
 
   retry_record record;
   public_result result;
@@ -396,6 +431,8 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 
   EXPECT_EQ(record.calls, 1U);
   EXPECT_TRUE(is_handshake_pause(record.last_pause));
+  EXPECT_EQ(handshake_pause_reason_of(record.last_pause),
+            handshake_pause_reason::client_hello_cb);
   EXPECT_EQ(result.values, 0U);
   EXPECT_EQ(result.errors, 1U);
   EXPECT_EQ(result.stopped, 0U);
@@ -528,9 +565,11 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 
 TEST_F(SslHandshakeRetryRuntimeTest,
        synchronous_factory_stopped_stops_without_retry) {
+  install_retry_client_hello_callback();
   auto stream = make_server_stream();
   ASSERT_NE(stream, nullptr);
   ASSERT_TRUE(stream->valid());
+  preload_client_hello(*stream);
 
   public_result result;
   auto sender = stream->async_handshake(scheduler_, handshake_type::server,
@@ -548,9 +587,11 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 
 TEST_F(SslHandshakeRetryRuntimeTest,
        noexcept_factory_runs_the_nothrow_builder_path) {
+  install_retry_client_hello_callback();
   auto stream = make_server_stream();
   ASSERT_NE(stream, nullptr);
   ASSERT_TRUE(stream->valid());
+  preload_client_hello(*stream);
 
   retry_record record;
   public_result result;
@@ -572,9 +613,11 @@ TEST_F(SslHandshakeRetryRuntimeTest,
 }
 
 TEST_F(SslHandshakeRetryRuntimeTest, lvalue_connect_runs_the_sender_copy_path) {
+  install_retry_client_hello_callback();
   auto stream = make_server_stream();
   ASSERT_NE(stream, nullptr);
   ASSERT_TRUE(stream->valid());
+  preload_client_hello(*stream);
 
   retry_record record;
   public_result result;
@@ -591,10 +634,39 @@ TEST_F(SslHandshakeRetryRuntimeTest, lvalue_connect_runs_the_sender_copy_path) {
   context_.run();
 
   EXPECT_EQ(record.calls, 1U);
+  EXPECT_EQ(handshake_pause_reason_of(record.last_pause),
+            handshake_pause_reason::client_hello_cb);
   EXPECT_EQ(result.values, 0U);
   EXPECT_EQ(result.errors, 1U);
   EXPECT_EQ(result.stopped, 0U);
   EXPECT_EQ(result.last_error, terminal);
+}
+
+TEST_F(SslHandshakeRetryRuntimeTest,
+       callback_pause_terminates_the_2arg_overload_as_unsupported) {
+  install_retry_client_hello_callback();
+  auto stream = make_server_stream();
+  ASSERT_NE(stream, nullptr);
+  ASSERT_TRUE(stream->valid());
+  preload_client_hello(*stream);
+
+  public_result result;
+  auto sender = stream->async_handshake(scheduler_, handshake_type::server);
+  auto operation =
+      bexec::connect(std::move(sender), result_receiver{&result, &context_});
+  bexec::start(operation);
+  context_.run();
+
+  // The 2-argument overload is a retry sender with the stateless default
+  // factory: transport pauses are driven internally, and a callback-driven
+  // pause terminates with operation_not_supported because this overload has
+  // no resume surface. The pause code never reaches the public receiver.
+  EXPECT_EQ(result.values, 0U);
+  EXPECT_EQ(result.errors, 1U);
+  EXPECT_EQ(result.stopped, 0U);
+  EXPECT_FALSE(result.saw_pause_code);
+  EXPECT_EQ(result.last_error,
+            std::make_error_code(std::errc::operation_not_supported));
 }
 
 }  // namespace

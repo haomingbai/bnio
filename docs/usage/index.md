@@ -297,11 +297,16 @@ earlier is unsupported.
 **Callback-driven retry.** `client_hello_result::retry` and
 `cert_result::retry` pause the handshake. Resume them with the 3-argument
 `async_handshake(scheduler, type, factory)` overload: the factory receives
-`handshake_pause_reason::client_hello_cb` or
-`handshake_pause_reason::x509_lookup` and returns a sender that performs one
-wait step (for example `make_handshake_wait_sender`). The 2-argument overload
-has no resume surface, so a callback-driven pause is reported there as a
-terminal handshake error.
+only callback-driven pause codes
+(`handshake_pause_reason::client_hello_cb`,
+`handshake_pause_reason::x509_lookup`, `handshake_pause_reason::async`,
+`handshake_pause_reason::async_job`, and
+`handshake_pause_reason::retry_verify`) and returns a sender that performs
+the user's asynchronous work; an empty completion resumes the handshake.
+Transport progress (`handshake_pause_reason::want_read` and
+`handshake_pause_reason::want_write`) is internal to the operation and never
+reaches the factory. The 2-argument overload has no resume surface, so a
+callback-driven pause completes with `std::errc::operation_not_supported`.
 
 **Copied callbacks and lifetime.** Callbacks split into two lifetime rules.
 ALPN, SNI servername, and ClientHello registrations are looked up through the

@@ -13,8 +13,10 @@
  * caught even when it happens to look harmless without instrumentation.
  */
 
+#include <bnio/local.h>
 #include <bnio/ssl.h>
 #include <gtest/gtest.h>
+#include <openssl/err.h>
 #include <openssl/ssl.h>
 
 #include <bexec/just.hpp>
@@ -25,6 +27,7 @@
 #include <system_error>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -173,14 +176,50 @@ struct stopped_factory {
   }
 };
 
-struct wait_factory {
-  inline_scheduler scheduler;
-  stream_type* stream = nullptr;
-
-  auto operator()(const std::error_code& ec) const {
-    return bnio::ssl::make_handshake_wait_sender(scheduler, *stream, ec);
+// Completes synchronously with an empty error: the retry operation resumes the
+// SSL attempt after the callback pause.
+struct resume_factory {
+  auto operator()(const std::error_code&) const {
+    return bexec::just(std::error_code{});
   }
 };
+
+// A client SSL object produces a real ClientHello into its write BIO. The
+// bytes are later preloaded into a server stream's read BIO so the
+// client_hello callback is reached deterministically.
+using generator_stream_type =
+    bnio::ssl::tcp::stream<bnio::local::stream_socket>;
+
+[[nodiscard]] std::vector<char> make_client_hello() {
+  bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
+  EXPECT_TRUE(client_context.valid());
+  client_context.set_verify_mode(SSL_VERIFY_NONE);
+
+  generator_stream_type generator{bnio::local::stream_socket(-1),
+                                  client_context};
+  EXPECT_TRUE(generator.valid());
+  SSL* const ssl = generator.native_handle().native_handle();
+  EXPECT_NE(ssl, nullptr);
+  SSL_set_connect_state(ssl);
+  ERR_clear_error();
+  const int result = SSL_do_handshake(ssl);
+  EXPECT_EQ(result, -1);
+  EXPECT_EQ(SSL_get_error(ssl, result), SSL_ERROR_WANT_READ);
+
+  const std::size_t hello_size = BIO_ctrl_pending(generator.native_write_bio());
+  EXPECT_GT(hello_size, std::size_t{0});
+  std::vector<char> hello(hello_size);
+  EXPECT_EQ(BIO_read(generator.native_write_bio(), hello.data(),
+                     static_cast<int>(hello.size())),
+            static_cast<int>(hello.size()));
+  return hello;
+}
+
+void preload_client_hello(stream_type& stream, const std::vector<char>& hello) {
+  EXPECT_EQ(BIO_write(stream.native_read_bio(), hello.data(),
+                      static_cast<int>(hello.size())),
+            static_cast<int>(hello.size()));
+}
 
 template <class Factory>
 using sender_type = decltype(std::declval<stream_type&>().async_handshake(
@@ -207,6 +246,14 @@ class SslHandshakeRetryLifetimeTest : public ::testing::Test {
     server_context_ = std::make_unique<bnio::ssl::context>(
         bnio::ssl::context_method::tls_server);
     ASSERT_TRUE(server_context_->valid());
+    // The retry operation drives transport pauses internally, so a server
+    // test that needs the factory path must pause in a callback. This always
+    // retrying callback provides that pause once a ClientHello is preloaded.
+    server_context_->set_client_hello_callback(
+        [](bnio::ssl::context_view, bnio::ssl::stream_view,
+           bnio::ssl::alert_out&) -> bnio::ssl::client_hello_result {
+          return bnio::ssl::client_hello_result::retry;
+        });
   }
 
   // Starts the retry operation over the fake transport with a receiver that
@@ -305,11 +352,17 @@ TEST_F(SslHandshakeRetryLifetimeTest,
 TEST_F(SslHandshakeRetryLifetimeTest,
        inline_child_stopped_terminal_does_not_touch_the_operation) {
   completion_record record;
-  // A server with no peer bytes pauses want_read without producing output;
-  // the factory's synchronous set_stopped() terminalizes the operation.
+  const std::vector<char> hello = make_client_hello();
+  // A server with a preloaded ClientHello pauses in the client_hello callback
+  // without producing output; the factory's synchronous set_stopped()
+  // terminalizes the operation.
   ASSERT_TRUE(run_and_destroy(
       sync_transport{}, handshake_type::server,
-      [](stream_type&) { return stopped_factory{}; }, record));
+      [hello](stream_type& stream) {
+        preload_client_hello(stream, hello);
+        return stopped_factory{};
+      },
+      record));
 
   EXPECT_EQ(record.errors, 0U);
   EXPECT_EQ(record.values, 0U);
@@ -321,10 +374,15 @@ TEST_F(SslHandshakeRetryLifetimeTest,
   completion_record record;
   const std::error_code terminal =
       std::make_error_code(std::errc::permission_denied);
+  const std::vector<char> hello = make_client_hello();
 
   ASSERT_TRUE(run_and_destroy(
       sync_transport{}, handshake_type::server,
-      [terminal](stream_type&) { return terminal_factory{terminal}; }, record));
+      [hello, terminal](stream_type& stream) {
+        preload_client_hello(stream, hello);
+        return terminal_factory{terminal};
+      },
+      record));
 
   EXPECT_EQ(record.errors, 1U);
   EXPECT_EQ(record.values, 0U);
@@ -333,19 +391,57 @@ TEST_F(SslHandshakeRetryLifetimeTest,
 }
 
 TEST_F(SslHandshakeRetryLifetimeTest,
-       inline_wait_step_terminal_does_not_touch_the_operation) {
+       inline_callback_resume_terminal_does_not_touch_the_operation) {
   completion_record record;
   sync_transport transport;
-  // Accept the ClientHello so the pause flush succeeds; the wait step then
-  // observes transport EOF and reports connection_reset.
+  // Accept whatever the resumed attempt produces so its flush completes
+  // synchronously.
+  transport.accept_all_writes = true;
+
+  // The callback retries once so the factory runs, then succeeds so the
+  // factory's empty result resumes the handshake. The resumed attempt
+  // terminalizes synchronously: a fatal SSL error for this certificate-less
+  // server, or transport EOF if OpenSSL asks for more bytes. This is the
+  // callback-pause replacement for the old wait-step resume path.
+  unsigned callback_calls = 0;
+  server_context_->set_client_hello_callback(
+      [](bnio::ssl::context_view, bnio::ssl::stream_view, bnio::ssl::alert_out&,
+         unsigned* calls) -> bnio::ssl::client_hello_result {
+        return ++*calls == 1 ? bnio::ssl::client_hello_result::retry
+                             : bnio::ssl::client_hello_result::success;
+      },
+      &callback_calls);
+  const std::vector<char> hello = make_client_hello();
+
+  ASSERT_TRUE(run_and_destroy(
+      std::move(transport), handshake_type::server,
+      [hello](stream_type& stream) {
+        preload_client_hello(stream, hello);
+        return resume_factory{};
+      },
+      record));
+
+  EXPECT_GE(callback_calls, 2U);
+  EXPECT_EQ(record.errors, 1U);
+  EXPECT_EQ(record.values, 0U);
+  EXPECT_EQ(record.stopped, 0U);
+  EXPECT_TRUE(record.last_error);
+  EXPECT_FALSE(record.saw_pause);
+}
+
+TEST_F(SslHandshakeRetryLifetimeTest,
+       inline_transport_read_eof_terminal_does_not_touch_the_operation) {
+  completion_record record;
+  sync_transport transport;
+  // Accept the ClientHello so its pause flush succeeds; the internal
+  // transport read that follows then observes EOF and reports
+  // connection_reset. This is the callback-free counterpart of the old
+  // factory wait-step path: want_read is now driven inside the operation.
   transport.accept_all_writes = true;
 
   ASSERT_TRUE(run_and_destroy(
       std::move(transport), handshake_type::client,
-      [](stream_type& stream) {
-        return wait_factory{inline_scheduler{}, &stream};
-      },
-      record));
+      [](stream_type&) { return terminal_factory{}; }, record));
 
   EXPECT_EQ(record.errors, 1U);
   EXPECT_EQ(record.values, 0U);

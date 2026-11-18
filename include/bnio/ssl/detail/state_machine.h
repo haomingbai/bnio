@@ -230,8 +230,17 @@ class operation_base {
     }
   }
 
+  // Computes the OpenSSL error for a failed SSL call and dispatches it.
+  // Callers that already computed SSL_get_error() (for example to filter
+  // transport pauses before classification) use the value overload below so
+  // the error is not computed twice.
   void handle_ssl_error(int ssl_result, resume_action action) noexcept {
-    const int error = SSL_get_error(native_ssl(*stream_), ssl_result);
+    handle_ssl_error_value(SSL_get_error(native_ssl(*stream_), ssl_result),
+                           action);
+  }
+
+  // Dispatches an already computed SSL_get_error() value.
+  void handle_ssl_error_value(int error, resume_action action) noexcept {
     switch (error) {
       case SSL_ERROR_WANT_READ:
         after_read_ = action;

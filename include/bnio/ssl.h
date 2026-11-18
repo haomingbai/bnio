@@ -12,7 +12,6 @@
 #include <bnio/ssl/context_view.h>
 #include <bnio/ssl/cpo.h>
 #include <bnio/ssl/handshake_pause.h>
-#include <bnio/ssl/handshake_wait.h>
 #include <bnio/ssl/stream.h>
 
 #endif  // BNIO_SSL_H_

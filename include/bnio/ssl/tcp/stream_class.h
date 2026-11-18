@@ -261,6 +261,11 @@ class stream {
   /**
    * Creates a handshake sender whose transport I/O uses the scheduler's queued
    * submission path.
+   *
+   * This overload is an instance of the factory-driven retry sender with a
+   * default factory: transport pauses are driven internally, while a
+   * callback-driven pause completes with std::errc::operation_not_supported
+   * because this overload has no resume surface.
    */
   template <class Scheduler>
   [[nodiscard]] auto async_handshake(Scheduler scheduler,
@@ -268,17 +273,21 @@ class stream {
 
   /**
    * Creates a handshake sender that runs the SSL attempt first and invokes
-   * `factory` only when the attempt pauses.
+   * `factory` only when the attempt pauses for a callback-driven reason
+   * (X509 lookup, async engine/job, client hello callback, certificate
+   * retry). Transport pauses (want_read/want_write) are driven internally by
+   * the operation and never reach the factory.
    *
-   * This is the full retry surface: the factory receives the pause code and
-   * returns a sender (for example make_handshake_wait_sender) that performs
-   * one wait step; an empty completion resumes the handshake, a non-empty
-   * one becomes the terminal result, and set_stopped cancels. The receiver
-   * contract is unchanged from the 2-argument overload: exactly
-   * set_value(std::error_code) plus set_stopped(), and pause codes never
-   * reach the public receiver. Everything is stored inline; connecting and
-   * starting do not allocate. The factory is invoked zero times when the
-   * stream is invalid or the attempt finishes without pausing.
+   * The factory receives the callback-driven pause code and returns a sender
+   * that performs the user's asynchronous wait work; an empty completion
+   * resumes the handshake, a non-empty one becomes the terminal result, and
+   * set_stopped cancels. Return `bexec::just(std::error_code{})` to resume
+   * immediately. The receiver contract is unchanged from the 2-argument
+   * overload: exactly set_value(std::error_code) plus set_stopped(), and
+   * pause codes never reach the public receiver. Everything is stored
+   * inline; connecting and starting do not allocate. The factory is invoked
+   * zero times when the stream is invalid or the attempt finishes without
+   * pausing.
    */
   template <class Scheduler, class Factory>
     requires detail::handshake_retry_factory<Factory>

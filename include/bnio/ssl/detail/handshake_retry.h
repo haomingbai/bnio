@@ -34,9 +34,13 @@ namespace detail {
 /**
  * Whole-operation driver for async_handshake(scheduler, type, factory).
  *
- * The SSL attempt runs first; the factory is invoked only after the attempt
- * paused. The attempt, its output flush, and the factory's wait sender all
- * live here: no nested attempt sender and no heap allocation.
+ * The SSL attempt runs first. Transport pauses (SSL_ERROR_WANT_READ and
+ * SSL_ERROR_WANT_WRITE) are driven internally through operation_base: pending
+ * output is flushed, the requested transport step runs, and the attempt is
+ * resumed. The factory is invoked only for callback-driven pauses
+ * (x509_lookup, async, async_job, client_hello_cb, retry_verify). The attempt,
+ * its output flush, and the factory's wait sender all live here: no nested
+ * attempt sender and no heap allocation.
  *
  * Completion contract matches the 2-argument handshake: exactly
  * set_value(std::error_code) or set_stopped(). Pause codes never reach the
@@ -143,11 +147,19 @@ class handshake_retry_operation
   /**
    * Receives the staged action once the pending output flush finished.
    *
-   * The action is staged, never executed here: an inline flush completion must
-   * not nest another driver frame.
+   * operation_base forwards handshake, finish, fail, and pause here.
+   * resume_action::handshake means an internal transport step made progress;
+   * the other actions carry the flush outcome. The action is staged, never
+   * executed here: an inline flush completion must not nest another driver
+   * frame.
    */
   void resume(resume_action action) noexcept {
     switch (action) {
+      case resume_action::handshake:
+        // An internal transport step (WANT_READ/WANT_WRITE) made progress:
+        // run another SSL attempt.
+        kick(driver_action::ssl_attempt);
+        return;
       case resume_action::finish:
         kick(driver_action::finish);
         return;
@@ -158,10 +170,10 @@ class handshake_retry_operation
         kick(driver_action::wait);
         return;
       default:
-        // Defensive: operation_base only forwards finish/fail/pause here
-        // (transport_read is intercepted). Report a protocol violation instead
-        // of re-running the attempt, which could loop or corrupt the
-        // handshake.
+        // Defensive: operation_base only forwards handshake, finish, fail,
+        // and pause here (transport_read is intercepted). Report a protocol
+        // violation instead of re-running the attempt, which could loop or
+        // corrupt the handshake.
         this->post_complete_value(
             std::make_error_code(std::errc::protocol_error));
         return;
@@ -185,7 +197,8 @@ class handshake_retry_operation
     none = 0,
     // Run one SSL_do_handshake attempt (and flush its output).
     ssl_attempt,
-    // Invoke the factory for the last pause and start its wait sender.
+    // Invoke the factory for the last callback-driven pause and start its
+    // wait sender.
     wait,
     // Process the result stored by the factory child.
     child_done,
@@ -304,6 +317,12 @@ class handshake_retry_operation
   /**
    * Performs one SSL handshake attempt.
    *
+   * A failed attempt computes SSL_get_error() once. Transport pauses
+   * (WANT_READ/WANT_WRITE) are handed to operation_base, which drives the
+   * flush/read/write step and resumes the attempt through
+   * resume(resume_action::handshake). Every other result goes to
+   * classify_ssl_result().
+   *
    * Returns true when a terminal completion was staged (ZERO_RETURN, with no
    * flush). Every other outcome stages a follow-up action or leaves the output
    * flush pending; a flush-staged terminal is queued by the terminal hook.
@@ -316,19 +335,29 @@ class handshake_retry_operation
       this->flush_then(resume_action::finish);
       return false;
     }
-    return classify_ssl_result(
-        SSL_get_error(native_ssl(*this->stream_), result));
+
+    const int error = SSL_get_error(native_ssl(*this->stream_), result);
+    if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+      // Transport progress: flush pending output and perform the requested
+      // read or write; resume(handshake) then runs another attempt.
+      this->handle_ssl_error_value(error, resume_action::handshake);
+      return false;
+    }
+    return classify_ssl_result(error);
   }
 
   /**
-   * Classifies an SSL_do_handshake() error.
+   * Classifies a callback-driven SSL_do_handshake() error.
    *
-   * Returns true when a terminal completion was staged.
+   * Transport pauses were already filtered by run_ssl_attempt(), so the pause
+   * branch here only sees callback-driven pauses. Returns true when a terminal
+   * completion was staged.
    */
   [[nodiscard]] bool classify_ssl_result(int error) noexcept {
     if (const std::optional<handshake_pause_reason> reason =
             lookup_handshake_pause(error)) {
-      // A pause is not an error; never read the OpenSSL error queue here.
+      // A callback-driven pause is not an error; never read the OpenSSL error
+      // queue here.
       last_pause_ = make_handshake_pause_error(*reason);
       this->flush_then(resume_action::pause);
       return false;
@@ -351,11 +380,14 @@ class handshake_retry_operation
   }
 
   /**
-   * Invokes the factory for the last pause and starts one wait round.
+   * Invokes the factory for the last callback-driven pause and starts one
+   * wait round.
    *
-   * Returns true when this function completed the operation. A factory throw
-   * maps to std::errc::protocol_error. The epoch CAS hands the round to either
-   * the driver or the child; the loser processes the stored result via
+   * The factory is reached only for callback-driven pauses; transport pauses
+   * are driven internally through operation_base. Returns true when this
+   * function completed the operation. A factory throw maps to
+   * std::errc::protocol_error. The epoch CAS hands the round to either the
+   * driver or the child; the loser processes the stored result via
    * driver_action::child_done.
    */
   [[nodiscard]] bool start_wait_round() noexcept {
@@ -397,7 +429,8 @@ class handshake_retry_operation
   }
 
   /**
-   * Invokes the factory with the lvalue pause code and connects its sender.
+   * Invokes the factory with the lvalue callback-driven pause code and
+   * connects its sender.
    *
    * The factory is stored by value and invoked as an lvalue, matching
    * handshake_retry_factory exactly.
@@ -472,8 +505,8 @@ class handshake_retry_operation
   handshake_type type_;
   factory_type factory_;
 
-  // Last pause code handed to the factory (written before the flush, read by
-  // the child construction only while the driver is active).
+  // Last callback-driven pause code handed to the factory (written before the
+  // flush, read by the child construction only while the driver is active).
   std::error_code last_pause_ = bnio::ssl::base::empty_error_code;
 
   // Published before the epoch CAS (release) and read by the loser of the

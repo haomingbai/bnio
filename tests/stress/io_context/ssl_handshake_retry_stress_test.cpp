@@ -3,16 +3,20 @@
  * @brief Stress tests for the factory-driven SSL handshake retry API.
  *
  * Everything here uses only the public bnio and bexec sender/receiver
- * surfaces: the 3-argument async_handshake,
- * bnio::ssl::make_handshake_wait_sender, and the public handshake-pause error
- * category. No bnio detail header is included.
+ * surfaces: the 2- and 3-argument async_handshake and the public
+ * handshake-pause error category. Transport pauses are driven inside the
+ * retry operation; the factory is reached only for callback-driven pauses,
+ * which these tests produce with client_hello callbacks returning retry. No
+ * bnio detail header is included.
  */
 
 #include <bnio/local.h>
 #include <bnio/ssl.h>
 #include <gtest/gtest.h>
+#include <openssl/ssl.h>
 
 #include <atomic>
+#include <bexec/just.hpp>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
 #include <bexec/stop_token.hpp>
@@ -26,6 +30,7 @@
 #include <system_error>
 #include <thread>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -37,13 +42,10 @@ using ssl_stream_type = bnio::ssl::tcp::stream<bnio::local::stream_socket>;
 using post_scheduler_type =
     decltype(std::declval<bnio::io_context&>().get_post_scheduler());
 
-[[nodiscard]] bool is_table_pause_reason(
-    bnio::ssl::handshake_pause_reason reason) noexcept {
-  const int value = static_cast<int>(reason);
-  return value >=
-             static_cast<int>(bnio::ssl::handshake_pause_reason::want_read) &&
-         value <=
-             static_cast<int>(bnio::ssl::handshake_pause_reason::retry_verify);
+[[nodiscard]] bool is_callback_pause(const std::error_code& ec) noexcept {
+  return bnio::ssl::is_handshake_pause(ec) &&
+         bnio::ssl::handshake_pause_reason_of(ec) ==
+             bnio::ssl::handshake_pause_reason::client_hello_cb;
 }
 
 struct retry_counters {
@@ -60,10 +62,8 @@ struct retry_counters {
   std::condition_variable first_pause;
 };
 
-// Counting factory that composes the public wait helper for every pause.
-struct counting_wait_factory {
-  post_scheduler_type scheduler;
-  ssl_stream_type* stream = nullptr;
+// Counting factory that resumes every callback-driven pause synchronously.
+struct counting_resume_factory {
   retry_counters* counters = nullptr;
 
   auto operator()(const std::error_code& ec) const {
@@ -72,13 +72,14 @@ struct counting_wait_factory {
       std::lock_guard<std::mutex> guard(counters->first_pause_mutex);
     }
     counters->first_pause.notify_all();
+    // Every factory invocation must be a client_hello callback pause: the
+    // transport pauses are internal and never reach the factory.
     if (!bnio::ssl::is_handshake_pause(ec)) {
       counters->pause_violations.fetch_add(1, std::memory_order_relaxed);
-    } else if (!is_table_pause_reason(
-                   bnio::ssl::handshake_pause_reason_of(ec))) {
+    } else if (!is_callback_pause(ec)) {
       counters->reason_violations.fetch_add(1, std::memory_order_relaxed);
     }
-    return bnio::ssl::make_handshake_wait_sender(scheduler, *stream, ec);
+    return bexec::just(std::error_code{});
   }
 };
 
@@ -88,6 +89,8 @@ struct handshake_outcome {
   std::atomic<int> errors{0};
   std::atomic<int> stopped{0};
   std::atomic<int> pause_leaks{0};
+  // Written once before the terminal signal; read after all workers join.
+  std::error_code last_error;
 };
 
 struct outcome_receiver {
@@ -99,6 +102,7 @@ struct outcome_receiver {
   void set_value(std::error_code ec) noexcept {
     if (ec) {
       outcome->errors.fetch_add(1, std::memory_order_relaxed);
+      outcome->last_error = ec;
       if (bnio::ssl::is_handshake_pause(ec)) {
         outcome->pause_leaks.fetch_add(1, std::memory_order_relaxed);
       }
@@ -129,113 +133,34 @@ struct stop_outcome_receiver : outcome_receiver {
 };
 
 // ---------------------------------------------------------------------------
-// A fixed sender type that completes synchronously with an empty error code
-// for a bounded number of rounds, then delegates to the public wait helper.
-// The retry driver must trampoline these synchronous completions instead of
-// recursing once per round.
+// A factory that completes synchronously with an empty error code for a
+// bounded number of rounds, then with a terminal error. The retry driver must
+// trampoline these synchronous completions instead of recursing once per
+// round.
 // ---------------------------------------------------------------------------
 
-template <class Scheduler, class NextLayer>
 struct synchronous_retry_state {
-  explicit synchronous_retry_state(Scheduler sched)
-      : scheduler(std::move(sched)) {}
-
-  Scheduler scheduler;
-  bnio::ssl::tcp::stream<NextLayer>* stream = nullptr;
-  std::error_code last_pause;
   long remaining = 0;
+  std::error_code terminal = std::make_error_code(std::errc::permission_denied);
   std::atomic<long> synchronous_rounds{0};
   std::atomic<long> factory_calls{0};
+  std::atomic<long> pause_violations{0};
 };
 
-template <class Scheduler, class NextLayer>
-class synchronous_retry_sender {
- public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::error_code),
-                                   bexec::set_stopped_t()>;
-  using state_type = synchronous_retry_state<Scheduler, NextLayer>;
-
-  explicit synchronous_retry_sender(std::shared_ptr<state_type> state) noexcept
-      : state_(std::move(state)) {}
-
-  template <class Receiver>
-  class operation {
-   public:
-    using wait_sender_type = decltype(bnio::ssl::make_handshake_wait_sender(
-        std::declval<Scheduler>(),
-        std::declval<bnio::ssl::tcp::stream<NextLayer>&>(),
-        std::declval<std::error_code>()));
-    using wait_operation_type = decltype(bexec::connect(
-        std::declval<wait_sender_type>(), std::declval<Receiver>()));
-
-    operation(std::shared_ptr<state_type> state, Receiver receiver)
-        : state_(std::move(state)), receiver_(std::move(receiver)) {}
-
-    operation(const operation&) = delete;
-    operation& operator=(const operation&) = delete;
-
-    ~operation() noexcept {
-      if (wait_started_) {
-        wait_storage_.wait_operation.~wait_operation_type();
-      }
-    }
-
-    void start() noexcept {
-      auto& state = *state_;
-      if (state.remaining > 0) {
-        --state.remaining;
-        state.synchronous_rounds.fetch_add(1, std::memory_order_relaxed);
-        bexec::set_value(std::move(receiver_), std::error_code{});
-        return;
-      }
-
-      auto wait_sender = bnio::ssl::make_handshake_wait_sender(
-          state.scheduler, *state.stream, state.last_pause);
-      ::new (static_cast<void*>(&wait_storage_.wait_operation))
-          wait_operation_type(
-              bexec::connect(std::move(wait_sender), std::move(receiver_)));
-      wait_started_ = true;
-      bexec::start(wait_storage_.wait_operation);
-    }
-
-   private:
-    union wait_storage_type {
-      wait_operation_type wait_operation;
-      wait_storage_type() noexcept {}
-      ~wait_storage_type() noexcept {}
-    };
-
-    std::shared_ptr<state_type> state_;
-    Receiver receiver_;
-    wait_storage_type wait_storage_{};
-    bool wait_started_ = false;
-  };
-
-  template <class Receiver>
-  auto connect(Receiver receiver) && {
-    return operation<std::remove_cvref_t<Receiver>>(std::move(state_),
-                                                    std::move(receiver));
-  }
-
-  template <class Receiver>
-  auto connect(Receiver receiver) const& {
-    return operation<std::remove_cvref_t<Receiver>>(state_,
-                                                    std::move(receiver));
-  }
-
- private:
-  std::shared_ptr<state_type> state_;
-};
-
-template <class Scheduler, class NextLayer>
 struct synchronous_retry_factory {
-  std::shared_ptr<synchronous_retry_state<Scheduler, NextLayer>> state;
+  std::shared_ptr<synchronous_retry_state> state;
 
   auto operator()(const std::error_code& ec) const {
-    state->last_pause = ec;
     state->factory_calls.fetch_add(1, std::memory_order_relaxed);
-    return synchronous_retry_sender<Scheduler, NextLayer>(state);
+    if (!is_callback_pause(ec)) {
+      state->pause_violations.fetch_add(1, std::memory_order_relaxed);
+    }
+    if (state->remaining > 0) {
+      --state->remaining;
+      state->synchronous_rounds.fetch_add(1, std::memory_order_relaxed);
+      return bexec::just(std::error_code{});
+    }
+    return bexec::just(state->terminal);
   }
 };
 
@@ -246,18 +171,26 @@ struct synchronous_retry_factory {
 using client_sender_type =
     decltype(std::declval<ssl_stream_type&>().async_handshake(
         std::declval<post_scheduler_type>(),
-        std::declval<bnio::ssl::handshake_type>(),
-        std::declval<counting_wait_factory>()));
+        std::declval<bnio::ssl::handshake_type>()));
 using server_sender_type =
     decltype(std::declval<ssl_stream_type&>().async_handshake(
         std::declval<post_scheduler_type>(),
-        std::declval<bnio::ssl::handshake_type>()));
+        std::declval<bnio::ssl::handshake_type>(),
+        std::declval<counting_resume_factory>()));
 using client_operation_type = decltype(bexec::connect(
     std::declval<client_sender_type>(), std::declval<outcome_receiver>()));
 using server_operation_type = decltype(bexec::connect(
     std::declval<server_sender_type>(), std::declval<outcome_receiver>()));
 using cancellable_client_operation_type = decltype(bexec::connect(
     std::declval<client_sender_type>(), std::declval<stop_outcome_receiver>()));
+
+// Per-connection client_hello state: each connection retries its first
+// callback invocation and succeeds afterwards, so every handshake produces
+// exactly one callback-driven pause.
+struct client_hello_retry_state {
+  std::mutex mutex;
+  std::unordered_set<SSL*> retried;
+};
 
 // Owns the certificate files and the configured TLS contexts used by the
 // stress scenarios.
@@ -266,6 +199,8 @@ struct stress_ssl_fixture {
 
   bnio::ssl::context server_context{bnio::ssl::context_method::tls_server};
   bnio::ssl::context client_context{bnio::ssl::context_method::tls_client};
+  std::shared_ptr<client_hello_retry_state> hello_retry =
+      std::make_shared<client_hello_retry_state>();
 
   stress_ssl_fixture() {
     test_require(server_context.valid());
@@ -274,6 +209,19 @@ struct stress_ssl_fixture {
     test_require(!server_context.use_private_key_file(
         files.private_key.string().c_str()));
     test_require(!server_context.check_private_key());
+
+    // Keyed by native_handle(): a stable per-connection key. Each connection
+    // pauses exactly once, on its first client_hello callback invocation.
+    server_context.set_client_hello_callback(
+        [state = hello_retry](
+            bnio::ssl::context_view, bnio::ssl::stream_view ssl,
+            bnio::ssl::alert_out&) -> bnio::ssl::client_hello_result {
+          std::lock_guard<std::mutex> guard(state->mutex);
+          if (state->retried.insert(ssl.native_handle()).second) {
+            return bnio::ssl::client_hello_result::retry;
+          }
+          return bnio::ssl::client_hello_result::success;
+        });
 
     test_require(client_context.valid());
     client_context.set_verify_mode(SSL_VERIFY_NONE);
@@ -412,16 +360,14 @@ void add_handshake_pair(
 
   auto client_sender =
       pool.clients[static_cast<std::size_t>(i)]->async_handshake(
-          scheduler, bnio::ssl::handshake_type::client,
-          counting_wait_factory{scheduler,
-                                pool.clients[static_cast<std::size_t>(i)].get(),
-                                &counters});
+          scheduler, bnio::ssl::handshake_type::client);
   client_operations.emplace_back(new client_operation_type(
       bexec::connect(std::move(client_sender), std::move(client_receiver))));
 
   auto server_sender =
       pool.servers[static_cast<std::size_t>(i)]->async_handshake(
-          scheduler, bnio::ssl::handshake_type::server);
+          scheduler, bnio::ssl::handshake_type::server,
+          counting_resume_factory{&counters});
   server_operations.emplace_back(new server_operation_type(
       bexec::connect(std::move(server_sender), std::move(server_receiver))));
 }
@@ -460,16 +406,14 @@ void add_cancellation_pair(
 
   auto client_sender =
       pool.clients[static_cast<std::size_t>(i)]->async_handshake(
-          scheduler, bnio::ssl::handshake_type::client,
-          counting_wait_factory{scheduler,
-                                pool.clients[static_cast<std::size_t>(i)].get(),
-                                &counters});
+          scheduler, bnio::ssl::handshake_type::client);
   client_operations.emplace_back(new cancellable_client_operation_type(
       bexec::connect(std::move(client_sender), std::move(client_receiver))));
 
   auto server_sender =
       pool.servers[static_cast<std::size_t>(i)]->async_handshake(
-          scheduler, bnio::ssl::handshake_type::server);
+          scheduler, bnio::ssl::handshake_type::server,
+          counting_resume_factory{&counters});
   server_operations.emplace_back(new server_operation_type(
       bexec::connect(std::move(server_sender), std::move(server_receiver))));
 }
@@ -601,7 +545,10 @@ TEST(SslHandshakeRetryStressTest,
   EXPECT_EQ(failures.stopped, 0) << "handshakes that reported stopped";
   EXPECT_EQ(failures.pause_leaks, 0)
       << "pause codes leaked to a public receiver";
-  EXPECT_GE(counters.factory_calls.load(std::memory_order_acquire), kPairs);
+  // Each connection's client_hello callback retries exactly once, so the
+  // factory sees exactly one callback-driven pause per connection. Transport
+  // pauses no longer contribute invocations.
+  EXPECT_EQ(counters.factory_calls.load(std::memory_order_acquire), kPairs);
   EXPECT_EQ(counters.pause_violations.load(std::memory_order_acquire), 0);
   EXPECT_EQ(counters.reason_violations.load(std::memory_order_acquire), 0);
 }
@@ -619,6 +566,13 @@ TEST(SslHandshakeRetryStressTest,
   test_require(
       !server_context.use_private_key_file(files.private_key.string().c_str()));
   test_require(!server_context.check_private_key());
+  // Always retry: every server attempt pauses in the client_hello callback,
+  // so the factory is invoked once per synchronous round.
+  server_context.set_client_hello_callback(
+      [](bnio::ssl::context_view, bnio::ssl::stream_view,
+         bnio::ssl::alert_out&) -> bnio::ssl::client_hello_result {
+        return bnio::ssl::client_hello_result::retry;
+      });
 
   bnio::ssl::context client_context(bnio::ssl::context_method::tls_client);
   test_require(client_context.valid());
@@ -638,23 +592,29 @@ TEST(SslHandshakeRetryStressTest,
   ssl_stream_type server{bnio::local::stream_socket(sockets[1]),
                          server_context};
 
-  using state_type =
-      synchronous_retry_state<post_scheduler_type, bnio::local::stream_socket>;
-  using factory_type = synchronous_retry_factory<post_scheduler_type,
-                                                 bnio::local::stream_socket>;
-
-  auto state = std::make_shared<state_type>(scheduler);
-  state->stream = &client;
+  // The factory completes synchronously with an empty sender for
+  // kSynchronousRounds rounds, then with a terminal error. All rounds run on
+  // one driver stack: the retry operation must trampoline them instead of
+  // recursing once per round.
+  auto state = std::make_shared<synchronous_retry_state>();
   state->remaining = kSynchronousRounds;
 
-  auto handshake = std::make_shared<handshake_state>();
-  handshake_receiver client_receiver{handshake, &context};
-  handshake_receiver server_receiver{handshake, &context};
+  constexpr int kNoReceiverStop = std::numeric_limits<int>::max();
+  std::atomic<int> total{0};
+  auto client_outcome = std::make_unique<handshake_outcome>();
+  auto server_outcome = std::make_unique<handshake_outcome>();
+  // The server terminal (the factory's terminal error) stops the context; the
+  // client's parked internal transport read is then aborted, so both
+  // operations terminate exactly once.
+  outcome_receiver client_receiver{client_outcome.get(), &total,
+                                   kNoReceiverStop, &context};
+  outcome_receiver server_receiver{server_outcome.get(), &total, 1, &context};
 
-  auto client_sender = client.async_handshake(
-      scheduler, bnio::ssl::handshake_type::client, factory_type{state});
+  auto client_sender =
+      client.async_handshake(scheduler, bnio::ssl::handshake_type::client);
   auto server_sender =
-      server.async_handshake(scheduler, bnio::ssl::handshake_type::server);
+      server.async_handshake(scheduler, bnio::ssl::handshake_type::server,
+                             synchronous_retry_factory{state});
 
   auto client_operation =
       bexec::connect(std::move(client_sender), std::move(client_receiver));
@@ -665,13 +625,21 @@ TEST(SslHandshakeRetryStressTest,
   bexec::start(server_operation);
   context.run();
 
-  EXPECT_EQ(handshake->values, 2u);
-  EXPECT_EQ(handshake->errors, 0u);
-  EXPECT_EQ(handshake->stopped, 0u);
   EXPECT_EQ(state->synchronous_rounds.load(std::memory_order_acquire),
             kSynchronousRounds);
-  EXPECT_GE(state->factory_calls.load(std::memory_order_acquire),
+  // One factory invocation per synchronous round, plus the terminal round.
+  EXPECT_EQ(state->factory_calls.load(std::memory_order_acquire),
             kSynchronousRounds + 1);
+  EXPECT_EQ(state->pause_violations.load(std::memory_order_acquire), 0);
+
+  EXPECT_EQ(server_outcome->terminals.load(std::memory_order_acquire), 1);
+  EXPECT_EQ(server_outcome->errors.load(std::memory_order_acquire), 1);
+  EXPECT_EQ(server_outcome->success.load(std::memory_order_acquire), 0);
+  EXPECT_EQ(server_outcome->stopped.load(std::memory_order_acquire), 0);
+  EXPECT_EQ(server_outcome->last_error, state->terminal);
+
+  EXPECT_EQ(client_outcome->terminals.load(std::memory_order_acquire), 1);
+  EXPECT_EQ(total.load(std::memory_order_acquire), 2);
 }
 
 TEST(SslHandshakeRetryStressTest, cancellation_storm_completes_exactly_once) {

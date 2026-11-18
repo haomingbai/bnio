@@ -35,9 +35,11 @@ struct handshake_retry_probe {
  * Accepts senders completing through the retry contract.
  *
  * The sender must be valid in Env, admit the probe receiver, and expose
- * exactly one value signature plus set_stopped(), with no set_error channel.
- * This is the sender a retry factory must return. The "step" qualifier avoids
- * a name clash with handshake_retry_sender.
+ * exactly one value signature, set_value(std::error_code), with no set_error
+ * channel. set_stopped() is accepted but not required: a sender that only
+ * completes with an error-code value (for example bexec::just(error_code))
+ * satisfies the concept. This is the sender a retry factory must return. The
+ * "step" qualifier avoids a name clash with handshake_retry_sender.
  */
 template <class Sender, class Env = bexec::empty_env>
 concept handshake_retry_step_sender =
@@ -48,7 +50,8 @@ concept handshake_retry_step_sender =
          bexec::set_value_t>() == 1);
 
 /**
- * Accepts factories that drive one wait step of a paused handshake.
+ * Accepts factories that perform the user wait work for a callback-driven
+ * pause.
  *
  * Stored by value, invoked as an lvalue with a const std::error_code&, and
  * returning a handshake_retry_step_sender by value. Rvalue-only factories are

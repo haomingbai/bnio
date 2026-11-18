@@ -5,8 +5,10 @@
  * These tests exercise the public surface only: set_cert_callback, the raw
  * set_cert_cb setter, the cert_out proxy, the in-memory certificate
  * installation on context_view, and the 3-argument async_handshake retry
- * factory. The tests are written before the P2 implementation, so they are
- * expected to fail against the skeleton.
+ * factory. Transport pauses are driven inside the retry operation; the
+ * factory is reached only for callback-driven pauses such as x509_lookup.
+ * The tests are written before the P2 implementation, so they are expected to
+ * fail against the skeleton.
  */
 
 #include <bnio/local.h>
@@ -18,6 +20,7 @@
 #include <openssl/x509.h>
 
 #include <bexec/completion_signatures.hpp>
+#include <bexec/just.hpp>
 #include <bexec/operation_state.hpp>
 #include <bexec/sender.hpp>
 #include <memory>
@@ -32,8 +35,6 @@
 namespace {
 
 using stream_type = bnio::ssl::tcp::stream<bnio::local::stream_socket>;
-using post_scheduler_type =
-    decltype(std::declval<bnio::io_context&>().get_post_scheduler());
 
 // Owns one parsed copy of the embedded PEM fixture.
 struct identity_bundle {
@@ -153,105 +154,17 @@ std::shared_ptr<handshake_state> handshake_pair(bnio::io_context& context,
   return state;
 }
 
-// Sender used by callback-driven retry factories: callback pauses resume the
-// handshake immediately while transport pauses delegate to the public wait
-// helper. The factory return type is fixed, so the choice is made at start().
-template <class Scheduler, class NextLayer>
-class callback_resume_sender {
- public:
-  using completion_signatures =
-      bexec::completion_signatures<bexec::set_value_t(std::error_code),
-                                   bexec::set_stopped_t()>;
-  using wait_sender_type = decltype(bnio::ssl::make_handshake_wait_sender(
-      std::declval<Scheduler>(),
-      std::declval<bnio::ssl::tcp::stream<NextLayer>&>(),
-      std::declval<std::error_code>()));
-
-  callback_resume_sender(Scheduler scheduler,
-                         bnio::ssl::tcp::stream<NextLayer>& stream,
-                         std::error_code pause)
-      : scheduler_(std::move(scheduler)), stream_(&stream), pause_(pause) {}
-
-  template <class Receiver>
-  class operation {
-   public:
-    using wait_operation_type = decltype(bexec::connect(
-        std::declval<wait_sender_type>(), std::declval<Receiver>()));
-
-    operation(Scheduler scheduler, bnio::ssl::tcp::stream<NextLayer>& stream,
-              std::error_code pause, Receiver receiver)
-        : scheduler_(std::move(scheduler)),
-          stream_(&stream),
-          pause_(pause),
-          receiver_(std::move(receiver)) {}
-
-    operation(const operation&) = delete;
-    operation& operator=(const operation&) = delete;
-
-    ~operation() noexcept {
-      if (wait_started_) {
-        storage_.wait_operation.~wait_operation_type();
-      }
-    }
-
-    void start() noexcept {
-      const auto reason = bnio::ssl::handshake_pause_reason_of(pause_);
-      if (reason == bnio::ssl::handshake_pause_reason::client_hello_cb ||
-          reason == bnio::ssl::handshake_pause_reason::x509_lookup) {
-        bexec::set_value(std::move(receiver_), std::error_code{});
-        return;
-      }
-      auto wait_sender =
-          bnio::ssl::make_handshake_wait_sender(scheduler_, *stream_, pause_);
-      ::new (static_cast<void*>(&storage_.wait_operation)) wait_operation_type(
-          bexec::connect(std::move(wait_sender), std::move(receiver_)));
-      wait_started_ = true;
-      bexec::start(storage_.wait_operation);
-    }
-
-   private:
-    union storage_type {
-      wait_operation_type wait_operation;
-      storage_type() noexcept {}
-      ~storage_type() noexcept {}
-    };
-
-    Scheduler scheduler_;
-    bnio::ssl::tcp::stream<NextLayer>* stream_;
-    std::error_code pause_;
-    Receiver receiver_;
-    storage_type storage_{};
-    bool wait_started_ = false;
-  };
-
-  template <class Receiver>
-  auto connect(Receiver receiver) && {
-    return operation<std::remove_cvref_t<Receiver>>(
-        std::move(scheduler_), *stream_, pause_, std::move(receiver));
-  }
-
-  template <class Receiver>
-    requires std::copy_constructible<Scheduler>
-  auto connect(Receiver receiver) const& {
-    return operation<std::remove_cvref_t<Receiver>>(
-        scheduler_, *stream_, pause_, std::move(receiver));
-  }
-
- private:
-  Scheduler scheduler_;
-  bnio::ssl::tcp::stream<NextLayer>* stream_;
-  std::error_code pause_;
-};
-
 struct retry_observation {
   unsigned calls = 0;
   unsigned x509_lookup_pauses = 0;
   std::vector<bnio::ssl::handshake_pause_reason> reasons;
 };
 
+// Records every callback-driven pause and resumes the handshake immediately.
+// OpenSSL re-invokes the certificate callback on the next attempt. Transport
+// pauses are driven internally by the retry operation and never reach this
+// factory.
 struct cert_retry_factory {
-  post_scheduler_type scheduler;
-  stream_type* stream = nullptr;
   std::shared_ptr<retry_observation> observation;
 
   auto operator()(const std::error_code& ec) const {
@@ -261,9 +174,7 @@ struct cert_retry_factory {
     if (reason == bnio::ssl::handshake_pause_reason::x509_lookup) {
       ++observation->x509_lookup_pauses;
     }
-    return callback_resume_sender<post_scheduler_type,
-                                  bnio::local::stream_socket>(scheduler,
-                                                              *stream, ec);
+    return bexec::just(std::error_code{});
   }
 };
 
@@ -363,9 +274,9 @@ TEST(SslCertCallbackTest, retry_then_ok_through_factory_reports_x509_lookup) {
       bexec::connect(pair.client->async_handshake(
                          scheduler, bnio::ssl::handshake_type::client),
                      handshake_receiver{state, &context});
-  auto server_sender = pair.server->async_handshake(
-      scheduler, bnio::ssl::handshake_type::server,
-      cert_retry_factory{scheduler, pair.server.get(), observation});
+  auto server_sender =
+      pair.server->async_handshake(scheduler, bnio::ssl::handshake_type::server,
+                                   cert_retry_factory{observation});
   auto server_operation = bexec::connect(std::move(server_sender),
                                          handshake_receiver{state, &context});
   bexec::start(client_operation);
@@ -380,10 +291,12 @@ TEST(SslCertCallbackTest, retry_then_ok_through_factory_reports_x509_lookup) {
   EXPECT_EQ(probe.calls, 2u);
   EXPECT_FALSE(probe.certificate_error);
   EXPECT_FALSE(probe.private_key_error);
-  ASSERT_GE(observation->calls, 2u);
+  // Only callback-driven pauses reach the factory, so the single retry is the
+  // only invocation; transport pauses were driven internally.
+  ASSERT_EQ(observation->calls, 1u);
   EXPECT_EQ(observation->x509_lookup_pauses, 1u);
   for (const auto reason : observation->reasons) {
-    EXPECT_NE(reason, bnio::ssl::handshake_pause_reason::none);
+    EXPECT_EQ(reason, bnio::ssl::handshake_pause_reason::x509_lookup);
   }
 }
 

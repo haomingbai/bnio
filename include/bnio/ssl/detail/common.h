@@ -48,6 +48,7 @@ template <class NextLayer>
 }
 
 enum class resume_action {
+  // Resume another SSL attempt after an internal transport step.
   handshake,
   application_read,
   application_write,
@@ -57,8 +58,9 @@ enum class resume_action {
   // Delivered after the hard-failure flush completes: complete the
   // operation with the staged SSL error (see operation_base).
   fail,
-  // Delivered after the output flush of a paused handshake attempt: the
-  // factory-driven retry operation invokes its factory for the staged pause.
+  // Delivered after the output flush of a callback-driven handshake pause:
+  // the factory-driven retry operation invokes its factory for the staged
+  // pause.
   pause,
 };
 

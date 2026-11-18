@@ -38,15 +38,32 @@ struct retry_test_receiver {
   void set_stopped() noexcept {}
 };
 
-/** The old 2-argument handshake sender stays available and unchanged. */
+/**
+ * The 2-argument handshake sender is the retry sender instantiated with the
+ * stateless default factory: transport pauses are driven internally by the
+ * retry operation, and a callback-driven pause terminates with
+ * operation_not_supported because the 2-argument overload has no resume
+ * surface.
+ */
 using old_sender_type = decltype(std::declval<stream_type&>().async_handshake(
     std::declval<scheduler_type>(), std::declval<bnio::ssl::handshake_type>()));
 using old_completions = bexec::completion_signatures_of_t<old_sender_type>;
 
+static_assert(std::same_as<old_sender_type,
+                           bnio::ssl::detail::handshake_retry_sender<
+                               scheduler_type, bnio::tcp_socket,
+                               bnio::ssl::detail::handshake_default_factory>>,
+              "the 2-argument async_handshake must be a handshake_retry_sender "
+              "instantiated with the default factory");
 static_assert(
     std::same_as<old_sender_type, bnio::ssl::detail::handshake_sender<
                                       scheduler_type, bnio::tcp_socket>>,
-    "the 2-argument async_handshake sender type must not change");
+    "the handshake_sender alias must name that same retry sender instance");
+static_assert(std::is_empty_v<bnio::ssl::detail::handshake_default_factory>,
+              "the default factory must be stateless so the 2-argument "
+              "sender stores no per-operation state");
+static_assert(
+    handshake_retry_factory<bnio::ssl::detail::handshake_default_factory>);
 static_assert(
     std::same_as<old_completions, bexec::completion_signatures<
                                       bexec::set_value_t(std::error_code),
@@ -293,9 +310,11 @@ TEST(SslHandshakeRetryConceptTest, sender_contract_counts) {
 }
 
 // ---------------------------------------------------------------------------
-// The defensive resume() fallback: operation_base only forwards finish, fail,
-// and pause to the retry operation. Exercise the unexpected-action branch
-// directly through the detail operation so it is not dead code and stays a
+// The defensive resume() fallback: operation_base only forwards handshake,
+// finish, fail, and pause to the retry operation. resume_action::handshake is
+// now a valid retry action (it re-runs the SSL attempt after an internal
+// transport step), so exercise the unexpected-action branch with a
+// shutdown action the retry operation never produces; it must stay a
 // terminal, visible protocol violation.
 // ---------------------------------------------------------------------------
 
@@ -362,7 +381,7 @@ TEST(SslHandshakeRetryConceptTest, resume_fallback_reports_protocol_error) {
 
   // No other resume_action reaches the retry operation in production; feed
   // one directly and verify the contract-preserving terminal.
-  operation.resume(bnio::ssl::detail::resume_action::handshake);
+  operation.resume(bnio::ssl::detail::resume_action::shutdown);
   context.run();
 
   EXPECT_EQ(record.values, 0U);

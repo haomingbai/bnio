@@ -260,10 +260,13 @@ lifetime management back to the caller.
 `client_hello_result::retry` and `cert_result::retry` pause the handshake.
 Resume them through the 3-argument
 `async_handshake(scheduler, type, factory)` overload: the factory receives
-`handshake_pause_reason::client_hello_cb` or
-`handshake_pause_reason::x509_lookup` and returns the wait sender. The
-2-argument overload has no resume surface, so a callback-driven pause is
-reported there as a terminal handshake error.
+only callback-driven pause codes (`client_hello_cb`, `x509_lookup`, `async`,
+`async_job`, `retry_verify`) and returns a sender that performs the user's
+asynchronous work. Transport progress (`want_read` and `want_write`) is
+internal: the operation flushes pending output, performs the requested
+transport step, and resumes the SSL attempt itself. The 2-argument overload
+has no resume surface, so a callback-driven pause completes with
+`std::errc::operation_not_supported`.
 
 Pass the owning context directly to the constructor or `set_context()`, e.g.
 `stream.set_context(ctx)`. The `context_view` overload is only for call sites
