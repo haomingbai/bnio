@@ -1,0 +1,7 @@
+add_executable(bnio_ssl_dynamic_cert_server ssl_dynamic_cert_server.cpp)
+target_link_libraries(bnio_ssl_dynamic_cert_server PRIVATE bnio::bnio)
+bnio_set_project_warnings(bnio_ssl_dynamic_cert_server)
+
+add_executable(bnio_ssl_dynamic_cert_client ssl_dynamic_cert_client.cpp)
+target_link_libraries(bnio_ssl_dynamic_cert_client PRIVATE bnio::bnio)
+bnio_set_project_warnings(bnio_ssl_dynamic_cert_client)
