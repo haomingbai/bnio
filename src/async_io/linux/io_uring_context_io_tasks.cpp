@@ -17,30 +17,10 @@ namespace bnio::async_io::linux_native {
 namespace {
 
 /**
- * @brief Returns whether a submit error is one the next run-loop pass can
- * plausibly clear, so the never-prepared SQ-full remainder may keep its
- * retry-slot turn.
+ * @brief Whether a submit error is plausibly transient.
  *
- * A submit that fails with one of these errnos leaves the ring itself
- * usable; re-queueing the remainder gives the next pass a chance to
- * succeed. Any other error means the ring rejects submissions the same
- * way every time, and unconditionally re-queueing would busy-spin the
- * run loop instead of reaching the fatal-error routing.
- *
- * <ul>
- * <li>-EINTR: io_uring_enter(2) was interrupted by a signal on a
- *     get-events path. The signal says nothing about the ring's health;
- *     the next submit succeeds once the storm passes.</li>
- * <li>-EAGAIN: transient SQ/CQ backpressure (e.g. an SQPOLL kernel
- *     thread that has not drained the SQ yet). The kernel consumes the
- *     queued work and a later submit clears it.</li>
- * <li>-EBUSY: the completion ring is temporarily unable to accept the
- *     submission; draining ready CQEs resolves it without any action
- *     against the ring itself.</li>
- * <li>-ENOMEM: the kernel could not allocate resources for this enter
- *     call. Memory pressure is by nature transient; the ring state is
- *     untouched.</li>
- * </ul>
+ * True when @p error leaves the ring usable (EINTR/EAGAIN/EBUSY/ENOMEM);
+ * other errors would busy-spin the run loop if retried.
  */
 [[nodiscard]] bool is_transient_submit_error(int error) noexcept {
   switch (error) {
@@ -57,14 +37,9 @@ namespace {
 }  // namespace
 
 bool io_uring_context::consume_io_tasks() noexcept {
-  // Teardown guard: once the context is stopping or closing, operations
-  // consumed here must be aborted, not prepared — the ring is going away
-  // and a submit failure (e.g. EBADFD) would report a generic error where
-  // the completion contract requires the stop channel.  Routing the
-  // drained operations through complete_submit_stopped() lets execute()'s
-  // token arbitration deliver set_value(operation_canceled, ...) (or
-  // set_stopped when the receiver token raced the stop).  This also
-  // implements the not-yet-executed queued-work rule of io_context::stop().
+  // Teardown guard: while stopping or closing, abort instead of preparing —
+  // the ring is going away and the completion contract requires the stop
+  // channel, not a submit error. Implements stop()'s queued-work rule.
   if (stop_requested() || closing_requested()) {
     bool found = false;
     if (pending_io_retry_ != nullptr) {
@@ -87,14 +62,8 @@ bool io_uring_context::consume_io_tasks() noexcept {
   io_uring_io_operation_base* remaining = nullptr;
   bool found_work = false;
 
-  // Take and consume the three sources in priority order: the SQ-full
-  // retry slot first (the unsubmitted remainder of the previous batch),
-  // then the worker-local queue (keeps the operation on the worker that
-  // owns the connection), then the shared queue. Once the SQ fills up
-  // (prepare_io_batch returns a remainder), stop taking: the sources
-  // not yet taken stay in their own queues instead of piling into this
-  // worker's retry slot — under backpressure, shared-queue entries in
-  // particular remain visible to other workers.
+  // Priority: retry slot, then local (ownership), then shared; once the SQ
+  // fills, leave untaken sources for other workers.
   io_uring_io_operation_base* operations = pending_io_retry_;
   pending_io_retry_ = nullptr;
   if (operations != nullptr) {
@@ -119,24 +88,17 @@ bool io_uring_context::consume_io_tasks() noexcept {
     return false;
   }
 
-  // One submit before the control flow exits, covering the SQEs
-  // prepared from every source consumed above.
+  // One submit covers every SQE prepared from the sources above.
   const int submit_result = submit_and_track_prepared(prepared);
   if (submit_result < 0) {
     fail_io_list(prepared, submit_result);
     if (!is_transient_submit_error(submit_result)) {
-      // Fatal: the ring rejects submissions the same way every time, so
-      // re-queueing the remainder would busy-spin the run loop without
-      // ever reaching the fatal-error routing. Fail it with the same
-      // errno; fail_io_list() is a no-op unregistration for these
-      // never-registered operations.
+      // Fatal: retrying would busy-spin; fail the remainder likewise.
       fail_io_list(remaining, submit_result);
       return true;
     }
-    // Transient: the remainder never reached an SQE and took no part in
-    // the failed submit, so it keeps its retry-slot turn and is prepared
-    // again on the next pass — exactly like the same-batch operations a
-    // full SQ leaves behind in their source queues.
+    // Transient: the remainder never reached an SQE, so it keeps its
+    // retry-slot turn.
   }
   // SQ-full remainder (nullptr when fully consumed): retried first on
   // the next run-loop pass.
@@ -147,19 +109,14 @@ bool io_uring_context::consume_io_tasks() noexcept {
 io_uring_io_operation_base* io_uring_context::prepare_io_batch(
     io_uring_io_operation_base* operations,
     io_uring_io_operation_base*& prepared) noexcept {
-  // Prepare each I/O operation into an SQE. Either batch it into the
-  // prepared list or, on EAGAIN, hand the rest back to the caller, which
-  // submits the prepared SQEs and stashes the remainder in the run-loop
-  // retry slot. Any other prepare error fails the operation inline.
+  // Prepare into SQEs; on EAGAIN return the rest so the caller submits what
+  // is prepared and stashes the remainder. Other prepare errors fail inline.
   while (operations != nullptr) {
     io_uring_io_operation_base* operation = operations;
     const int prepare_result = prepare_io(*operation);
     if (prepare_result == -EAGAIN) {
-      // SQ is full: return this operation and everything behind it so
-      // the caller can stash the list in the retry slot instead of
-      // retrying inline. The next run-loop pass picks the list up
-      // before touching any queue — no reversal, no re-push, and no
-      // wakeup (the publisher is the consumer).
+      // SQ full: return this operation and the rest for the retry slot
+      // instead of retrying inline.
       return operations;
     }
 
@@ -178,10 +135,8 @@ io_uring_io_operation_base* io_uring_context::prepare_io_batch(
 
 void io_uring_context::track_prepared_batch(
     io_uring_io_operation_base*& prepared) noexcept {
-  // Register every prepared operation in the inflight list before their
-  // next pointers are cleared. Registration precedes submission, so an
-  // operation holding a prepared SQE is always reachable by the abort
-  // path (abort_inflight_io) regardless of the submit outcome.
+  // Register before the next pointers are cleared: an operation holding a
+  // prepared SQE must always be reachable by abort_inflight_io().
   auto* current = prepared;
   while (current != nullptr) {
     auto* next_op = static_cast<io_uring_io_operation_base*>(current->next);
@@ -200,9 +155,7 @@ int io_uring_context::submit_and_track_prepared(
   if (prepared == nullptr) {
     return 0;
   }
-  // Inflight registration is deliberately separated from the submit
-  // syscall: every prepared operation is tracked before io_uring_submit,
-  // and a failed submit untracks them through fail_io_list().
+  // Track before the submit call; a failed submit untracks via fail_io_list().
   track_prepared_batch(prepared);
   return submit_ring();
 }
@@ -213,8 +166,7 @@ void io_uring_context::fail_io_list(io_uring_io_operation_base* head,
     io_uring_io_operation_base* operation = head;
     head = static_cast<io_uring_io_operation_base*>(operation->next);
     operation->next = nullptr;
-    // Undo the registration performed by track_prepared_batch(); a no-op
-    // for operations that failed before they were ever registered.
+    // Undo track_prepared_batch(); a no-op for never-registered operations.
     remove_inflight(*operation);
     operation->complete_submit_error(result);
     local_state_.push_cpu(*operation);
@@ -311,11 +263,8 @@ void io_uring_context::abort_inflight_io() noexcept {
     local_state_.push_cpu(*op);
   }
 
-  // Drain the still-unregistered I/O — the SQ-full retry slot first
-  // (it was logically next in line), then this worker's local I/O queue
-  // and the shared one — so they are completed instead of leaked.
-  // Callbacks running here may have published I/O that never reached a
-  // consume_io_tasks() pass.
+  // Drain unregistered I/O (retry slot, then local and shared queues) so
+  // callbacks that published here are completed instead of leaked.
   drain_io_list_complete_stopped(pending_io_retry_);
   pending_io_retry_ = nullptr;
   drain_io_list_complete_stopped(local_state_.pop_io_all());

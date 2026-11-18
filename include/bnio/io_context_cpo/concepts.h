@@ -17,9 +17,7 @@
 
 namespace bnio {
 
-/**
- * Concept satisfied when a scheduler returns a sender from async_read.
- */
+/** A scheduler whose async_read(source, buffer) returns a sender. */
 template <class Scheduler, class Source, class Buffer>
 concept reads_bytes =
     bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
@@ -29,9 +27,7 @@ concept reads_bytes =
       } -> bexec::sender;
     };
 
-/**
- * Concept satisfied when a scheduler returns a sender from async_write.
- */
+/** A scheduler whose async_write(sink, buffer) returns a sender. */
 template <class Scheduler, class Sink, class Buffer>
 concept writes_bytes =
     bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
@@ -41,9 +37,7 @@ concept writes_bytes =
       } -> bexec::sender;
     };
 
-/**
- * Concept satisfied when a provider returns a sender from async_accept.
- */
+/** A scheduler whose async_accept(acceptor) returns a sender. */
 template <class Scheduler, class Acceptor>
 concept accepts_connections =
     bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
@@ -51,9 +45,7 @@ concept accepts_connections =
       { async_accept(scheduler, acceptor) } -> bexec::sender;
     };
 
-/**
- * Concept satisfied when a scheduler returns a sender from async_connect.
- */
+/** A scheduler whose async_connect(stream, endpoint) returns a sender. */
 template <class Scheduler, class Stream, class Endpoint>
 concept connects_stream =
     bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
@@ -63,9 +55,7 @@ concept connects_stream =
       } -> bexec::sender;
     };
 
-/**
- * Concept satisfied when a scheduler returns a sender from async_poll.
- */
+/** A scheduler whose async_poll(descriptor, mask) returns a sender. */
 template <class Scheduler, class Descriptor>
 concept polls_descriptor =
     bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
@@ -73,9 +63,7 @@ concept polls_descriptor =
       { async_poll(scheduler, descriptor, poll_mask) } -> bexec::sender;
     };
 
-/**
- * Concept satisfied when a scheduler returns a sender from async_resolve.
- */
+/** A scheduler whose async_resolve(query, result) returns a sender. */
 template <class Scheduler, class Query>
 concept resolves_dns =
     bexec::scheduler<std::remove_cvref_t<Scheduler>> &&

@@ -19,8 +19,7 @@ namespace bnio::async_io {
 inline constexpr std::size_t default_dns_host_capacity = 255;
 
 /**
- * Default maximum service bytes stored by dns_query, excluding the trailing
- * nul.
+ * Default max service bytes stored by dns_query, excluding the trailing nul.
  */
 inline constexpr std::size_t default_dns_service_capacity = 32;
 

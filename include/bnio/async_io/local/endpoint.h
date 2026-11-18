@@ -37,44 +37,32 @@ enum class endpoint_kind {
 };
 
 /**
- * Value type representing a local (AF_UNIX) endpoint.
+ * Local (AF_UNIX) endpoint value type: inline path buffer, trivially copyable.
  *
- * Endpoints own their path in a fixed-capacity buffer sized after
- * sockaddr_un::sun_path; they are allocation-free and trivially copyable,
- * consistent with ip::address and ip::endpoint. A path that does not fit
- * the buffer cannot be represented, so the endpoint degrades to the
- * unspecified kind; socket calls consuming such an endpoint report
- * std::errc::invalid_argument from the sockaddr_un conversion before any
- * syscall.
+ * Sized after sockaddr_un::sun_path; an oversized path degrades to
+ * unspecified, which consuming calls report as invalid_argument (no syscall).
  */
 class BNIO_EXPORT endpoint {
  public:
   /**
-   * Maximum path byte capacity, matching sockaddr_un::sun_path (108 on
-   * Linux, 104 on BSD).
+   * Path capacity, matching sockaddr_un::sun_path (108 Linux, 104 BSD).
    */
   static constexpr std::size_t max_path_length = sizeof(sockaddr_un::sun_path);
 
   /**
-   * Creates an unspecified endpoint. This is also the form of unnamed
-   * peers reported by endpoint queries.
+   * Creates an unspecified endpoint; also the form of unnamed peers.
    */
   endpoint() noexcept;
 
   /**
-   * Creates a path-name endpoint. When @p path does not fit the fixed
-   * buffer, the endpoint is left unspecified.
+   * Creates a path-name endpoint; unspecified if @p path does not fit.
    */
   explicit endpoint(std::string_view path) noexcept;
 
 #if defined(BNIO_HAS_ASYNC_IO_LINUX)
   /**
-   * Creates an abstract-namespace endpoint; the leading NUL of the native
-   * address is not part of @p name. When @p name does not fit, the
-   * endpoint is left unspecified.
-   *
-   * The abstract namespace is a Linux convention, so this factory exists
-   * only where the Linux backend is compiled in.
+   * Creates an abstract-namespace endpoint; Linux-only. The leading NUL is not
+   * part of @p name, and an oversized name leaves the endpoint unspecified.
    */
   static endpoint abstract(std::string_view name) noexcept;
 #endif
@@ -85,8 +73,7 @@ class BNIO_EXPORT endpoint {
   [[nodiscard]] endpoint_kind kind() const noexcept;
 
   /**
-   * Returns the endpoint path or abstract name without the leading NUL,
-   * or an empty view for an unspecified endpoint.
+   * Path or abstract name without the leading NUL; empty if unspecified.
    */
   [[nodiscard]] std::string_view path() const noexcept;
 

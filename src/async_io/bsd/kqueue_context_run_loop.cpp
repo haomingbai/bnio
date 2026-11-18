@@ -12,11 +12,7 @@ namespace bnio::async_io::bsd_native {
 namespace {
 
 /**
- * @brief Fills a timespec with the remaining duration until deadline.
- *
- * @param deadline The deadline time point to compute against.
- * @param timeout  The timespec to fill with the remaining duration in seconds
- * and nanoseconds.
+ * @brief Fills timeout with the remaining time until deadline (zero if past).
  */
 void compute_wait_timespec(async_io::time_point deadline,
                            timespec& timeout) noexcept {
@@ -32,9 +28,8 @@ void compute_wait_timespec(async_io::time_point deadline,
 }  // namespace
 
 void kqueue_context::register_wake_poll(int fd, void* udata) noexcept {
-  // EV_CLEAR makes the event edge-triggered: it re-fires only on the next
-  // write after the channel is drained. `udata` tags the event so
-  // process_event() filters it out of operation dispatch.
+  // EV_CLEAR makes the event edge-triggered: it re-fires only after the
+  // channel is drained. `udata` tags it for process_event().
   bnio::base::event wake_event(static_cast<std::uintptr_t>(fd), EVFILT_READ,
                                EV_ADD | EV_CLEAR, 0, 0, udata);
   (void)queue_.control(&wake_event, 1, nullptr, 0, nullptr);
@@ -47,9 +42,8 @@ bool kqueue_context::enter_run() noexcept {
           std::memory_order_acquire)) {
     return false;
   }
-  // Only the thread that wins the CAS checks state.  Concurrent callers
-  // that lose the race return immediately — they must not assert on a
-  // run_state_.state value left by a previous run cycle.
+  // Only the CAS winner checks state; losers must not assert on a value left
+  // by a previous run cycle.
   assert_running();
 
   if (!is_open()) {
@@ -63,15 +57,13 @@ bool kqueue_context::enter_run() noexcept {
     global_state_->awake_workers.fetch_add(1, std::memory_order_acq_rel);
   }
 
-  // Register the shared wake fd so io_context can wake this worker via a
-  // write to the shared wake channel.
+  // Register the shared wake fd so io_context can wake this worker.
   if (global_state_ != nullptr && global_state_->wake_channel_.is_open()) {
     register_wake_poll(global_state_->wake_channel_.read_fd(),
                        wakeup_user_data());
   }
 
-  // Register the per-worker wake channel so a directed wake can target
-  // this worker without waking the whole group.
+  // Register the per-worker channel for directed wakeups.
   if (local_state_.wake_channel_.is_open()) {
     register_wake_poll(local_state_.wake_channel_.read_fd(),
                        local_wakeup_user_data());
@@ -88,8 +80,6 @@ void kqueue_context::run() noexcept {
   }
 
   run_phase phase = run_phase::run_ready_tasks;
-  // Run-loop phase machine:
-  //   run_ready_tasks -> wait_for_work -> finish_drain -> finished
   while (phase != run_phase::finished) {
     switch (phase) {
       case run_phase::run_ready_tasks:
@@ -106,9 +96,8 @@ void kqueue_context::run() noexcept {
     }
   }
 
-  // Unregister the local state (from the suspend list, if the worker still
-  // sits there) before the context and its local state are destroyed, so a
-  // concurrent directed wakeup can never touch a dangling local_state.
+  // Unregister the local state before it is destroyed, so a concurrent
+  // directed wakeup can never touch a dangling local_state.
   unregister_local_state();
 
   current_context_ = previous_context;
@@ -154,32 +143,23 @@ bool kqueue_context::consume_timeout_operations() noexcept {
 kqueue_context::run_phase kqueue_context::handle_run_ready_tasks() noexcept {
   scheduling_state_.local_task_budget = options_.local_queue_threshold;
 
-  // 1. Poll ready kevents only when there is inflight I/O that could have
-  //    produced a completion. Without inflight I/O, kevent() would always
-  //    return 0 events — the syscall is pure overhead (notably on the
-  //    timer-only path). Mirrors io_uring's collect_ready_cqes(), which reads
-  //    a user-space ring and is cheap to call unconditionally; kqueue has no
-  //    such user-space shortcut, so we gate on inflight_io_head_.
+  // Poll only when inflight I/O could have produced a completion: without
+  // it, kevent() always returns 0 and is pure syscall overhead.
   if (inflight_io_head_ != nullptr) {
     (void)collect_ready_events(false);
   }
 
-  // 2. Run one batch of CPU tasks, trying local → shared in that order.
-  //    Stopping after one batch keeps work from piling up on this thread's
-  //    stack; the shared queue distributes the rest fairly.
+  // One CPU batch (local -> shared) per pass bounds this thread's stack use.
   if (run_cpu_batch()) {
     return run_phase::run_ready_tasks;
   }
 
-  // 3. Consume timer expirations.
   if (consume_timeout_operations()) {
     return run_phase::run_ready_tasks;
   }
 
-  // 4. Register pending I/O tasks with kqueue — always a separate step
-  //    so repeat_until chains that generate I/O during CPU processing
-  //    don't starve the kqueue filter set.  Matches Linux's explicit
-  //    consume_io_tasks() call after CPU draining.
+  // Register pending I/O only after CPU draining, so repeat_until chains
+  // that generate I/O cannot starve the kqueue filter set.
   if (consume_io_tasks()) {
     return run_phase::run_ready_tasks;
   }
@@ -201,8 +181,8 @@ kqueue_context::run_phase kqueue_context::handle_finish_drain() noexcept {
 }
 
 kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
-  // Bounded busy-spin: check for new events and CPU tasks up to
-  // wait_spin_count times before falling through to kevent().
+  // Bounded busy-spin: check for events and CPU tasks up to wait_spin_count
+  // times before falling through to a blocking kevent().
   for (unsigned round = 0; round < options_.wait_spin_count; ++round) {
     if (collect_ready_events(false) || run_cpu_batch() ||
         consume_timeout_operations()) {
@@ -216,8 +196,7 @@ kqueue_context::run_phase kqueue_context::spin_for_work() noexcept {
 }
 
 kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
-  // begin_wait/end_wait sandwich: allows task publishers to detect a sleeping
-  // worker and wake it via EVFILT_USER trigger.
+  // Mark this worker sleeping so publishers can wake it.
   begin_wait();
 
   if (collect_ready_events(false) || run_cpu_batch() ||
@@ -239,8 +218,8 @@ kqueue_context::run_phase kqueue_context::wait_for_io_work() noexcept {
   const bool collected_events = collect_ready_events(true, timeout_pointer);
   end_wait();
 
-  // A timeout is only a reason to become running. The normal ready phase
-  // performs another complete work/timer decision before this worker sleeps.
+  // A timeout only returns to the ready phase, which re-decides before the
+  // worker sleeps again.
   if (collected_events || timeout_pointer != nullptr || run_cpu_batch() ||
       consume_timeout_operations() || consume_io_tasks()) {
     return run_phase::run_ready_tasks;
@@ -266,8 +245,7 @@ bool kqueue_context::compute_io_wait_timeout(
   if (timeout_operations != nullptr) {
     local_state_.push_cpu(timeout_operations);
   }
-  // Runs while the worker is marked sleeping (only called from
-  // wait_for_io_work() after begin_wait()).
+  // Runs while the worker is marked sleeping (only from wait_for_io_work()).
   if (timeout_operations != nullptr || run_cpu_batch() || consume_io_tasks() ||
       should_finish()) {
     return true;
@@ -291,12 +269,11 @@ bool kqueue_context::stop_requested() const noexcept {
 }
 
 bool kqueue_context::should_finish() const noexcept {
-  // Abnormal shutdown (closing flag): force finish regardless of inflight.
+  // Closing forces finish regardless of inflight. A normal stop() waits for
+  // every inflight I/O to produce its event, so finish() cannot race them.
   if (closing_requested()) {
     return true;
   }
-  // Normal stop(): wait until every inflight I/O has produced its event.
-  // This guarantees finish() never races with in-flight completions.
   if (stop_requested()) {
     return inflight_io_head_ == nullptr;
   }
@@ -313,32 +290,20 @@ void kqueue_context::drain_local_cpu_tasks() noexcept {
 }
 
 void kqueue_context::finish() noexcept {
-  // Phase 1: drain already-ready kevents, CPU tasks, and timer abort ops.
+  // Drain ready kevents, CPU tasks, and expired timers.
   for (;;) {
     (void)collect_ready_events(false);
     (void)consume_timeout_operations();
     if (!run_cpu_batch() && !consume_io_tasks()) break;
   }
 
-  // Phase 2: safety net for abnormal shutdown (closing flag) where
-  // inflight I/O was not fully drained by the run loop.  Normal
-  // stop()-driven shutdown never reaches here with inflight operations
-  // because should_finish() waits for inflight_io_head_ == nullptr.
+  // Abort remaining inflight I/O. Only abnormal shutdown reaches here with
+  // any: stop() waits for inflight_io_head_ to become null.
   abort_inflight_io();
 
-  // Phase 3: execute CPU tasks generated by the abort phase, plus any
-  // timer abort ops that arrived after Phase 1.
+  // Execute the abort completions. set_stopped() receivers may publish new
+  // I/O on this thread into the local queue, so repeat until none remains.
   drain_local_cpu_tasks();
-
-  // Phase 3b: drain any new I/O operations generated by Phase 3
-  // callbacks — and any further I/O operations those in turn generate.
-  // When set_stopped() propagates through receiver chains, custom
-  // receivers may start new I/O via publish_io(). They run on this
-  // thread inside this context, so publish_io() takes its worker-local
-  // fast path and the operations land in the local I/O queue — which
-  // Phase 3 above never drains.  We loop
-  // consume_io_tasks() → abort_inflight_io() → drain until no more I/O
-  // tasks appear, closing the nested-publish window.
   while (consume_io_tasks()) {
     abort_inflight_io();
     drain_local_cpu_tasks();

@@ -15,10 +15,7 @@ namespace bnio {
  * Customization point object for Provider::async_resolve.
  */
 struct async_resolve_t {
-  /**
-   * Invokes async_resolve on a provider with an owned query object and result
-   * view.
-   */
+  /** Forwards an owned query and result view to the provider. */
   template <class Provider, class Query, class ResultView>
   constexpr decltype(auto) operator()(Provider&& provider, Query&& query,
                                       ResultView&& result) const
@@ -28,10 +25,7 @@ struct async_resolve_t {
         std::forward<Query>(query), std::forward<ResultView>(result));
   }
 
-  /**
-   * Invokes async_resolve on a provider with host, service, and result view
-   * arguments.
-   */
+  /** Forwards host, service, and result view to the provider. */
   template <class Provider, class Host, class Service, class ResultView>
   constexpr decltype(auto) operator()(Provider&& provider, Host&& host,
                                       Service&& service,

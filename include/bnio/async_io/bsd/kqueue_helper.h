@@ -22,10 +22,8 @@ class kqueue_io_operation_base;
 
 /**
  * Fills the kqueue registrations required by one asynchronous operation.
- *
- * A helper is intentionally a short-lived preparation object. It owns at most
- * two kevent values because a poll request can wait for read and write
- * readiness at the same time.
+ * Short-lived preparation object owning at most two kevents (read + write
+ * for a poll request).
  */
 class BNIO_EXPORT kqueue_helper {
  public:

@@ -24,10 +24,8 @@ class kqueue_operation_base;
 class kqueue_io_operation_base;
 
 /**
- * Native action selected for a kqueue operation.
- *
- * Chosen by prepare() through kqueue_helper and consumed by the run loop
- * when registering the operation and dispatching a fired readiness event.
+ * Native action selected by prepare() through kqueue_helper and consumed
+ * by the run loop when registering and dispatching.
  */
 enum class kqueue_task : std::uint8_t {
   /** No action selected; the operation cannot be registered yet. */
@@ -38,18 +36,14 @@ enum class kqueue_task : std::uint8_t {
   read,
   /** One EVFILT_WRITE registration (prep_write). */
   write,
-  /** EVFILT_READ and/or EVFILT_WRITE per the original poll mask
-   *  (prep_poll_add). */
+  /** EVFILT_READ and/or EVFILT_WRITE per the original poll mask. */
   poll,
 };
 
 /**
- * Complete per-(ident, filter) registration state for one kevent.
- *
- * An I/O operation owns up to two of these (EVFILT_READ and EVFILT_WRITE
- * for poll requests). Each node is linked into exactly one wait queue
- * keyed by (ident, filter), so a single poll operation can wait on both
- * filters simultaneously.
+ * Per-(ident, filter) registration state for one kevent; an operation owns
+ * up to two (READ + WRITE for poll), each linked into exactly one
+ * (ident, filter) wait queue.
  */
 struct kqueue_registration_state {
   /** Back-pointer to the owning operation; also the kevent udata value. */
@@ -81,31 +75,16 @@ struct kqueue_registration_state {
 
 /** Per-worker local CPU and I/O queues, and wake channel.
  *
- * Both local queues are owned exclusively by their worker thread: they are
- * pushed only by the worker itself (or, in standalone mode, before/after
- * a run on the same thread) and popped only by the worker during fetch.
- * No remote thread ever touches them — work stealing was removed — so the
- * heads are plain pointers and push/pop need no atomics.
- *
- * The local I/O queue is safe without a wakeup for the same reason: an
- * operation reaches it only from a callback running on this worker's own
- * run loop, so the publisher is the thread that will drain it. That is
- * what distinguishes it from the shared I/O queue, which is MPSC and
- * therefore needs every publication to pair the push with a wakeup of a
- * possibly sleeping worker.
- *
- * The node is linked into the shared state's suspend list only while the
- * worker sleeps in the native poller, so a publisher can wake it.  A
- * remote thread touches the node only while holding that list's lock,
- * which also keeps the owning worker from being destroyed (UAF
- * protection).
+ * Both queues are owned solely by their worker thread (no stealing), so
+ * they need no atomics or wakeups. The node sits in the shared suspend
+ * list only while sleeping; that list's lock also guards the owner's
+ * lifetime against remote wakers.
  */
 struct BNIO_EXPORT kqueue_local_task_queue_state {
   /** Pushes a single task onto the local CPU queue (LIFO head insert). */
   void push_cpu(kqueue_operation_base& operation) noexcept;
 
-  /** Pushes a linked list of tasks (order preserved relative to the caller's
-   *  reversed FIFO). */
+  /** Pushes a linked list of CPU tasks onto the local queue. */
   void push_cpu(kqueue_operation_base* operations) noexcept;
 
   /** Removes the whole CPU queue in bulk; used by fetch. */
@@ -118,8 +97,7 @@ struct BNIO_EXPORT kqueue_local_task_queue_state {
    */
   void push_io(kqueue_io_operation_base& operation) noexcept;
 
-  /** Pushes a linked list of I/O tasks (the caller's order is preserved
-   *  relative to the reversed FIFO the consumer re-establishes). */
+  /** Pushes a linked list of I/O tasks onto the local queue. */
   void push_io(kqueue_io_operation_base* operations) noexcept;
 
   /** Removes the whole I/O queue in bulk; used by consume_io_tasks(). */
@@ -137,12 +115,9 @@ struct BNIO_EXPORT kqueue_local_task_queue_state {
   bnio::base::wake_channel wake_channel_;
 };
 
-/** One doubly-linked list of sleeping worker local states guarded by its
- * own lock.
- *
- * The list head and its guard lock are kept together so every operation on
- * the list takes exactly the lock that owns it; the lock also guards node
- * lifetime (a node is unlinked under it before its owner is destroyed). */
+/** Doubly-linked list of sleeping worker local states, with its own lock
+ * guarding both list operations and node lifetime (a node is unlinked
+ * under the lock before its owner is destroyed). */
 struct BNIO_EXPORT kqueue_worker_state_list {
   /** Guards the list and the lifetime of its nodes. */
   std::mutex lock;
@@ -155,10 +130,8 @@ struct BNIO_EXPORT kqueue_worker_state_list {
 
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT kqueue_task_queue_state {
-  /**
-   * Signature of the shared timeout heap's non-blocking fetch entry point:
-   * fetches due timer operations and reports whether a deadline exists.
-   */
+  /** Signature of the shared timeout heap's non-blocking fetch entry:
+   *  fetches due timers and reports whether a deadline exists. */
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
                                         kqueue_operation_base*&) noexcept;
 
@@ -174,36 +147,28 @@ struct BNIO_EXPORT kqueue_task_queue_state {
   /** Atomically removes and returns the entire shared I/O queue. */
   [[nodiscard]] kqueue_io_operation_base* pop_io_all() noexcept;
 
-  /** Pops the whole shared I/O queue and delivers every operation through
-   *  the stop channel inline: result = -ECANCELED, complete_submit_stopped(),
-   *  then execute().  The caller owns the receiver-callback context; this
-   *  must never run while holding submit_lock.  Traverses with `io_next` —
-   *  the field push_io() links with.
+  /** Pops the whole shared I/O queue and delivers every operation inline
+   *  through the stop channel: result = -ECANCELED, complete_submit_stopped(),
+   *  then execute(). Must not run while holding submit_lock; the caller owns
+   *  the receiver-callback context. Traverses with `io_next`.
    *  @return true when at least one operation was delivered. */
   [[nodiscard]] bool drain_io_stopped() noexcept;
 
-  /**
-   * Wakes exactly one sleeping worker by writing its per-worker wake
-   * channel. Takes only the suspend list's lock: a node on the suspend
-   * list is alive (the owner unregisters under the same lock before its
-   * context is destroyed), so the write cannot race a close.
-   *
-   * @return true if a worker was woken; false if nobody is sleeping.
-   */
+  /** Wakes exactly one sleeping worker through its per-worker wake channel.
+   *  Only the suspend list's lock is held; nodes are unlinked under it
+   *  before destruction, so the write cannot race a close.
+   *  @return true if a worker was woken, false if none is sleeping. */
   [[nodiscard]] bool wake_one_sleeping() noexcept;
 
   /** Head of the shared MPSC CPU queue; nodes chain through next. */
   std::atomic<kqueue_operation_base*> cpu_head{nullptr};
   /** Head of the shared MPSC I/O queue; nodes chain through io_next. */
   std::atomic<kqueue_io_operation_base*> io_head{nullptr};
-  /** Workers not blocked in the native poller (active workers). Incremented
-   *  by enter_run(), decremented by begin_wait(), restored by end_wait().
-   *  Feeds the wake fast path and the all-sleeping timer wake check. */
+  /** Workers not blocked in the native poller; feeds the wake fast path and
+   *  the all-sleeping timer wake check. */
   std::atomic<std::size_t> awake_workers{0};
-  /** Total workers currently inside io_context::run() (active + suspended +
-   *  entering). Incremented by io_context::run() before any check,
-   *  decremented on every run() return path; the native backends never touch
-   *  it. Feeds the wake fast path. */
+  /** Total workers inside io_context::run() (active, suspended, or
+   *  entering); maintained by io_context, never by the native backends. */
   std::atomic<std::size_t> running_workers{0};
 
   /** Sleeping worker local states (directed-wake targets), guarded by its
@@ -219,67 +184,46 @@ struct BNIO_EXPORT kqueue_task_queue_state {
    *  together with timeout_heap. */
   try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
 
-  /** Shared wake channel owned by io_context.
-   *
-   * io_context creates the channel once and writes to it to wake
-   * workers during shutdown.  Each worker's kqueue_context registers
-   * EVFILT_READ | EV_CLEAR on the read end before sleeping.  In normal
-   * operation a single worker is woken directly via its per-worker
-   * channel (see wake_one_sleeping()); this shared channel remains the
-   * broadcast path used by stop() and as a fallback.
-   */
+  /** Shared wake channel owned by io_context, used to broadcast shutdown;
+   *  each worker registers EVFILT_READ | EV_CLEAR on it before sleeping.
+   *  Normal wakeups target a single worker's channel. */
   bnio::base::wake_channel wake_channel_;
 
-  /** Submit-path lock shared by publish_cpu() and begin_stop().
-   *
-   * Both the "check state + enqueue + wake" submission critical section and
-   * the stop-path state transition run inside this lock, so an operation
-   * that observed the context as running is guaranteed to be drained by the
-   * last worker's finish(), and an operation that observes the stopping
-   * state never enqueues into a queue that may no longer be drained.
+  /** Submit-path lock shared by publish_cpu() and begin_stop(): the "check
+   *  state + enqueue + wake" section is atomic with the stop transition, so
+   *  accepted work is drained and stopped work never enqueues.
    */
   std::mutex submit_lock;
 };
 
-/**
- * Base class for operations scheduled by a kqueue_context.
- *
- * Descriptor and readiness metadata intentionally live in the context, so
- * CPU-only operations do not carry unused native I/O fields.
+/** Base class for operations scheduled by a kqueue_context. Descriptor and
+ * readiness metadata live in the context, so CPU-only operations carry no
+ * unused native I/O fields.
  */
 class BNIO_EXPORT kqueue_operation_base {
  public:
   /** Intrusive next pointer used by context task queues. */
   kqueue_operation_base* next = nullptr;
 
-  /**
-   * Completion result copied from the readiness event or the native I/O
-   * step; a negative errno reports a recoverable failure.
-   */
+  /** Completion result; a negative errno reports a recoverable failure. */
   int result = 0;
 
-  /**
-   * Native kevent flags copied from the readiness notification.
-   */
+  /** Native kevent flags from the readiness notification. */
   unsigned flags = 0;
 
   /** Creates an unlinked operation base. */
   kqueue_operation_base() noexcept = default;
 
-  /** Copy construction is disabled because operations are queued
-   *  intrusively. */
+  /** Disabled: operations are queued intrusively. */
   kqueue_operation_base(const kqueue_operation_base&) = delete;
 
-  /** Copy assignment is disabled because operations are queued
-   *  intrusively. */
+  /** Disabled: operations are queued intrusively. */
   kqueue_operation_base& operator=(const kqueue_operation_base&) = delete;
 
-  /** Move construction is disabled because operations are queued
-   *  intrusively. */
+  /** Disabled: operations are queued intrusively. */
   kqueue_operation_base(kqueue_operation_base&&) = delete;
 
-  /** Move assignment is disabled because operations are queued
-   *  intrusively. */
+  /** Disabled: operations are queued intrusively. */
   kqueue_operation_base& operator=(kqueue_operation_base&&) = delete;
 
   /** Destroys the operation base. */
@@ -299,24 +243,17 @@ class BNIO_EXPORT kqueue_io_operation_base : public kqueue_operation_base {
   kqueue_io_operation_base& operator=(kqueue_io_operation_base&&) = delete;
   ~kqueue_io_operation_base() override = default;
 
-  /**
-   * Intrusive link used by the local and shared I/O queues. An operation is
-   * either queued or inflight, never both, so this field doubles as the
-   * queue link while io_next/io_prev together carry the inflight
-   * doubly-linked list.
-   */
+  /** Intrusive link for the local/shared I/O queues and the inflight list's
+   *  forward link; an operation is either queued or inflight, never both.
+   *  `io_prev` is the reverse link. */
   kqueue_io_operation_base* io_next = nullptr;
 
   /** Reverse link for the inflight doubly-linked list. */
   kqueue_io_operation_base* io_prev = nullptr;
 
-  /**
-   * Per-(ident, filter) registration state filled by the run loop.
-   *
-   * A poll request occupies two entries (READ + WRITE); single-filter
-   * operations occupy one. `registration_count` is set by prepare_io()
-   * before the operation is registered with the kqueue.
-   */
+  /** Registration state filled by the run loop: one entry per filter (two
+   *  for poll). `registration_count` is set by prepare_io() before
+   *  registration. */
   std::array<kqueue_registration_state, 2> registrations{};
   /** Number of valid entries in registrations (0-2). */
   std::uint8_t registration_count = 0;
@@ -331,13 +268,9 @@ class BNIO_EXPORT kqueue_io_operation_base : public kqueue_operation_base {
    * I/O. */
   virtual void complete_submit_stopped() noexcept = 0;
 
-  /**
-   * Returns whether this operation owns the syscall performed after a
-   * readiness notification.
-   *
-   * Objectized layer-2 read/write requests override this hook. The context
-   * itself never issues their native I/O calls.
-   */
+  /** Returns whether this operation performs the syscall after readiness.
+   *  Objectized read/write requests override this; the context never issues
+   *  their native I/O calls. */
   [[nodiscard]] virtual bool owns_io_step() const noexcept { return false; }
 
   /** Performs one bounded nonblocking syscall after readiness. */
@@ -430,16 +363,15 @@ inline bool kqueue_task_queue_state::drain_io_stopped() noexcept {
     head->io_next = nullptr;
     head->result = -ECANCELED;
     head->complete_submit_stopped();
-    // No worker exists in the stop-drain path: deliver inline instead of
-    // re-queueing onto a local CPU queue, or the operation would never
-    // be fetched again.
+    // No worker exists in the stop-drain path, so deliver inline; a
+    // re-queued operation would never be fetched again.
     head->execute();
     head = next;
   }
   return true;
 }
 
-/** Links a local state at the head of a worker list. Caller holds the
+/** Links a local state at the head of a worker list; caller holds the
  *  list's lock. */
 inline void kqueue_link_local_state(
     kqueue_worker_state_list& list,
@@ -452,7 +384,7 @@ inline void kqueue_link_local_state(
   list.head = node;
 }
 
-/** Unlinks a local state from its worker list. Caller holds the list's
+/** Unlinks a local state from its worker list; caller holds the list's
  *  lock. */
 inline void kqueue_unlink_local_state(
     kqueue_worker_state_list& list,
@@ -469,8 +401,8 @@ inline void kqueue_unlink_local_state(
   node->next = nullptr;
 }
 
-/** Returns whether the node is currently linked into the given list.
- *  Caller holds the list's lock. */
+/** Returns whether the node is linked into the given list; caller holds the
+ *  list's lock. */
 inline bool kqueue_local_state_in_list(
     const kqueue_worker_state_list& list,
     const kqueue_local_task_queue_state* node) noexcept {

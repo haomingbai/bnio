@@ -18,97 +18,51 @@ class ring;
 namespace bnio::base {
 
 /**
- * RAII wrapper for an io_uring operation probe.
+ * RAII owner for an io_uring operation probe.
+ *
+ * Move-only; the allocation is freed with io_uring_free_probe.
  *
  * @see io_uring_probe
  */
 class BNIO_EXPORT probe {
  public:
-  /**
-   * Creates an empty probe wrapper.
-   *
-   * @see io_uring_probe
-   */
+  /** Creates an empty probe wrapper. */
   probe() noexcept;
 
-  /**
-   * Frees the owned probe, if any.
-   *
-   * @see io_uring_free_probe
-   */
+  /** Frees the owned probe. */
   ~probe() noexcept;
 
-  /**
-   * Copy construction is disabled because probe owns a probe allocation.
-   */
+  /** Deleted: the wrapper owns a probe allocation. */
   probe(const probe&) = delete;
 
-  /**
-   * Copy assignment is disabled because probe owns a probe allocation.
-   */
+  /** Deleted: the wrapper owns a probe allocation. */
   probe& operator=(const probe&) = delete;
 
-  /**
-   * Moves ownership of a probe.
-   *
-   * @see io_uring_probe
-   */
+  /** Moves ownership of the probe. */
   probe(probe&& other) noexcept;
 
-  /**
-   * Moves ownership of a probe.
-   *
-   * @see io_uring_probe
-   */
+  /** Move assigns ownership of the probe. */
   probe& operator=(probe&& other) noexcept;
 
-  /**
-   * Allocates a probe by creating a temporary ring.
-   *
-   * @see io_uring_get_probe
-   */
+  /** Allocates a probe by creating a temporary ring. */
   io_uring_probe* get_probe() noexcept;
 
-  /**
-   * Allocates a probe using an existing ring.
-   *
-   * @see io_uring_get_probe_ring
-   */
+  /** Allocates a probe using @p source. */
   io_uring_probe* get_probe_ring(ring& source) noexcept;
 
-  /**
-   * Frees the owned probe.
-   *
-   * @see io_uring_free_probe
-   */
+  /** Frees the owned probe. */
   void free_probe() noexcept;
 
-  /**
-   * Returns whether the probed ring supports an opcode.
-   *
-   * @see io_uring_opcode_supported
-   */
+  /** Returns whether the probed ring supports @p op. */
   [[nodiscard]] int opcode_supported(int op) const noexcept;
 
-  /**
-   * Returns the wrapped probe.
-   *
-   * @see io_uring_probe
-   */
+  /** Returns the wrapped probe. */
   [[nodiscard]] io_uring_probe* raw() noexcept;
 
-  /**
-   * Returns the wrapped probe.
-   *
-   * @see io_uring_probe
-   */
+  /** Const overload. */
   [[nodiscard]] const io_uring_probe* raw() const noexcept;
 
-  /**
-   * Returns whether this wrapper currently owns a probe.
-   *
-   * @see io_uring_probe
-   */
+  /** Returns whether a probe is currently owned. */
   [[nodiscard]] bool is_open() const noexcept;
 
  private:

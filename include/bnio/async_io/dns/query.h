@@ -22,9 +22,8 @@ namespace bnio::async_io {
 /**
  * Fixed-capacity owned DNS query.
  *
- * Host and service strings are copied into inline nul-terminated buffers.
- * If either input exceeds its capacity, valid() becomes false and resolution
- * reports invalid_argument.
+ * Host and service data is stored inline, nul-terminated; an over-capacity
+ * input makes valid() false and resolution reports invalid_argument.
  */
 template <std::size_t HostCapacity = default_dns_host_capacity,
           std::size_t ServiceCapacity = default_dns_service_capacity>
@@ -86,7 +85,7 @@ class basic_dns_query {
   [[nodiscard]] dns_query_flags flags() const noexcept { return flags_; }
 
   /**
-   * Returns whether all assigned host and service data fit inline.
+   * Whether the assigned host and service both fit inline.
    */
   [[nodiscard]] bool valid() const noexcept {
     return host_valid_ && service_valid_;

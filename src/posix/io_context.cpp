@@ -22,15 +22,8 @@ io_context::io_context() noexcept : io_context(io_context_options{}) {}
 io_context::io_context(const io_context_options& options) noexcept
     : native_options_(options.platform),
       immutable_flags_(options.enable_immediate_io) {
-  // Create the shared wake channel owned by io_context. Each worker's
-  // native context registers read interest on the channel before
-  // sleeping. io_context writes to the channel to wake workers.
-  //
-  // @warning A single write wakes ALL workers that have read interest
-  // registered on the channel (minor thundering herd). The per-worker
-  // overhead is one read(2) returning EAGAIN plus one pop_cpu_all()
-  // CAS — negligible for typical 4–8 worker concurrency. During
-  // stop(), waking all workers is the desired behaviour.
+  // Shared wake channel: each worker registers read interest before
+  // sleeping; one write wakes all of them, which is what stop() wants.
   (void)global_state_.wake_channel_.open();
 
   global_state_.timeout_heap = &timers_;
@@ -48,12 +41,8 @@ io_context::~io_context() noexcept {
     global_state_.try_fetch_timeout_operations = nullptr;
   }
 
-  // Bind the wake-channel close to the submit lock. publish_cpu /
-  // publish_io and every wake helper write the channel inside the same
-  // lock, so a close can never race a wake write (Issue 2's write-after-
-  // close use-after-free). Publishing the terminal state first also makes
-  // every later submission observe the stopping state and reject inline
-  // instead of touching the queue or the channel after destruction begins.
+  // Close the channel under submit_lock after publishing the terminal state:
+  // later submissions observe stopping, and no wake can race the close.
   {
     std::lock_guard guard(global_state_.submit_lock);
     global_state_.life_state.store(1, std::memory_order_release);
@@ -62,10 +51,8 @@ io_context::~io_context() noexcept {
 }
 
 bool io_context::is_open() const noexcept {
-  // The POSIX backend is selected at compile time on this platform, so
-  // construction always succeeds.  Runtime availability of the native
-  // backend is probed lazily by run(), which reports failure through its
-  // returned error_code.
+  // The backend is selected at compile time and construction always
+  // succeeds; run() probes runtime availability and reports it via error_code.
   return true;
 }
 
@@ -78,13 +65,8 @@ void io_context::release_worker_slot() noexcept {
   global_state_.running_workers.fetch_sub(1, std::memory_order_acq_rel);
 }
 std::error_code io_context::run() noexcept {
-  // Increment running_workers BEFORE any check so stop() always observes
-  // this worker regardless of how far run() has progressed.  This closes
-  // the use-after-free window: if stop() destroys the io_context while a
-  // worker is inside run(), the worker would access freed memory.
-  // The counter lives in global_state_ so the native backends' advisory
-  // wake fast path shares the same count; the increment itself stays here,
-  // before any check, never inside enter_run().
+  // Increment before any check so stop() cannot destroy the context while
+  // run() is inside it; the counter lives in global_state_ for the backends.
   global_state_.running_workers.fetch_add(1, std::memory_order_acq_rel);
 
   if (!can_start_run()) {
@@ -98,12 +80,8 @@ std::error_code io_context::run() noexcept {
 }
 
 std::error_code io_context::run_native_loop() noexcept {
-  // The native context is bound to the shared state before any check so
-  // its destructor (queue_exit) always has the state it was wired to.
-  // The context's lifetime is scoped to this function: the destructor
-  // runs before release_worker_slot() in the caller, so running_workers
-  // never reaches zero while queue_exit may still touch global_state_ —
-  // stop() and ~io_context() can therefore never race the teardown.
+  // Bind the native context before any check; its lifetime ends here, before
+  // release_worker_slot(), so teardown never overlaps a zero worker count.
   std::error_code result = bnio::detail::empty_error_code;
   {
     detail::native_context ctx(native_options_);
@@ -112,8 +90,7 @@ std::error_code io_context::run_native_loop() noexcept {
     if (!ctx.is_open()) {
       result = std::error_code(ENOMEM, std::generic_category());
     } else if (global_state_.life_state.load(std::memory_order_acquire)) {
-      // A close may have been requested after the initial checks but
-      // before the native context was fully opened.
+      // Close requested between the initial checks and the native open.
       (void)ctx.stop();
       result = std::make_error_code(std::errc::operation_canceled);
     } else {
@@ -122,22 +99,12 @@ std::error_code io_context::run_native_loop() noexcept {
       current_context_ = this;
       current_worker_native_ = &ctx;
       ctx.run();
-      // Restore both thread-local slots symmetrically. current_context_
-      // and current_worker_native_ are thread-local fast-path pointers:
-      // without the save/restore, a run() re-entered from inside this
-      // loop (an outer worker driving a second context's loop) would
-      // clobber them, and on return the outer worker's fast path would
-      // point at the already-destroyed inner context — breaking
-      // is_in_context() and the in-context submission fast paths. The
-      // previous_* save makes nested run() transparent to the outer
-      // worker (anti-recurrence).
+      // Restore both thread-local fast paths so a nested run() does not leave
+      // them pointing at this destroyed context.
       current_worker_native_ = previous_worker_native;
       current_context_ = previous_context;
-      // A failed native enter (ring enable or wake-poll arming) happened
-      // before any worker started, so the native context records its
-      // errno for this same thread to read; an empty error_code keeps
-      // the normal-run channel. This must not report success for a run
-      // loop that never started.
+      // A failed native enter happened before any worker started; report
+      // it instead of success for a loop that never ran.
       result = std::error_code(-ctx.enter_run_error(), std::generic_category());
     }
   }  // native context (and its queue_exit teardown) completes here
@@ -167,18 +134,11 @@ bool io_context::begin_stop() noexcept {
           expected, 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
     return false;
   }
-  // Abort all pending timer waits BEFORE publishing the stopping state.
-  // This guarantees that when workers observe life_state != 0 and enter
-  // finish(), the aborted operations are already staged on timers_.ready.
-  // Without this ordering a worker that is actively spinning (not sleeping
-  // in a syscall) could observe life_state == 1, drain the still-empty
-  // timers_.ready in finish(), and exit before abort_pending_timer_waits()
-  // moves the operations — leaving them permanently stranded.
+  // Abort timer waits before publishing the stopping state, so a worker that
+  // observes the stop and drains timers_.ready in finish() cannot miss them.
   abort_pending_timer_waits();
-  // Publish the stopping state inside the same lock used by publish_cpu()'s
-  // state-check + enqueue critical section, binding enqueue to the state.
-  // Any operation that passed the check before this store is ordered before
-  // the workers' final drain and is guaranteed to complete.
+  // Publish stopping under the same lock as publish_cpu()'s state-check +
+  // enqueue: operations that passed the check are ordered before the drain.
   {
     std::lock_guard<std::mutex> guard(global_state_.submit_lock);
     global_state_.life_state.store(1, std::memory_order_release);
@@ -187,21 +147,9 @@ bool io_context::begin_stop() noexcept {
 }
 
 int io_context::stop_internal() noexcept {
-  // Timer waits were already aborted by begin_stop() before the stopping
-  // state was published.  Now wait for every other worker to observe the
-  // stopping flag and exit.  Workers drain timers_.ready during finish(),
-  // and the ordering in begin_stop() guarantees the operations are already
-  // staged there before any worker can enter its final drain.
-  // Wake unconditionally before waiting.  The caller may be a signal
-  // handler running on a worker thread whose run loop is actually
-  // blocked inside the kernel (e.g. io_uring_enter); in that case
-  // is_in_context() is true and the loop below excludes this worker
-  // from the wait set, so without this wake nobody would ever write
-  // the channel and the worker would sleep forever.  Excluding self
-  // from the wait means "do not wait for our own exit" (waiting would
-  // self-deadlock in the signal frame), not "self needs no wake".
-  // A superfluous wake is harmless: workers drain the channel and
-  // re-arm (see src/async_io/linux/io_uring_context_cqe.cpp).
+  // Wake unconditionally: a signal-handler caller excludes itself from the
+  // wait (to avoid self-deadlock) but may still be blocked in the kernel; if it
+  // is the last worker, this write is the only one that wakes its run loop.
   (void)global_state_.wake_channel_.wake();
 
   const bool in_worker_context = is_in_context();
@@ -212,34 +160,24 @@ int io_context::stop_internal() noexcept {
     std::this_thread::yield();
   }
 
-  // Workers drain the shared queues in finish(); with running_workers at
-  // zero nothing else will. Deliver every operation the stopping state
-  // was elected over, including the never-started-worker case where the
-  // queues were never touched by a run loop.
+  // With running_workers at zero nothing else drains the shared queues;
+  // deliver everything the stop was elected over, even if no worker started.
   drain_shared_queues_for_stop();
 
   return 0;
 }
 
 void io_context::drain_shared_queues_for_stop() noexcept {
-  // The concurrency contract documented on the declaration (class.h)
-  // makes this drain the exclusive owner of the shared queues: publishes
-  // racing the stop are serialized against the life_state store by
-  // submit_lock and either landed in the queue before it (visible here,
-  // since the drain runs after the store was published and its spin
-  // completed) or were rejected and completed inline by their caller.
-  // Receiver callbacks must never run under submit_lock — they may call
-  // wake_one_if_all_workers_sleeping() or queue_timer_completion(), both
-  // of which take locks — so the drain pops without holding submit_lock
-  // and loops until a full pass finds all three sources empty.
+  // Exclusive owner of the shared queues: racing publishes are visible here
+  // or completed inline. Pop without submit_lock (callbacks may lock).
   bool had_work = true;
   while (had_work) {
     had_work = false;
 
-    // Shared CPU operations (posted schedules, resolves, ...). Their
-    // execute() arbitration (stop token, then is_stopped()) delivers
-    // set_value(operation_canceled) for work the stopping context never
-    // ran.
+    // Every queued operation must reach execute(): CPU work and staged timer
+    // waits deliver operation_canceled, while I/O arbitrates on the receiver
+    // stop token (set_stopped on a cancelled token, else operation_canceled);
+    // no SQE or kevent is submitted.
     detail::native_operation_base* cpu = global_state_.pop_cpu_all();
     while (cpu != nullptr) {
       detail::native_operation_base* next = cpu->next;
@@ -249,23 +187,10 @@ void io_context::drain_shared_queues_for_stop() noexcept {
       cpu = next;
     }
 
-    // Shared I/O operations: each platform's task queue state owns its
-    // own link fields (kqueue chains through io_next, io_uring through
-    // next), so the traversal cannot live here — it is delegated to the
-    // state's drain_io_stopped(), which marks every operation stopped
-    // exactly like the native abort paths (drain_io_list_complete_stopped)
-    // and executes them inline — the stopped branch arbitrates via the
-    // receiver stop token. No SQE or kevent is ever prepared or submitted
-    // here.
     if (global_state_.drain_io_stopped()) {
       had_work = true;
     }
 
-    // Timer waits staged on timers_.ready by abort_pending_timer_waits()
-    // (or by a wait started on an already-unregistered timer). Normally a
-    // worker's finish() drains the ready list; take it under timers_.mutex
-    // and deliver inline — timer_wait_operation::execute() maps the
-    // staged canceled kind to set_value(operation_canceled).
     detail::timer_operation_base* ready = nullptr;
     {
       std::lock_guard context_lock(timers_.mutex);

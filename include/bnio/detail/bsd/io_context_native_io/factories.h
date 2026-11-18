@@ -2,9 +2,8 @@
  * @file factories.h
  * @brief BSD native I/O sender and request factories.
  *
- * Adapts the shared io_context I/O surface to layer-2 kqueue request
- * objects, which own the native nonblocking socket calls and retry them
- * after the corresponding filter fires.
+ * Adapts the shared io_context I/O surface to kqueue request objects, which
+ * own the native nonblocking calls and retry them when the filter fires.
  */
 
 #ifndef BNIO_DETAIL_BSD_IO_CONTEXT_NATIVE_IO_FACTORIES_H_

@@ -8,9 +8,7 @@
 
 namespace mini_curl {
 
-// ============================================================
 // Receiver implementations (must be in header for template spawn)
-// ============================================================
 /** @cond BNIO_DETAIL */
 
 struct mini_curl_client::resolve_receiver {
@@ -89,9 +87,8 @@ struct mini_curl_client::timer_receiver {
   std::shared_ptr<mini_curl_client> client;
 
   void set_value(std::error_code ec) noexcept {
-    // Timer semantics: successful expiry ec={} -> on_timeout; aborted by a
-    // non-token source (io_context::stop(), timer object-API cancellation)
-    // ec=operation_canceled -> do nothing
+    // Expiry (ec == {}) -> on_timeout; operation_canceled (stop or timer
+    // object-API cancellation) -> ignore.
     if (!ec) client->on_timeout();
   }
   void set_stopped() noexcept {

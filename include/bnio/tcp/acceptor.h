@@ -18,11 +18,8 @@
 namespace bnio::tcp {
 
 /**
- * RAII owner for a native TCP listening socket descriptor.
- *
- * tcp_acceptor closes its descriptor on destruction. It is move-only because
- * duplicating ownership of one descriptor would make close semantics ambiguous.
- * Use view() when an API needs a non-owning async_io stream socket view.
+ * RAII owner of a native TCP listening socket descriptor. Move-only; closes
+ * the descriptor on destruction. view() returns a non-owning view.
  */
 class BNIO_EXPORT acceptor {
  public:
@@ -37,10 +34,8 @@ class BNIO_EXPORT acceptor {
   acceptor() noexcept = default;
 
   /**
-   * Takes ownership of an existing native listening socket descriptor.
-   *
-   * The underlying descriptor is set to non-blocking mode so that the
-   * kqueue backend can skip per-operation fcntl calls.
+   * Takes ownership of @p fd and sets it non-blocking, so the kqueue backend
+   * needs no per-operation fcntl.
    */
   explicit acceptor(native_handle_type fd) noexcept : fd_(fd) {
     if (fd_ >= 0) {
@@ -71,10 +66,7 @@ class BNIO_EXPORT acceptor {
    */
   acceptor(acceptor&& other) noexcept;
 
-  /**
-   * Closes the current descriptor and moves descriptor ownership from another
-   * acceptor.
-   */
+  /** Closes the current descriptor, then takes ownership from @p other. */
   acceptor& operator=(acceptor&& other) noexcept;
 
   /**
@@ -84,16 +76,12 @@ class BNIO_EXPORT acceptor {
     return fd_;
   }
 
-  /**
-   * Returns the owned native descriptor, or -1 when closed.
-   */
+  /** Alias for native_handle(). */
   [[nodiscard]] native_handle_type get_native_handle() const noexcept {
     return native_handle();
   }
 
-  /**
-   * Returns whether this object currently owns a descriptor.
-   */
+  /** True when a descriptor is owned. */
   [[nodiscard]] bool is_open() const noexcept { return fd_ >= 0; }
 
   /**
@@ -103,10 +91,7 @@ class BNIO_EXPORT acceptor {
     return async_io::stream_socket_view(fd_);
   }
 
-  /**
-   * Creates a sender that accepts one TCP connection through the scheduler's
-   * queued submission path.
-   */
+  /** Accept sender for one connection via the queued submission path. */
   template <class Scheduler>
   [[nodiscard]] auto async_accept(Scheduler scheduler, int flags = 0);
 
@@ -145,11 +130,7 @@ class BNIO_EXPORT acceptor {
    */
   void assign(native_handle_type fd) noexcept;
 
-  /**
-   * Shuts down socket send and/or receive operations.
-   *
-   * @see shutdown
-   */
+  /** Shuts down socket send and/or receive operations. */
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
   /**

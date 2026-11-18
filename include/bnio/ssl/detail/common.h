@@ -8,10 +8,8 @@
 #define BNIO_SSL_DETAIL_COMMON_H_
 
 #include <bnio/buffer.h>
-// This header refers to the tcp::stream template and must stay
-// self-contained: clang-format's include sorting once reordered an includer's
-// blocks so this header was processed before the ssl umbrella header, which
-// exposed the missing include below.
+// Keep this header self-contained: clang-format sorting once processed it
+// before the ssl umbrella header and exposed the missing include below.
 #include <bnio/ssl/tcp/stream_class.h>
 #include <openssl/ssl.h>
 #include <sys/socket.h>
@@ -38,9 +36,7 @@ template <class NextLayer>
 }
 
 /**
- * Returns the raw native SSL handle behind a stream's non-owning view. Keeps
- * the view-to-handle unwrapping in one place so OpenSSL call sites do not
- * repeat native_handle().native_handle().
+ * Returns the native SSL handle behind a stream's non-owning view.
  */
 template <class NextLayer>
 [[nodiscard]] SSL* native_ssl(const tcp::stream<NextLayer>& stream) noexcept {
@@ -59,8 +55,7 @@ enum class resume_action {
   // operation with the staged SSL error (see operation_base).
   fail,
   // Delivered after the output flush of a callback-driven handshake pause:
-  // the factory-driven retry operation invokes its factory for the staged
-  // pause.
+  // the retry operation invokes its factory for the staged pause.
   pause,
 };
 

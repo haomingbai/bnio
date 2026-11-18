@@ -30,9 +30,8 @@ namespace bnio::async_io::bsd_native {
 
 namespace detail {
 
-/** Normalizes a nonblocking syscall result: the byte count on success,
- *  -EAGAIN for retryable would-block and in-progress states, otherwise the
- *  negated errno. */
+/** Encodes a nonblocking syscall result: bytes transferred, or -errno;
+ *  EINTR, EAGAIN, EWOULDBLOCK, EINPROGRESS, and EALREADY map to -EAGAIN. */
 [[nodiscard]] inline int nonblocking_io_result(ssize_t result) noexcept {
   if (result >= 0) {
     return static_cast<int>(result);
@@ -45,8 +44,7 @@ namespace detail {
   return -error;
 }
 
-/** Completion signals shared by byte-count requests: set_value(ec, size)
- *  or set_stopped(). */
+/** Byte-count completion: set_value(ec, size) or set_stopped(). */
 using size_completion_signatures = bexec::completion_signatures<
     bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
@@ -58,8 +56,7 @@ class kqueue_receive_request {
   /** Completion signals: set_value(ec, bytes) or set_stopped(). */
   using completion_signatures = detail::size_completion_signatures;
 
-  /** Constructs the request from the socket descriptor, receive buffer,
-   *  and native recv flags. */
+  /** Binds the descriptor, buffer, and native recv flags. */
   kqueue_receive_request(int descriptor, buffer_view buffer, int flags) noexcept
       : descriptor_(descriptor), buffer_(buffer), flags_(flags) {}
 
@@ -81,8 +78,7 @@ class kqueue_receive_request {
                flags_ | MSG_DONTWAIT));
   }
 
-  /** Delivers the received byte count to @p receiver, clamping negative
-   *  results to zero. */
+  /** Delivers the received byte count, clamping negative results to zero. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -103,8 +99,7 @@ class kqueue_send_request {
   /** Completion signals: set_value(ec, bytes) or set_stopped(). */
   using completion_signatures = detail::size_completion_signatures;
 
-  /** Constructs the request from the socket descriptor, data, size, and
-   *  native send flags. */
+  /** Binds the descriptor, data, size, and native send flags. */
   kqueue_send_request(int descriptor, const void* data, std::size_t size,
                       int flags) noexcept
       : descriptor_(descriptor), data_(data), size_(size), flags_(flags) {}
@@ -127,8 +122,7 @@ class kqueue_send_request {
                                                 flags_ | MSG_DONTWAIT));
   }
 
-  /** Delivers the sent byte count to @p receiver, clamping negative
-   *  results to zero. */
+  /** Delivers the sent byte count, clamping negative results to zero. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -149,8 +143,7 @@ class kqueue_receive_from_request {
   /** Completion signals: set_value(ec, bytes) or set_stopped(). */
   using completion_signatures = detail::size_completion_signatures;
 
-  /** Constructs the request from the socket, receive buffer, destination
-   *  endpoint, and native recvfrom flags. */
+  /** Binds the socket, buffer, output endpoint, and native flags. */
   kqueue_receive_from_request(datagram_socket_view socket, buffer_view buffer,
                               ip::endpoint& endpoint, int flags) noexcept
       : descriptor_(socket.native_handle()),
@@ -166,8 +159,7 @@ class kqueue_receive_from_request {
   /** Attempts one immediate nonblocking receive-from. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
-  /** Performs one nonblocking recvfrom, capturing the peer address for
-   *  later conversion. */
+  /** Performs one nonblocking recvfrom, capturing the peer address. */
   [[nodiscard]] int perform_io() noexcept {
     if (buffer_.size > 0 && buffer_.data == nullptr) {
       return -EFAULT;
@@ -184,9 +176,9 @@ class kqueue_receive_from_request {
     return detail::nonblocking_io_result(result);
   }
 
-  /** Delivers the byte count to @p receiver; on success the captured peer
-   *  address is converted into the endpoint, and an undecodable address
-   *  family reports address_family_not_supported with a reset endpoint. */
+  /** Delivers the byte count; on success converts the captured peer address
+   *  into @p endpoint. An undecodable family reports
+   *  address_family_not_supported with a reset endpoint. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -218,16 +210,14 @@ class kqueue_receive_from_request {
   int flags_;
 };
 
-/** One nonblocking recvfrom request with endpoint conversion for the local
- *  family. Identical wire-up to kqueue_receive_from_request with a
- *  local::endpoint output and the local decoder. */
+/** Local recvfrom request; same contract as kqueue_receive_from_request
+ *  with a local::endpoint output. */
 class kqueue_local_receive_from_request {
  public:
   /** Completion signals: set_value(ec, bytes) or set_stopped(). */
   using completion_signatures = detail::size_completion_signatures;
 
-  /** Constructs the request from the socket, receive buffer, destination
-   *  endpoint, and native recvfrom flags. */
+  /** Binds the socket, buffer, output endpoint, and native flags. */
   kqueue_local_receive_from_request(local::datagram_socket_view socket,
                                     buffer_view buffer,
                                     local::endpoint& endpoint,
@@ -245,8 +235,7 @@ class kqueue_local_receive_from_request {
   /** Attempts one immediate nonblocking receive-from. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
-  /** Performs one nonblocking recvfrom, capturing the peer address for
-   *  later conversion. */
+  /** Performs one nonblocking recvfrom, capturing the peer address. */
   [[nodiscard]] int perform_io() noexcept {
     if (buffer_.size > 0 && buffer_.data == nullptr) {
       return -EFAULT;
@@ -263,9 +252,9 @@ class kqueue_local_receive_from_request {
     return detail::nonblocking_io_result(result);
   }
 
-  /** Delivers the byte count to @p receiver; on success the captured peer
-   *  address is converted into the endpoint, and an undecodable address
-   *  family reports address_family_not_supported with a reset endpoint. */
+  /** Delivers the byte count; on success converts the captured peer address
+   *  into @p endpoint. An undecodable family reports
+   *  address_family_not_supported with a reset endpoint. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -303,8 +292,7 @@ class kqueue_send_to_request {
   /** Completion signals: set_value(ec, bytes) or set_stopped(). */
   using completion_signatures = detail::size_completion_signatures;
 
-  /** Constructs the request from the socket, data, size, destination
-   *  endpoint, and native sendto flags. */
+  /** Binds the socket, data, size, destination endpoint, and flags. */
   kqueue_send_to_request(datagram_socket_view socket, const void* data,
                          std::size_t size, const ip::endpoint& endpoint,
                          int flags) noexcept
@@ -314,8 +302,7 @@ class kqueue_send_to_request {
         remote_address_(endpoint),
         flags_(flags) {}
 
-  /** Constructs the request for a local datagram socket with a local
-   *  destination endpoint. */
+  /** Binds the local socket, data, size, destination endpoint, and flags. */
   kqueue_send_to_request(local::datagram_socket_view socket, const void* data,
                          std::size_t size, const local::endpoint& endpoint,
                          int flags) noexcept
@@ -343,8 +330,7 @@ class kqueue_send_to_request {
         flags_ | MSG_DONTWAIT, remote_address_.data(), remote_address_.size()));
   }
 
-  /** Delivers the sent byte count to @p receiver, clamping negative
-   *  results to zero. */
+  /** Delivers the sent byte count, clamping negative results to zero. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -369,13 +355,11 @@ class kqueue_accept_request {
       bexec::completion_signatures<bexec::set_value_t(std::error_code, int),
                                    bexec::set_stopped_t()>;
 
-  /** Constructs the request from the listening socket and native accept
-   *  flags. */
+  /** Binds the listening socket and native accept flags. */
   kqueue_accept_request(stream_socket_view socket, int flags) noexcept
       : descriptor_(socket.native_handle()), flags_(flags) {}
 
-  /** Constructs the request from a listening local stream socket and
-   *  native accept flags. */
+  /** Binds a listening local stream socket and native accept flags. */
   kqueue_accept_request(local::stream_socket_view socket, int flags) noexcept
       : descriptor_(socket.native_handle()), flags_(flags) {}
 
@@ -387,8 +371,8 @@ class kqueue_accept_request {
   /** Attempts one immediate nonblocking accept. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
-  /** Performs one nonblocking accept and applies the nonblocking and
-   *  close-on-exec flags to the accepted descriptor before returning it. */
+  /** Accepts one connection, applying nonblocking and close-on-exec flags
+   *  to the accepted descriptor. */
   [[nodiscard]] int perform_io() noexcept {
     int supported_flags = 0;
 #if defined(SOCK_CLOEXEC)
@@ -446,8 +430,7 @@ class kqueue_connect_request {
                          const ip::endpoint& endpoint) noexcept
       : descriptor_(socket.native_handle()), address_(endpoint) {}
 
-  /** Constructs the request for a local stream socket and a local remote
-   *  endpoint. */
+  /** Binds a local stream socket and local remote endpoint. */
   kqueue_connect_request(local::stream_socket_view socket,
                          const local::endpoint& endpoint) noexcept
       : descriptor_(socket.native_handle()), address_(endpoint) {}
@@ -495,8 +478,7 @@ class kqueue_connect_request {
     return error == 0 ? 0 : -error;
   }
 
-  /** Delivers the connect outcome to @p receiver, ignoring the unused
-   *  result and flags values. */
+  /** Delivers the connect outcome to @p receiver. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int,
                  unsigned) noexcept {

@@ -21,21 +21,16 @@ namespace bnio::async_io::bsd_native::detail {
 /**
  * Completion channel selected for receiver delivery.
  *
- * Per completion-semantics contract: set_value(ec, ...) is the universal
- * observable exit (success, recoverable failure, and an abort observed
- * without a canceled stop token). `stopped` marks the stop channel —
- * io_context::stop() aborting inflight I/O, or a stop-token cancel
- * observed at start time — and execute() arbitrates its final signal:
- * a canceled receiver token wins → set_stopped; otherwise
- * set_value(operation_canceled, ...).
+ * `stopped` marks the stop channel; execute() arbitrates it: canceled
+ * token → set_stopped, otherwise set_value(operation_canceled, ...). All
+ * other channels deliver set_value(ec, result, flags).
  */
 enum class kqueue_receiver_completion {
   /** set_value(empty ec, result, flags). */
   value,
-  /** set_value(ec, result, flags) where ec carries a recoverable error. */
+  /** set_value(ec, result, flags) with a recoverable error in ec. */
   value_with_ec,
-  /** Stop channel (abort or token-at-start); execute() arbitrates the
-   *  final signal. */
+  /** Stop channel (abort or token-at-start), arbitrated by execute(). */
   stopped,
 };
 
@@ -43,40 +38,26 @@ enum class kqueue_receiver_completion {
 template <class Receiver>
 class kqueue_receiver_operation : public kqueue_io_operation_base {
  public:
-  /**
-   * Copy construction is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   kqueue_receiver_operation(const kqueue_receiver_operation&) = delete;
 
-  /**
-   * Copy assignment is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   kqueue_receiver_operation& operator=(const kqueue_receiver_operation&) =
       delete;
 
-  /**
-   * Move construction is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   kqueue_receiver_operation(kqueue_receiver_operation&&) = delete;
 
-  /**
-   * Move assignment is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   kqueue_receiver_operation& operator=(kqueue_receiver_operation&&) = delete;
 
-  /**
-   * Destroys the operation without delivering an additional signal.
-   */
+  /** Destroys the operation without delivering an additional signal. */
   ~kqueue_receiver_operation() noexcept override = default;
 
   /**
-   * Delivers the selected completion signal to the receiver.
-   *
-   * The `value` branch re-derives the error from `result`: a kevent may
-   * report readiness, then perform_io() returns a negative errno, but
-   * completion_ is still `value` because the event handler only updates
-   * `result`, not `completion_`. That errno must surface through
-   * set_value(ec, ...) rather than being lost.
+   * Delivers the selected completion signal. The `value` branch re-derives
+   * the error from `result`, which a fired event may set to a negative
+   * errno without changing `completion_`.
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -96,10 +77,7 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
                          this->flags);
         break;
       case kqueue_receiver_completion::stopped:
-        // Token arbitration decides the stop channel's final signal: a
-        // canceled receiver token wins → set_stopped; an abort observed
-        // without a canceled token delivers
-        // set_value(operation_canceled, 0, 0).
+        // Canceled token wins; otherwise report operation_canceled.
         if (stop_requested()) {
           bexec::set_stopped(std::move(receiver_));
         } else {
@@ -134,35 +112,20 @@ class kqueue_receiver_operation : public kqueue_io_operation_base {
     completion_ = kqueue_receiver_completion::value;
   }
 
-  /**
-   * Selects set_value(ec, ...) where ec carries a recoverable error
-   * (preparation/registration failure reported through
-   * complete_submit_error).
-   */
+  /** Selects set_value(ec, ...) with a recoverable error. */
   void complete_with_ec(int result_code) noexcept {
     completion_ = kqueue_receiver_completion::value_with_ec;
     error_ = std::error_code(-result_code, std::generic_category());
   }
 
-  /**
-   * Selects the stop channel. Reached via complete_submit_stopped()
-   * (io_context::stop() aborts this inflight I/O operation) or via
-   * start_io()'s stop-token pre-check. execute()'s token arbitration
-   * decides the final signal: token canceled → set_stopped, otherwise
-   * set_value(operation_canceled, ...).
-   */
+  /** Selects the stop channel (abort or start-time token cancel); execute()
+   *  arbitrates the final signal. */
   void complete_with_stopped() noexcept {
     completion_ = kqueue_receiver_completion::stopped;
   }
 
-  /**
-   * Starts a kqueue operation or posts an immediate completion.
-   *
-   * A stop-token cancel observed at start() selects the stop channel;
-   * execute()'s token arbitration then delivers set_stopped (token
-   * canceled) or set_value(operation_canceled, ...) (abort raced the
-   * token).
-   */
+  /** Starts the operation, or posts an immediate stop-channel completion
+   *  when the receiver's stop token is already canceled. */
   template <class Operation>
   void start_io(Operation& operation) noexcept {
     if (stop_requested()) {

@@ -41,8 +41,6 @@ std::error_code connect_socket(int descriptor,
 
 std::error_code get_socket_endpoint(int descriptor, bool peer,
                                     ip::endpoint& endpoint) noexcept {
-  // Stack-allocated byte storage for the native address, parsed into the
-  // C++ endpoint object below.
   alignas(sockaddr_storage) std::byte storage[sizeof(sockaddr_storage)]{};
   auto* const address = reinterpret_cast<sockaddr*>(storage);
   socklen_t size = sizeof(storage);
@@ -62,16 +60,12 @@ std::error_code get_socket_endpoint(int descriptor, bool peer,
   return bnio::detail::empty_error_code;
 }
 
-// The invalid_argument reported when a local endpoint cannot be converted
-// to sockaddr_un (unspecified kind): the conversion-boundary rejection the
-// local family specifies, before any syscall.
+// Unspecified local endpoint kind: invalid_argument before any syscall.
 std::error_code invalid_local_endpoint() noexcept {
   return std::make_error_code(std::errc::invalid_argument);
 }
 
-// Converts a native AF_UNIX address into a local endpoint; an undecodable
-// address (never expected from the kernel for an AF_UNIX socket) reports
-// address_family_not_supported, byte-for-byte the IP decoder contract.
+// Undecodable AF_UNIX address: address_family_not_supported, as for IP.
 std::error_code get_local_socket_endpoint(int descriptor, bool peer,
                                           local::endpoint& endpoint) noexcept {
   alignas(sockaddr_storage) std::byte storage[sizeof(sockaddr_storage)]{};

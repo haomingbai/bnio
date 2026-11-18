@@ -14,13 +14,10 @@
 namespace bnio::async_io {
 
 /**
- * Non-owning view over a native file descriptor opened for random access.
+ * Non-owning view over a file descriptor opened for random access.
  *
- * Unlike descriptor_view, every I/O operation on this view takes an explicit
- * offset and does not observe or advance the kernel file position.
- *
- * Copying or moving this view copies only the descriptor value. The descriptor
- * remains owned and closed by the caller.
+ * Operations take an explicit offset and never observe or advance the kernel
+ * file position; caller owns the descriptor, and copies copy its value.
  */
 class random_access_file {
  public:
@@ -41,8 +38,7 @@ class random_access_file {
       : fd_(fd) {}
 
   /**
-   * Reinterprets a descriptor view as a random access file without taking
-   * ownership.
+   * Reinterprets @p descriptor as a file without taking ownership.
    */
   constexpr explicit random_access_file(descriptor_view descriptor) noexcept
       : fd_(descriptor.native_handle()) {}
@@ -82,7 +78,7 @@ class random_access_file {
   }
 
   /**
-   * Returns whether this view references a valid descriptor value.
+   * Whether the descriptor value is non-negative.
    */
   [[nodiscard]] constexpr bool valid() const noexcept { return fd_ >= 0; }
 

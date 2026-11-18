@@ -27,11 +27,8 @@
 
 namespace bnio {
 
-// Every scheduler-initiated I/O operation carries the schedule kind so the
-// operation's start() can honor the defer policy: publish through the
-// shared queue only, never onto the publishing worker's local queue. The
-// default kind is post, which keeps every existing io_context::async_*
-// caller unchanged.
+// The schedule kind lets start() honor the defer policy: defer publishes
+// only through the shared queue, never the worker-local one. Default: post.
 
 template <io_context::schedule_kind Kind>
 inline auto io_context::async_read(async_io::stream_socket_view socket,

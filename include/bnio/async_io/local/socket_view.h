@@ -17,12 +17,9 @@ namespace bnio::async_io::local {
 /**
  * Non-owning view over a native local stream socket descriptor.
  *
- * Listening is a lifecycle state of a stream socket, not a separate socket
- * kind, so the same view covers unbound, bound, listening, and connected
- * sockets. Synchronous operations cover bind(), listen(), connect(),
- * shutdown(), and endpoint queries; stream transfer is async-only. As with
- * every socket view, destroying the view does nothing: the socket remains
- * owned and closed by the caller.
+ * Sync: bind(), listen(), connect(), shutdown(), endpoint queries; transfer is
+ * async-only. Covers unbound, bound, listening, and connected states (listening
+ * is a state, not a separate kind); caller owns and closes.
  */
 class BNIO_EXPORT stream_socket_view {
  public:
@@ -50,14 +47,13 @@ class BNIO_EXPORT stream_socket_view {
   }
 
   /**
-   * Returns whether this view references a valid descriptor value.
+   * Whether the descriptor value is non-negative.
    */
   [[nodiscard]] constexpr bool valid() const noexcept { return fd_ >= 0; }
 
   /**
-   * Binds the socket to a local endpoint. An endpoint that cannot be
-   * converted to sockaddr_un reports std::errc::invalid_argument without
-   * a syscall.
+   * Binds to @p endpoint; a non-convertible endpoint reports
+   * std::errc::invalid_argument without a syscall.
    */
   [[nodiscard]] std::error_code bind(const endpoint& endpoint) noexcept;
 
@@ -67,9 +63,8 @@ class BNIO_EXPORT stream_socket_view {
   [[nodiscard]] std::error_code listen(int backlog) noexcept;
 
   /**
-   * Connects the socket to a local endpoint. An endpoint that cannot be
-   * converted to sockaddr_un reports std::errc::invalid_argument without
-   * a syscall.
+   * Connects to @p endpoint; a non-convertible endpoint reports
+   * std::errc::invalid_argument without a syscall.
    */
   [[nodiscard]] std::error_code connect(const endpoint& endpoint) noexcept;
 
@@ -79,8 +74,7 @@ class BNIO_EXPORT stream_socket_view {
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
   /**
-   * Stores the connected peer endpoint into @p endpoint, resetting it to
-   * the unspecified kind for an unnamed peer.
+   * Stores the peer endpoint; unspecified kind for an unnamed peer.
    */
   [[nodiscard]] std::error_code remote_endpoint(
       endpoint& endpoint) const noexcept;
@@ -90,13 +84,10 @@ class BNIO_EXPORT stream_socket_view {
 };
 
 /**
- * Non-owning view over a connectionless or connected local datagram
- * socket.
+ * Non-owning view over a connectionless or connected local datagram socket.
  *
- * Datagram operations stay distinct from stream operations so stream
- * partial I/O rules can never be applied to a datagram. As with every
- * socket view, destroying the view does nothing: the socket remains owned
- * and closed by the caller.
+ * Kept distinct from stream views so stream partial-I/O rules cannot apply.
+ * The caller keeps ownership and closes the socket.
  */
 class BNIO_EXPORT datagram_socket_view {
  public:
@@ -124,14 +115,13 @@ class BNIO_EXPORT datagram_socket_view {
   }
 
   /**
-   * Returns whether this view references a valid descriptor value.
+   * Whether the descriptor value is non-negative.
    */
   [[nodiscard]] constexpr bool valid() const noexcept { return fd_ >= 0; }
 
   /**
-   * Binds the socket to a local endpoint. An endpoint that cannot be
-   * converted to sockaddr_un reports std::errc::invalid_argument without
-   * a syscall.
+   * Binds to @p endpoint; a non-convertible endpoint reports
+   * std::errc::invalid_argument without a syscall.
    */
   [[nodiscard]] std::error_code bind(const endpoint& endpoint) noexcept;
 
@@ -146,15 +136,13 @@ class BNIO_EXPORT datagram_socket_view {
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
   /**
-   * Stores the locally bound endpoint into @p endpoint, resetting it to
-   * the unspecified kind for an unnamed socket.
+   * Stores the locally bound endpoint; unspecified kind if unnamed.
    */
   [[nodiscard]] std::error_code local_endpoint(
       endpoint& endpoint) const noexcept;
 
   /**
-   * Stores the connected peer endpoint into @p endpoint, resetting it to
-   * the unspecified kind for an unnamed peer.
+   * Stores the peer endpoint; unspecified kind for an unnamed peer.
    */
   [[nodiscard]] std::error_code remote_endpoint(
       endpoint& endpoint) const noexcept;

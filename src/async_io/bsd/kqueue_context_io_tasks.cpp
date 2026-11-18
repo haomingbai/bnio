@@ -2,11 +2,8 @@
  * @file kqueue_context_io_tasks.cpp
  * @brief IO task submission, registration, arm/disarm, and dedup.
  *
- * Registration state lives inside the I/O operations themselves
- * (kqueue_registration_state nodes). Wait queues are intrusive doubly-linked
- * lists keyed by (ident, filter); the queue tail is located by a linear scan
- * of the inflight list, and unlinking a node is O(1). No separate registration
- * table is allocated.
+ * Registration state lives in the I/O operations themselves; wait queues are
+ * intrusive lists keyed by (ident, filter). No separate table is allocated.
  */
 
 #include <bnio/async_io/bsd/kqueue_context.h>
@@ -34,17 +31,9 @@ namespace {
 }  // namespace
 
 bool kqueue_context::consume_io_tasks() noexcept {
-  // Teardown guard: once the context is stopping or closing, operations
-  // consumed here must be aborted, not registered.  EV_ADD still succeeds
-  // while the kqueue fd is open, so without this guard an operation
-  // published from a completion callback while finish() drains its queues
-  // would be armed for real and executed — and a receiver that keeps
-  // republishing ready I/O would starve the finish() break condition and
-  // hang stop().  Routing the drained operations through
-  // complete_submit_stopped() lets execute()'s token arbitration deliver
-  // set_value(operation_canceled, ...) (or set_stopped when the receiver
-  // token raced the stop).  This mirrors the io_uring guard and implements
-  // the not-yet-executed queued-work rule of io_context::stop().
+  // While stopping/closing, abort instead of registering: an armed EV_ADD
+  // could hang stop(). complete_submit_stopped() delivers the stop channel
+  // (operation_canceled, or set_stopped if the token raced).
   if (stop_requested() || closing_requested()) {
     bool found = false;
     if (kqueue_io_operation_base* operations = local_state_.pop_io_all()) {
@@ -60,9 +49,8 @@ bool kqueue_context::consume_io_tasks() noexcept {
     return found;
   }
 
-  // Worker-local queue first (fastest, keeps the operation on the worker
-  // that owns the connection), then the shared queue — stop at the first
-  // non-empty source, exactly like fetch_cpu_task().
+  // Local queue first (keeps the operation on the worker that owns the
+  // connection), then the shared queue; stop at the first non-empty source.
   kqueue_io_operation_base* operations = local_state_.pop_io_all();
   if (operations == nullptr && global_state_ != nullptr) {
     operations = global_state_->pop_io_all();
@@ -130,7 +118,6 @@ int kqueue_context::prepare_io(kqueue_io_operation_base& operation) noexcept {
   }
 
   operation.registration_count = 0;
-  // nop completes without a native registration.
   if (helper.task() == kqueue_task::nop) {
     return 0;
   }
@@ -153,10 +140,9 @@ int kqueue_context::prepare_io(kqueue_io_operation_base& operation) noexcept {
 
 kqueue_registration_state* kqueue_context::find_queue_tail(
     std::uintptr_t ident, std::int16_t filter) const noexcept {
-  // Linear scan of inflight operations. The tail of the (ident, filter) wait
-  // queue is the registered node whose wait_next is null. The queue head is
-  // always armed; a length-1 queue therefore also reports its (armed) head as
-  // the tail.
+  // Linear scan of inflight operations. The queue tail is the registered node
+  // whose wait_next is null; the head is always armed, so a length-1 queue
+  // reports its head as the tail.
   for (kqueue_io_operation_base* op = inflight_io_head_; op != nullptr;
        op = op->io_next) {
     for (std::uint8_t index = 0; index < op->registration_count; ++index) {
@@ -247,11 +233,9 @@ void kqueue_context::arm_queue_head(
     if (result >= 0) {
       return;
     }
-    // Arming failed: capture the successor, then tear the operation down.
-    // fail_operation detaches `candidate` (and the op's other nodes) without
-    // re-arming, so the loop continues with the next candidate. A given op
-    // contributes at most one node per (ident, filter) queue, so the
-    // successor survives the teardown as the new queue head.
+    // Arming failed: capture the successor, then tear the operation down
+    // without re-arming. An operation contributes at most one node per
+    // (ident, filter) queue, so the successor survives as the new queue head.
     kqueue_registration_state* after = candidate->wait_next;
     fail_operation(*candidate->operation, result);
     candidate = after;
@@ -273,7 +257,7 @@ void kqueue_context::unregister_operation(
     }
     kqueue_registration_state* new_head = unlink_node(node);
     node = kqueue_registration_state{};
-    // If the removed node was the armed head, arm the successor that took over.
+    // If the removed node was the armed head, arm its successor.
     if (was_armed) {
       arm_queue_head(new_head);
     }
@@ -283,8 +267,8 @@ void kqueue_context::unregister_operation(
 
 void kqueue_context::fail_operation(kqueue_io_operation_base& operation,
                                     int result) noexcept {
-  // Detach all remaining nodes without re-arming (avoids unbounded recursion:
-  // each failure completes exactly one operation).
+  // Detach all nodes without re-arming: each failure completes exactly one
+  // operation, so this cannot recurse.
   for (std::uint8_t index = 0; index < operation.registration_count; ++index) {
     kqueue_registration_state& node = operation.registrations[index];
     if (node.operation == nullptr) {
@@ -338,8 +322,7 @@ void kqueue_context::remove_inflight(
 }
 
 void kqueue_context::abort_inflight_io() noexcept {
-  // Cancel every inflight operation: remove from list, EV_DELETE its
-  // kqueue registrations, mark as cancelled, and push to the CPU queue.
+  // Abort every inflight operation and push it to the CPU queue as canceled.
   while (inflight_io_head_ != nullptr) {
     kqueue_io_operation_base* op = inflight_io_head_;
     inflight_io_head_ = op->io_next;
@@ -368,10 +351,8 @@ void kqueue_context::abort_inflight_io() noexcept {
     local_state_.push_cpu(*op);
   }
 
-  // Drain the still-unregistered I/O from both queues — this worker's local
-  // I/O queue and the shared one — so they are completed instead of
-  // leaked. Callbacks running here may have published I/O that never
-  // reached a consume_io_tasks() pass.
+  // Drain still-unregistered I/O from both queues so callbacks that published
+  // here are completed instead of leaked.
   drain_io_list_complete_stopped(local_state_.pop_io_all());
   if (global_state_ != nullptr) {
     drain_io_list_complete_stopped(global_state_->pop_io_all());

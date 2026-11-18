@@ -130,9 +130,7 @@ void socket::assign(native_handle_type fd) noexcept {
     (void)close();
     fd_ = fd;
   }
-  // Establish the nonblocking invariant for every descriptor owned by
-  // this socket.  The kqueue backend relies on O_NONBLOCK being set
-  // exactly once so it can skip per-operation fcntl calls.
+  // Keep the nonblocking invariant; kqueue skips per-operation fcntl.
   if (fd_ >= 0) {
     const int flags = ::fcntl(fd_, F_GETFL, 0);
     if (flags >= 0 && (flags & O_NONBLOCK) == 0) {

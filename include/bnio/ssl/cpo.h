@@ -28,9 +28,8 @@ struct async_handshake_t {
   }
 
   /**
-   * Invokes the factory-driven retry overload of async_handshake on a
-   * stream. The stream's member function enforces the factory concept; this
-   * overload only forwards.
+   * Forwards to the factory-driven retry overload; the stream's member
+   * function enforces the factory concept.
    */
   template <class Provider, class Stream, class Factory>
   constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,

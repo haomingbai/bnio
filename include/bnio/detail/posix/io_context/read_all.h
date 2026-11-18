@@ -9,21 +9,16 @@
 #else
 #define BNIO_DETAIL_POSIX_IO_CONTEXT_READ_ALL_H_
 
-// write_all.h defines the generic operation/sender/factory/predicate
-// templates that are reused verbatim for read-all.  The only difference
-// between read-all and write-all is the state class.
+// write_all.h holds the generic operation/sender/factory/predicate templates
+// reused for read-all; only the state class differs.
 #include <bnio/detail/posix/io_context/write_all.h>
 
 namespace bnio::detail {
 
 /**
- * State for a socket read-all operation.
- *
- * Its interface (remaining, current_buffer, advance, done, make_sender)
- * is identical to socket_write_all_state, so the same wire-up
- * templates – write_all_step_complete, write_all_step_factory,
- * write_all_done_predicate, write_all_operation,
- * and write_all_sender – work unchanged.
+ * State for a socket read-all operation. It exposes the same interface as
+ * socket_write_all_state, so the write_all wire-up templates are reused
+ * unchanged.
  */
 template <io_context::schedule_kind Kind>
 class socket_read_all_state {
@@ -65,8 +60,7 @@ class socket_read_all_state {
   int flags;
   std::size_t transferred = 0;
   bool done = false;
-  // Adaptive eager probing: cleared when the previous step had a short
-  // transfer, so the next step skips the immediate-completion probe.
+  // Cleared after a short transfer, so the next step skips the eager probe.
   bool eager = true;
 };
 
@@ -113,8 +107,7 @@ class local_socket_read_all_state {
   int flags;
   std::size_t transferred = 0;
   bool done = false;
-  // Adaptive eager probing: cleared when the previous step had a short
-  // transfer, so the next step skips the immediate-completion probe.
+  // Cleared after a short transfer, so the next step skips the eager probe.
   bool eager = true;
 };
 

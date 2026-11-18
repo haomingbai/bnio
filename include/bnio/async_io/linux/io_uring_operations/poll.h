@@ -34,7 +34,7 @@ class io_uring_poll_request {
       : descriptor_(descriptor), poll_mask_(poll_mask) {}
 
   /**
-   * Prepares the poll SQE through the base-layer wrapper.
+   * Prepares the poll SQE.
    *
    * @see io_uring_prep_poll_add
    */
@@ -113,13 +113,10 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
   }
 
   /**
-   * Starts the poll or posts an immediate stopped completion.
-   *
-   * A stop token cancelled at start marks the completion stopped;
-   * execute()'s token arbitration then delivers set_stopped.
-   * io_context::stop() aborts are delivered through
-   * set_value(operation_canceled, ...) unless the stop token won the
-   * race.
+   * Starts the poll, or posts an immediate stopped completion if the
+   * stop token is already cancelled. io_context::stop() aborts exit
+   * through set_value(operation_canceled, ...) unless the stop token
+   * won the race.
    */
   void start() noexcept {
     if (stop_requested()) {
@@ -144,18 +141,11 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
   /**
    * Delivers the typed poll completion.
    *
-   * The `value` branch preserves the `result < 0` guard: a poll CQE may
-   * report a negative errno (e.g. EBADF) while completion_ is still
-   * `value`; that errno must surface through set_value(ec, ...) rather
-   * than being lost. The `stopped` branch runs the token arbitration:
-   * set_stopped only for a cancelled receiver stop token; an
-   * io_context::stop() abort without one exits through
-   * set_value(operation_canceled, 0).
-   *
-   * The ready mask is meaningful only on success; every other channel
-   * delivers `0U`. The errno is already carried by `ec`, so nothing is lost,
-   * and a negative result is never converted to `unsigned` (that would wrap
-   * to ~4.29e9 and make a caller's `mask & POLLIN` test trip on a failure).
+   * set_value carries (ec, ready mask). The mask is meaningful only on
+   * success: a negative CQE result (e.g. EBADF) is converted to ec and
+   * the mask delivered is 0U, never a wrapped unsigned. The stopped
+   * branch emits set_stopped only for a cancelled stop token; otherwise
+   * set_value(operation_canceled, 0U).
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -173,10 +163,8 @@ class io_uring_poll_sender_operation : public io_uring_io_operation_base {
         bexec::set_value(std::move(receiver_), error_, 0U);
         break;
       case completion_kind::stopped:
-        // Token arbitration: set_stopped is emitted only when the
-        // receiver's stop token is cancelled; an io_context::stop()
-        // abort without a cancelled token delivers
-        // set_value(operation_canceled, 0) instead.
+        // set_stopped only for a cancelled stop token; otherwise report
+        // operation_canceled.
         if (stop_requested()) {
           bexec::set_stopped(std::move(receiver_));
         } else {
@@ -216,9 +204,8 @@ class io_uring_poll_sender {
   /**
    * Completion signatures produced by a poll sender.
    *
-   * set_value(ec, unsigned) is the universal observable exit (success,
-   * cancel, recoverable failure); set_stopped is emitted only when the
-   * receiver's stop token is cancelled.
+   * set_value(ec, mask) is the universal exit (success, cancel,
+   * recoverable failure); set_stopped only for a cancelled stop token.
    */
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, unsigned), bexec::set_stopped_t()>;

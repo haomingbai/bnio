@@ -20,10 +20,8 @@
 namespace bnio {
 
 /**
- * Non-owning view over mutable contiguous bytes.
- *
- * Copying or moving this object copies only the pointer and size. The
- * pointed-to storage remains owned by the caller.
+ * Non-owning view over mutable contiguous bytes; copying or moving captures
+ * only the pointer and size, and the caller owns the storage.
  */
 class mutable_buffer {
  public:
@@ -86,10 +84,8 @@ class mutable_buffer {
 };
 
 /**
- * Non-owning view over immutable contiguous bytes.
- *
- * Copying or moving this object copies only the pointer and size. The
- * pointed-to storage remains owned by the caller.
+ * Non-owning view over immutable contiguous bytes; copying or moving captures
+ * only the pointer and size, and the caller owns the storage.
  */
 class const_buffer {
  public:

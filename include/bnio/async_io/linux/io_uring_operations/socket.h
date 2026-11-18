@@ -22,14 +22,15 @@
 namespace bnio::async_io::linux_native {
 
 /**
- * Operation representing an io_uring accept request.
+ * io_uring accept request.
  */
 template <class Receiver>
 class io_uring_accept_operation
     : public detail::io_uring_receiver_operation<Receiver> {
  public:
   /**
-   * Creates an accept operation for a listening socket.
+   * Creates an accept operation on a listening socket, capturing the peer
+   * endpoint.
    */
   io_uring_accept_operation(io_uring_context& context,
                             stream_socket_view socket,
@@ -44,7 +45,7 @@ class io_uring_accept_operation
   }
 
   /**
-   * Stores an accepted socket without collecting its remote endpoint.
+   * Creates an accept operation without capturing the peer endpoint.
    */
   io_uring_accept_operation(io_uring_context& context,
                             stream_socket_view socket, int accept_flags,
@@ -107,7 +108,7 @@ class io_uring_accept_operation
 };
 
 /**
- * Operation representing an io_uring connect request.
+ * io_uring connect request.
  */
 template <class Receiver>
 class io_uring_connect_operation
@@ -147,7 +148,7 @@ class io_uring_connect_operation
 };
 
 /**
- * Operation representing an io_uring recv request.
+ * io_uring recv request.
  */
 template <class Receiver>
 class io_uring_recv_operation
@@ -189,7 +190,7 @@ class io_uring_recv_operation
 };
 
 /**
- * Operation representing an io_uring send request.
+ * io_uring send request.
  */
 template <class Receiver>
 class io_uring_send_operation
@@ -231,7 +232,7 @@ class io_uring_send_operation
 };
 
 /**
- * Operation that receives one datagram from a connected default peer.
+ * Receives one datagram from the connected default peer.
  */
 template <class Receiver>
 class io_uring_datagram_receive_operation
@@ -274,7 +275,7 @@ class io_uring_datagram_receive_operation
 };
 
 /**
- * Operation that sends one datagram to a connected default peer.
+ * Sends one datagram to the connected default peer.
  */
 template <class Receiver>
 class io_uring_datagram_send_operation
@@ -317,7 +318,7 @@ class io_uring_datagram_send_operation
 };
 
 /**
- * Operation representing an io_uring recvmsg request.
+ * io_uring recvmsg request.
  */
 template <class Receiver>
 class io_uring_recvmsg_operation
@@ -360,7 +361,7 @@ class io_uring_recvmsg_operation
 };
 
 /**
- * Operation representing an io_uring sendmsg request.
+ * io_uring sendmsg request.
  */
 template <class Receiver>
 class io_uring_sendmsg_operation
@@ -403,7 +404,7 @@ class io_uring_sendmsg_operation
 };
 
 /**
- * Operation that receives one datagram and captures its source endpoint.
+ * Receives one datagram and captures its source endpoint.
  */
 template <class Receiver>
 class io_uring_receive_from_operation
@@ -473,7 +474,7 @@ class io_uring_receive_from_operation
 };
 
 /**
- * Operation that sends one datagram to an explicit destination endpoint.
+ * Sends one datagram to an explicit destination endpoint.
  */
 template <class Receiver>
 class io_uring_send_to_operation

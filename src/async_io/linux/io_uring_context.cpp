@@ -98,9 +98,8 @@ int io_uring_context::init_ring_params(
     return result;
   }
 
-  // Fallback: retry without optional task-run/issuer flags on older kernels.
-  // Explicit SQPOLL requests are retained and permission/resource failures are
-  // propagated instead of being silently converted to a different mode.
+  // On EINVAL retry without optional taskrun/issuer flags; SQPOLL stays
+  // requested and permission/resource failures propagate.
   if (result == -EINVAL && flags != 0) {
     queue_params.reset();
     flags &= ~(bnio::base::detail::io_uring_setup_coop_taskrun |
@@ -118,24 +117,13 @@ int io_uring_context::init_ring_params(
 }
 
 void io_uring_context::queue_exit() noexcept {
-  // Abort-and-deliver runs only when the context did not already finish
-  // cleanly: run()/finish() drain every operation on the way out, so a
-  // finished context has nothing left to deliver and must not touch the
-  // shared queues that sibling workers still own.  A context torn down
-  // without a clean finish (never run, fatal error, forced close) still
-  // owes its receivers terminal calls.
-  //
-  // The delivery assumes global_state_ is wired: io_context::run() keeps
-  // its native context bound to the shared state until the context's
-  // destructor has completed.
+  // Only an unclean teardown (never run, fatal error, forced close) still owes
+  // terminal calls; a finished context must not touch sibling workers' queues.
+  // global_state_ must stay wired until the destructor completes.
   if (run_state_.state.load(std::memory_order_acquire) !=
       context_state::finished) {
-    // Mark the context finishing (not finished) so operations completed
-    // during the abort delivery observe a coherent stopping state, then
-    // deliver every aborted completion through the same abort path
-    // finish() uses: the aborted operations used to be discarded by a
-    // plain pop_cpu_all(), leaving their receivers forever silent.
-    // Receivers run synchronously on the calling thread.
+    // Mark finishing (not finished) so the delivery observes a coherent
+    // state. Receivers run synchronously on this thread.
     run_state_.state.store(context_state::finishing, std::memory_order_release);
     abort_and_deliver_completions();
     run_state_.state.store(context_state::finished, std::memory_order_release);

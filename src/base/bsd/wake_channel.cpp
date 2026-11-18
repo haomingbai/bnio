@@ -90,9 +90,8 @@ int wake_channel::wake() noexcept {
       continue;
     }
     if (result < 0 && errno == EAGAIN) {
-      // The pipe buffer is full and the write cannot be completed.
-      // This is a best-effort signal -- EAGAIN (buffer full) is treated
-      // as success because workers are already awake in that case.
+      // Best-effort signal: EAGAIN means the pipe is full and workers are
+      // already awake, so treat it as success.
       return 0;
     }
     return result < 0 ? -errno : -EIO;

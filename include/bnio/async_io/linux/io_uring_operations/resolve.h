@@ -22,7 +22,7 @@
 namespace bnio::async_io::linux_native {
 
 /**
- * Operation that posts a synchronous DNS query onto an io_uring_context.
+ * Posts a synchronous DNS query onto an io_uring_context run loop.
  */
 template <class Receiver>
 class io_uring_resolve_operation : public io_uring_operation_base {
@@ -66,12 +66,11 @@ class io_uring_resolve_operation : public io_uring_operation_base {
   ~io_uring_resolve_operation() noexcept override = default;
 
   /**
-   * Posts this operation to the context run loop.
+   * Posts this operation to the run loop.
    *
-   * A stop-token cancel (observed at start) completes through
-   * set_stopped(); resolve runs on the CPU queue, which
-   * io_context::stop() does not abort, so no other path produces a
-   * stopped completion.
+   * A stop token cancelled at start completes through set_stopped();
+   * resolve runs on the CPU queue, which io_context::stop() does not
+   * abort, so no other path yields a stopped completion.
    */
   void start() noexcept {
     if (stop_requested()) {
@@ -85,11 +84,11 @@ class io_uring_resolve_operation : public io_uring_operation_base {
   }
 
   /**
-   * Executes the synchronous resolver and completes the receiver.
+   * Runs the synchronous resolver and completes the receiver.
    *
-   * The `stopped` branch is reached only for a stop-token cancel
-   * observed at start(); stop tokens are monotonic, so it completes
-   * with set_stopped without further arbitration.
+   * Only a stop-token cancel observed at start() reaches the stopped
+   * branch; stop tokens are monotonic, so no further arbitration is
+   * needed.
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -118,7 +117,7 @@ class io_uring_resolve_operation : public io_uring_operation_base {
   }
 
   /**
-   * Runs the async_io platform resolver helper. Both success and failure
+   * Runs the async_io platform resolver helper; success and failure both
    * exit through set_value(ec, count).
    */
   void complete_resolve() noexcept {
@@ -143,10 +142,9 @@ class io_uring_resolve_sender {
   /**
    * Completion signatures produced by a DNS resolution sender.
    *
-   * set_value(ec, count) is the universal exit (success, resolver
-   * failure); set_stopped is emitted when the receiver's stop token was
-   * already cancelled at start(). resolve runs on the CPU queue, which
-   * io_context::stop() does not abort.
+   * set_value(ec, count) is the universal exit; set_stopped is emitted
+   * only when the receiver's stop token was cancelled at start(). The
+   * CPU-queue resolve is not aborted by io_context::stop().
    */
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;

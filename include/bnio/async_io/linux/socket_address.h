@@ -27,9 +27,8 @@ class BNIO_EXPORT socket_address {
   explicit socket_address(const ip::endpoint& endpoint) noexcept;
 
   /**
-   * Stores a local endpoint as a native sockaddr_un value. An endpoint
-   * with no representable address (unspecified kind) leaves the storage
-   * empty.
+   * Stores a local endpoint as a native sockaddr_un value; an endpoint with
+   * no representable address leaves the storage empty.
    */
   explicit socket_address(const local::endpoint& endpoint) noexcept;
 
@@ -51,28 +50,17 @@ class BNIO_EXPORT socket_address {
   /** Returns whether an endpoint was stored. */
   [[nodiscard]] bool valid() const noexcept;
 
-  /**
-   * Returns the stored address family (AF_INET or AF_INET6), or AF_UNSPEC
-   * when no endpoint was stored.
-   */
+  /** Returns the stored family (AF_INET, AF_INET6, or AF_UNIX), or AF_UNSPEC
+   *  if empty. */
   [[nodiscard]] int family() const noexcept;
 
-  /**
-   * Returns a pointer to the native sockaddr for socket calls, or nullptr
-   * when no endpoint was stored.
-   */
+  /** Native sockaddr pointer for socket calls; nullptr when empty. */
   [[nodiscard]] sockaddr* data() noexcept;
 
-  /**
-   * Returns a pointer to the native sockaddr for socket calls, or nullptr
-   * when no endpoint was stored.
-   */
+  /** Native sockaddr pointer for socket calls; nullptr when empty. */
   [[nodiscard]] const sockaddr* data() const noexcept;
 
-  /**
-   * Returns the byte length to pass alongside data() to socket calls, or
-   * zero when no endpoint was stored.
-   */
+  /** Byte length to pass with data() to socket calls; zero when empty. */
   [[nodiscard]] socklen_t size() const noexcept;
 
  private:
@@ -81,26 +69,16 @@ class BNIO_EXPORT socket_address {
 };
 
 /**
- * Converts a native sockaddr into an IP endpoint.
- *
- * @param[in] address Native socket address bytes.
- * @param[in] size    Byte length of @p address.
- * @return The converted endpoint, or std::nullopt when @p address is null,
- *         @p size is too small for the address family it claims, or the
- *         family is neither AF_INET nor AF_INET6.
+ * Returns the IP endpoint encoded in @p address, or std::nullopt when it is
+ * null, short for its claimed family, or not AF_INET/AF_INET6.
  */
 [[nodiscard]] BNIO_EXPORT std::optional<ip::endpoint> make_endpoint(
     const sockaddr* address, socklen_t size) noexcept;
 
 /**
- * Converts a native sockaddr into a local (AF_UNIX) endpoint.
- *
- * @param[in] address Native socket address bytes.
- * @param[in] size    Byte length of @p address.
- * @return The converted endpoint, or std::nullopt when @p address is null,
- *         @p size is too small for the address family it claims, or the
- *         family is not AF_UNIX. An address of exactly the family field
- *         size decodes to an unspecified endpoint (unnamed socket).
+ * Returns the AF_UNIX endpoint encoded in @p address, or std::nullopt when it
+ * is null, short for its claimed family, or not AF_UNIX. An address of exactly
+ * the family field size is an unnamed socket.
  */
 [[nodiscard]] BNIO_EXPORT std::optional<local::endpoint> make_local_endpoint(
     const sockaddr* address, socklen_t size) noexcept;

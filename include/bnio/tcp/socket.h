@@ -20,11 +20,8 @@
 namespace bnio::tcp {
 
 /**
- * RAII owner for a native TCP stream socket descriptor.
- *
- * tcp_socket closes its descriptor on destruction. It is move-only because
- * duplicating ownership of one descriptor would make close semantics ambiguous.
- * Use view() when an API needs a non-owning async_io stream socket view.
+ * RAII owner of a native TCP stream socket descriptor. Move-only; closes the
+ * descriptor on destruction. view() returns a non-owning view.
  */
 class BNIO_EXPORT socket {
  public:
@@ -39,10 +36,8 @@ class BNIO_EXPORT socket {
   socket() noexcept = default;
 
   /**
-   * Takes ownership of an existing native stream socket descriptor.
-   *
-   * The underlying descriptor is set to non-blocking mode so that the
-   * kqueue backend can skip per-operation fcntl calls.
+   * Takes ownership of @p fd and sets it non-blocking, so the kqueue backend
+   * needs no per-operation fcntl.
    */
   explicit socket(native_handle_type fd) noexcept : fd_(fd) {
     if (fd_ >= 0) {
@@ -73,10 +68,7 @@ class BNIO_EXPORT socket {
    */
   socket(socket&& other) noexcept;
 
-  /**
-   * Closes the current descriptor and moves descriptor ownership from another
-   * socket.
-   */
+  /** Closes the current descriptor, then takes ownership from @p other. */
   socket& operator=(socket&& other) noexcept;
 
   /**
@@ -86,16 +78,12 @@ class BNIO_EXPORT socket {
     return fd_;
   }
 
-  /**
-   * Returns the owned native descriptor, or -1 when closed.
-   */
+  /** Alias for native_handle(). */
   [[nodiscard]] native_handle_type get_native_handle() const noexcept {
     return native_handle();
   }
 
-  /**
-   * Returns whether this object currently owns a descriptor.
-   */
+  /** True when a descriptor is owned. */
   [[nodiscard]] bool is_open() const noexcept { return fd_ >= 0; }
 
   /**
@@ -126,40 +114,31 @@ class BNIO_EXPORT socket {
   [[nodiscard]] const socket& lowest_layer() const noexcept { return *this; }
 
   /**
-   * Creates a sender for one read operation. The operation may complete with
-   * fewer bytes than the buffer size.
+   * Read-all sender: repeats until the buffer is full; completes short only
+   * on EOF/error.
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_read(Scheduler scheduler, Buffer&& buffer,
                                 int flags = 0);
 
-  /**
-   * Creates a sender for one read operation. This is the explicit read-some
-   * spelling of async_read.
-   */
+  /** Sender for one read attempt; explicit read-some spelling. */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_read_some(Scheduler scheduler, Buffer&& buffer,
                                      int flags = 0);
 
   /**
-   * Creates a sender that writes the whole buffer, retrying short writes until
-   * the buffer is fully transferred or an error/stopped signal occurs.
+   * Write-all sender: retries short writes until complete, error, or stop.
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_write(Scheduler scheduler, Buffer&& buffer,
                                  int flags = 0);
 
-  /**
-   * Creates a sender for one write operation without retrying short writes.
-   */
+  /** One write attempt; short writes are not retried. */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_write_some(Scheduler scheduler, Buffer&& buffer,
                                       int flags = 0);
 
-  /**
-   * Creates a sender that connects this socket to an endpoint through the
-   * scheduler's queued submission path.
-   */
+  /** Connect sender for @p endpoint via the queued submission path. */
   template <class Scheduler>
   [[nodiscard]] auto async_connect(Scheduler scheduler,
                                    const ip::endpoint& endpoint);
@@ -189,11 +168,7 @@ class BNIO_EXPORT socket {
    */
   void assign(native_handle_type fd) noexcept;
 
-  /**
-   * Shuts down socket send and/or receive operations.
-   *
-   * @see shutdown
-   */
+  /** Shuts down socket send and/or receive operations. */
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
   /**

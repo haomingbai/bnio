@@ -14,61 +14,46 @@
 namespace bnio::ssl::base {
 
 /**
- * Capacity of each memory BIO half that buffers application-facing payload
- * between the SSL object and the transport.
+ * Capacity of each memory BIO half buffering payload between SSL and the
+ * transport.
  */
 inline constexpr std::size_t bio_buffer_capacity = 64 * 1024;
 
 /**
  * The two memory BIO pairs wiring an SSL object to a byte transport.
  *
- * The ssl-side halves are handed to SSL_set_bio and are freed when the SSL
- * object is freed; the transport-side halves are owned by the caller (the
- * stream) and must be freed explicitly. This is the smallest assembly for the
- * memory-BIO plumbing that used to live inline in stream construction; the
- * transport concept (encrypted in on transport_read, encrypted out on
- * transport_write) stays stable, so a future transport implementation can be
- * swapped in without changing the shape of this facility.
+ * The ssl-side halves are freed with the SSL object; the transport-side
+ * halves are caller-owned and must be freed explicitly.
  */
 class bio_pair {
  public:
   /**
-   * SSL-side read half of the read pair: handed to SSL_set_bio and freed
-   * with the SSL object. Unbounded on the ssl side; pairs with
-   * transport_read.
+   * SSL-side read half; freed with the SSL object. Pairs with transport_read.
    */
   BIO* ssl_read = nullptr;
 
   /**
-   * SSL-side write half of the write pair: handed to SSL_set_bio and freed
-   * with the SSL object. Bounded on the ssl side (bio_buffer_capacity);
-   * pairs with transport_write.
+   * SSL-side write half; bounded by bio_buffer_capacity and freed with the SSL
+   * object. Pairs with transport_write.
    */
   BIO* ssl_write = nullptr;
 
   /**
-   * Caller-owned read half of the read pair: encrypted bytes received from
-   * the peer are written here and become readable by the SSL object through
-   * ssl_read. Must be freed explicitly.
+   * Caller-owned read half: encrypted bytes received from the peer are written
+   * here and become readable by the SSL object via ssl_read. Free explicitly.
    */
   BIO* transport_read = nullptr;
 
   /**
-   * Caller-owned write half of the write pair: encrypted output produced by
-   * the SSL object becomes readable here through ssl_write and is sent to
-   * the peer. Must be freed explicitly.
+   * Caller-owned write half: encrypted output from the SSL object becomes
+   * readable here via ssl_write and is sent to the peer. Free explicitly.
    */
   BIO* transport_write = nullptr;
 
   /**
-   * Assembles the two BIO pairs. All-or-nothing: if either pair cannot be
-   * created, every half is returned as nullptr. The ssl_read pair buffers
-   * decrypted input toward the application with an unbounded ssl side; the
-   * ssl_write pair buffers encrypted output from the SSL object with a
-   * bounded ssl side (bio_buffer_capacity). The transport concept (encrypted
-   * in on transport_read, encrypted out on transport_write) stays stable, so
-   * a future transport layer can replace the current wiring without touching
-   * this assembly.
+   * Assembles both pairs; all-or-nothing, returning a pair with all halves
+   * null if either creation fails. The ssl side of the read pair is unbounded;
+   * the ssl side of the write pair is bounded by bio_buffer_capacity.
    */
   static bio_pair make() noexcept {
     bio_pair pair;
@@ -86,17 +71,13 @@ class bio_pair {
     return pair;
   }
 
-  /**
-   * Returns whether all four BIO halves were created.
-   */
+  /** True when all four BIO halves were created. */
   [[nodiscard]] bool valid() const noexcept {
     return ssl_read != nullptr && ssl_write != nullptr &&
            transport_read != nullptr && transport_write != nullptr;
   }
 
-  /**
-   * Frees the caller-owned transport halves (encrypted in and encrypted out).
-   */
+  /** Frees the caller-owned transport halves (encrypted in and out). */
   void release_transport_halves() noexcept {
     BIO_free(transport_read);
     transport_read = nullptr;

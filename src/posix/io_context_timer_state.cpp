@@ -19,7 +19,6 @@ void detail::timer_state_data::push_heap(detail::timer_slot& timer) noexcept {
   timer.child = nullptr;
   timer.next = nullptr;
   timer.active = true;
-  // Pairing-heap insert: meld the new single-node heap into the root.
   heap = meld(heap, &timer);
 }
 
@@ -36,9 +35,7 @@ void detail::timer_state_data::erase_heap(detail::timer_slot& timer) noexcept {
     return;
   }
 
-  // Cut the node out of the sibling list. If it has a parent, fix the
-  // parent's child pointer. Otherwise it is the root and we replace it
-  // with its next sibling.
+  // Unlink the node from its parent, or from the root sibling list.
   if (timer.previous != nullptr) {
     if (timer.previous->child == &timer) {
       timer.previous->child = timer.next;
@@ -58,9 +55,7 @@ void detail::timer_state_data::erase_heap(detail::timer_slot& timer) noexcept {
     }
   }
 
-  // Replace the removed node with the merged result of its children (the
-  // standard pairing-heap delete-min). Meld the replacement back into the
-  // root.
+  // Merge the removed node's children back into the root.
   timer_slot* const replacement = merge_pairs(timer.child);
   timer.previous = nullptr;
   timer.child = nullptr;
@@ -159,9 +154,7 @@ detail::timer_slot* detail::timer_state_data::meld(
 
 detail::timer_slot* detail::timer_state_data::merge_pairs(
     detail::timer_slot* first) noexcept {
-  // Pairwise merge pass: traverse the sibling list, melding adjacent
-  // siblings and accumulating results into a single heap. Standard
-  // two-pass pairing-heap merge-pairs.
+  // Two-pass merge: meld adjacent siblings, accumulating into one heap.
   timer_slot* result = nullptr;
   while (first != nullptr) {
     timer_slot* const second = first->next;

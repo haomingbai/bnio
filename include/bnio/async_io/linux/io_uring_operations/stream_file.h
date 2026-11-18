@@ -28,8 +28,8 @@ inline constexpr std::uint64_t stream_file_offset =
 }  // namespace detail
 
 /**
- * Operation representing a streaming io_uring read request: the SQE carries
- * offset -1, so the kernel uses and advances the file position.
+ * Streaming read: offset -1 makes the kernel use and advance the file
+ * position.
  */
 template <class Receiver>
 class io_uring_read_operation
@@ -69,8 +69,7 @@ class io_uring_read_operation
 };
 
 /**
- * Operation representing a streaming io_uring write request: the SQE
- * carries offset -1, so the kernel uses and advances the file position.
+ * Streaming write: offset -1 uses and advances the kernel file position.
  */
 template <class Receiver>
 class io_uring_write_operation
@@ -111,8 +110,7 @@ class io_uring_write_operation
 };
 
 /**
- * Operation representing a streaming io_uring readv request: the SQE
- * carries offset -1, so the kernel uses and advances the file position.
+ * Streaming readv: offset -1 uses and advances the kernel file position.
  */
 template <class Receiver>
 class io_uring_readv_operation
@@ -152,8 +150,7 @@ class io_uring_readv_operation
 };
 
 /**
- * Operation representing a streaming io_uring writev request: the SQE
- * carries offset -1, so the kernel uses and advances the file position.
+ * Streaming writev: offset -1 uses and advances the kernel file position.
  */
 template <class Receiver>
 class io_uring_writev_operation

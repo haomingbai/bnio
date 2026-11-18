@@ -85,33 +85,24 @@ class BNIO_EXPORT steady_timer {
   steady_timer& operator=(steady_timer&& other) noexcept;
 
   /**
-   * Returns the context that owns this timer.
+   * Returns the owning context.
    *
-   * @pre The timer is registered (has_context() is true). On a
-   * moved-from timer, or one whose waits were aborted by
-   * io_context::stop(), the slot is unregistered and this returns an
-   * empty reference — use has_context() to check first.
+   * @pre has_context(), i.e. the timer is registered. A moved-from timer,
+   * or one unregistered by io_context::stop(), yields an empty reference.
    */
   [[nodiscard]] io_context& context() noexcept { return *timer_.context; }
 
   /**
-   * Returns the context that owns this timer.
-   *
-   * @pre The timer is registered (has_context() is true). On a
-   * moved-from timer, or one whose waits were aborted by
-   * io_context::stop(), the slot is unregistered and this returns an
-   * empty reference — use has_context() to check first.
+   * Const overload of context(); the same precondition applies.
    */
   [[nodiscard]] const io_context& context() const noexcept {
     return *timer_.context;
   }
 
   /**
-   * Returns whether this timer is currently registered with a context.
-   * A moved-from timer, or one whose pending waits were aborted by
-   * io_context::stop(), is unregistered and reports false; its object
-   * APIs (cancel(), expiry(), expires_at(), async_wait()) remain safe to
-   * call in that state.
+   * Whether the timer is registered with a context. A moved-from timer, or
+   * one unregistered by io_context::stop(), reports false; cancel(),
+   * expiry(), expires_at(), and async_wait() remain safe meanwhile.
    */
   [[nodiscard]] bool has_context() const noexcept {
     return timer_.context != nullptr;
@@ -153,9 +144,8 @@ class BNIO_EXPORT steady_timer {
   template <class Receiver>
   friend class detail::timer_wait_operation;
 
-  /** Unregisters other's timer, moves its expiry into this timer, and
-   *  re-registers this timer with the same context. Shared by the move
-   *  constructor and move assignment. */
+  /** Moves other's expiry here and re-registers with the same context;
+   *  shared by move construction and move assignment. */
   void transfer_from(steady_timer& other) noexcept;
 
   detail::timer_slot timer_;

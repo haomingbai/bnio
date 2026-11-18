@@ -34,21 +34,9 @@ namespace detail {
 /**
  * Whole-operation driver for async_handshake(scheduler, type, factory).
  *
- * The SSL attempt runs first. Transport pauses (SSL_ERROR_WANT_READ and
- * SSL_ERROR_WANT_WRITE) are driven internally through operation_base: pending
- * output is flushed, the requested transport step runs, and the attempt is
- * resumed. The factory is invoked only for callback-driven pauses
- * (x509_lookup, async, async_job, client_hello_cb, retry_verify). The attempt,
- * its output flush, and the factory's wait sender all live here: no nested
- * attempt sender and no heap allocation.
- *
- * Completion contract matches the 2-argument handshake: exactly
- * set_value(std::error_code) or set_stopped(). Pause codes never reach the
- * public receiver; a pause returned by the factory is reported as
- * std::errc::protocol_error.
- *
- * Synchronization uses the bexec repeat_until epoch protocol, a per-operation
- * driver token, and the terminal-post-last rule (see drive()).
+ * Transport pauses run through operation_base; the factory handles only
+ * callback-driven pauses. Completes with set_value(std::error_code) or
+ * set_stopped(); a factory-returned pause becomes protocol_error.
  */
 template <class Scheduler, class NextLayer, class Receiver, class Factory>
 class handshake_retry_operation
@@ -68,9 +56,9 @@ class handshake_retry_operation
   /**
    * Receiver handed to the factory's sender.
    *
-   * The downstream environment is forwarded so the stop token reaches the
-   * user's work, but the result is stored in this operation rather than
-   * forwarded. Accepts only set_value(std::error_code) and set_stopped().
+   * get_env forwards the downstream environment so the stop token reaches the
+   * user's work; results are stored in this operation. Accepts only
+   * set_value(std::error_code) and set_stopped().
    */
   class retry_receiver {
    public:
@@ -147,11 +135,9 @@ class handshake_retry_operation
   /**
    * Receives the staged action once the pending output flush finished.
    *
-   * operation_base forwards handshake, finish, fail, and pause here.
-   * resume_action::handshake means an internal transport step made progress;
-   * the other actions carry the flush outcome. The action is staged, never
-   * executed here: an inline flush completion must not nest another driver
-   * frame.
+   * operation_base forwards handshake, finish, fail, and pause here. The action
+   * is staged, never executed here: an inline flush completion must not nest
+   * another driver frame.
    */
   void resume(resume_action action) noexcept {
     switch (action) {
@@ -170,10 +156,8 @@ class handshake_retry_operation
         kick(driver_action::wait);
         return;
       default:
-        // Defensive: operation_base only forwards handshake, finish, fail,
-        // and pause here (transport_read is intercepted). Report a protocol
-        // violation instead of re-running the attempt, which could loop or
-        // corrupt the handshake.
+        // Defensive: operation_base never forwards transport_read here.
+        // Report a protocol violation rather than re-running the attempt.
         this->post_complete_value(
             std::make_error_code(std::errc::protocol_error));
         return;
@@ -183,8 +167,8 @@ class handshake_retry_operation
   /**
    * Receives a terminal completion staged by operation_base.
    *
-   * Only queues it: driver_action::complete submits the post as the driver
-   * loop's last action, because the schedule post may destroy *this inline.
+   * Only queues it: driver_action::complete posts it as the driver loop's last
+   * action, because the schedule post may destroy *this inline.
    */
   void on_terminal_staged() noexcept { kick(driver_action::complete); }
 
@@ -214,8 +198,7 @@ class handshake_retry_operation
    * Publishes one action and makes sure a driver processes it.
    *
    * A re-entrant call finds the driver token held and returns; the active
-   * driver picks the action up. Token and action exchanges are seq_cst so the
-   * no-lost-wakeup handoff cannot strand an action.
+   * driver picks the action up. The seq_cst exchanges prevent a lost wakeup.
    */
   void kick(driver_action action) noexcept {
     pending_.store(action, std::memory_order_seq_cst);
@@ -223,12 +206,11 @@ class handshake_retry_operation
   }
 
   /**
-   * Single-winner driver loop (trampoline).
+   * Single-winner driver loop.
    *
-   * Synchronous rounds run iteratively here instead of recursing. Terminal
+   * Synchronous rounds run iteratively instead of recursing. Terminal
    * completions are only recorded by their callbacks; driver_action::complete
-   * submits the post as the loop's last action, then returns without touching
-   * any member.
+   * posts as the last action and returns without touching any member.
    */
   void drive() noexcept {
     if (driver_active_.exchange(true, std::memory_order_seq_cst)) {
@@ -269,9 +251,9 @@ class handshake_retry_operation
   /**
    * Second half of the no-lost-wakeup handoff.
    *
-   * Releases the token, then re-checks the staged action: after the release,
-   * either this load observes a concurrent kick, or the kicker's token
-   * exchange observes the release. Returns true when the driver may return.
+   * Releases the token, then re-checks the staged action: either this load sees
+   * a concurrent kick, or the kicker's exchange sees the release. Returns true
+   * when the driver may return.
    */
   [[nodiscard]] bool handle_none() noexcept {
     driver_active_.store(false, std::memory_order_seq_cst);
@@ -285,7 +267,7 @@ class handshake_retry_operation
   }
 
   // Success: the output was flushed; stage the empty error code. The terminal
-  // hook queues `complete` so the driver posts it as its last action.
+  // hook queues `complete`, posted as the driver's last action.
   void handle_finish() noexcept {
     this->post_complete_value(bnio::ssl::base::empty_error_code);
   }
@@ -317,15 +299,11 @@ class handshake_retry_operation
   /**
    * Performs one SSL handshake attempt.
    *
-   * A failed attempt computes SSL_get_error() once. Transport pauses
-   * (WANT_READ/WANT_WRITE) are handed to operation_base, which drives the
-   * flush/read/write step and resumes the attempt through
-   * resume(resume_action::handshake). Every other result goes to
-   * classify_ssl_result().
-   *
-   * Returns true when a terminal completion was staged (ZERO_RETURN, with no
-   * flush). Every other outcome stages a follow-up action or leaves the output
-   * flush pending; a flush-staged terminal is queued by the terminal hook.
+   * A failed attempt computes SSL_get_error() once. Transport pauses go to
+   * operation_base, which drives the flush/read/write step and resumes through
+   * resume(resume_action::handshake); every other result goes to
+   * classify_ssl_result(). Returns true when a terminal completion was staged
+   * (ZERO_RETURN, with no flush).
    */
   [[nodiscard]] bool run_ssl_attempt() noexcept {
     bnio::ssl::base::clear_errors();
@@ -349,51 +327,43 @@ class handshake_retry_operation
   /**
    * Classifies a callback-driven SSL_do_handshake() error.
    *
-   * Transport pauses were already filtered by run_ssl_attempt(), so the pause
-   * branch here only sees callback-driven pauses. Returns true when a terminal
-   * completion was staged.
+   * Transport pauses were already filtered by run_ssl_attempt(). Returns true
+   * when a terminal completion was staged.
    */
   [[nodiscard]] bool classify_ssl_result(int error) noexcept {
     if (const std::optional<handshake_pause_reason> reason =
             lookup_handshake_pause(error)) {
-      // A callback-driven pause is not an error; never read the OpenSSL error
-      // queue here.
+      // A pause is not an error: do not read the OpenSSL error queue.
       last_pause_ = make_handshake_pause_error(*reason);
       this->flush_then(resume_action::pause);
       return false;
     }
 
     if (error == SSL_ERROR_ZERO_RETURN) {
-      // Orderly close during the handshake: terminal with no flush, like a
-      // transport EOF.
+      // Orderly close: terminal, no flush (like a transport EOF).
       this->post_complete_value(
           std::make_error_code(std::errc::connection_reset));
       return true;
     }
 
-    // Hard failure: the write BIO may hold a fatal alert OpenSSL just produced
-    // (e.g. an ALPN callback rejecting every protocol), so flush before
-    // reporting the error.
+    // Hard failure: the write BIO may hold a fatal alert (e.g. an ALPN
+    // rejection), so flush before reporting the error.
     this->pending_error_ = bnio::ssl::base::last_error();
     this->flush_then(resume_action::fail);
     return false;
   }
 
   /**
-   * Invokes the factory for the last callback-driven pause and starts one
-   * wait round.
+   * Invokes the factory for the last callback-driven pause and starts one wait
+   * round.
    *
-   * The factory is reached only for callback-driven pauses; transport pauses
-   * are driven internally through operation_base. Returns true when this
-   * function completed the operation. A factory throw maps to
-   * std::errc::protocol_error. The epoch CAS hands the round to either the
-   * driver or the child; the loser processes the stored result via
-   * driver_action::child_done.
+   * Returns true when this function completed the operation; a factory throw
+   * maps to std::errc::protocol_error. The epoch CAS hands the round to either
+   * the driver or the child; the loser processes the stored result.
    */
   [[nodiscard]] bool start_wait_round() noexcept {
-    // The previous round is finished: the epoch handoff guarantees both
-    // parties are done with the stored child (the after-signaling rule), so
-    // replacing it is safe.
+    // The previous round is done: the epoch handoff guarantees both parties
+    // are done with the stored child, so replacing it is safe.
     child_operation_.reset();
 
     const std::uint64_t child_epoch = epoch_.load(std::memory_order_acquire);
@@ -413,8 +383,8 @@ class handshake_retry_operation
 
     child_operation_.start();
 
-    // Race the child receiver to claim the round. The winner returns to its
-    // own stack; the loser processes the stored completion.
+    // Race the child receiver to claim the round; the loser processes the
+    // stored completion.
     std::uint64_t expected = child_epoch;
     if (epoch_.compare_exchange_strong(expected, child_epoch + 1,
                                        std::memory_order_acq_rel,
@@ -423,24 +393,22 @@ class handshake_retry_operation
     }
 
     // The child won (synchronous completion): stage the handoff for this
-    // still-active driver instead of driving from the child's stack.
+    // still-active driver.
     kick(driver_action::child_done);
     return false;
   }
 
   /**
-   * Invokes the factory with the lvalue callback-driven pause code and
-   * connects its sender.
-   *
-   * The factory is stored by value and invoked as an lvalue, matching
-   * handshake_retry_factory exactly.
+   * Invokes the stored factory (by value, as a non-const lvalue) with the
+   * const-lvalue pause code and connects its sender.
    */
   void emplace_wait_child(std::uint64_t child_epoch) {
     child_operation_.template emplace_from<retry_operation_type>(
         // noexcept(retry_nothrow) lets the compiler drop unreachable
-        // exception-cleanup edges when nothing can throw.
+        // exception-cleanup edges.
         [this, child_epoch]() noexcept(retry_nothrow) {
-          // Const lvalue invocation: the value category the concept checks.
+          // Non-const factory, const pause code: the value categories the
+          // concept checks.
           auto sender = factory_(std::as_const(last_pause_));
           return bexec::connect(std::move(sender),
                                 retry_receiver(*this, child_epoch));
@@ -450,8 +418,8 @@ class handshake_retry_operation
   /**
    * Handles the result stored by the factory child.
    *
-   * Returns true when the operation was completed; false means the driver
-   * should run another SSL attempt.
+   * Returns true when the operation completed, false to run another SSL
+   * attempt.
    */
   [[nodiscard]] bool process_child_result() noexcept {
     if (child_stopped_) {
@@ -487,8 +455,8 @@ class handshake_retry_operation
    * Completes one factory-child round.
    *
    * The winner's acq_rel CAS publishes the stored result to the loser's
-   * acquire. The loser never drives the loop itself when a driver is active:
-   * it only stages child_done.
+   * acquire. A loser never drives the loop while a driver is active: it only
+   * stages child_done.
    */
   void finish_child(std::uint64_t child_epoch) noexcept {
     std::uint64_t expected = child_epoch;
@@ -524,12 +492,9 @@ class handshake_retry_operation
 };
 
 /**
- * Sender for async_handshake(scheduler, type, factory).
- *
- * Completes with exactly set_value(std::error_code) plus set_stopped(); there
- * is no set_error channel. A prvalue connect is always available; connecting
- * through an lvalue requires a copyable scheduler and factory. The operation
- * state is stored inline, so connecting does not allocate.
+ * Sender for async_handshake(scheduler, type, factory); completes with
+ * set_value(std::error_code) or set_stopped() only. State is inline, so
+ * connect does not allocate.
  */
 template <class Scheduler, class NextLayer, class Factory>
   requires handshake_retry_factory<Factory>

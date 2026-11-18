@@ -61,10 +61,8 @@ namespace {
 }
 #endif
 
-// Socket creation shared by the stream and datagram owners: the protocol
-// tag supplies the socket(2) triple, and the descriptor comes out in
-// non-blocking mode so the kqueue backend can skip per-operation fcntl
-// calls.
+// Shared socket creation for the stream and datagram owners; the descriptor
+// comes back non-blocking so kqueue can skip per-operation fcntl calls.
 [[nodiscard]] int open_socket(
     const async_io::local::stream_protocol&) noexcept {
 #if defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
@@ -83,8 +81,7 @@ namespace {
 #endif
 }
 
-// Establishes the nonblocking invariant for a descriptor taken over via
-// assign(), mirroring the tcp/udp owners.
+// Keep the nonblocking invariant; kqueue skips per-operation fcntl.
 void set_nonblocking(int fd) noexcept {
   if (fd >= 0) {
     const int flags = ::fcntl(fd, F_GETFL, 0);

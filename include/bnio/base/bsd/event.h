@@ -27,11 +27,7 @@ class BNIO_EXPORT event {
    */
   event() noexcept;
 
-  /**
-   * Creates an event from the native kevent fields.
-   *
-   * @see EV_SET
-   */
+  /** Creates an event from the native kevent fields. @see EV_SET */
   event(uintptr_t ident, int16_t filter, uint16_t flags, uint32_t fflags,
         intptr_t data, void* udata) noexcept;
 
@@ -40,11 +36,7 @@ class BNIO_EXPORT event {
    */
   explicit event(const struct kevent& raw_event) noexcept;
 
-  /**
-   * Sets all native kevent fields.
-   *
-   * @see EV_SET
-   */
+  /** Sets all native kevent fields. @see EV_SET */
   void set(uintptr_t ident, int16_t filter, uint16_t flags, uint32_t fflags,
            intptr_t data, void* udata) noexcept;
 

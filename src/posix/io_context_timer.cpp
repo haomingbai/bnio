@@ -37,9 +37,7 @@ bool io_context::register_timer_locked(detail::timer_slot& timer,
   timer.child = nullptr;
   timer.next = nullptr;
   const time_point previous_deadline = timers_.heap_deadline();
-  // If the timer has already expired, place it directly in the inactive
-  // (ready) list so it fires immediately. Otherwise insert it into the
-  // pairing heap ordered by expiry.
+  // Already-expired timers go to the inactive list; others to the expiry heap.
   if (timer.expiry > now) {
     timers_.push_heap(timer);
     return timers_.heap_deadline() < previous_deadline;
@@ -50,12 +48,8 @@ bool io_context::register_timer_locked(detail::timer_slot& timer,
 
 void io_context::register_timer(detail::timer_slot& timer) noexcept {
   bool wake_worker = false;
-  // Read the clock before taking timers_.mutex so the (relatively expensive)
-  // clock call overlaps lock acquisition instead of lengthening the critical
-  // section. steady_clock is monotonic, so a stale now read can only make the
-  // heap-vs-inactive decision more conservative (a timer that expired while we
-  // waited for the lock lands in the heap and fires on the next fetch cycle)
-  // and can never cause an early fire.
+  // Read the clock before the lock; steady_clock is monotonic, so a stale now
+  // can only delay an expired timer's fire, never cause an early one.
   const time_point now = clock::now();
   {
     std::lock_guard context_lock(timers_.mutex);
@@ -100,8 +94,7 @@ void io_context::unregister_timer(detail::timer_slot& timer) noexcept {
 
 std::pair<std::size_t, bool> io_context::cancel_timer_locked(
     detail::timer_slot& timer) noexcept {
-  // Caller must hold timers_.mutex. Returns the number of canceled waits
-  // and whether a sleeping worker must be woken.
+  // Caller must hold timers_.mutex; returns {canceled count, wake needed}.
   if (timer.context != this) {
     return {0, false};
   }
@@ -128,8 +121,7 @@ std::size_t io_context::cancel_timer(detail::timer_slot& timer) noexcept {
 
 std::pair<std::size_t, bool> io_context::set_timer_expiry_locked(
     detail::timer_slot& timer, time_point expiry, time_point now) noexcept {
-  // Caller must hold timers_.mutex. Returns the number of canceled waits
-  // and whether a sleeping worker must be woken.
+  // Locked; same result contract as cancel_timer_locked().
   if (timer.context != this) {
     return {0, false};
   }
@@ -161,9 +153,7 @@ std::pair<std::size_t, bool> io_context::set_timer_expiry_locked(
 
 std::size_t io_context::set_timer_expiry(detail::timer_slot& timer,
                                          time_point expiry) noexcept {
-  // Same rationale as register_timer: read the clock before the lock so the
-  // per-op clock call is not inside the timers_.mutex critical section. A
-  // stale now only delays, never advances, the expiry decision.
+  // Same clock-before-lock rationale as register_timer().
   const time_point now = clock::now();
   std::pair<std::size_t, bool> result;
   {
@@ -220,8 +210,8 @@ void io_context::start_timer_wait(detail::timer_operation_base& operation,
 
 detail::timer_operation_queue io_context::take_timer_operations_locked(
     detail::timer_slot& timer) noexcept {
-  // Drain all submitted wait operations from this timer slot into a detached
-  // queue. Caller must hold timers_.mutex.
+  // Detach all submitted waits from this timer slot. Caller must hold
+  // timers_.mutex.
   const detail::timer_operation_queue operations = timer.submitted;
   timer.submitted = {};
   return operations;
@@ -249,11 +239,8 @@ void io_context::queue_timer_completion(
     operation.timer_next_ = nullptr;
     enqueue_timer_operations_locked(&operation, completion);
   }
-  // Note: the wake below is deliberately unconditional, unlike the *_locked
-  // timer entry points which only wake when they staged work. A queued timer
-  // completion must always reach the run loop, and switching this to a
-  // conditional wake would require proving equivalence; the original
-  // behavior is preserved.
+  // Unconditional: a queued completion must always reach the run loop,
+  // unlike the *_locked entry points which wake only when they staged work.
   wake_one_if_all_workers_sleeping();
 }
 
@@ -291,9 +278,7 @@ void io_context::reverse_ready_operations(
 bool io_context::try_fetch_timeout_operations(
     time_point& deadline, detail::native_operation_base*& operations) noexcept {
   operations = nullptr;
-  // Use a lock-free CAS gate to serialize concurrent workers trying to
-  // drain the timer heap. Workers that lose the CAS skip the expensive
-  // heap walk entirely.
+  // CAS gate: serialize concurrent heap drains; losers skip the heap walk.
   bool expected = false;
   if (!timers_.timeout_fetching.compare_exchange_strong(
           expected, true, std::memory_order_acq_rel,
@@ -301,18 +286,15 @@ bool io_context::try_fetch_timeout_operations(
     return false;
   }
 
-  // The CAS gate won, now attempt the structural lock. If the mutex is
-  // already held, release the gate and return so the caller can retry.
+  // The mutex is held elsewhere; release the gate so the caller can retry.
   std::unique_lock context_lock(timers_.mutex, std::try_to_lock);
   if (!context_lock.owns_lock()) {
     timers_.timeout_fetching.store(false, std::memory_order_release);
     return false;
   }
 
-  // Note: unlike register_timer/set_timer_expiry, the clock read stays inside
-  // the critical section here. This path runs once per run-loop iteration
-  // (amortized), and reading before the CAS gate would add a wasted clock
-  // call on every CAS-loss / lock-busy retry under contention.
+  // The clock read stays inside the critical section: this path runs once
+  // per run-loop iteration, so a pre-gate read would be wasted on retries.
   const time_point now = clock::now();
   drain_expired_timers_locked(now);
 
@@ -354,9 +336,8 @@ steady_timer::~steady_timer() noexcept {
 }
 
 void steady_timer::transfer_from(steady_timer& other) noexcept {
-  // Unregister the other timer, carry over its expiry, and re-register this
-  // slot with the same context so the moved-from timer leaves no registration
-  // behind.
+  // Unregister the source and re-register this slot with its context, so the
+  // moved-from timer leaves no registration behind.
   io_context* context = other.timer_.context;
   if (context != nullptr) {
     const time_point expiry = context->timer_expiry(other.timer_);
@@ -393,9 +374,8 @@ steady_timer::time_point steady_timer::expiry() const noexcept {
 }
 
 std::size_t steady_timer::expires_at(time_point expiry) noexcept {
-  // Unregistered slot: there are no pending waits to cancel and no
-  // registration to re-schedule, so only the saved expiry is written
-  // through and zero waits are reported canceled.
+  // Unregistered slot: only write through the saved expiry; no waits to
+  // cancel and no registration to re-schedule.
   if (timer_.context == nullptr) {
     timer_.expiry = expiry;
     return 0;
@@ -413,9 +393,8 @@ std::size_t steady_timer::cancel() noexcept {
 
 void io_context::abort_pending_timer_waits() noexcept {
   std::lock_guard context_lock(timers_.mutex);
-  // io_context::stop() abort is not token cancellation: stage canceled
-  // completions; execute() delivers them as set_value(operation_canceled).
-  // Drain all active timers from the heap.
+  // stop() abort is not token cancellation: stage canceled completions;
+  // execute() delivers them as set_value(operation_canceled).
   while (auto* slot = timers_.pop_heap()) {
     const detail::timer_operation_queue canceled =
         take_timer_operations_locked(*slot);

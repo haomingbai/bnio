@@ -18,11 +18,9 @@
 
 namespace bnio::detail {
 
-// Adaptive eager I/O control attached to each read-all/write-all step native
-// I/O operation. Consulted by native_io_operation::start() to decide whether
-// to probe for immediate completion. The eager flag is rewritten by the step
-// completion handler based on whether the previous step filled its buffer
-// (bytes == expected).
+// Decides whether each read-all/write-all step probes for immediate
+// completion; the step handler sets eager to (bytes == expected), so a short
+// transfer disables the next probe.
 template <class State>
 class adaptive_eager_control {
  public:
@@ -75,14 +73,13 @@ class socket_write_all_state {
   int flags;
   std::size_t transferred = 0;
   bool done = false;
-  // Adaptive eager probing: cleared when the previous step had a short
-  // transfer, so the next step skips the immediate-completion probe.
+  // Set to (bytes == expected) by the step handler; a short transfer
+  // disables the next probe.
   bool eager = true;
 };
 
-// Local (AF_UNIX) twin of socket_write_all_state: identical wire-up, but
-// the step operation goes through the local write factory, so model
-// selection is decided by the socket type instead of kernel capability.
+// Local (AF_UNIX) twin of socket_write_all_state: the step operation goes
+// through the local write factory, so the socket type selects the model.
 template <io_context::schedule_kind Kind>
 class local_socket_write_all_state {
  public:
@@ -124,8 +121,8 @@ class local_socket_write_all_state {
   int flags;
   std::size_t transferred = 0;
   bool done = false;
-  // Adaptive eager probing: cleared when the previous step had a short
-  // transfer, so the next step skips the immediate-completion probe.
+  // Set to (bytes == expected) by the step handler; a short transfer
+  // disables the next probe.
   bool eager = true;
 };
 
@@ -140,9 +137,8 @@ template <class State>
 [[nodiscard]] auto write_all_step_complete(State* state, std::error_code ec,
                                            std::size_t bytes) noexcept {
   if (ec) {
-    // Failure/cancellation: terminate. Must set done=true so repeat_until's
-    // predicate exits the loop; otherwise the same failed operation would be
-    // retried forever.
+    // Failure/cancellation: set done so repeat_until exits instead of
+    // retrying the same failed operation forever.
     state->done = true;
     return bexec::just(ec, state->transferred);
   }
@@ -204,12 +200,8 @@ class write_all_operation {
 
   class repeat_receiver {
    public:
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    // env_type is named so get_env's type is available while the operation
+    // is incomplete; a deduced return would instantiate the body too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     explicit repeat_receiver(write_all_operation& operation) noexcept
@@ -224,12 +216,8 @@ class write_all_operation {
     }
 
     void set_stopped() noexcept {
-      // set_stopped now exclusively means the receiver's stop token was
-      // observed cancelled (repeat_until::drain() checks it before each
-      // round), so it is forwarded unconditionally. io_context::stop()
-      // aborts without token cancellation complete the step with
-      // set_value(operation_canceled, transferred) instead and never reach
-      // this receiver as a token/context distinction.
+      // set_stopped means the stop token was cancelled; io_context::stop()
+      // instead completes with set_value(operation_canceled, transferred).
       operation_->complete_stopped();
     }
 
@@ -256,8 +244,7 @@ class write_all_operation {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      // Stop token already requested before start: deliver set_stopped
-      // (token cancellation wins over value delivery).
+      // Stop token already cancelled: set_stopped wins.
       complete_stopped();
       return;
     }

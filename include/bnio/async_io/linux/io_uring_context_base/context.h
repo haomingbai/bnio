@@ -26,228 +26,138 @@ namespace bnio::async_io::linux_native {
  */
 class BNIO_EXPORT io_uring_context {
  public:
-  /**
-   * Monotonic clock used by async I/O scheduling.
-   */
+  /** Monotonic clock used by async I/O scheduling. */
   using steady_clock = bnio::async_io::steady_clock;
 
-  /**
-   * Clock used as the default async I/O scheduling clock.
-   */
+  /** Clock used as the default async I/O scheduling clock. */
   using clock = bnio::async_io::clock;
 
-  /**
-   * Wall-clock type for APIs that explicitly need system time.
-   */
+  /** Wall-clock type for APIs that explicitly need system time. */
   using system_clock = bnio::async_io::system_clock;
 
-  /**
-   * Canonical async I/O duration.
-   */
+  /** Canonical async I/O duration. */
   using duration = bnio::async_io::duration;
 
-  /**
-   * Time point represented with the default async I/O clock.
-   */
+  /** Time point represented with the default async I/O clock. */
   using time_point = bnio::async_io::time_point;
 
-  /**
-   * System-clock time point represented with async I/O duration precision.
-   */
+  /** System-clock time point with async I/O duration precision. */
   using system_time_point = bnio::async_io::system_time_point;
 
-  /**
-   * Creates a closed context.
-   */
+  /** Creates a closed context. */
   io_uring_context() noexcept;
 
-  /**
-   * Creates a context and attempts to initialize its ring.
-   */
+  /** Creates a context and attempts to initialize its ring. */
   explicit io_uring_context(const io_uring_context_options& options) noexcept;
 
-  /**
-   * Stops and releases the context ring.
-   */
+  /** Stops and releases the context ring. */
   ~io_uring_context() noexcept;
 
-  /**
-   * Copy construction is disabled because the context owns an io_uring ring.
-   */
+  /** Disabled: the context owns an io_uring ring. */
   io_uring_context(const io_uring_context&) = delete;
 
-  /**
-   * Copy assignment is disabled because the context owns an io_uring ring.
-   */
+  /** Disabled: the context owns an io_uring ring. */
   io_uring_context& operator=(const io_uring_context&) = delete;
 
-  /**
-   * Move construction is disabled because the context owns a ring and
-   * thread-local run-loop state.
-   */
+  /** Disabled: the context owns a ring and thread-local run-loop state. */
   io_uring_context(io_uring_context&&) = delete;
 
-  /**
-   * Move assignment is disabled because the context owns a ring and
-   * thread-local run-loop state.
-   */
+  /** Disabled: the context owns a ring and thread-local run-loop state. */
   io_uring_context& operator=(io_uring_context&&) = delete;
 
-  /**
-   * Initializes the context ring with the supplied options.
-   *
-   * @see io_uring_queue_init
-   */
+  /** Initializes the ring with the supplied options. */
   int queue_init(const io_uring_context_options& options) noexcept;
 
-  /**
-   * Releases the context ring and wakes any active run loop.
-   *
-   * @see io_uring_queue_exit
-   */
+  /** Releases the ring and wakes any active run loop. */
   void queue_exit() noexcept;
 
-  /**
-   * Returns whether the context currently owns an open ring.
-   */
+  /** Returns whether the context currently owns an open ring. */
   [[nodiscard]] bool is_open() const noexcept;
 
-  /**
-   * Returns the kernel io_uring feature flags reported at ring creation.
-   *
-   * Use IORING_FEAT_* macros to test individual capabilities, e.g.:
-   *   if (ctx.kernel_features() & IORING_FEAT_RECVSEND_BUNDLE) { ... }
-   *
-   * @see io_uring_params::features
-   */
+  /** Kernel io_uring feature flags reported at ring creation; test with
+   *  IORING_FEAT_* macros. See io_uring_params::features. */
   [[nodiscard]] unsigned kernel_features() const noexcept {
     return kernel_features_;
   }
 
-  /**
-   * Creates a sender that waits for events on a file descriptor.
-   */
+  /** Creates a sender that waits for events on a file descriptor. */
   [[nodiscard]] auto async_poll(bnio::async_io::descriptor_view descriptor,
                                 unsigned poll_mask);
 
-  /**
-   * Creates a sender that resolves a DNS query into caller-provided result
-   * storage on the context run loop.
-   */
+  /** Sender resolving a DNS query into caller-provided result storage on
+   *  the context run loop. */
   [[nodiscard]] auto async_resolve(bnio::async_io::dns_query query,
                                    bnio::async_io::dns_result_view result);
 
-  /**
-   * Creates a sender that resolves a host and service into caller-provided
-   * result storage on the context run loop.
-   */
+  /** Sender resolving a host and service into caller-provided result storage
+   *  on the context run loop. */
   [[nodiscard]] auto async_resolve(std::string_view host,
                                    std::string_view service,
                                    bnio::async_io::dns_result_view result);
 
-  /**
-   * Runs queued tasks and CQE completions until the context finishes.
+  /** Runs queued tasks and CQE completions until the context finishes.
    *
-   * Once the context has reached finished, calling run() again is not
-   * supported; a caller that races a completed run loop past its lifetime
-   * is outside the contract.
-   */
+   *  Calling run() again after it has finished, or racing it past its
+   *  lifetime, is unsupported. */
   void run() noexcept;
 
-  /**
-   * Requests the run loop to finish.
-   */
+  /** Requests the run loop to finish. */
   int stop() noexcept;
 
-  /**
-   * Returns whether the current thread is running this context.
-   */
+  /** Returns whether the current thread is running this context. */
   [[nodiscard]] bool is_in_context() const noexcept;
 
-  /**
-   * Selects externally owned shared state for a worker group.
+  /** Selects externally owned shared state for a worker group.
    *
-   * This function is not thread-safe and must be called before publishing
-   * work or calling run(). The state must remain valid until this context
-   * stops running.
-   */
+   *  Not thread-safe; call before publishing work or run(). The state must
+   *  stay valid until this context stops running. */
   void set_global_state(io_uring_task_queue_state* state) noexcept;
 
-  /**
-   * Returns the shared task queue state this worker is bound to, or null
-   * when it has not entered run() yet.
-   */
+  /** Shared task queue state bound to this worker, or null before run(). */
   [[nodiscard]] io_uring_task_queue_state* get_global_state() const noexcept {
     return global_state_;
   }
 
-  /**
-   * Wakes the run loop through the context eventfd.
-   */
+  /** Wakes the run loop through the context eventfd. */
   void notify_one_waiter() noexcept;
 
   /** Returns whether this run-loop worker has published a sleeping state. */
   [[nodiscard]] bool is_waiting() const noexcept;
 
-  /**
-   * Returns the negative errno that aborted enter_run(), or 0 when the
-   * last run() entered its loop normally (or never ran).
+  /** Negative errno that aborted enter_run(), or 0 if run() entered normally
+   *  (or never ran).
    *
-   * The only failures enter_run() can report are the io_uring ring
-   * enable and the wake-poll arming: both happen before any worker has
-   * started, so the value is written once by the run() caller and read
-   * after run() returns — no synchronization is needed. The caller
-   * (io_context::run_native_loop) surfaces it as the error_code run()
-   * returns instead of reporting success for a worker that never ran.
-   */
+   *  Written once by the run() caller before any worker starts and read after
+   *  run() returns, so no synchronization is needed; run() surfaces it as its
+   *  error_code. */
   [[nodiscard]] int enter_run_error() const noexcept {
     return enter_run_error_;
   }
 
-  /**
-   * Posts an operation for execution by the context run loop.
+  /** Internal: posts an operation for execution by the run loop.
    *
-   * Internal submission API. Unlike the posix io_context queue, this
-   * function does not gate on the shared life_state; it always enqueues
-   * and never refuses work. Lifecycle gating is the caller's job: the
-   * io_context layer refuses submissions while stopping so nothing
-   * strands, and direct callers must guarantee the context keeps
-   * running until the operation reaches a terminal receiver call.
-   *
-   * @see bnio::io_context::publish_cpu
-   */
+   *  Always enqueues and never refuses work; this layer does not gate on
+   *  life_state. Direct callers must keep the context running until the
+   *  operation reaches a terminal receiver call. */
   int post(io_uring_operation_base& operation) noexcept;
 
-  /**
-   * Publishes I/O for passive preparation by the context run loop.
+  /** Internal: publishes I/O for passive preparation by the run loop.
    *
-   * Internal submission API. Unlike the posix io_context queue, this
-   * function does not gate on the shared life_state; it always enqueues
-   * and never refuses work. Lifecycle gating is the caller's job: the
-   * io_context layer refuses submissions while stopping so nothing
-   * strands, and direct callers must guarantee the context keeps
-   * running until the operation reaches a terminal receiver call.
-   *
-   * @see bnio::io_context::publish_io
-   */
+   *  Always enqueues and never refuses work; this layer does not gate on
+   *  life_state. Direct callers must keep the context running until the
+   *  operation reaches a terminal receiver call. */
   void publish_io(io_uring_io_operation_base& operation) noexcept;
 
-  /**
-   * Returns the worker-local task queue state.
+  /** Worker-local task queue state.
    *
-   * The state is linked into the shared task queue state's suspend list
-   * while the worker sleeps in the native poller. Its CPU queue is owned
-   * exclusively by the worker thread (no stealing).
-   */
+   *  Linked into the shared suspend list while the worker sleeps; its queues
+   *  are worker-exclusive. */
   [[nodiscard]] io_uring_local_task_queue_state* local_state() noexcept {
     return &local_state_;
   }
 
-  /**
-   * Fetches a batch of CPU tasks, trying the local queue first, then the
-   * shared queue. Stops at the first source that yields tasks so work never
-   * accumulates on this thread's stack.
-   */
+  /** Fetches a batch of CPU tasks: local queue first, then shared, stopping
+   *  at the first source that yields work. */
   [[nodiscard]] io_uring_operation_base* fetch_cpu_task() noexcept;
 
   /** Fetches and executes a batch of CPU tasks. Returns true if work ran. */
@@ -274,30 +184,21 @@ class BNIO_EXPORT io_uring_context {
   /** Enables a disabled ring on its run-loop thread. */
   int enable_ring() noexcept;
 
-  /**
-   * Small copy of CQE data used after the CQ head advances.
-   */
+  /** Small copy of CQE data used after the CQ head advances. */
   struct cqe_data;
 
-  /**
-   * Callable that consumes one ready CQE for collect_cqe_tasks(): classifies
-   * it (shared/per-worker wake poll vs operation) and enqueues operations
-   * into the caller-provided queue, counting them.
-   */
+  /** CQE consumer for collect_cqe_tasks(): classifies each CQE and enqueues
+   *  operation CQEs into the caller's queue, counting them. */
   struct cqe_collector;
 
-  /**
-   * Lifecycle state for the context run loop.
-   */
+  /** Lifecycle state for the context run loop. */
   enum class context_state {
     running,
     finishing,
     finished,
   };
 
-  /**
-   * Next action selected by the run loop.
-   */
+  /** Next action selected by the run loop. */
   enum class run_phase {
     run_ready_tasks,
     wait_for_work,
@@ -305,55 +206,36 @@ class BNIO_EXPORT io_uring_context {
     finished,
   };
 
-  /**
-   * Publishes all operations from a local queue to the shared CPU-task queue.
-   */
+  /** Publishes a local queue's operations to the shared CPU queue. */
   void push_cpu_tasks(operation_queue& operations) noexcept;
 
-  /**
-   * Takes and consumes the SQ-full retry slot, the worker-local queue,
-   * and the shared queue in priority order, then submits once before
-   * returning. Stops taking new sources as soon as the SQ fills up so
-   * backpressured work stays in its own queue.
-   */
+  /** Consumes the SQ-full retry slot, then the local queue, then the shared
+   *  queue; submits once. Stops pulling new sources as soon as the SQ fills
+   *  so backpressured work stays queued. */
   [[nodiscard]] bool consume_io_tasks() noexcept;
 
-  /**
-   * Prepares each operation in the list into an SQE, batching successes
-   * into prepared (LIFO) and failing non-EAGAIN prepare errors inline.
+  /** Prepares a list of operations into SQEs, appending successes to
+   *  @p prepared (LIFO) and failing non-EAGAIN prepare errors inline.
    *
-   * @return nullptr when the whole list was consumed, or the remaining
-   *         list headed by the current operation when the SQ is full
-   *         (-EAGAIN); the caller submits prepared and stashes the
-   *         remainder in the retry slot.
-   */
+   *  @return nullptr when fully consumed, else the remainder headed by the
+   *          operation that hit a full SQ (-EAGAIN). */
   [[nodiscard]] io_uring_io_operation_base* prepare_io_batch(
       io_uring_io_operation_base* operations,
       io_uring_io_operation_base*& prepared) noexcept;
 
-  /**
-   * Registers every prepared operation in the inflight list and clears
-   * the next pointers. Deliberately separate from submit_ring(): inflight
-   * registration is a bookkeeping step that must cover every operation
-   * holding a prepared SQE, and a transient -EAGAIN CQE re-enters the
-   * pipeline by re-running prepare + submit + track on the same operation.
-   */
+  /** Registers every prepared operation in the inflight list and clears its
+   *  next pointer. Must cover every operation holding a prepared SQE,
+   *  including -EAGAIN re-submissions. */
   void track_prepared_batch(io_uring_io_operation_base*& prepared) noexcept;
 
-  /**
-   * Submits the prepared SQEs. Every prepared operation is registered in
-   * the inflight list before the submit call, so a submit failure fails
-   * them through fail_io_list() (which also unregisters them). Returns 0
-   * without a syscall when prepared is null.
-   */
+  /** Submits the prepared SQEs, which must already be registered inflight: a
+   *  submit failure then fails them through fail_io_list(). Returns 0 without
+   *  a syscall when @p prepared is null. */
   [[nodiscard]] int submit_and_track_prepared(
       io_uring_io_operation_base* prepared) noexcept;
 
-  /**
-   * Unregisters every operation in the list from the inflight list, fails
-   * each with the given submission error, and pushes it to the local CPU
-   * queue.
-   */
+  /** Unregisters a list from the inflight list, fails each operation with
+   *  @p result, and pushes it to the local CPU queue. */
   void fail_io_list(io_uring_io_operation_base* head, int result) noexcept;
 
   /** Adds an I/O operation to the inflight doubly-linked list. */
@@ -377,75 +259,41 @@ class BNIO_EXPORT io_uring_context {
 
   void end_wait() noexcept;
 
-  /**
-   * Signals the eventfd used by posted work and stop requests.
-   */
+  /** Signals the eventfd used by posted work and stop requests. */
   [[nodiscard]] int signal_eventfd() noexcept;
 
-  /**
-   * Drains pending eventfd notifications.
-   */
+  /** Drains pending eventfd notifications. */
   void drain_eventfd() noexcept;
 
   /**
-   * Arms the IORING_POLL_ADD that lets one wake channel wake this worker.
-   *
-   * Shared by the shared wake channel and the per-worker wake channel:
-   * the caller passes that channel's read fd, its CQE user-data sentinel,
-   * and its "already armed" flag.
-   *
-   * There is deliberately no retry here. When the submission queue is
-   * full the call returns -EAGAIN and the run loop re-arms on its next
-   * pass, which keeps SQ pressure handling in one place.
-   *
-   * @param fd           Read fd of the wake channel to poll.
-   * @param user_data    Sentinel identifying this channel's poll CQEs.
-   * @param pending_flag Per-channel flag set once the poll is armed and
-   *                     cleared when its CQE is collected.
-   * @return 1 when the wake poll is armed (newly submitted or already
-   *         pending), 0 when it is not armed because the context is no
-   *         longer running (stopping; the caller must not block on the
-   *         ring without an independent wake source), or a negative
-   *         errno on submission failure (-EAGAIN is transient SQ
-   *         pressure; -EINVAL means the wake channel is closed; anything
-   *         else is fatal for the channel).
+   * Arms the IORING_POLL_ADD for fd; -EAGAIN is re-armed on the next pass.
+   * pending_flag is set while armed, cleared when the CQE is collected.
+   * Returns 1 when armed or already pending, 0 when stopping (do not block
+   * without an independent wake source), or a negative errno (-EINVAL closed,
+   * others fatal for the channel).
    */
   [[nodiscard]] int arm_wake_poll(int fd, void* user_data,
                                   bool& pending_flag) noexcept;
 
-  /**
-   * Returns the sentinel user data used for eventfd poll SQEs.
-   */
+  /** Sentinel user data for eventfd poll SQEs. */
   [[nodiscard]] static void* eventfd_user_data() noexcept;
 
-  /**
-   * Returns the sentinel user data used for local wake channel poll SQEs.
-   */
+  /** Sentinel user data for local wake channel poll SQEs. */
   [[nodiscard]] static void* local_eventfd_user_data() noexcept;
 
-  /**
-   * Runs ready local and posted tasks.
-   */
+  /** Runs ready local and posted tasks. */
   [[nodiscard]] run_phase handle_run_ready_tasks() noexcept;
 
-  /**
-   * Waits for work when no tasks are immediately ready.
-   */
+  /** Waits for work when no tasks are immediately ready. */
   [[nodiscard]] run_phase handle_wait_for_work() noexcept;
 
-  /**
-   * Drains remaining work during shutdown.
-   */
+  /** Drains remaining work during shutdown. */
   [[nodiscard]] run_phase handle_finish_drain() noexcept;
 
-  /**
-   * Polls briefly for CQEs or posted tasks before blocking.
-   */
+  /** Polls briefly for CQEs or posted tasks before blocking. */
   [[nodiscard]] run_phase spin_for_work() noexcept;
 
-  /**
-   * Waits for io_uring completion events.
-   */
+  /** Waits for io_uring completion events. */
   [[nodiscard]] run_phase wait_for_io_work() noexcept;
 
   /**
@@ -454,78 +302,54 @@ class BNIO_EXPORT io_uring_context {
    */
   [[nodiscard]] bool collect_pending_work() noexcept;
 
-  /**
-   * Rearms both wake polls before a blocking wait.
+  /** Rearms both wake polls before a blocking wait.
    *
-   * @return run_phase::wait_for_work when the caller may block;
-   *         run_phase::run_ready_tasks on transient -EAGAIN SQ pressure;
-   *         run_phase::finish_drain on a fatal re-arm failure or when the
-   *         context is stopping.
+   *  @return wait_for_work when the caller may block; run_ready_tasks on
+   *          transient -EAGAIN SQ pressure; finish_drain on a fatal re-arm
+   *          failure or when stopping.
    */
   [[nodiscard]] run_phase rearm_wake_polls_for_wait() noexcept;
 
-  /**
-   * Fetches due timeout operations and, when none becomes ready, fills the
-   * wait timespec with the nearest timer deadline.
+  /** Fetches due timers; if none is ready, fills @p timeout with the nearest
+   *  deadline.
    *
-   * @param timeout         The timespec filled when a deadline is available.
-   * @param timeout_pointer Set to point at timeout when a deadline is
-   *                        available, left null otherwise.
-   * @return run_phase::wait_for_work when the caller should rearm the wake
-   *         polls and block; otherwise the phase to enter because work was
-   *         found.
+   *  @param timeout         Timespec filled when a deadline exists.
+   *  @param timeout_pointer Set to @p timeout when a deadline exists, else
+   *                         null.
+   *  @return wait_for_work to rearm and block; otherwise the phase to enter
+   *          because work was found.
    */
   [[nodiscard]] run_phase prepare_wait_timeout(
       __kernel_timespec& timeout, __kernel_timespec*& timeout_pointer) noexcept;
 
-  /**
-   * Returns whether the shared state has requested closing.
-   */
+  /** Returns whether the shared state has requested closing. */
   [[nodiscard]] bool closing_requested() const noexcept;
 
-  /**
-   * Returns whether stop() has been called on this context.
-   */
+  /** Returns whether stop() has been called on this context. */
   [[nodiscard]] bool stop_requested() const noexcept;
 
-  /**
-   * Returns whether the context should leave the running state.
-   */
+  /** Returns whether the context should leave the running state. */
   [[nodiscard]] bool should_finish() const noexcept;
 
-  /**
-   * Drains work and marks the context finished.
+  /** Drains work and marks the context finished.
    *
-   * Tolerates a broken or closed ring/wake channel: every drain step
-   * guards its ring state and fails operations through delivery, so all
-   * operations reach a terminal receiver call.
-   */
+   *  Tolerates a broken ring or wake channel: every operation still reaches a
+   *  terminal receiver call. */
   void finish() noexcept;
 
-  /**
-   * Aborts remaining inflight and shared-queued I/O and delivers every
-   * completion, looping until no further work appears.
-   *
-   * Shared by finish() (run-loop shutdown) and queue_exit() (teardown
-   * without a run) so both paths own one abort-and-deliver policy.
-   * Receivers run synchronously on the calling thread.
-   */
+  /** Aborts remaining inflight and queued I/O and delivers every completion,
+   *  looping until no work remains. Shared by finish() and queue_exit();
+   *  receivers run synchronously on the calling thread. */
   void abort_and_deliver_completions() noexcept;
 
-  /**
-   * Waits for at least one CQE event on the native ring descriptor.
-   */
+  /** Waits for at least one CQE event on the native ring descriptor. */
   [[nodiscard]] int wait_for_cqe_event(
       __kernel_timespec* timeout = nullptr) noexcept;
 
-  /**
-   * Collects and dispatches ready CQE-backed tasks.
-   */
+  /** Collects and dispatches ready CQE-backed tasks. */
   [[nodiscard]] bool collect_ready_cqes() noexcept;
 
-  /**
-   * Kind of a CQE user-data pointer, used to dispatch collected CQEs.
-   */
+  /** Kind of CQE user data, used to dispatch collected CQEs. */
   enum class cqe_user_data_kind {
     eventfd,
     local_eventfd,
@@ -539,61 +363,39 @@ class BNIO_EXPORT io_uring_context {
   [[nodiscard]] static cqe_user_data_kind classify_cqe_user_data(
       void* user_data) noexcept;
 
-  /**
-   * Collects ready CQEs into an operation queue.
-   */
+  /** Collects ready CQEs into an operation queue. */
   [[nodiscard]] unsigned collect_cqe_tasks(operation_queue& cqe_tasks) noexcept;
 
-  /**
-   * Dispatches collected CQE tasks locally or through the shared CPU queue.
-   */
+  /** Dispatches collected CQE tasks locally or via the shared CPU queue. */
   void dispatch_cqe_tasks(operation_queue& cqe_tasks,
                           unsigned task_count) noexcept;
 
-  /**
-   * Enqueues the operation represented by one CQE data record.
-   */
+  /** Enqueues the operation represented by one CQE data record. */
   [[nodiscard]] bool enqueue_cqe_task(const cqe_data& data,
                                       operation_queue& tasks) noexcept;
 
-  /**
-   * Initialises the ring with the supplied flags, retrying without
-   * bnio-managed setup flags on EINVAL.
-   *
-   * @return 0 on success, or a negative errno.
-   */
+  /** Initializes the ring, retrying without bnio-managed setup flags on
+   *  EINVAL. @return 0 or a negative errno. */
   int init_ring_params(unsigned entries, unsigned flags,
                        bnio::base::params& queue_params) noexcept;
 
-  /**
-   * Initialises run-loop state and returns whether the worker may proceed.
-   *
-   * On failure the caller must exit early after restoring current_context_.
-   */
+  /** Initializes run-loop state; false means the caller must exit early
+   *  after restoring current_context_. */
   [[nodiscard]] bool enter_run() noexcept;
 
-  /**
-   * Common rollback for enter_run() failures: delivers queued operations
-   * through finish()'s abort path so no receiver is stranded, undoes the
-   * awake-worker count when it was already incremented, and clears
-   * run_active.
-   */
+  /** Rollback for enter_run() failure: delivers queued operations through
+   *  finish()'s abort path, undoes the awake-worker count, clears
+   *  run_active. */
   bool fail_enter_run(bool awake_worker_added) noexcept;
 
-  /**
-   * Repeatedly drains CPU tasks, timer expirations, and optionally CQEs
-   * until the local task queue is empty.
-   */
+  /** Drains CPU tasks, timer expirations, and optionally CQEs until the local
+   *  task queue is empty. */
   void drain_local_tasks(bool include_cqe) noexcept;
 
-  /**
-   * Applies configuration from options to context member variables.
-   */
+  /** Applies configuration from options to context member variables. */
   void apply_context_options(const io_uring_context_options& options) noexcept;
 
-  /**
-   * Verifies in debug builds that the context is running.
-   */
+  /** Verifies in debug builds that the context is running. */
   void assert_running() const noexcept;
 
   bnio::base::ring ring_;
@@ -610,11 +412,8 @@ class BNIO_EXPORT io_uring_context {
   };
   run_state run_state_;
 
-  /**
-   * Negative errno recorded by enter_run() when the ring enable or a
-   * wake-poll arming failed, 0 otherwise. Owned by the run() caller
-   * thread; see enter_run_error().
-   */
+  /** enter_run() failure errno, 0 otherwise; owned by the run() caller
+   *  thread. See enter_run_error(). */
   int enter_run_error_ = 0;
 
   /** Poll-arming state for the shared and per-worker wake channels. */
@@ -629,15 +428,9 @@ class BNIO_EXPORT io_uring_context {
   io_uring_local_task_queue_state local_state_;
   io_uring_io_operation_base* inflight_io_head_ = nullptr;
 
-  /**
-   * Unsubmitted remainder of the current I/O batch, set when the
-   * submission queue is full. Owned by the run-loop thread and kept
-   * outside every queue: a non-null value means the previous pass hit a
-   * full SQ, so this list is retried before any queue is popped — no
-   * list reversal, no re-push, no wakeup (the publisher is the
-   * consumer). abort_inflight_io() drains it exactly like the two I/O
-   * queues.
-   */
+  /** Unsubmitted remainder of the current I/O batch, set when the SQ fills.
+   *  Owned by the run-loop thread and retried before any queue is popped;
+   *  abort_inflight_io() drains it like the I/O queues. */
   io_uring_io_operation_base* pending_io_retry_ = nullptr;
 
   /** Run-loop scheduling budget. */

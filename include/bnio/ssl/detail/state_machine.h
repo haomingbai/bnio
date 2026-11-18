@@ -61,9 +61,8 @@ class operation_base {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      // Token canceled before start: deliver set_stopped (unified contract).
-      // Context-stop aborts take the value(operation_canceled) path instead,
-      // decided by the token arbitration in each operation's execute().
+      // Token canceled before start: deliver set_stopped. Context-stop aborts
+      // take the value(operation_canceled) path via token arbitration.
       post_complete_stopped();
       return;
     }
@@ -74,12 +73,8 @@ class operation_base {
  protected:
   class child_receiver {
    public:
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    // Named explicitly so get_env's return type is available while the
+    // operation class is incomplete.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     explicit child_receiver(operation_base& operation) noexcept
@@ -101,12 +96,8 @@ class operation_base {
 
   class post_receiver {
    public:
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    // Named explicitly so get_env's return type is available while the
+    // operation class is incomplete.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     explicit post_receiver(operation_base& operation) noexcept
@@ -117,24 +108,14 @@ class operation_base {
     }
 
     void set_value(std::error_code ec) noexcept {
-      // The schedule handoff never overwrites a staged completion. Every
-      // submit_post() call site stages a completion (value, error, or
-      // stopped) before submitting, and completion_kind has no empty state,
-      // so there is always a staged result here; delivering it unchanged
-      // implements the "already-completed results are delivered unchanged"
-      // contract (docs/usage/index.md). A non-empty ec from the schedule
-      // (e.g. value(operation_canceled) after an io_context::stop() abort)
-      // is simply dropped when a completion is already staged. The
-      // set_stopped() branch below is the deliberate exception: token
-      // cancellation wins over everything, including a staged completion.
+      // Completion is always staged; a schedule error never overwrites it.
       (void)ec;
       operation_->deliver_terminal();
     }
 
     void set_stopped() noexcept {
-      // The schedule observed a canceled stop token (token arbitration in
-      // execute()): override any stale staged completion so an older pending
-      // value cannot swallow the token cancellation, then deliver stopped.
+      // Token cancellation wins over any staged completion: override it, then
+      // deliver stopped.
       operation_->complete_stopped();
       operation_->deliver_terminal();
     }
@@ -196,11 +177,10 @@ class operation_base {
   /**
    * Submits the completion staged by post_complete_*.
    *
-   * A derived driver loop that defines on_terminal_staged() receives the
-   * staged completion instead, because the schedule post may complete inline
-   * and destroy the operation: the post must be the driver loop's last action,
-   * not a nested flush/transport/child-completion callback's. Operations
-   * without the hook keep the immediate-post behavior.
+   * If Derived defines on_terminal_staged(), the staged completion goes to that
+   * hook instead: the schedule post may complete inline and destroy the
+   * operation, so it must be a driver loop's last action. Operations without
+   * the hook post immediately.
    */
   void submit_completion() noexcept {
     if constexpr (requires(Derived& derived) {
@@ -230,10 +210,8 @@ class operation_base {
     }
   }
 
-  // Computes the OpenSSL error for a failed SSL call and dispatches it.
-  // Callers that already computed SSL_get_error() (for example to filter
-  // transport pauses before classification) use the value overload below so
-  // the error is not computed twice.
+  // Computes SSL_get_error() and dispatches it; callers that already have the
+  // value use the overload below to avoid computing it twice.
   void handle_ssl_error(int ssl_result, resume_action action) noexcept {
     handle_ssl_error_value(SSL_get_error(native_ssl(*stream_), ssl_result),
                            action);
@@ -253,17 +231,9 @@ class operation_base {
         post_complete_value(std::make_error_code(std::errc::connection_reset));
         return;
       default:
-        // A hard failure (SSL_ERROR_SSL, SSL_ERROR_SYSCALL, ...) may have
-        // queued outbound records in the write BIO — most notably the fatal
-        // alert OpenSSL writes when, e.g., the ALPN selection callback
-        // rejects the offered protocols. Completing immediately would leave
-        // that alert stranded in the memory BIO: the peer (already in
-        // WANT_READ) would never observe the failure and its own operation
-        // would hang forever. Flush the pending output first, then complete
-        // with the staged error through resume(resume_action::fail). If
-        // the flush itself fails, the transport error is reported instead —
-        // a connection that cannot carry the alert is the more fundamental
-        // failure by that point.
+        // Hard failure: the write BIO may hold a fatal alert (e.g. an ALPN
+        // rejection), so flush it before completing; otherwise the peer hangs.
+        // If the flush itself fails, the transport error is reported instead.
         pending_error_ = base::last_error();
         flush_then(resume_action::fail);
         return;
@@ -278,9 +248,8 @@ class operation_base {
   tcp::stream<NextLayer>* stream_;
   receiver_type receiver_;
 
-  // Error staged by handle_ssl_error's hard-failure branch and delivered
-  // through resume(resume_action::fail) once the pending output flush
-  // completes.
+  // Error staged by the hard-failure branch, delivered through
+  // resume(resume_action::fail) after the output flush.
   std::error_code pending_error_ = base::empty_error_code;
 
  private:
@@ -344,10 +313,8 @@ class operation_base {
       return;
     }
     if (result == 0) {
-      // EOF (peer closed): transport read/write returns 0 bytes with an empty
-      // ec. Treat as connection_reset (recoverable, passed through via
-      // set_value(ec)); otherwise the state machine would treat 0 bytes as
-      // "keep looping" and hang forever.
+      // EOF (0 bytes, empty ec) is reported as connection_reset; otherwise the
+      // state machine would treat 0 bytes as "keep looping" and hang forever.
       post_complete_value(std::make_error_code(std::errc::connection_reset));
       return;
     }
@@ -369,8 +336,7 @@ class operation_base {
   }
 
   void handle_read_complete(std::size_t result) noexcept {
-    // result <= 0 is no longer possible: ec is already filtered in
-    // handle_transport_complete
+    // result > 0: non-positive results were already filtered.
 
     char* data = nullptr;
     base::clear_errors();
@@ -388,8 +354,7 @@ class operation_base {
   }
 
   void handle_write_complete(std::size_t result) noexcept {
-    // result <= 0 is no longer possible: ec is already filtered in
-    // handle_transport_complete
+    // result > 0: non-positive results were already filtered.
 
     char* data = nullptr;
     base::clear_errors();

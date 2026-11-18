@@ -1,8 +1,5 @@
-// Timer cancellation — a 100ms timer cancels a pending 10s timer.
-// The canceled wait completes with operation_canceled; the receiver
-// observes that error and stops the context for a clean, immediate exit.
-// An op_registry keeps every operation state alive until its completion
-// has been delivered (the operations are non-movable).
+// Timer cancellation: a 100ms timer cancels a pending 10s timer, whose wait
+// completes with operation_canceled. The registry keeps operations alive.
 
 #include <bnio/bnio.h>
 

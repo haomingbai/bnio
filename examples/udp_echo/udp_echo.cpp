@@ -1,7 +1,5 @@
-// UDP echo — send a datagram and receive the reply.
-// main thread runs context.run(). An op_registry keeps every operation
-// state alive until its completion has been delivered (the operations
-// are non-movable).
+// UDP echo: send a datagram and receive the reply.
+// The registry keeps the non-movable operations alive until completion.
 
 #include <bnio/bnio.h>
 

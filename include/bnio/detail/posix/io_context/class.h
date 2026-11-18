@@ -42,9 +42,8 @@ namespace detail {
 /**
  * Scheduling policy used by io_context scheduler handles.
  *
- * Lives at bnio::detail scope so the forward declarations below and the
- * detail operation templates can name it before and after the io_context
- * class body; io_context re-exposes it as io_context::schedule_kind.
+ * Lives at bnio::detail scope; io_context re-exposes it as
+ * io_context::schedule_kind.
  */
 enum class schedule_kind {
   /**
@@ -58,9 +57,8 @@ enum class schedule_kind {
   post,
 
   /**
-   * Always publish schedule() and scheduler-initiated I/O through the
-   * shared queue, skipping the worker-local fast path, so completions
-   * are drained by whichever worker reaches the queue first.
+   * Publish schedule() and scheduler-initiated I/O through the shared
+   * queue, skipping the worker-local fast path; any worker may drain it.
    */
   defer,
 };
@@ -82,115 +80,65 @@ struct schedule_policy;
 }  // namespace detail
 
 /**
- * High-level asynchronous I/O context for the configured native backend.
- *
- * io_context is the event-loop owner and scheduler factory:
- *
- * 1. Event loop host — run() drives the selected io_uring or kqueue loop;
- *    each thread calling run() creates its own native context.
- * 2. Scheduler factory — produces dispatch, post, and defer schedulers.
- * 3. Passive I/O backend — publishes scheduler I/O to the running worker's
- *    own queue or, for every other producer, to the shared queue that a
- *    worker drains on its owning native-context thread.
- *
- * io_context adapts the non-owning async_io views into sender-returning
- * operations. Higher-level stream owners build on top of these view-level
- * operations instead of being known by io_context.
- *
- * The context is non-movable: it owns native workers, the timer heap, and
- * its synchronization resources, and it must outlive every operation
- * submitted on it.
+ * Asynchronous I/O context and scheduler factory. run() drives the native
+ * loop, one native context per calling thread; schedulers return senders over
+ * non-owning async_io views. Non-movable, and must outlive every submitted
+ * operation.
  */
 class BNIO_EXPORT io_context {
  public:
   /** I/O operation passively consumed by one native run-loop worker. */
   using operation_base = detail::native_io_operation_base;
 
-  /**
-   * Monotonic clock used by this context.
-   */
+  /** Monotonic clock used by this context. */
   using steady_clock = async_io::steady_clock;
 
-  /**
-   * Default clock used by this context.
-   */
+  /** Default clock used by this context. */
   using clock = async_io::clock;
 
-  /**
-   * Default duration type used by this context.
-   */
+  /** Default duration type used by this context. */
   using duration = async_io::duration;
 
-  /**
-   * Default time point type used by this context.
-   */
+  /** Default time point type used by this context. */
   using time_point = async_io::time_point;
 
-  /**
-   * Scheduling policy used by io_context scheduler handles.
-   *
-   * The enumerator set lives at bnio::detail scope so the detail operation
-   * templates can name it; this alias keeps the io_context::schedule_kind
-   * spelling.
-   */
+  /** Scheduling policy; alias of bnio::detail::schedule_kind. */
   using schedule_kind = detail::schedule_kind;
 
-  /**
-   * Sender returned by io_context schedulers' schedule() member.
-   */
+  /** Sender returned by a scheduler's schedule() member. */
   template <schedule_kind Kind>
   class schedule_sender {
    public:
-    /**
-     * Completion signatures produced by the scheduler sender.
-     */
+    /** Completion signatures produced by the scheduler sender. */
     using completion_signatures =
         bexec::completion_signatures<bexec::set_value_t(std::error_code),
                                      bexec::set_stopped_t()>;
 
-    /**
-     * Creates a schedule sender bound to context.
-     */
+    /** Creates a schedule sender bound to the context. */
     explicit schedule_sender(io_context& context) noexcept
         : context_(&context) {}
 
-    /**
-     * Operation state for a scheduler schedule() sender.
-     */
+    /** Operation state for a scheduler schedule() sender. */
     template <class Receiver>
     class operation : public detail::native_operation_base {
      public:
-      /**
-       * Creates an operation bound to the context and receiver.
-       */
+      /** Creates an operation bound to the context and receiver. */
       operation(io_context& context, Receiver receiver)
           : context_(&context), receiver_(std::move(receiver)) {}
 
-      /**
-       * Copy construction is disabled because operations are queued
-       * intrusively.
-       */
+      /** Deleted: operations are queued intrusively. */
       operation(const operation&) = delete;
 
-      /**
-       * Copy assignment is disabled because operations are queued intrusively.
-       */
+      /** Deleted: operations are queued intrusively. */
       operation& operator=(const operation&) = delete;
 
-      /**
-       * Move construction is disabled because operations are queued
-       * intrusively.
-       */
+      /** Deleted: operations are queued intrusively. */
       operation(operation&&) = delete;
 
-      /**
-       * Move assignment is disabled because operations are queued intrusively.
-       */
+      /** Deleted: operations are queued intrusively. */
       operation& operator=(operation&&) = delete;
 
-      /**
-       * Starts the schedule operation.
-       */
+      /** Starts the schedule operation. */
       void start() noexcept {
         if constexpr (Kind == schedule_kind::dispatch) {
           if (context_->is_in_context()) {
@@ -199,31 +147,20 @@ class BNIO_EXPORT io_context {
           }
         }
 
-        // The schedule policy owns the publish composition: defer
-        // publishes through the shared queue only, so the completion is
-        // drained by whichever worker reaches the queue first instead of
-        // staying pinned to the publishing worker. The submission critical
-        // section (locked state check + enqueue) is ordered against
-        // stop()'s state transition by the submit lock; if the context is
-        // already stopping, the publish is rejected and we complete inline
-        // so the operation never strands.
+        // If the context is already stopping the publish is rejected;
+        // complete inline so the operation never strands.
         if (!detail::schedule_policy<Kind>::publish_cpu(*context_, *this)) {
           complete();
         }
       }
 
-      /**
-       * Delivers the schedule completion.
-       */
+      /** Delivers the schedule completion. */
       void execute() noexcept override { complete(); }
 
      private:
       void complete() noexcept {
-        // Abort delivery is decided by token arbitration at the observation
-        // point: a cancelled receiver stop token wins and delivers
-        // set_stopped(); without token cancellation, an io_context::stop()
-        // abort delivers set_value(operation_canceled); a normal completion
-        // delivers set_value({}) with the real result untouched.
+        // A cancelled receiver stop token wins with set_stopped(); otherwise
+        // a stopping context yields set_value(operation_canceled).
         auto env = bexec::get_env(receiver_);
         auto token = bexec::query(env, bexec::get_stop_token);
         if (token.stop_requested()) {
@@ -243,9 +180,7 @@ class BNIO_EXPORT io_context {
     };
 
     template <class Receiver>
-    /**
-     * Connects the schedule sender to a receiver.
-     */
+    /** Connects the schedule sender to @p receiver. */
     [[nodiscard]] auto connect(Receiver receiver) const {
       return operation<std::remove_cvref_t<Receiver>>(*context_,
                                                       std::move(receiver));
@@ -255,268 +190,170 @@ class BNIO_EXPORT io_context {
     io_context* context_;
   };
 
-  /**
-   * Copyable scheduler handle produced by io_context.
-   */
+  /** Copyable scheduler handle produced by io_context. */
   template <schedule_kind Kind>
   class basic_scheduler {
    public:
-    /**
-     * Concrete sender type returned by schedule().
-     */
+    /** Concrete sender type returned by schedule(). */
     using schedule_sender_type = schedule_sender<Kind>;
 
-    /**
-     * Copies a scheduler handle.
-     */
+    /** Copies a scheduler handle. */
     basic_scheduler(const basic_scheduler&) noexcept = default;
 
-    /**
-     * Assigns a scheduler handle.
-     */
+    /** Assigns a scheduler handle. */
     basic_scheduler& operator=(const basic_scheduler&) noexcept = default;
 
-    /**
-     * Returns a sender that completes according to this scheduler's policy.
-     */
+    /** Returns a sender that completes per this scheduler's policy. */
     [[nodiscard]] schedule_sender_type schedule() const noexcept {
       return schedule_sender_type(*context_);
     }
 
-    /**
-     * Returns the context that owns this scheduler.
-     */
+    /** Returns the context that owns this scheduler. */
     [[nodiscard]] io_context& context() const noexcept { return *context_; }
 
-    /**
-     * Creates a sender that reads the whole buffer from a socket.
-     */
+    /** Reads the whole buffer from a socket. */
     [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
                                   mutable_buffer buffer, int flags = 0) const;
 
-    /**
-     * Creates a sender for one socket read operation.
-     */
+    /** Performs one socket read operation. */
     [[nodiscard]] auto async_read_some(async_io::stream_socket_view socket,
                                        mutable_buffer buffer,
                                        int flags = 0) const;
 
-    /**
-     * Creates a sender that writes the whole buffer to a socket.
-     */
+    /** Writes the whole buffer to a socket. */
     [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
                                    const_buffer buffer, int flags = 0) const;
 
-    /**
-     * Creates a sender for one socket write operation without retrying short
-     * writes.
-     */
+    /** Performs one socket write; short writes are not retried. */
     [[nodiscard]] auto async_write_some(async_io::stream_socket_view socket,
                                         const_buffer buffer,
                                         int flags = 0) const;
 
-    /**
-     * Creates a sender that reads the whole buffer from a local stream
-     * socket.
-     */
+    /** Reads the whole buffer from a local stream socket. */
     [[nodiscard]] auto async_read(async_io::local::stream_socket_view socket,
                                   mutable_buffer buffer, int flags = 0) const;
 
-    /**
-     * Creates a sender for one local stream socket read operation.
-     */
+    /** Performs one local stream socket read. */
     [[nodiscard]] auto async_read_some(
         async_io::local::stream_socket_view socket, mutable_buffer buffer,
         int flags = 0) const;
 
-    /**
-     * Creates a sender that writes the whole buffer to a local stream
-     * socket.
-     */
+    /** Writes the whole buffer to a local stream socket. */
     [[nodiscard]] auto async_write(async_io::local::stream_socket_view socket,
                                    const_buffer buffer, int flags = 0) const;
 
-    /**
-     * Creates a sender for one local stream socket write operation without
-     * retrying short writes.
-     */
+    /** Performs one local socket write; short writes are not retried. */
     [[nodiscard]] auto async_write_some(
         async_io::local::stream_socket_view socket, const_buffer buffer,
         int flags = 0) const;
 
-    /**
-     * Creates a sender that performs one datagram receive on a connected
-     * socket.
-     */
+    /** Receives one datagram on a connected socket. */
     [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
                                      mutable_buffer buffer,
                                      int flags = 0) const;
 
-    /**
-     * Creates a sender that performs one datagram send on a connected
-     * socket.
-     */
+    /** Sends one datagram on a connected socket. */
     [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
                                   const_buffer buffer, int flags = 0) const;
 
-    /**
-     * Creates a sender that performs one datagram receive and stores the
-     * source endpoint into @p endpoint.
-     */
+    /** Receives one datagram and stores the source in @p endpoint. */
     [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
                                           mutable_buffer buffer,
                                           ip::endpoint& endpoint,
                                           int flags = 0) const;
 
-    /**
-     * Creates a sender that performs one datagram send to @p endpoint,
-     * without requiring a connected socket.
-     */
+    /** Sends one datagram to @p endpoint; no connect() required. */
     [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                      const_buffer buffer,
                                      const ip::endpoint& endpoint,
                                      int flags = 0) const;
 
-    /**
-     * Creates a sender that performs one local datagram receive on a
-     * connected socket.
-     */
+    /** Receives one local datagram on a connected socket. */
     [[nodiscard]] auto async_receive(async_io::local::datagram_socket_view,
                                      mutable_buffer buffer,
                                      int flags = 0) const;
 
-    /**
-     * Creates a sender that performs one local datagram send on a connected
-     * socket.
-     */
+    /** Sends one local datagram on a connected socket. */
     [[nodiscard]] auto async_send(async_io::local::datagram_socket_view socket,
                                   const_buffer buffer, int flags = 0) const;
 
-    /**
-     * Creates a sender that performs one local datagram receive and stores
-     * the source endpoint into @p endpoint.
-     */
+    /** Receives one local datagram and stores the source in @p endpoint. */
     [[nodiscard]] auto async_receive_from(
         async_io::local::datagram_socket_view socket, mutable_buffer buffer,
         async_io::local::endpoint& endpoint, int flags = 0) const;
 
-    /**
-     * Creates a sender that performs one local datagram send to @p endpoint,
-     * without requiring a connected socket.
-     */
+    /** Sends one local datagram to @p endpoint; no connect() required. */
     [[nodiscard]] auto async_send_to(async_io::local::datagram_socket_view,
                                      const_buffer buffer,
                                      const async_io::local::endpoint& endpoint,
                                      int flags = 0) const;
-    /**
-     * Creates a sender that reads the whole buffer from a descriptor,
-     * advancing the kernel file position.
-     */
+    /** Reads the whole buffer from a descriptor, advancing its position. */
     [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
                                   mutable_buffer buffer) const;
 
-    /**
-     * Creates a sender for one streaming descriptor read operation.
-     */
+    /** Performs one streaming descriptor read. */
     [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
                                        mutable_buffer buffer) const;
 
-    /**
-     * Creates a sender that writes the whole buffer to a descriptor,
-     * advancing the kernel file position.
-     */
+    /** Writes the whole buffer to a descriptor, advancing its position. */
     [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
                                    const_buffer buffer) const;
 
-    /**
-     * Creates a sender for one streaming descriptor write operation without
-     * retrying short writes.
-     */
+    /** Performs one descriptor write; short writes are not retried. */
     [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
                                         const_buffer buffer) const;
 
-    /**
-     * Creates a sender that reads the whole buffer from a random access
-     * file at an explicit offset.
-     */
+    /** Reads the whole buffer from a random access file at @p offset. */
     [[nodiscard]] auto async_read(async_io::random_access_file file,
                                   mutable_buffer buffer,
                                   std::uint64_t offset) const;
 
-    /**
-     * Creates a sender for one random access read operation at an explicit
-     * offset.
-     */
+    /** Performs one random access read at @p offset. */
     [[nodiscard]] auto async_read_some(async_io::random_access_file file,
                                        mutable_buffer buffer,
                                        std::uint64_t offset) const;
 
-    /**
-     * Creates a sender that writes the whole buffer to a random access file
-     * at an explicit offset.
-     */
+    /** Writes the whole buffer to a random access file at @p offset. */
     [[nodiscard]] auto async_write(async_io::random_access_file file,
                                    const_buffer buffer,
                                    std::uint64_t offset) const;
 
-    /**
-     * Creates a sender for one random access write operation at an explicit
-     * offset without retrying short writes.
-     */
+    /** Performs one random access write, no short-write retry. */
     [[nodiscard]] auto async_write_some(async_io::random_access_file file,
                                         const_buffer buffer,
                                         std::uint64_t offset) const;
 
-    /**
-     * Creates a sender that accepts one connection.
-     */
+    /** Accepts one connection. */
     [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                     int flags = 0) const;
 
-    /**
-     * Creates a sender that connects a socket to an endpoint.
-     */
+    /** Connects a socket to an endpoint. */
     [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                      const ip::endpoint& endpoint) const;
 
-    /**
-     * Creates a sender that accepts one connection from a listening local
-     * stream socket.
-     */
+    /** Accepts one connection on a local stream socket. */
     [[nodiscard]] auto async_accept(async_io::local::stream_socket_view socket,
                                     int flags = 0) const;
 
-    /**
-     * Creates a sender that connects a local stream socket to a local
-     * endpoint.
-     */
+    /** Connects a local stream socket to a local endpoint. */
     [[nodiscard]] auto async_connect(
         async_io::local::stream_socket_view socket,
         const async_io::local::endpoint& endpoint) const;
 
-    /**
-     * Creates a sender that waits for descriptor events.
-     */
+    /** Waits for events on a descriptor. */
     [[nodiscard]] auto async_poll(async_io::descriptor_view descriptor,
                                   unsigned poll_mask) const;
 
-    /**
-     * Creates a sender that resolves a DNS query into caller-provided storage.
-     */
+    /** Resolves a DNS query into caller-provided storage. */
     [[nodiscard]] auto async_resolve(async_io::dns_query query,
                                      async_io::dns_result_view result) const;
 
-    /**
-     * Creates a sender that resolves a host and service into caller-provided
-     * storage.
-     */
+    /** Resolves a host and service into caller-provided storage. */
     [[nodiscard]] auto async_resolve(std::string_view host,
                                      std::string_view service,
                                      async_io::dns_result_view result) const;
 
-    /**
-     * Compares whether two scheduler handles refer to the same context.
-     */
+    /** Whether two handles refer to the same context. */
     friend bool operator==(basic_scheduler lhs, basic_scheduler rhs) noexcept {
       return lhs.context_ == rhs.context_;
     }
@@ -530,9 +367,7 @@ class BNIO_EXPORT io_context {
     io_context* context_;
   };
 
-  /**
-   * Sender returned by io_context::join().
-   */
+  /** Sender returned by io_context::join(). */
   class join_sender {
    public:
     /** Completes with set_value() when the context has fully stopped. */
@@ -542,9 +377,7 @@ class BNIO_EXPORT io_context {
     /** Creates a join sender bound to @p context. */
     explicit join_sender(io_context& context) noexcept : context_(&context) {}
 
-    /**
-     * Operation state that stops the context and waits for it to finish.
-     */
+    /** Operation state that stops the context and waits for it to finish. */
     template <class Receiver>
     class operation {
      public:
@@ -559,16 +392,14 @@ class BNIO_EXPORT io_context {
 
       /**
        * Stops the context on the elected thread, or waits for the already
-       * stopping thread, then completes the receiver with set_value().
+       * stopping thread, then completes with set_value().
        */
       void start() noexcept {
         if (context_->begin_stop()) {
-          // This thread is responsible for stopping.
           context_->stop_internal();
           context_->lifecycle_.stopped.store(true, std::memory_order_release);
           bexec::set_value(std::move(receiver_));
         } else {
-          // Another thread is already stopping or the context is stopped.
           while (
               !context_->lifecycle_.stopped.load(std::memory_order_acquire)) {
             std::this_thread::yield();
@@ -582,10 +413,7 @@ class BNIO_EXPORT io_context {
       Receiver receiver_;
     };
 
-    /**
-     * Connects the join sender to @p receiver and returns the operation
-     * state.
-     */
+    /** Connects the join sender to @p receiver. */
     template <class Receiver>
     [[nodiscard]] auto connect(Receiver receiver) const {
       return operation<std::remove_cvref_t<Receiver>>(*context_,
@@ -596,116 +424,78 @@ class BNIO_EXPORT io_context {
     io_context* context_;
   };
 
-  /**
-   * Scheduler with Asio dispatch-like schedule() semantics.
-   */
+  /** Scheduler with Asio dispatch-like schedule() semantics. */
   using dispatch_scheduler = basic_scheduler<schedule_kind::dispatch>;
 
-  /**
-   * Scheduler with Asio post-like schedule() semantics.
-   */
+  /** Scheduler with Asio post-like schedule() semantics. */
   using post_scheduler = basic_scheduler<schedule_kind::post>;
 
-  /**
-   * Scheduler whose schedule() and scheduler-initiated I/O always go
-   * through the shared queue.
-   */
+  /** Scheduler whose schedule() and I/O always use the shared queue. */
   using defer_scheduler = basic_scheduler<schedule_kind::defer>;
 
-  /**
-   * Creates a context with default options.
-   */
+  /** Creates a context with default options. */
   io_context() noexcept;
 
-  /**
-   * Creates a context with explicit options.
-   */
+  /** Creates a context with explicit options. */
   explicit io_context(const io_context_options& options) noexcept;
 
   /** Releases worker, timer, and native context resources. */
   ~io_context() noexcept;
 
-  /**
-   * Copy construction is disabled because the context owns a native context
-   * and synchronization resources.
-   */
+  /** Deleted: the context owns native and synchronization resources. */
   io_context(const io_context&) = delete;
 
-  /**
-   * Copy assignment is disabled because the context owns a native context
-   * and synchronization resources.
-   */
+  /** Deleted: the context owns native and synchronization resources. */
   io_context& operator=(const io_context&) = delete;
 
-  /**
-   * Move construction is disabled because the context owns synchronization
-   * resources and timer state.
-   */
+  /** Deleted: the context owns synchronization and timer state. */
   io_context(io_context&&) = delete;
 
-  /**
-   * Move assignment is disabled because the context owns synchronization
-   * resources and timer state.
-   */
+  /** Deleted: the context owns synchronization and timer state. */
   io_context& operator=(io_context&&) = delete;
 
   /**
-   * Returns whether the context is open.  The POSIX backend is selected
-   * at compile time, so this always returns true; runtime availability of
-   * the native backend is probed lazily by run(), which reports failure
-   * through its returned error_code.
+   * Always true: the POSIX backend is selected at compile time. Native
+   * backend failure is reported by run() instead.
    */
   [[nodiscard]] bool is_open() const noexcept;
 
   /**
-   * Runs the context event loop on the calling thread until the context
-   * stops. Each call to run() creates one native context for this thread.
+   * Runs the event loop on the calling thread until the context stops;
+   * each call creates one native context for this thread.
    *
-   * @return An empty error_code for a normal run, operation_canceled when
-   *         the context stopped (including a stop requested before or
-   *         during this call), or the backend's error as
-   *         std::error_code(-errno, std::generic_category()) when the
-   *         native run loop could not be entered (for example the ring
-   *         could not be enabled or a wake poll could not be armed).
-   *         Whatever was already published when the enter failed is still
-   *         delivered to its receivers before run() returns.
+   * @return Empty for a normal run; operation_canceled when the context
+   *         stopped (including a stop requested before or during this
+   *         call); std::error_code(-errno, std::generic_category()) when
+   *         the native loop could not be entered, in which case work
+   *         already published is still delivered before returning.
    */
   std::error_code run() noexcept;
 
   /**
-   * Requests the context event loop to stop.
+   * Requests the event loop to stop.
    *
-   * Work published before the stopping state was elected still completes.
-   * Inflight I/O and not-yet-executed queued work is aborted and reports
-   * set_value(operation_canceled), and so does every pending timer wait;
-   * a cancelled receiver stop token wins and reports set_stopped()
-   * instead. The elected stopping thread drains the shared queues, so no
-   * published work is silently dropped.
+   * Work published before the stop was elected still completes. Inflight
+   * I/O, queued work not yet executed, and pending timer waits are
+   * aborted with set_value(operation_canceled), unless a cancelled
+   * receiver stop token wins with set_stopped(). The elected thread
+   * drains the shared queues, so no published work is dropped.
    */
   int stop() noexcept;
 
   /**
-   * Returns a sender that stops the context (if not already done) and waits
-   * for it to fully finish.  If multiple threads call join(), exactly one
-   * performs the actual stop and the rest spin-wait.
-   *
-   * The sender completes with set_value() when all workers have exited.
+   * Stops the context if needed and waits for it to fully finish; of
+   * several concurrent callers exactly one stops and the rest wait.
+   * Completes with set_value() once all workers have exited.
    */
   [[nodiscard]] join_sender join() noexcept;
 
-  /**
-   * Returns whether the current thread is running this context.
-   */
+  /** Whether the current thread is running this context. */
   [[nodiscard]] bool is_in_context() const noexcept;
 
   /**
-   * Returns whether stop() has been requested for this context.
-   *
-   * schedule_sender's completion arbitration consults this after the
-   * receiver's stop token: a cancelled token delivers set_stopped(), a
-   * stopped context without token cancellation delivers
-   * set_value(operation_canceled), and otherwise the real result is
-   * delivered untouched.
+   * Whether stop() has been requested. schedule_sender arbitration
+   * consults this only after the receiver's stop token.
    */
   [[nodiscard]] bool is_stopped() const noexcept {
     return global_state_.life_state.load(std::memory_order_acquire) != 0 ||
@@ -713,32 +503,22 @@ class BNIO_EXPORT io_context {
   }
 
   /**
-   * Returns whether eager immediate I/O completion is enabled for this
-   * context.
-   *
-   * Set once at construction from io_context_options::enable_immediate_io;
-   * immutable afterwards, so native I/O operations can read it in start()
-   * as a single non-atomic bool load.
+   * Whether eager immediate I/O completion is enabled; fixed at
+   * construction and read without synchronization afterwards.
    */
   [[nodiscard]] bool enable_immediate_io() const noexcept {
     return immutable_flags_.enable_immediate_io;
   }
 
-  /**
-   * Returns a scheduler whose schedule() may complete inline on the context
-   * thread.
-   */
+  /** Scheduler whose schedule() may complete inline on the context thread. */
   [[nodiscard]] dispatch_scheduler get_dispatch_scheduler() noexcept;
 
-  /**
-   * Returns a scheduler whose schedule() always posts through the context loop.
-   */
+  /** Scheduler whose schedule() always posts through the context loop. */
   [[nodiscard]] post_scheduler get_post_scheduler() noexcept;
 
   /**
-   * Returns a scheduler whose schedule() and scheduler-initiated I/O are
-   * always published through the shared queue, never onto a worker's
-   * local queue.
+   * Scheduler whose schedule() and scheduler-initiated I/O always use the
+   * shared queue, never a worker's local queue.
    */
   [[nodiscard]] defer_scheduler get_defer_scheduler() noexcept;
 
@@ -766,441 +546,270 @@ class BNIO_EXPORT io_context {
   friend class join_sender;
 
   /**
-   * Creates a sender that reads bytes from a non-owning stream socket
-   * view and completes with bytes transferred.
+   * Reads bytes from a non-owning stream socket view; completes with the
+   * byte count.
    */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read(async_io::stream_socket_view socket,
                                 mutable_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender for one socket read operation through a non-owning
-   * stream socket view.
-   */
+  /** One socket read through a non-owning stream socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read_some(async_io::stream_socket_view socket,
                                      mutable_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender that writes the whole buffer through a non-owning
-   * stream socket view.
-   */
+  /** Writes the whole buffer through a non-owning stream socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write(async_io::stream_socket_view socket,
                                  const_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender for one write operation through a non-owning
-   * stream socket view.
-   */
+  /** One socket write through a non-owning stream socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write_some(async_io::stream_socket_view socket,
                                       const_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender that reads the whole buffer from a local stream
-   * socket view.
-   */
+  /** Reads the whole buffer from a local stream socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read(async_io::local::stream_socket_view socket,
                                 mutable_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender for one local stream socket read operation.
-   */
+  /** One local stream socket read. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read_some(async_io::local::stream_socket_view,
                                      mutable_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender that writes the whole buffer to a local stream
-   * socket view.
-   */
+  /** Writes the whole buffer to a local stream socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write(async_io::local::stream_socket_view socket,
                                  const_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender for one local stream socket write operation.
-   */
+  /** One local stream socket write. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write_some(async_io::local::stream_socket_view,
                                       const_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender that reads bytes from a file descriptor, advancing the
-   * kernel file position.
-   */
+  /** Reads bytes from a descriptor, advancing the file position. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read(async_io::descriptor_view descriptor,
                                 mutable_buffer buffer);
 
-  /**
-   * Creates a sender for one streaming descriptor read operation.
-   */
+  /** One streaming descriptor read. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read_some(async_io::descriptor_view descriptor,
                                      mutable_buffer buffer);
 
-  /**
-   * Creates a sender that writes the whole buffer to a file descriptor,
-   * advancing the kernel file position.
-   */
+  /** Writes the whole buffer to a descriptor, advancing its position. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write(async_io::descriptor_view descriptor,
                                  const_buffer buffer);
 
-  /**
-   * Creates a sender for one streaming write operation to a file descriptor.
-   */
+  /** One streaming descriptor write. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write_some(async_io::descriptor_view descriptor,
                                       const_buffer buffer);
 
-  /**
-   * Creates a sender that reads bytes from a random access file at an
-   * explicit offset.
-   */
+  /** Reads bytes from a random access file at an explicit offset. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read(async_io::random_access_file file,
                                 mutable_buffer buffer, std::uint64_t offset);
 
-  /**
-   * Creates a sender for one random access read operation at an explicit
-   * offset.
-   */
+  /** One random access read at an explicit offset. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_read_some(async_io::random_access_file file,
                                      mutable_buffer buffer,
                                      std::uint64_t offset);
 
-  /**
-   * Creates a sender that writes the whole buffer to a random access file at
-   * an explicit offset.
-   */
+  /** Writes the whole buffer to a random access file at @p offset. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write(async_io::random_access_file file,
                                  const_buffer buffer, std::uint64_t offset);
 
-  /**
-   * Creates a sender for one positioned write operation to a random access
-   * file.
-   */
+  /** One positioned write to a random access file. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_write_some(async_io::random_access_file file,
                                       const_buffer buffer,
                                       std::uint64_t offset);
 
-  /**
-   * Creates a sender that performs one datagram receive on a connected
-   * socket.
-   */
+  /** Receives one datagram on a connected socket. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_receive(async_io::datagram_socket_view socket,
                                    mutable_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender that performs one datagram send on a connected
-   * socket.
-   */
+  /** Sends one datagram on a connected socket. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_send(async_io::datagram_socket_view socket,
                                 const_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender that performs one datagram receive and stores the
-   * source endpoint into @p endpoint.
-   */
+  /** Receives one datagram and stores the source in @p endpoint. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_receive_from(async_io::datagram_socket_view socket,
                                         mutable_buffer buffer,
                                         ip::endpoint& endpoint, int flags = 0);
 
-  /**
-   * Creates a sender that performs one datagram send to @p endpoint,
-   * without requiring a connected socket.
-   */
+  /** Sends one datagram to @p endpoint; no connect() required. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_send_to(async_io::datagram_socket_view socket,
                                    const_buffer buffer,
                                    const ip::endpoint& endpoint, int flags = 0);
 
-  /**
-   * Creates a sender that performs one local datagram receive on a
-   * connected socket.
-   */
+  /** Receives one local datagram on a connected socket. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_receive(async_io::local::datagram_socket_view,
                                    mutable_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender that performs one local datagram send on a connected
-   * socket.
-   */
+  /** Sends one local datagram on a connected socket. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_send(async_io::local::datagram_socket_view socket,
                                 const_buffer buffer, int flags = 0);
 
-  /**
-   * Creates a sender that performs one local datagram receive and stores
-   * the source endpoint into @p endpoint.
-   */
+  /** Receives one local datagram and stores the source in @p endpoint. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_receive_from(
       async_io::local::datagram_socket_view socket, mutable_buffer buffer,
       async_io::local::endpoint& endpoint, int flags = 0);
 
-  /**
-   * Creates a sender that performs one local datagram send to @p endpoint,
-   * without requiring a connected socket.
-   */
+  /** Sends one local datagram to @p endpoint; no connect() required. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_send_to(async_io::local::datagram_socket_view,
                                    const_buffer buffer,
                                    const async_io::local::endpoint& endpoint,
                                    int flags = 0);
-  /**
-   * Creates a sender that accepts one connection from a non-owning
-   * listening socket view.
-   */
+  /** Accepts one connection from a non-owning listening socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_accept(async_io::stream_socket_view socket,
                                   int flags = 0);
 
-  /**
-   * Creates a sender that connects a non-owning stream socket view.
-   */
+  /** Connects a non-owning stream socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_connect(async_io::stream_socket_view socket,
                                    const ip::endpoint& endpoint);
 
-  /**
-   * Creates a sender that accepts one connection from a listening local
-   * stream socket view.
-   */
+  /** Accepts one connection on a listening local stream socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_accept(async_io::local::stream_socket_view socket,
                                   int flags = 0);
 
-  /**
-   * Creates a sender that connects a non-owning local stream socket view.
-   */
+  /** Connects a non-owning local stream socket view. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_connect(async_io::local::stream_socket_view socket,
                                    const async_io::local::endpoint& endpoint);
 
-  /**
-   * Creates a sender that waits for events on a file descriptor.
-   */
+  /** Waits for events on a file descriptor. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_poll(async_io::descriptor_view descriptor,
                                 unsigned poll_mask);
 
-  /**
-   * Creates a sender that resolves a DNS query into caller-provided result
-   * storage on the context run loop.
-   */
+  /** Resolves a DNS query into caller storage on the context run loop. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_resolve(async_io::dns_query query,
                                    async_io::dns_result_view result);
 
-  /**
-   * Creates a sender that resolves a host and service into caller-provided
-   * result storage on the context run loop.
-   */
+  /** Resolves a host and service into caller storage on the run loop. */
   template <schedule_kind Kind = schedule_kind::post>
   [[nodiscard]] auto async_resolve(std::string_view host,
                                    std::string_view service,
                                    async_io::dns_result_view result);
 
   /**
-   * Publishes an operation for passive native submission by a worker.
+   * Publishes an operation for passive submission by a worker. A worker of
+   * this context posts to its own queue without the submit lock and always
+   * succeeds; other threads enqueue under the lock only while not stopping.
    *
-   * Takes the worker-local fast path when this thread is a worker of this
-   * context (see running_worker_native()): the operation is pushed onto
-   * that worker's own I/O queue without taking submit_lock, which also
-   * keeps it on the worker that owns the connection. Otherwise it falls
-   * through to the shared path, which mirrors the old behaviour: check the
-   * shutdown state under the submit lock and, only while the context is
-   * not stopping, enqueue the operation and wake a sleeping worker as
-   * needed. The wake-channel write is bound to the submit lock (see
-   * wake_locked), so it can never race the destructor's close.
-   *
-   * @return true if the operation was published; false if the context is
-   *         already stopping and the operation was NOT enqueued — the
-   *         caller must complete it inline (set_stopped), mirroring the
-   *         abort path. Only the shared path can return false: the local
-   *         path always publishes, because the publisher is the thread
-   *         that will drain that queue (see running_worker_native()).
+   * @return false if stopping and not enqueued; the caller must then complete
+   *         it inline with set_stopped, like the abort path.
    */
   [[nodiscard]] bool publish_io(operation_base& operation) noexcept;
 
   /**
-   * Publishes CPU work for execution by one context run-loop worker.
-   *
-   * Takes the worker-local fast path when this thread is a worker of this
-   * context (see running_worker_native()), posting to that worker's own
-   * queue without taking submit_lock. Otherwise it falls through to the
-   * shared path, which checks the shutdown state under the submit lock
-   * and, only while the context is not stopping, enqueues the operation
-   * and wakes a sleeping worker as needed. publish_cpu assumes the publish
-   * happens against a running context; the in-lock state check makes that
-   * assumption explicit and atomic with the enqueue.
-   *
-   * @return true if the operation was published (enqueued, or posted to the
-   *         worker-local queue); false if the context is already stopping
-   *         and the operation was NOT enqueued — the caller must complete
-   *         it inline (e.g. set_stopped) so it never strands.
-   *
-   * Only state-involving work (check, enqueue, wake decision) runs inside
-   * the critical section; the caller executes the operation afterwards.
+   * Publishes CPU work for execution by a run-loop worker; same split and
+   * false-means-complete-inline rule as publish_io().
    */
   [[nodiscard]] bool publish_cpu(
       detail::native_operation_base& operation) noexcept;
 
   /**
-   * Publishes an I/O operation through the shared queue only, without the
-   * worker-local fast path.
-   *
-   * This is publish_io()'s shared path factored out for the defer schedule
-   * kind: the operation must not stay on the publishing worker's own
-   * queue, so even a running worker goes through the submit_lock critical
-   * section.
-   *
-   * @return true if the operation was published; false if the context is
-   *         already stopping and the operation was NOT enqueued — the
-   *         caller must complete it inline (set_stopped), mirroring the
-   *         abort path.
+   * publish_io() shared path only, even for a running worker; false as
+   * publish_io(), with the same complete-inline requirement.
    */
   [[nodiscard]] bool publish_io_deferred(operation_base& operation) noexcept;
 
   /**
-   * Publishes CPU work through the shared queue only, without the
-   * worker-local fast path.
-   *
-   * Same relationship to publish_cpu() as publish_io_deferred() has to
-   * publish_io(): identical critical section, minus the local fast path.
-   *
-   * @return true if the operation was published; false if the context is
-   *         already stopping and the operation was NOT enqueued — the
-   *         caller must complete it inline (e.g. set_stopped) so it never
-   *         strands.
+   * publish_cpu() shared path only, as publish_io_deferred() relates to
+   * publish_io(); false as publish_cpu().
    */
   [[nodiscard]] bool publish_cpu_deferred(
       detail::native_operation_base& operation) noexcept;
 
   /**
-   * Returns the native context this thread is running as a worker of, or
-   * nullptr when this thread is not a worker of THIS io_context.
+   * Native context this thread is running as a worker of, or nullptr when
+   * this thread is not a worker of this io_context.
    *
-   * Shared by the publish_io() and publish_cpu() local fast paths.
-   * current_worker_native_ is only non-null while this thread is inside
-   * io_context::run(), which sets it on entry and restores it on every
-   * return path, so a non-null bound pointer also guarantees the native
-   * context is alive for the duration of the call.
-   *
-   * The bound-state check matters for nested run(): an outer worker's
-   * handler may post to a different context, and current_worker_native_
-   * then still points at the OUTER worker's native context. Posting to
-   * the wrong local queue would strand the operation — the inner run loop
-   * never drains the outer worker's local queue — so both publish paths
-   * fall through to the shared queue for any context other than this one.
-   *
-   * A non-null result is also what makes the local path safe to take
-   * without the lock and without the life_state check, even while the
-   * context is already stopping: the caller is the worker that will drain
-   * the queue. Native finish() keeps calling consume_io_tasks() →
-   * abort_inflight_io() until both I/O queues stay empty, and
-   * abort_inflight_io() completes the leftovers with stopped.
+   * Non-null only inside io_context::run(). The bound check also covers
+   * nested run(): an outer worker's pointer stays bound, and posting to
+   * that queue would strand the operation, so any other context falls
+   * through to the shared queue. A non-null result means the caller itself
+   * drains that local queue, which is what makes the unlocked, unchecked
+   * local path safe even while stopping.
    */
   [[nodiscard]] detail::native_context* running_worker_native() const noexcept;
 
   /** Wakes one worker only when every published worker is sleeping. */
   void wake_one_if_all_workers_sleeping() noexcept;
 
-  // Internal wake helpers. The *_locked variants require the caller to
-  // already hold global_state_.submit_lock; they are used by the publish
-  // paths so the wake-channel write stays bound to the submit lock without
-  // re-locking. wake_one_sleeping_locked() prefers a directed wake of a
-  // single sleeping worker via its per-worker channel and falls back to the
-  // shared broadcast channel when nobody is suspended. The public
-  // wake_one_if_all_workers_sleeping acquires the lock itself and re-checks
-  // the shutdown state first: after ~io_context has published the terminal
-  // state and closed the channel under the same lock, a wake would write to
-  // a closed fd.
+  // The *_locked variants require global_state_.submit_lock, keeping the
+  // wake-channel write bound to that lock so it cannot hit a closed fd.
   void wake_locked() noexcept;
   void wake_one_sleeping_locked() noexcept;
 
-  /**
-   * Returns whether a worker may enter the run loop: the context is not
-   * stopping.
-   */
+  /** Whether a worker may enter the run loop: the context is not stopping. */
   [[nodiscard]] bool can_start_run() const noexcept;
 
-  /**
-   * Decrements the running worker count on every run() return path.
-   */
+  /** Decrements the running worker count on every run() return path. */
   void release_worker_slot() noexcept;
 
-  /**
-   * Drives the native run loop for one worker: constructs the native
-   * context, binds it to the shared state, and blocks in ctx.run().
-   */
+  /** Builds, binds, and blocks in one worker's native run loop. */
   std::error_code run_native_loop() noexcept;
 
-  /**
-   * Registers a timer slot with this context, inserting it into the active
-   * time heap or the inactive list according to its expiry.
-   */
+  /** Registers a timer slot by expiry in the active heap or inactive list. */
   void register_timer(detail::timer_slot& timer) noexcept;
 
   /**
-   * Unregisters a timer slot, removing it from its heap/list container.
-   * Pending waits are detached and staged on the timer-ready list with
-   * canceled completion, delivering set_value(operation_canceled).
+   * Unregisters a timer slot. Its pending waits are detached and staged
+   * with canceled completion, delivered as set_value(operation_canceled).
    */
   void unregister_timer(detail::timer_slot& timer) noexcept;
 
   /**
-   * Detaches the timer's submitted head-linked queue and marks every
-   * detached wait canceled. The timer's active/inactive state and expiry
-   * are left unchanged.
+   * Detaches and cancels the timer's submitted waits, leaving its
+   * active/inactive state and expiry unchanged.
    *
    * @return The number of canceled waits.
    */
   [[nodiscard]] std::size_t cancel_timer(detail::timer_slot& timer) noexcept;
 
   /**
-   * Replaces the timer's expiry: removes the slot from its current
-   * container, stores the new expiry, detaches the submitted waits as
-   * canceled, and reinserts the slot into the active heap or the inactive
-   * list according to the new time.
+   * Replaces the timer's expiry, detaching its submitted waits as canceled
+   * and reinserting it by the new time.
    *
    * @return The number of detached waits.
    */
   [[nodiscard]] std::size_t set_timer_expiry(detail::timer_slot& timer,
                                              time_point expiry) noexcept;
 
-  /**
-   * Returns the timer's stored expiry. The saved value is authoritative
-   * even for an unregistered slot, which no worker or context can mutate.
-   */
+  /** The timer's stored expiry; authoritative even if unregistered. */
   [[nodiscard]] time_point timer_expiry(
       const detail::timer_slot& timer) const noexcept;
 
   /**
-   * Starts a wait on the given timer. An active timer links the operation
-   * at its submitted head; an inactive (expired) timer stages an immediate
-   * completion on the timer-ready list without touching the shared CPU
-   * queue.
+   * Starts a wait: links it at an active timer's submitted head, or stages
+   * an immediate completion for an already-expired timer without touching
+   * the shared CPU queue.
    */
   void start_timer_wait(detail::timer_operation_base& operation,
                         detail::timer_slot& timer) noexcept;
 
-  // *_locked variants of the timer entry points. The caller must already
-  // hold timers_.mutex. Each returns whether a sleeping worker must be
-  // woken (the public wrapper wakes on the caller's behalf); the entry
-  // points that also return a cancellation count combine both.
+  // The *_locked variants require timers_.mutex. Each returns whether a
+  // sleeping worker must be woken; count-returning ones combine both.
   [[nodiscard]] bool register_timer_locked(detail::timer_slot& timer,
                                            time_point now) noexcept;
 
@@ -1224,8 +833,7 @@ class BNIO_EXPORT io_context {
       void* state, time_point& deadline,
       detail::native_operation_base*& operations) noexcept;
 
-  // Stage helpers for try_fetch_timeout_operations().
-  // drain_expired_timers_locked runs inside the timers_.mutex critical section;
+  // drain_expired_timers_locked runs under timers_.mutex;
   // reverse_ready_operations runs after it is released.
   void drain_expired_timers_locked(time_point now) noexcept;
 
@@ -1233,100 +841,50 @@ class BNIO_EXPORT io_context {
       detail::timer_operation_base* ready,
       detail::native_operation_base*& operations) noexcept;
 
-  /** Aborts all pending timer waits for io_context::stop().
-   *
-   *  Drains every active and inactive timer slot's submitted queue, sets
-   *  each operation's completion to timer_completion_kind::canceled (a
-   *  context-stop abort is not token cancellation; execute() delivers it
-   *  as set_value(operation_canceled)), and pushes them to timers_.ready.
-   *  Called by begin_stop() BEFORE
-   *  life_state is published so that workers entering finish() observe a
-   *  fully populated timers_.ready — no worker can drain the ready list
-   *  before the abort has staged the operations.
+  /**
+   * Aborts pending timer waits into timers_.ready as canceled; they complete
+   * with set_value(operation_canceled), not set_stopped(). Runs before
+   * life_state is published, so workers entering finish() see the full list.
    */
   void abort_pending_timer_waits() noexcept;
 
   /**
-   * Waits for every other worker to observe the stopping state and exit.
-   * Timer waits were already aborted by begin_stop() before life_state
-   * was published, so this function only spins on the wake channel until
-   * global_state_.running_workers drops to zero (or one, when called from
-   * a worker), then drains the shared queues that no worker will drain
-   * (see drain_shared_queues_for_stop()).
+   * Waits for every other worker to exit, then drains the shared queues no
+   * worker will drain (see drain_shared_queues_for_stop()). Timer waits
+   * were already aborted by begin_stop().
    */
   int stop_internal() noexcept;
 
   /**
-   * Drains and delivers the shared queues after the stopping thread has
-   * waited for running_workers to reach zero.
-   *
-   * Concurrency contract: begin_stop() published life_state = 1 inside
-   * global_state_.submit_lock, and every shared-path publish checks
-   * life_state and enqueues inside the same lock. The two critical
-   * sections are therefore fully serialized — an operation enqueued
-   * before the store is visible to this drain, and any publish after the
-   * store observes the stopping state, does not enqueue, and completes
-   * inline at its caller. With running_workers at zero no concurrent
-   * consumer exists either: run() increments running_workers before any
-   * check, so a late run() that observes life_state != 0 exits without
-   * touching the queues, and earlier workers drained the shared queues in
-   * finish() before releasing their slot. The drain owns the queues
-   * exclusively; the loop runs until a full pass finds every source empty
-   * and then returns. On the normal multi-worker stop the last worker's
-   * finish() already emptied everything, so this pass is a no-op.
-   *
-   * Delivery never prepares or submits SQEs/kevents: CPU operations run
-   * inline (their execute() arbitration reports
-   * set_value(operation_canceled) for work the context aborted), I/O
-   * operations are marked stopped (result = -ECANCELED +
-   * complete_submit_stopped()) and executed inline, and the timer waits
-   * staged on timers_.ready by abort_pending_timer_waits() are taken
-   * under timers_.mutex and executed inline. Receiver callbacks run
-   * synchronously on the stopping thread.
+   * Drains shared queues after running_workers reaches zero. Publishes and
+   * stop() both check/enqueue under submit_lock, so this sees every earlier
+   * publish and nothing else consumes. Operations run inline on the stopping
+   * thread and report operation_canceled for aborted work.
    */
   void drain_shared_queues_for_stop() noexcept;
 
   /**
-   * Elects this thread as the stopping thread, aborts pending timer
-   * waits, and publishes the stopping state inside the submit-path lock.
+   * Elects the stopping thread and publishes the stopping state under
+   * submit_lock; pending timer waits are aborted before the publish, so every
+   * worker that observes the state also sees a full timers_.ready.
    *
-   * abort_pending_timer_waits() runs BEFORE taking submit_lock so that
-   * the release-store of life_state happens after the abort in program
-   * order.  Any worker whose acquire-load of life_state observes the
-   * non-zero value is therefore guaranteed to see a fully populated
-   * timers_.ready when it enters finish().
-   *
-   * Ordering the state transition against publish_cpu()'s
-   * check-state + enqueue critical section (same lock) is what binds
-   * enqueue to state: operations that passed the check are drained before
-   * workers exit, and operations that see the stopping state do not
-   * enqueue. The election CAS on lifecycle_.stop_requested keeps exactly one
-   * stopping thread while stop() and join() share this path.
-   *
-   * @return true if this thread owns the stop, false if another thread
-   *         already owns it (the caller must wait for lifecycle_.stopped).
+   * @return true if this thread owns the stop; otherwise wait for stopped.
    */
   [[nodiscard]] bool begin_stop() noexcept;
 
-  /**
-   * Consumes the timer's lock-protected list of submitted wait operations.
-   */
+  /** Consumes the timer's lock-protected list of submitted waits. */
   [[nodiscard]] detail::timer_operation_queue take_timer_operations_locked(
       detail::timer_slot& timer) noexcept;
 
   /**
-   * Stages the given detached wait operations on the timer-ready list with
-   * the given completion kind. The list is drained only by a native
-   * worker's passive timer check (or by the stopping thread).
+   * Stages detached waits on the timer-ready list with @p completion; only
+   * a worker's passive timer check or the stopping thread drains it.
    */
   void enqueue_timer_operations_locked(
       detail::timer_operation_base* operations,
       detail::timer_completion_kind completion) noexcept;
 
-  /**
-   * Stages a single wait operation's completion kind onto the timer-ready
-   * list.
-   */
+  /** Stages one wait's completion kind on the timer-ready list. */
   void queue_timer_completion(
       detail::timer_operation_base& operation,
       detail::timer_completion_kind completion) noexcept;
@@ -1335,11 +893,10 @@ class BNIO_EXPORT io_context {
   platform_io_context_options native_options_;
 
   /**
-   * Configuration fixed once at construction and read-only afterwards.
+   * Configuration fixed at construction and read-only afterwards.
    *
-   * enable_immediate_io comes from io_context_options and is written
-   * exactly once by the constructor before the context is shared with
-   * other threads; it is read as a plain bool on the hot path.
+   * enable_immediate_io is written once before the context is shared and
+   * read as a plain bool on the hot path.
    */
   struct immutable_flags {
     explicit immutable_flags(bool eager_immediate_io) noexcept
@@ -1349,16 +906,14 @@ class BNIO_EXPORT io_context {
     bool enable_immediate_io = true;
   } immutable_flags_;
 
-  /**
-   * Lifecycle state shared between the run()/stop()/join() paths.
-   */
+  /** Lifecycle state shared between the run()/stop()/join() paths. */
   struct lifecycle_state {
-    /** Stop-thread election flag. Exactly one thread wins the CAS and then
-     *  publishes life_state inside the submit-path lock (see begin_stop()). */
+    /** Stop-thread election flag; the CAS winner publishes life_state under
+     *  the submit-path lock (see begin_stop()). */
     std::atomic<int> stop_requested{0};
 
-    /** Signalled when the context has fully stopped. Join() waiters spin
-     *  on this flag. Independent from life_state to avoid torn reads. */
+    /** Set when the context has fully stopped; join() waiters spin on it.
+     *  Independent from life_state to avoid torn reads. */
     std::atomic_bool stopped{false};
   } lifecycle_;
 

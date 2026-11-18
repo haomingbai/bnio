@@ -22,26 +22,17 @@ constexpr std::size_t k_max_endpoints = 16;
 constexpr std::size_t k_receive_size = 16 * 1024;
 constexpr int k_max_redirects = 10;
 
-/**
- * Asynchronous HTTP client used by the mini_curl example.
- */
+/** Async HTTP client for the mini_curl example. */
 class mini_curl_client : public std::enable_shared_from_this<mini_curl_client> {
  public:
-  /**
-   * Creates a client bound to an io_context, parsed request options, and
-   * operation registry.
-   */
+  /** Binds to a context, parsed options, and a registry. */
   mini_curl_client(bnio::io_context& context, request_options options,
                    operation_registry& registry);
 
-  /**
-   * Starts the resolve/connect/handshake/send/receive pipeline.
-   */
+  /** Starts the resolve/connect/handshake/send/receive pipeline. */
   void start();
 
-  /**
-   * Returns the process-style exit code selected by the client.
-   */
+  /** Process-style exit code selected by the client. */
   [[nodiscard]] int exit_code() const noexcept { return exit_code_; }
 
  private:

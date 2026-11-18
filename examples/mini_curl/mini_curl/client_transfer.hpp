@@ -137,8 +137,7 @@ inline void mini_curl_client::on_received(std::size_t count) noexcept {
 
 inline void mini_curl_client::on_receive_error(std::error_code error) noexcept {
   // SSL_ERROR_ZERO_RETURN (clean TLS close) and TCP ECONNRESET after data
-  // are both reported as connection_reset.  If we already received response
-  // data, treat it as a clean server-initiated close.
+  // both report as connection_reset, treated as a clean server close.
   if (error == std::make_error_code(std::errc::connection_reset)) {
     if (options_.verbose) {
       std::cerr << "* Server closed connection\n";

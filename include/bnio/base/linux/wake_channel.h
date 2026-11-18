@@ -12,17 +12,10 @@
 namespace bnio::base {
 
 /**
- * Cross-thread wake channel backed by eventfd(2).
+ * Cross-thread wake channel backed by eventfd(2); io_context writes, workers
+ * IORING_POLL_ADD the read side.
  *
- * On Linux, a single eventfd serves as both the read and write end.
- * io_context writes to signal workers; each worker submits
- * IORING_POLL_ADD on the read side before sleeping.
- *
- * @warning A single write wakes ALL workers whose io_uring rings have
- * a pending IORING_POLL_ADD on this eventfd (minor thundering herd).
- * The per-worker overhead is one @c read returning EAGAIN plus one
- * pop_cpu_all() CAS — negligible for typical 4–8 worker concurrency.
- * During stop(), waking all workers is the desired behaviour.
+ * @warning One write wakes all pollers (the intended behaviour during stop()).
  */
 class BNIO_EXPORT wake_channel {
  public:
@@ -58,23 +51,14 @@ class BNIO_EXPORT wake_channel {
   [[nodiscard]] int read_fd() const noexcept;
 
   /**
-   * Writes one unit to the eventfd counter to wake workers.
-   *
-   * This is a best-effort signal — EAGAIN (counter saturated) is
-   * treated as success because workers are already awake in that
-   * case.
-   *
-   * @return 0 on success, or a negative errno (other than EAGAIN).
+   * Writes one unit to wake workers; EAGAIN counts as success because they are
+   * already awake. Returns 0, or another negative errno.
    */
   int wake() noexcept;
 
   /**
-   * Drains all pending wake notifications from the eventfd.
-   *
-   * Called by the worker on waking to reset the counter so future
-   * edge-triggered polling can detect new signals.
-   *
-   * @return 0 on success, or a negative errno.
+   * Drains all pending notifications so later edge-triggered polls detect new
+   * signals. Returns 0, or a negative errno.
    */
   int drain() noexcept;
 

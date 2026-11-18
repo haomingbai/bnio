@@ -76,12 +76,8 @@ class step_operation {
 
   class child_receiver {
    public:
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    // Named explicitly so get_env's return type is available while the
+    // operation class is incomplete.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     explicit child_receiver(step_operation& operation) noexcept
@@ -121,10 +117,8 @@ class step_operation {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      // Token canceled at start: deliver set_stopped (unified contract).
-      // Context-stop aborts surface as value(operation_canceled, bytes) from
-      // the transport layer's token arbitration instead, so no distinction is
-      // needed here.
+      // Token canceled at start: deliver set_stopped. Context-stop aborts
+      // surface as value(operation_canceled, bytes) from transport arbitration.
       complete_stopped();
       return;
     }
@@ -213,15 +207,12 @@ class step_operation {
       case SSL_ERROR_ZERO_RETURN:
         state_->done = true;
         if constexpr (State::application == application_io::read) {
-          // Orderly TLS close (peer sent close_notify): complete the read
-          // successfully with the bytes so far — the same EOF encoding as a
-          // plain descriptor / TCP socket read (docs/usage/index.md).
+          // Orderly TLS close (close_notify): complete the read with the bytes
+          // so far, the same EOF encoding as a plain socket read.
           complete_value(base::empty_error_code, state_->bytes);
         } else {
-          // A write step terminated by the orderly close: write-all reports
-          // it as broken_pipe, matching the TCP write-all zero-byte encoding.
-          // Never an empty ec: that would mask an interrupted write-all as a
-          // successful short write.
+          // An orderly close mid-write: report broken_pipe with the bytes so
+          // far, never an empty ec, which would mask a short write-all.
           complete_value(std::make_error_code(std::errc::broken_pipe),
                          state_->bytes);
         }
@@ -308,21 +299,17 @@ class step_operation {
       return;
     }
     if (bytes == 0) {
-      // EOF (peer closed): transport returns 0 bytes with an empty ec.
-      // Terminate with done=true so repeat_until exits; otherwise it would
-      // loop forever (SSL_read keeps returning WANT_READ, transport keeps
-      // returning 0).
+      // EOF: stop the loop (SSL_read keeps returning WANT_READ and the
+      // transport keeps returning 0), otherwise repeat_until never exits.
       state_->done = true;
       if (state_->phase == io_phase::transport_write) {
-        // A 0-byte transport write mid-write-all: report broken_pipe,
-        // matching the TCP write-all zero-byte encoding.
+        // 0-byte transport write mid-write-all: broken_pipe, as for TCP.
         complete_value(std::make_error_code(std::errc::broken_pipe),
                        state_->bytes);
         return;
       }
-      // A 0-byte transport read: the peer closed the connection without
-      // close_notify — a truncated stream, reported as connection_reset
-      // (the same pass-through a TCP socket reports on ECONNRESET).
+      // 0-byte transport read: peer closed without close_notify, a truncated
+      // stream reported as connection_reset.
       complete_value(std::make_error_code(std::errc::connection_reset),
                      state_->bytes);
       return;
@@ -343,8 +330,7 @@ class step_operation {
   }
 
   void handle_transport_read_complete(std::size_t result) noexcept {
-    // result <= 0 is no longer possible: ec is already filtered in
-    // handle_transport_complete
+    // result > 0: non-positive results were already filtered.
 
     char* data = nullptr;
     base::clear_errors();
@@ -361,8 +347,7 @@ class step_operation {
   }
 
   void handle_transport_write_complete(std::size_t result) noexcept {
-    // result <= 0 is no longer possible: ec is already filtered in
-    // handle_transport_complete
+    // result > 0: non-positive results were already filtered.
 
     char* data = nullptr;
     base::clear_errors();
@@ -383,10 +368,8 @@ class step_operation {
   }
 
   void complete_error(std::error_code error) noexcept {
-    // Unrecoverable internal exception: passed through set_value(ec, bytes) so
-    // repeat_receiver takes the complete_value path. Set done=true to ensure
-    // repeat_until exits; otherwise the invariant-violation path would loop
-    // forever.
+    // Passed through set_value(ec, bytes) so repeat_receiver takes the
+    // complete_value path; done=true ensures repeat_until exits.
     state_->done = true;
     bexec::set_value(std::move(receiver_), error, state_->bytes);
   }

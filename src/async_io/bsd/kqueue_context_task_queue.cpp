@@ -29,11 +29,8 @@ int kqueue_context::post(kqueue_operation_base& operation) noexcept {
 void kqueue_context::publish_io(kqueue_io_operation_base& operation) noexcept {
   assert_running();
 
-  // Worker-local fast path: I/O published by a callback running on this
-  // worker goes to the worker's own queue. The publisher is the thread
-  // that will drain the queue, so this needs no lock, no atomic, and no
-  // wakeup — and it keeps the operation on the worker that owns the
-  // connection. Standalone mode (no shared state) always takes this path.
+  // Worker-local fast path: a callback on this worker publishes to its own
+  // queue with no lock or wakeup, keeping it on the owning worker.
   if (current_context_ == this || global_state_ == nullptr) {
     local_state_.push_io(operation);
     return;
@@ -63,7 +60,7 @@ void kqueue_context::push_cpu_tasks(operation_queue& operations) noexcept {
 }
 
 kqueue_operation_base* kqueue_context::fetch_cpu_task() noexcept {
-  // 1. Worker-local queue first: fastest and preserves locality.
+  // Local queue first (locality), then shared.
   if (kqueue_operation_base* operations = local_state_.pop_cpu_all()) {
     return operations;
   }
@@ -72,7 +69,6 @@ kqueue_operation_base* kqueue_context::fetch_cpu_task() noexcept {
     return nullptr;
   }
 
-  // 2. Shared CPU queue.
   if (kqueue_operation_base* operations = global_state_->pop_cpu_all()) {
     return operations;
   }
@@ -92,10 +88,8 @@ void kqueue_context::unregister_local_state() noexcept {
   if (global_state_ == nullptr) {
     return;
   }
-  // Unlink from the suspend list if the worker is still linked there (a
-  // run() that exits through the normal wait path already unlinked in
-  // end_wait()). Only the suspend list exists now: without stealing no
-  // remote thread ever touches a worker's local state while it runs.
+  // Unlink from the suspend list if still linked; the normal wait path
+  // already unlinked in end_wait().
   kqueue_worker_state_list& suspend = global_state_->workers;
   std::lock_guard<std::mutex> guard(suspend.lock);
   if (kqueue_local_state_in_list(suspend, &local_state_)) {
@@ -118,9 +112,7 @@ void kqueue_context::begin_wait() noexcept {
   if (global_state_ == nullptr) {
     return;
   }
-  // Link into the suspend list so a publisher can find and wake this
-  // worker. No run list exists anymore (stealing was removed), so this is
-  // a single locked insertion.
+  // Link into the suspend list so a publisher can find and wake this worker.
   {
     kqueue_worker_state_list& suspend = global_state_->workers;
     std::lock_guard<std::mutex> guard(suspend.lock);
@@ -145,14 +137,11 @@ void kqueue_context::end_wait() noexcept {
 }
 
 int kqueue_context::trigger_wakeup() noexcept {
-  // Use the shared wake channel when available (multi-worker mode).
-  // Fall back to per-context EVFILT_USER NOTE_TRIGGER for legacy
-  // standalone operation (no global state).
+  // Shared wake channel when available; otherwise trigger this context's
+  // EVFILT_USER.
   if (global_state_ != nullptr && global_state_->wake_channel_.is_open()) {
-    // Bind the shared wake-channel write to the submit lock so the
-    // io_context destructor's close (under the same lock) can never race
-    // it. Re-check after acquiring the lock: the channel may have been
-    // closed while we waited for the lock.
+    // Hold submit_lock so the destructor's close cannot race the write;
+    // re-check after acquiring it, the channel may already be closed.
     std::lock_guard guard(global_state_->submit_lock);
     if (!global_state_->wake_channel_.is_open()) {
       return -EBADF;
@@ -160,7 +149,7 @@ int kqueue_context::trigger_wakeup() noexcept {
     return global_state_->wake_channel_.wake();
   }
 
-  // Legacy standalone mode: trigger own kqueue's EVFILT_USER.
+  // Standalone mode: trigger own kqueue's EVFILT_USER.
   if (!queue_.is_open()) {
     return -EINVAL;
   }

@@ -37,12 +37,8 @@ class io_operation {
 
   class repeat_receiver {
    public:
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    // Named explicitly so get_env's return type is available while the
+    // operation class is incomplete.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     explicit repeat_receiver(io_operation& operation) noexcept
@@ -57,12 +53,8 @@ class io_operation {
     }
 
     void set_stopped() noexcept {
-      // Under the unified contract, set_stopped only reaches this receiver
-      // when the stop token visible to the operation was observed canceled
-      // (step start pre-check, transport execute() arbitration, or
-      // repeat_until's per-round token check). io_context::stop() aborts
-      // deliver value(operation_canceled, bytes) via set_value instead, so no
-      // token re-check is needed here.
+      // set_stopped means the stop token was observed canceled;
+      // io_context::stop() aborts deliver value(operation_canceled, bytes).
       operation_->complete_stopped();
     }
 

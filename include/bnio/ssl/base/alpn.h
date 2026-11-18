@@ -10,22 +10,13 @@
 namespace bnio::ssl::base {
 
 /**
- * Destruction interface for heap-allocated callbacks.
- *
- * Legacy, currently unused: no bnio type derives from alpn_arg_base. The
- * high-level callback closures are owned through detail::callback_base
- * (include/bnio/ssl/detail/callback_slot.h). This declaration is kept only
- * for header compatibility; new callback state must not build on it.
- *
- * Concrete argument types know their own allocator and implement destroy() to
- * destroy and deallocate themselves; an owner only ever calls destroy() and
- * never deletes through this base pointer.
+ * Legacy, unused destruction interface kept for header compatibility; use
+ * detail::callback_base for new callback state. Destruction always goes
+ * through destroy(), never a base-class delete.
  */
 class alpn_arg_base {
  public:
-  /**
-   * Destroys and deallocates the concrete argument object.
-   */
+  /** Destroys and deallocates the concrete argument object. */
   virtual void destroy() noexcept = 0;
 
  protected:

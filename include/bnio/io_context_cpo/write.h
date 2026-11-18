@@ -12,18 +12,14 @@
 
 namespace bnio {
 
-/**
- * Customization point object for a single asynchronous write operation.
- */
+/** Customization point object for async_write. */
 struct async_write_t {
   /**
-   * Streaming form: invokes async_write on a stream when available,
-   * otherwise on a provider. The sink/provider advances its position
-   * naturally (kernel file position for descriptor_view).
+   * Streaming form: the stream's async_write if present, else the provider's.
+   * The sink advances its position (kernel file position for descriptor_view).
    *
-   * Constrained on branch viability so that an unsupported combination (e.g.
-   * a random_access_file without an offset) is removed from overload
-   * resolution instead of failing inside the body.
+   * Unsupported combinations (e.g. random_access_file without an offset) are
+   * removed from overload resolution rather than failing in the body.
    */
   template <class Provider, class Sink, class Buffer>
     requires(
@@ -50,11 +46,7 @@ struct async_write_t {
     }
   }
 
-  /**
-   * Mode form: passes mode through to a stream (e.g. socket flags) when
-   * available, otherwise to a positioned provider as an explicit offset
-   * (random_access_file).
-   */
+  /** Mode form: @p mode is stream flags if handled, else a provider offset. */
   template <class Provider, class Sink, class Buffer, class Mode>
     requires(
         requires {
@@ -84,14 +76,9 @@ struct async_write_t {
   }
 };
 
-/**
- * Customization point object for one asynchronous write operation.
- */
+/** Customization point object for async_write_some. */
 struct async_write_some_t {
-  /**
-   * Streaming form: invokes async_write_some on a stream when available,
-   * otherwise on a provider.
-   */
+  /** Streaming form: the stream's async_write_some, else the provider's. */
   template <class Provider, class Sink, class Buffer>
     requires(
         requires {
@@ -117,11 +104,7 @@ struct async_write_some_t {
     }
   }
 
-  /**
-   * Mode form: passes mode through to a stream (e.g. socket flags) when
-   * available, otherwise to a positioned provider as an explicit offset
-   * (random_access_file).
-   */
+  /** Mode form: @p mode is stream flags if handled, else a provider offset. */
   template <class Provider, class Sink, class Buffer, class Mode>
     requires(
         requires {

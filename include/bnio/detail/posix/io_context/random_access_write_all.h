@@ -12,10 +12,9 @@
 namespace bnio::detail {
 
 /**
- * State for a positioned write-all operation on a random access file.
- *
- * Every step passes an explicit offset (offset + transferred); the kernel
- * file position is never observed or advanced.
+ * State for a positioned write-all operation on a random access file. Each
+ * step passes an explicit offset + transferred; the kernel file position is
+ * never observed or advanced.
  */
 template <io_context::schedule_kind Kind>
 class random_access_write_all_state {
@@ -60,8 +59,7 @@ class random_access_write_all_state {
   std::uint64_t offset;
   std::size_t transferred = 0;
   bool done = false;
-  // Adaptive eager probing: cleared when the previous step had a short
-  // transfer, so the next step skips the immediate-completion probe.
+  // Cleared after a short transfer, so the next step skips the eager probe.
   bool eager = true;
 };
 

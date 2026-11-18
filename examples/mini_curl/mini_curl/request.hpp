@@ -61,64 +61,42 @@ struct request_options {
 
 // ---- URL / header helpers ----
 
-/**
- * Returns true when value begins with prefix.
- */
+/** Returns true when value begins with prefix. */
 [[nodiscard]] bool starts_with(std::string_view value,
                                std::string_view prefix) noexcept;
 
-/**
- * Returns true when value contains CR or LF characters.
- */
+/** Returns true when value contains CR or LF characters. */
 [[nodiscard]] bool contains_crlf(std::string_view value) noexcept;
 
-/**
- * Normalizes an HTTP request target to an absolute path.
- */
+/** Normalizes an HTTP request target to an absolute path. */
 [[nodiscard]] std::string normalized_target(std::string target);
 
-/**
- * Removes a URL fragment from a request target.
- */
+/** Removes a URL fragment from a request target. */
 [[nodiscard]] std::string remove_fragment(std::string_view target);
 
-/**
- * Parses URL authority text into host and service options.
- */
+/** Parses URL authority text into host and service options. */
 [[nodiscard]] bool parse_authority(std::string_view authority,
                                    request_options& options,
                                    std::string& error);
 
-/**
- * Parses an HTTP or HTTPS URL into request options.
- */
+/** Parses an HTTP or HTTPS URL into request options. */
 [[nodiscard]] bool parse_url(std::string_view url, request_options& options,
                              std::string& error);
 
-/**
- * Returns true when a header block already contains the named field.
- */
+/** Returns true when a header block contains the named field. */
 [[nodiscard]] bool header_contains(std::string_view header,
                                    std::string_view name) noexcept;
 
-/**
- * Builds the value for the Host request header.
- */
+/** Builds the value for the Host request header. */
 [[nodiscard]] std::string host_header_value(const request_options& options);
 
-/**
- * Builds an HTTP/1.1 request from parsed options.
- */
+/** Builds an HTTP/1.1 request from parsed options. */
 [[nodiscard]] std::string build_request(const request_options& options);
 
-/**
- * Parses the numeric status code from an HTTP status line.
- */
+/** Parses the numeric status code from an HTTP status line. */
 [[nodiscard]] int parse_status_code(std::string_view status_line) noexcept;
 
-/**
- * Extracts the Location header value from a header block.
- */
+/** Extracts the Location header value from a header block. */
 [[nodiscard]] std::string extract_location(std::string_view headers);
 
 }  // namespace mini_curl

@@ -143,15 +143,13 @@ class native_io_operation : public io_context::operation_base {
   }
 
   void complete_submit_stopped() noexcept override {
-    // io_context::stop() -> abort_inflight_io: mark stopped; whether this
-    // surfaces as set_stopped or set_value(operation_canceled) is decided
-    // by execute()'s stop-token arbitration.
+    // io_context::stop(): mark stopped; execute() arbitrates stopped vs
+    // operation_canceled.
     completion_ = completion_kind::stopped;
   }
 
-  /** io_context I/O runs through the io_uring submission pipeline; a
-   *  transient -EAGAIN CQE re-submits instead of terminating (kqueue
-   *  parity, mirroring kqueue_context::perform_io_step()). */
+  /** A transient -EAGAIN CQE re-submits instead of terminating (kqueue
+   *  parity). */
   [[nodiscard]] bool rearm_on_eagain() const noexcept override { return true; }
 
   void start() noexcept {
@@ -174,9 +172,8 @@ class native_io_operation : public io_context::operation_base {
 
     completion_ = completion_kind::value;
     if (!publish_io_by_kind()) {
-      // Context already stopping: mark stopped and complete inline instead
-      // of publishing into a context that is shutting down; execute()'s
-      // token arbitration decides the final delivery channel.
+      // Context already stopping: mark stopped and complete inline; the
+      // token arbitration in execute() picks the final channel.
       complete_submit_stopped();
       execute();
     }
@@ -185,9 +182,8 @@ class native_io_operation : public io_context::operation_base {
   void execute() noexcept override {
     switch (completion_) {
       case completion_kind::value:
-        // Native call succeeded, or a CQE completed with a negative result
-        // (-errno). Re-derive ec from result so the errno surfaces via
-        // set_value(ec, ...) rather than being lost (§9.2 guard).
+        // Success or a CQE with -errno: derive ec from result so the errno
+        // surfaces through set_value(ec, ...).
         if (this->result < 0) {
           model_.set_value(std::move(receiver_), errno_result(this->result),
                            this->result, this->flags);
@@ -202,16 +198,8 @@ class native_io_operation : public io_context::operation_base {
                          this->flags);
         break;
       case completion_kind::stopped:
-        // Abort (io_context::stop() -> abort_inflight_io ->
-        // complete_submit_stopped()) or token-at-start marking. Arbitrate:
-        // a cancelled receiver stop token wins -> set_stopped; otherwise
-        // the abort delivers set_value(operation_canceled, -1, 0).
-        //
-        // The result is -1 and not 0: an aborted operation produced no
-        // result at all, and a descriptor-yielding model (accept) forwards
-        // `result` verbatim, so 0 here would hand the caller ownership of a
-        // real descriptor — the process's stdin. Byte-count models clamp
-        // with std::max(0, result) and still observe 0.
+        // Abort: token cancel -> set_stopped, else operation_canceled with
+        // result -1; 0 would hand an accept caller a real (stdin) descriptor.
         if (stop_requested(receiver_)) {
           bexec::set_stopped(std::move(receiver_));
         } else {
@@ -224,9 +212,8 @@ class native_io_operation : public io_context::operation_base {
   }
 
  private:
-  /** Publishes to the CPU queue through the schedule policy: defer routes
-   *  through the shared queue only, skipping the worker-local fast
-   *  path (io_context::publish_cpu_deferred). */
+  /** Publishes to the CPU queue through the schedule policy (defer skips
+   *  the worker-local fast path). */
   [[nodiscard]] bool publish_cpu_by_kind() noexcept {
     return schedule_policy<Kind>::publish_cpu(*context_, *this);
   }
@@ -237,15 +224,11 @@ class native_io_operation : public io_context::operation_base {
   }
 
   [[nodiscard]] bool try_complete_immediate() noexcept {
-    // The schedule policy owns the eager gate: a kind opts out via
-    // k_immediate = false, which skips the probe regardless of the runtime
-    // eager switch. Every current kind keeps the probe enabled.
-    // has_immediate_io keeps the models without an eager probe (accept,
-    // connect) on the submission path.
+    // Eager probing requires k_immediate and a model with try_immediate();
+    // the runtime switch gates it further.
     if constexpr (schedule_policy<Kind>::k_immediate &&
                   has_immediate_io<Model>) {
-      // The runtime switch gates eager probing; when disabled the operation
-      // goes straight to io_uring submission in start().
+      // Switch off: go straight to io_uring submission.
       if (!control_()) {
         return false;
       }
@@ -365,10 +348,8 @@ class resolve_operation
 
     std::size_t count = 0;
     const std::error_code ec = async_io::resolve_dns(query_, result_, count);
-    // Success ec={}; failure ec carries the resolver error. Both exit through
-    // set_value(ec, count). Resolve runs on the CPU queue; a stop that lands
-    // after the is_stopped() check above is not observed here, so this path
-    // always delivers the real result.
+    // Success or resolver error both exit through set_value(ec, count); a
+    // stop after the is_stopped() check above is not observed here.
     bexec::set_value(std::move(receiver_), ec, count);
   }
 
@@ -408,10 +389,7 @@ class resolve_sender {
   async_io::dns_result_view result_;
 };
 
-/** Creates a native I/O sender honoring the schedule kind. Function-template
- *  factories allow the defer call sites to pass Kind explicitly while Model
- *  and Control stay deduced (class templates cannot mix partial explicit
- *  specification with CTAD). */
+/** Creates a native I/O sender honoring the schedule kind. */
 template <io_context::schedule_kind Kind, class Model,
           class Control = context_eager_control>
 [[nodiscard]] auto make_io_sender(io_context& context, Model model) noexcept {

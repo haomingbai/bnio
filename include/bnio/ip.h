@@ -96,10 +96,9 @@ using async_io::ip::make_v6_address;
 #endif
 
 /**
- * Protocol tag and type namespace for TCP over IPv4 or IPv6.
- *
- * The address and endpoint vocabulary types are aliases of async_io value
- * types, while socket owners are provided by the higher-level TCP API.
+ * Protocol tag and type namespace for TCP over IPv4 or IPv6. Address and
+ * endpoint types alias async_io values; owning socket types come from
+ * bnio::tcp.
  */
 class BNIO_EXPORT tcp {
  public:

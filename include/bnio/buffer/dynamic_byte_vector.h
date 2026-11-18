@@ -16,9 +16,8 @@ namespace bnio {
 
 /**
  * Dynamic buffer adapter backed by a caller-owned std::vector<std::byte>.
- *
- * The adapter never owns the vector. Copying or moving the adapter copies the
- * vector pointer and prepared-region bookkeeping.
+ * Never owns the vector; copies and moves copy the pointer and prepared-region
+ * bookkeeping.
  */
 template <class Allocator = std::allocator<std::byte>>
 class dynamic_byte_vector_buffer {

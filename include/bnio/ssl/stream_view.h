@@ -14,21 +14,12 @@
 namespace bnio::ssl {
 
 /**
- * Non-owning view over a native OpenSSL SSL object.
- *
- * stream_view carries a connection handle across bnio interfaces (most
- * notably the ALPN selection callback installed by set_alpn_callback) without
- * transferring or implying ownership. Copying or moving the view copies only
- * the pointer: the SSL object remains owned and freed by its RAII owner
- * (ssl::tcp::stream), and the view stays valid only while that owner keeps the
- * connection alive.
- *
- * The native context behind the connection is equally non-owning here: the
- * SSL object references its SSL_CTX, but callback registrations and the
- * closures behind them are owned by the ssl::context. That owner must stay
- * alive for the ALPN callback to remain installed and effective on this
- * connection; destroying it clears the registrations even while the
- * connection itself is still alive.
+ * Non-owning view over a native OpenSSL SSL object; copying copies only the
+ * pointer. The SSL object is owned and freed by ssl::tcp::stream, and the view
+ * is valid only while that owner lives. The SSL_CTX and callback closures are
+ * owned by ssl::context, which must stay alive for the ALPN callback to remain
+ * installed; destroying it clears the registrations even while the connection
+ * itself is still alive.
  */
 class stream_view {
  public:
@@ -68,12 +59,10 @@ class stream_view {
   }
 
   /**
-   * Returns a non-owning read-only view of the ALPN protocol selected during
-   * the handshake. The view is empty when no protocol was negotiated, when
-   * the peer did not acknowledge ALPN, when the handshake has not completed,
-   * or when this view is invalid. The bytes point into the SSL object's
-   * internal storage and remain valid as long as the connection is alive;
-   * renegotiation may change the contents.
+   * Non-owning view of the ALPN protocol selected during the handshake; empty
+   * when none was negotiated, the handshake has not completed, or this view is
+   * invalid. The bytes point into the SSL object and stay valid while the
+   * connection lives; renegotiation may change the contents.
    */
   [[nodiscard]] std::span<const unsigned char> alpn_selected() const noexcept {
     if (ssl_ == nullptr) {
@@ -86,9 +75,9 @@ class stream_view {
   }
 
   /**
-   * Returns the TLS server name (SNI) carried by the connection, or nullptr
-   * when none was sent or received. On a server this is the name the client
-   * offered; on a client it is the name configured for the handshake.
+   * Returns the TLS SNI name, or nullptr when none was sent or received. On a
+   * server this is the name the client offered; on a client, the name
+   * configured for the handshake.
    */
   [[nodiscard]] const char* servername() const noexcept {
     if (ssl_ == nullptr) {

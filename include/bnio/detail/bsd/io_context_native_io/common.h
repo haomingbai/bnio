@@ -2,12 +2,10 @@
  * @file common.h
  * @brief Common BSD native I/O operation support for io_context.
  *
- * Shared operation states and senders that adapt layer-2 kqueue request
- * objects to the high-level io_context. Included standalone, this header
- * only pulls in <bnio/io_context.h>; the content below is compiled by the
- * re-inclusion from detail/posix/io_context/class.h after the io_context
- * class definition, so the states here can name io_context members
- * directly.
+ * Shared operation states and senders adapting kqueue request objects to
+ * io_context. Included standalone it only pulls in <bnio/io_context.h>; the
+ * real content is compiled by re-inclusion from
+ * detail/posix/io_context/class.h after the io_context definition.
  */
 
 #ifndef BNIO_DETAIL_BSD_IO_CONTEXT_NATIVE_IO_COMMON_H_
@@ -38,15 +36,13 @@ template <class Receiver>
   return token.stop_requested();
 }
 
-/** Converts a negative native result (negative errno) into a
- *  generic-category error code. */
+/** Converts a negative errno result into a generic-category error code. */
 [[nodiscard]] inline std::error_code errno_result(int result) noexcept {
   return std::error_code(-result, std::generic_category());
 }
 
-/** Default eager-mode control: consults the context's immutable
- *  immediate-I/O switch (io_context_options::enable_immediate_io, set once
- *  at construction). */
+/** Default eager-mode control: reads the context's immutable immediate-I/O
+ *  switch, fixed at construction. */
 class context_eager_control {
  public:
   explicit context_eager_control(io_context* context) noexcept
@@ -60,30 +56,15 @@ class context_eager_control {
 };
 
 /**
- * Operation state for one objectized kqueue I/O request (read, write,
- * accept, or connect).
- *
- * start() checks the receiver's stop token, then probes the descriptor
- * once: under the eager control the request performs its start step,
- * otherwise the plain nonblocking call. A result the request classifies as
- * would-block publishes the operation for passive kqueue registration —
- * the request object owns the native nonblocking call and retries it after
- * the corresponding filter fires — while any other result completes
- * immediately on the CPU queue.
- *
- * @tparam Kind     Schedule kind controlling the publish path (defer
- *                  publishes through the shared queue only).
- * @tparam Request  Layer-2 kqueue request model owning the native call.
- * @tparam Control  Eager-mode predicate returning whether the start step
- *                  may run.
- * @tparam Receiver Downstream receiver.
+ * Operation state adapting one objectized kqueue request to a downstream
+ * receiver: start() probes once, then completes eagerly or waits for the
+ * filter.
  */
 template <io_context::schedule_kind Kind, class Request, class Control,
           class Receiver>
 class native_io_operation : public io_context::operation_base {
  public:
-  /** Creates the operation state bound to the context, request, control,
-   *  and receiver. */
+  /** Binds the operation to its context, request, control, and receiver. */
   native_io_operation(io_context& context, Request request, Control control,
                       Receiver receiver)
       : context_(&context),
@@ -91,7 +72,7 @@ class native_io_operation : public io_context::operation_base {
         control_(std::move(control)),
         receiver_(std::move(receiver)) {}
 
-  /** Describes the native registration after the run loop takes this task. */
+  /** Prepares the native registration for the run loop. */
   void prepare(async_io::bsd_native::kqueue_helper& helper) noexcept override {
     request_.prepare(helper);
   }
@@ -108,14 +89,10 @@ class native_io_operation : public io_context::operation_base {
   /** Marks the completion stopped when io_context::stop() aborts this
    *  inflight operation; execute() arbitrates the final channel. */
   void complete_submit_stopped() noexcept override {
-    // io_context::stop() -> abort_inflight_io: mark stopped; whether this
-    // surfaces as set_stopped or set_value(operation_canceled) is decided
-    // by execute()'s stop-token arbitration.
     completion_ = completion_kind::stopped;
   }
 
-  /** Returns true: the request owns the syscall performed after a readiness
-   *  notification. */
+  /** Returns true: the request performs the syscall after readiness. */
   [[nodiscard]] bool owns_io_step() const noexcept override { return true; }
 
   /** Performs one bounded nonblocking I/O step through the request. */
@@ -123,9 +100,7 @@ class native_io_operation : public io_context::operation_base {
     return request_.perform_io();
   }
 
-  /** Starts the operation: checks the stop token, probes the descriptor
-   *  once, and either completes immediately or publishes the operation for
-   *  passive kqueue registration. */
+  /** Probes the descriptor once, then completes or registers. */
   void start() noexcept {
     if (stop_requested(receiver_)) {
       // Token cancel at start: mark stopped; execute()'s arbitration
@@ -137,10 +112,8 @@ class native_io_operation : public io_context::operation_base {
       return;
     }
 
-    // The schedule policy owns the eager gate: for defer the request
-    // performs its plain nonblocking call only, so I/O never completes
-    // on the publishing worker's CPU queue and a would-block result
-    // always registers with kqueue for readiness.
+    // A kind with k_immediate == false skips the eager probe and calls
+    // perform_io() directly; no current kind opts out.
     if constexpr (schedule_policy<Kind>::k_immediate) {
       this->result = control_() ? request_.start_io() : request_.perform_io();
     } else {
@@ -164,21 +137,16 @@ class native_io_operation : public io_context::operation_base {
   /**
    * Delivers the completion.
    *
-   * The `stopped` branch carries no result: the aborted request never ran,
-   * so it arbitrates — a cancelled receiver stop token wins and delivers
-   * set_stopped(); otherwise the abort delivers
-   * set_value(operation_canceled, -1, 0). The result is -1 and not 0: a
-   * descriptor-yielding request (accept) forwards `result` verbatim, so 0
-   * would hand the caller ownership of a real descriptor; byte-count
-   * requests clamp with std::max(0, result) and still observe 0.
+   * The stopped branch arbitrates: a cancelled stop token wins with
+   * set_stopped(); otherwise set_value(operation_canceled, -1, 0). -1, not
+   * 0, so a descriptor-yielding accept never hands out a descriptor
+   * (byte-count requests clamp to 0 anyway).
    */
   void execute() noexcept override {
     switch (completion_) {
       case completion_kind::value:
-        // Success, or a kevent-reported I/O step whose perform_io() returned
-        // a negative errno (spurious wakeup / rearm failure). Re-derive ec
-        // from result so the errno surfaces via set_value(ec, ...) rather
-        // than being lost (§9.2 guard).
+        // Success or a negative errno from perform_io(); derive ec from
+        // result so the errno surfaces through set_value(ec, ...).
         if (this->result < 0) {
           request_.set_value(std::move(receiver_), errno_result(this->result),
                              this->result, this->flags);
@@ -194,16 +162,6 @@ class native_io_operation : public io_context::operation_base {
                            this->flags);
         break;
       case completion_kind::stopped:
-        // Abort (io_context::stop() -> abort_inflight_io) or token-at-start
-        // marking. Arbitrate: a cancelled receiver stop token wins ->
-        // set_stopped; otherwise the abort delivers
-        // set_value(operation_canceled, -1, 0).
-        //
-        // The result is -1 and not 0: an aborted operation produced no
-        // result at all, and a descriptor-yielding request (accept) forwards
-        // `result` verbatim, so 0 here would hand the caller ownership of a
-        // real descriptor — the process's stdin. Byte-count models clamp
-        // with std::max(0, result) and still observe 0.
         if (stop_requested(receiver_)) {
           bexec::set_stopped(std::move(receiver_));
         } else {
@@ -216,30 +174,23 @@ class native_io_operation : public io_context::operation_base {
   }
 
  private:
-  /** Publishes to the CPU queue, completing inline when the context is
-   *  already stopping and rejected the publish. The schedule policy picks
-   *  the queue composition: defer routes through the shared queue only,
-   *  skipping the worker-local fast path. */
+  /** Publishes to the CPU queue; completes inline if the context already
+   *  stopped and rejected the publish. */
   void publish_cpu_or_complete_inline() noexcept {
     if (!schedule_policy<Kind>::publish_cpu(*context_, *this)) {
       execute();
     }
   }
 
-  /** Publishes the would-block result for passive registration, completing
-   *  inline through the stop channel when the context is already stopping.
-   *  Honors the schedule policy like publish_cpu_or_complete_inline(). */
+  /** Publishes the would-block result for passive registration; completes
+   *  through the stop channel if the context is already stopping. */
   void publish_io_or_complete_stopped() noexcept {
-    // EAGAIN/EWOULDBLOCK: register with kqueue for readiness. Leave
-    // completion_ as `value`; the kevent path will update this->result via
-    // perform_io(), and execute()'s value branch re-derives ec from result
-    // (§9.2 guard). Eagerly setting value_with_ec here would leak a stale
-    // EAGAIN ec when the eventual perform_io() succeeds.
+    // Keep completion_ = value: a later successful perform_io() overwrites
+    // result, and an eager value_with_ec would leak the stale EAGAIN.
     completion_ = completion_kind::value;
     if (!schedule_policy<Kind>::publish_io(*context_, *this)) {
-      // Context already stopping: mark stopped and complete inline instead
-      // of publishing into a context that is shutting down; execute()'s
-      // token arbitration decides the final delivery channel.
+      // Context already stopping: mark stopped and complete inline; the
+      // token arbitration in execute() picks the final channel.
       complete_submit_stopped();
       execute();
     }
@@ -263,10 +214,8 @@ class native_io_operation : public io_context::operation_base {
 };
 
 /**
- * Sender for one objectized kqueue I/O request.
- *
- * Completion signatures are forwarded from the request type. The optional
- * control overrides the default eager-mode predicate.
+ * Sender for one objectized kqueue I/O request, forwarding the request's
+ * completion signatures; Control overrides the default eager predicate.
  */
 template <class Request, class Control = context_eager_control,
           io_context::schedule_kind Kind = io_context::schedule_kind::post>
@@ -289,8 +238,7 @@ class native_io_sender {
         request_(std::move(request)),
         control_(std::move(control)) {}
 
-  /** Connects the sender to a receiver, moving the request into the
-   *  created operation state. */
+  /** Connects the sender, moving the request and control. */
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return native_io_operation<Kind, Request, Control,
@@ -299,8 +247,7 @@ class native_io_sender {
         std::move(receiver));
   }
 
-  /** Connects the sender to a receiver, copying the request and control
-   *  into the created operation state. */
+  /** Connects the sender, copying the request and control. */
   template <class Receiver>
     requires std::copy_constructible<Request> &&
              std::copy_constructible<Control>
@@ -317,21 +264,13 @@ class native_io_sender {
 };
 
 /**
- * Operation state for descriptor polling on the kqueue backend.
- *
- * The operation is published straight to the I/O queues — polling has no
- * eager data step — and the run loop translates the fired filter's
- * readiness into the poll mask without performing an extra data syscall.
- *
- * @tparam Kind     Schedule kind controlling the publish path (defer
- *                  publishes through the shared queue only).
- * @tparam Receiver Downstream receiver.
+ * Poll operation on the kqueue backend; readiness comes from the fired filter,
+ * so no data syscall is issued. Published straight to the I/O queues.
  */
 template <io_context::schedule_kind Kind, class Receiver>
 class native_poll_operation : public io_context::operation_base {
  public:
-  /** Creates the operation state bound to the context, descriptor, mask,
-   *  and receiver. */
+  /** Binds the operation to its context, descriptor, mask, and receiver. */
   native_poll_operation(io_context& context,
                         async_io::descriptor_view descriptor,
                         unsigned poll_mask, Receiver receiver)
@@ -339,7 +278,7 @@ class native_poll_operation : public io_context::operation_base {
         request_(descriptor, poll_mask),
         receiver_(std::move(receiver)) {}
 
-  /** Describes the native registration after the run loop takes this task. */
+  /** Prepares the native registration for the run loop. */
   void prepare(async_io::bsd_native::kqueue_helper& helper) noexcept override {
     request_.prepare(helper);
   }
@@ -353,14 +292,10 @@ class native_poll_operation : public io_context::operation_base {
   /** Marks the completion stopped when io_context::stop() aborts this
    *  inflight operation; execute() arbitrates the final channel. */
   void complete_submit_stopped() noexcept override {
-    // io_context::stop() -> abort_inflight_io: mark stopped; whether this
-    // surfaces as set_stopped or set_value(operation_canceled) is decided
-    // by execute()'s stop-token arbitration.
     completion_ = completion_kind::stopped;
   }
 
-  /** Starts the operation: checks the stop token, then publishes the
-   *  operation for passive registration with the kqueue. */
+  /** Checks the stop token, then registers for readiness. */
   void start() noexcept {
     if (stop_requested(receiver_)) {
       // Token cancel at start: mark stopped; execute()'s arbitration
@@ -375,9 +310,8 @@ class native_poll_operation : public io_context::operation_base {
 
     completion_ = completion_kind::value;
     if (!schedule_policy<Kind>::publish_io(*context_, *this)) {
-      // Context already stopping: mark stopped and complete inline instead
-      // of publishing into a context that is shutting down; execute()'s
-      // token arbitration decides the final delivery channel.
+      // Context already stopping: mark stopped and complete inline; the
+      // token arbitration in execute() picks the final channel.
       complete_submit_stopped();
       execute();
     }
@@ -386,13 +320,9 @@ class native_poll_operation : public io_context::operation_base {
   /**
    * Delivers the typed poll completion.
    *
-   * The ready mask is meaningful only on success. On every other channel the
-   * mask is `0U`: the error is carried by the leading `ec` (`errno_result()`
-   * here, the staged `error_` below), so no information is lost, and a
-   * negative native result is never converted to `unsigned` (that would wrap
-   * to ~4.29e9 and make a caller's `mask & POLLIN` test trip on a failure).
-   * The Linux io_context poll model expresses the same rule as
-   * `std::max(0, result)`, which is identical for every non-negative result.
+   * The ready mask is meaningful only on success; on every other channel it
+   * is 0U, with the error in the leading ec. A negative result is never cast
+   * to unsigned (that would wrap and trip a caller's mask test).
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -409,9 +339,8 @@ class native_poll_operation : public io_context::operation_base {
         bexec::set_value(std::move(receiver_), error_, 0U);
         break;
       case completion_kind::stopped:
-        // Abort or token-at-start marking. Arbitrate: a cancelled receiver
-        // stop token wins -> set_stopped; otherwise the abort delivers
-        // set_value(operation_canceled, 0).
+        // Stopped: a cancelled stop token wins with set_stopped(); otherwise
+        // the abort delivers set_value(operation_canceled, 0).
         if (stop_requested(receiver_)) {
           bexec::set_stopped(std::move(receiver_));
         } else {
@@ -468,22 +397,14 @@ class native_poll_sender {
 };
 
 /**
- * DNS resolution operation, submitted to the CPU queue.
- *
- * Arbitration is three-way: a stop-token cancel observed at start()
- * delivers set_stopped(); a context stopped before the resolve ran skips
- * DNS and delivers set_value(operation_canceled, 0) — the not-yet-executed
- * queued-work rule; otherwise the resolver runs and delivers the real
- * result. A stop landing after that check is not observed here, so the
- * resolve always delivers its real result.
- *
- * @tparam Receiver Downstream receiver.
+ * DNS resolve on the CPU queue: canceled token at start() gives set_stopped();
+ * an already-stopped context gives set_value(operation_canceled, 0),
+ * otherwise the resolver result (a later stop is not observed).
  */
 template <io_context::schedule_kind Kind, class Receiver>
 class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
  public:
-  /** Creates the operation state bound to the context, query, result
-   *  storage, and receiver. */
+  /** Binds the operation to its context, query, and result storage. */
   resolve_operation(io_context& context, async_io::dns_query query,
                     async_io::dns_result_view result, Receiver receiver)
       : context_(&context),
@@ -491,8 +412,7 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
         result_(result),
         receiver_(std::move(receiver)) {}
 
-  /** Marks a stop-token cancel at the start observation point and publishes
-   *  the operation to the CPU queue. */
+  /** Records a stop cancel, then publishes to the CPU queue. */
   void start() noexcept {
     // Token check at the start observation point: a cancel here is marked
     // and execute() delivers set_stopped for it.
@@ -522,10 +442,8 @@ class resolve_operation : public async_io::bsd_native::kqueue_operation_base {
 
     std::size_t count = 0;
     const std::error_code ec = async_io::resolve_dns(query_, result_, count);
-    // Success ec={}; failure ec carries the resolver error. Both exit through
-    // set_value(ec, count). Resolve runs on the CPU queue; a stop that lands
-    // after the is_stopped() check above is not observed here, so this path
-    // always delivers the real result.
+    // Success or resolver error both exit through set_value(ec, count); a
+    // stop after the is_stopped() check above is not observed here.
     bexec::set_value(std::move(receiver_), ec, count);
   }
 
@@ -551,16 +469,14 @@ class resolve_sender {
                  async_io::dns_result_view result)
       : context_(&context), query_(std::move(query)), result_(result) {}
 
-  /** Connects the sender to a receiver, moving the query into the created
-   *  operation state. */
+  /** Connects the sender, moving the query into the operation state. */
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return resolve_operation<Kind, std::remove_cvref_t<Receiver> >(
         *context_, std::move(query_), result_, std::move(receiver));
   }
 
-  /** Connects the sender to a receiver, copying the query into the created
-   *  operation state. */
+  /** Connects the sender, copying the query into the operation state. */
   template <class Receiver>
   auto connect(Receiver receiver) const& {
     return resolve_operation<Kind, std::remove_cvref_t<Receiver> >(
@@ -573,10 +489,7 @@ class resolve_sender {
   async_io::dns_result_view result_;
 };
 
-/** Creates a native I/O sender honoring the schedule kind. Function-template
- *  factories allow the defer call sites to pass Kind explicitly while Request
- *  and Control stay deduced (class templates cannot mix partial explicit
- *  specification with CTAD). */
+/** Creates a native I/O sender honoring the schedule kind. */
 template <io_context::schedule_kind Kind, class Request,
           class Control = context_eager_control>
 [[nodiscard]] auto make_io_sender(io_context& context,

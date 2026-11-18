@@ -23,25 +23,16 @@ using platform_io_context_options = detail::native_context_options;
  */
 struct io_context_options {
   /**
-   * Advisory number of expected concurrent run-loop workers.
-   *
-   * The context does not pre-create native workers; every call to run()
-   * registers its own native context lazily.
+   * Advisory number of expected concurrent run-loop workers; no native
+   * workers are pre-created, each run() registers its own lazily.
    */
   std::uint32_t concurrency_hint = 1;
 
   /**
-   * Enables eager immediate completion for I/O operations.
-   *
-   * When true (the default), native I/O operations probe for immediate
-   * completion in start(): the backend issues a non-blocking attempt and
-   * only registers with the native poller when the resource is not ready.
-   * When false, the probe is skipped and the operation registers directly
-   * with the native poller, waiting for readiness before performing I/O.
-   *
-   * The value is immutable after construction: the io_context reads it once
-   * at construction time and stores it, so the hot path only performs a
-   * single bool read.
+   * Enables eager immediate completion. When true (default), start() tries
+   * a non-blocking operation first and registers with the native poller
+   * only if not ready; when false it registers directly. Read once at
+   * construction; immutable afterwards.
    */
   bool enable_immediate_io = true;
 

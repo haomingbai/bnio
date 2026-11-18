@@ -14,10 +14,9 @@ namespace bnio::ssl {
 /**
  * Non-owning view over a native OpenSSL SSL_CTX.
  *
- * This is the public spelling of base::context_view. It is valid only while
- * the owning ssl::context (or ssl::base::context_base) keeps the native
- * SSL_CTX alive. It never owns or frees the handle, and installing an owned
- * ALPN closure remains an ssl::context operation.
+ * Public spelling of base::context_view; valid only while the owning
+ * ssl::context or base::context_base keeps the SSL_CTX alive. It never owns
+ * or frees the handle; installing an owned ALPN closure is ssl::context-only.
  */
 using context_view = base::context_view;
 

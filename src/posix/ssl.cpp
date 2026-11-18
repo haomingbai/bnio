@@ -19,9 +19,8 @@ namespace bnio {
 
 namespace {
 
-// The value make_no_ssl_error() reports. Real OpenSSL error codes are
-// non-negative (ERR_get_error() returns 0 only for an empty queue), so -1
-// can never collide with a genuine error code.
+// Value reported by make_no_ssl_error(). Real OpenSSL codes are non-negative
+// (ERR_get_error() returns 0 only for an empty queue), so -1 cannot collide.
 constexpr int k_no_ssl_error_value = -1;
 
 class openssl_category final : public std::error_category {
@@ -103,9 +102,7 @@ std::error_code sni_out::set_context(context_view ctx) noexcept {
     return base::make_no_ssl_error();
   }
   base::clear_errors();
-  // SSL_set_SSL_CTX takes its own reference to the new context and releases
-  // the connection's previous reference, so the bnio owner may be destroyed
-  // after a successful switch.
+  // SSL_set_SSL_CTX takes its own ref; the bnio owner may die after the switch.
   if (SSL_set_SSL_CTX(ssl_, ctx.native_handle()) == nullptr) {
     return base::last_error();
   }
@@ -125,9 +122,7 @@ std::error_code cert_out::use_certificate(X509* cert) noexcept {
     return base::make_no_ssl_error();
   }
   base::clear_errors();
-  // On success SSL_use_certificate takes its own reference to the certificate
-  // (and releases the connection's previous one), so the caller keeps
-  // ownership of cert and may release it independently.
+  // OpenSSL keeps its own reference; caller retains ownership.
   if (SSL_use_certificate(ssl_, cert) == 1) {
     return base::empty_error_code;
   }
@@ -139,9 +134,7 @@ std::error_code cert_out::use_private_key(EVP_PKEY* key) noexcept {
     return base::make_no_ssl_error();
   }
   base::clear_errors();
-  // On success SSL_use_PrivateKey takes its own reference to the key (and
-  // releases the connection's previous one), so the caller keeps ownership of
-  // key and may release it independently.
+  // OpenSSL keeps its own reference; caller retains ownership.
   if (SSL_use_PrivateKey(ssl_, key) == 1) {
     return base::empty_error_code;
   }
@@ -238,9 +231,7 @@ void context_view::set_cert_cb(cert_cb cb, void* arg) noexcept {
 
 std::error_code context_view::use_certificate(X509* cert) noexcept {
   clear_errors();
-  // On success SSL_CTX_use_certificate takes its own reference to the
-  // certificate (and releases the context's previous one), so the caller
-  // keeps ownership of cert and may release it independently.
+  // OpenSSL keeps its own reference; caller retains ownership.
   if (SSL_CTX_use_certificate(context_, cert) == 1) {
     return empty_error_code;
   }
@@ -249,9 +240,7 @@ std::error_code context_view::use_certificate(X509* cert) noexcept {
 
 std::error_code context_view::use_private_key(EVP_PKEY* key) noexcept {
   clear_errors();
-  // On success SSL_CTX_use_PrivateKey takes its own reference to the key (and
-  // releases the context's previous one), so the caller keeps ownership of
-  // key and may release it independently.
+  // OpenSSL keeps its own reference; caller retains ownership.
   if (SSL_CTX_use_PrivateKey(context_, key) == 1) {
     return empty_error_code;
   }

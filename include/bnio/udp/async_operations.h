@@ -15,10 +15,7 @@
 
 namespace bnio::udp {
 
-/**
- * Sends exactly one datagram from @p buffer to the socket's default peer
- * (see socket::async_send).
- */
+/** Sends one datagram to the default peer (see socket::async_send). */
 template <class Scheduler, class Buffer>
 auto socket::async_send(Scheduler scheduler, Buffer&& buffer, int flags) {
   auto holder = detail::make_const_buffer_holder(std::forward<Buffer>(buffer));
@@ -27,10 +24,7 @@ auto socket::async_send(Scheduler scheduler, Buffer&& buffer, int flags) {
       std::move(scheduler), view(), std::move(holder), {}, flags);
 }
 
-/**
- * Receives exactly one datagram into @p buffer from the socket's default
- * peer (see socket::async_receive).
- */
+/** Receives one datagram from the default peer (see socket::async_receive). */
 template <class Scheduler, class Buffer>
 auto socket::async_receive(Scheduler scheduler, Buffer&& buffer, int flags) {
   auto holder =
@@ -41,8 +35,8 @@ auto socket::async_receive(Scheduler scheduler, Buffer&& buffer, int flags) {
 }
 
 /**
- * Sends exactly one datagram from @p buffer to @p endpoint without
- * requiring a connected socket (see socket::async_send_to).
+ * Sends one datagram to @p endpoint without a connected socket
+ * (see socket::async_send_to).
  */
 template <class Scheduler, class Buffer>
 auto socket::async_send_to(Scheduler scheduler, Buffer&& buffer,
@@ -54,8 +48,8 @@ auto socket::async_send_to(Scheduler scheduler, Buffer&& buffer,
 }
 
 /**
- * Receives exactly one datagram into @p buffer and stores the source
- * endpoint into @p endpoint (see socket::async_receive_from).
+ * Receives one datagram and stores its source in @p endpoint
+ * (see socket::async_receive_from).
  */
 template <class Scheduler, class Buffer>
 auto socket::async_receive_from(Scheduler scheduler, Buffer&& buffer,

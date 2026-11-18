@@ -1,7 +1,6 @@
 /**
  * @file random_access_file.h
- * @brief io_uring positioned file read/write operations on random access
- * files.
+ * @brief io_uring positioned file read/write operations.
  */
 
 #pragma once
@@ -34,10 +33,9 @@ namespace detail {
 }  // namespace detail
 
 /**
- * Operation representing a positioned io_uring read request on a random
- * access file: the SQE carries the explicit offset, so the kernel file
- * position is neither observed nor advanced. Offsets beyond the kernel's
- * signed loff_t are rejected with EOVERFLOW before entering the kernel.
+ * Positioned read: the SQE carries the explicit offset, so the kernel
+ * file position is neither observed nor advanced. Offsets beyond signed
+ * loff_t complete with EOVERFLOW before entering the kernel.
  */
 template <class Receiver>
 class io_uring_random_access_read_operation
@@ -89,10 +87,8 @@ class io_uring_random_access_read_operation
 };
 
 /**
- * Operation representing a positioned io_uring write request on a random
- * access file: the SQE carries the explicit offset, so the kernel file
- * position is neither observed nor advanced. Offsets beyond the kernel's
- * signed loff_t are rejected with EOVERFLOW before entering the kernel.
+ * Positioned write; same explicit offset and EOVERFLOW contract as the
+ * read operation.
  */
 template <class Receiver>
 class io_uring_random_access_write_operation
@@ -145,10 +141,8 @@ class io_uring_random_access_write_operation
 };
 
 /**
- * Operation representing a positioned io_uring readv request on a random
- * access file: the SQE carries the explicit offset. Offsets beyond the
- * kernel's signed loff_t are rejected with EOVERFLOW before entering the
- * kernel.
+ * Positioned readv: explicit SQE offset. Out-of-range offsets complete
+ * with EOVERFLOW before submission.
  */
 template <class Receiver>
 class io_uring_random_access_readv_operation
@@ -202,10 +196,8 @@ class io_uring_random_access_readv_operation
 };
 
 /**
- * Operation representing a positioned io_uring writev request on a random
- * access file: the SQE carries the explicit offset. Offsets beyond the
- * kernel's signed loff_t are rejected with EOVERFLOW before entering the
- * kernel.
+ * Positioned writev; same explicit offset and EOVERFLOW contract as
+ * readv.
  */
 template <class Receiver>
 class io_uring_random_access_writev_operation

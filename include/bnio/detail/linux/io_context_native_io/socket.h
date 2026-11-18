@@ -18,9 +18,8 @@
 
 namespace bnio::detail {
 
-// Socket models are descriptor-typed and family-agnostic: the factories
-// overload on the view type (network vs local) and hand the models a plain
-// descriptor, so one model body serves both families.
+// Models are descriptor-typed and family-agnostic: the factories overload on
+// the view type and pass a plain descriptor, so one body serves both.
 
 class socket_read_model {
  public:

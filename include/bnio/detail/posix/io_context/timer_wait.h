@@ -25,8 +25,7 @@ class timer_wait_operation : public timer_operation_base {
 
   void start() noexcept {
     if (stop_requested(receiver_)) {
-      // Token cancelled before start: stage a stopped completion so
-      // execute() delivers set_stopped (token cancellation wins).
+      // Token cancelled before start: set_stopped wins.
       if (this->timer_context_ == nullptr) {
         // Unregistered timer: no context remains to drain timers_.ready,
         // so the completion must be delivered inline, never staged.
@@ -39,10 +38,8 @@ class timer_wait_operation : public timer_operation_base {
     }
 
     if (this->timer_context_ == nullptr) {
-      // Unregistered timer (moved-from, or waits aborted by
-      // io_context::stop()): nothing will ever stage a completion for this
-      // wait, so deliver set_value(operation_canceled) inline per the
-      // usage contract — again without touching timers_.ready.
+      // Unregistered timer (moved-from or stopped): nothing will stage a
+      // completion, so deliver set_value(operation_canceled) inline.
       bexec::set_value(std::move(receiver_),
                        std::make_error_code(std::errc::operation_canceled));
       return;
@@ -51,10 +48,8 @@ class timer_wait_operation : public timer_operation_base {
     this->timer_context_->start_timer_wait(*this, *timer_);
   }
 
-  // Completion mapping per the unified stop contract: stopped ->
-  // set_stopped (token cancellation), canceled ->
-  // set_value(operation_canceled) (context-stop abort or timer object API
-  // cancellation), value -> normal completion delivered untouched.
+  // stopped -> set_stopped (token); canceled -> set_value(operation_canceled)
+  // (context stop or timer cancel); value -> normal completion.
   void execute() noexcept override {
     switch (this->timer_completion()) {
       case timer_completion_kind::stopped:

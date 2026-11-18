@@ -15,10 +15,7 @@ namespace bnio {
  * Customization point object for Provider::async_accept.
  */
 struct async_accept_t {
-  /**
-   * Invokes async_accept on an acceptor when available, otherwise on a
-   * provider.
-   */
+  /** Calls the acceptor's async_accept if present, else the provider's. */
   template <class Provider, class Acceptor>
   constexpr decltype(auto) operator()(Provider&& provider, Acceptor&& acceptor,
                                       int flags = 0) const {
@@ -39,9 +36,7 @@ struct async_accept_t {
  * Customization point object for Provider::async_connect.
  */
 struct async_connect_t {
-  /**
-   * Invokes async_connect on a stream when available, otherwise on a provider.
-   */
+  /** Calls the stream's async_connect if present, else the provider's. */
   template <class Provider, class Stream, class Endpoint>
   constexpr decltype(auto) operator()(Provider&& provider, Stream&& stream,
                                       Endpoint&& endpoint) const {

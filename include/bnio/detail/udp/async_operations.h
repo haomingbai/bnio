@@ -23,14 +23,9 @@
 namespace bnio::detail {
 
 /**
- * Operation state that performs one datagram receive through a scheduler
- * and forwards the result to a parent receiver.
- *
- * The operation owns the buffer holder so the receive storage stays alive
- * until completion; on success the holder commits the received byte count
- * before the parent receiver is completed. With From true the child is a
- * receive-from operation that also reports the source endpoint through the
- * caller-provided pointer.
+ * Operation state for one datagram receive through a scheduler; owns the
+ * buffer holder until completion and commits received bytes before completing
+ * the parent. With From it also reports the source endpoint.
  */
 template <class Scheduler, class Holder, bool From, class Receiver>
 class udp_receive_operation {
@@ -42,23 +37,14 @@ class udp_receive_operation {
   using receiver_type = std::remove_cvref_t<Receiver>;
 
   /**
-   * Receiver adapted onto the scheduler's child sender.
-   *
-   * It exposes the parent receiver's environment and translates the child
-   * completion into the parent receiver's completion, committing received
-   * bytes on success.
+   * Receiver adapted onto the child sender: forwards the parent environment
+   * and completes the parent receiver, committing received bytes on success.
    */
   class child_receiver {
    public:
-    /**
-     * Environment type forwarded from the parent receiver.
-     */
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    /** Environment type forwarded from the parent receiver. */
+    // Named explicitly so get_env's return type is available while the
+    // operation is incomplete; decltype(auto) would instantiate too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     /** Binds the child receiver to its parent operation. */
@@ -70,10 +56,7 @@ class udp_receive_operation {
       return bexec::get_env(operation_->receiver_);
     }
 
-    /**
-     * Commits the received bytes on success and completes the parent
-     * receiver with @p ec and @p size.
-     */
+    /** Commits received bytes on success, then completes the parent. */
     void set_value(std::error_code ec, std::size_t size) noexcept {
       if (!ec) operation_->holder_.commit(size);
       bexec::set_value(std::move(operation_->receiver_), ec, size);
@@ -89,16 +72,13 @@ class udp_receive_operation {
   };
 
   /**
-   * Creates the scheduler's child sender for this receive.
+   * Creates the child sender selected by From.
    *
-   * @param[in,out] scheduler Scheduler providing the datagram receive
-   *                          senders.
-   * @param[in]     socket    Datagram socket to receive on.
-   * @param[in]     buffer    Buffer that receives the datagram bytes.
-   * @param[in]     endpoint  Source endpoint output; only read when From
-   *                          is true.
-   * @param[in]     flags     Receive flags passed to the scheduler.
-   * @return The child sender selected by From.
+   * @param scheduler Scheduler providing the receive sender.
+   * @param socket    Datagram socket to receive on.
+   * @param buffer    Buffer that receives the datagram bytes.
+   * @param endpoint  Source endpoint output; read only when From is true.
+   * @param flags     Receive flags.
    */
   static auto make_child_sender(scheduler_type& scheduler,
                                 async_io::datagram_socket_view socket,
@@ -122,17 +102,15 @@ class udp_receive_operation {
       std::declval<child_sender_type>(), std::declval<child_receiver>()));
 
   /**
-   * Creates the operation state and connects the child sender to a child
-   * receiver.
+   * Creates the operation and connects the child sender and receiver.
    *
-   * @param[in] scheduler Scheduler used for the child receive.
-   * @param[in] socket    Datagram socket to receive on.
-   * @param[in] holder    Buffer holder owning the receive storage.
-   * @param[in] endpoint  Source endpoint output; may be null only when
-   *                      From is false. When set, the pointee must remain
-   *                      alive until the operation completes.
-   * @param[in] flags     Receive flags.
-   * @param[in] receiver  Parent receiver to complete.
+   * @param scheduler Scheduler used for the child receive.
+   * @param socket    Datagram socket to receive on.
+   * @param holder    Buffer holder owning the receive storage.
+   * @param endpoint  Source output; may be null only when From is false, and
+   *                  must outlive the operation.
+   * @param flags     Receive flags.
+   * @param receiver  Parent receiver to complete.
    */
   udp_receive_operation(scheduler_type scheduler,
                         async_io::datagram_socket_view socket, Holder holder,
@@ -170,25 +148,19 @@ class udp_receive_operation {
 };
 
 /**
- * Sender that performs one datagram receive through a scheduler.
- *
- * With From true the receive is endpoint-aware (receive-from); otherwise
- * it uses the socket's connected peer.
+ * Sender for one datagram receive through a scheduler: endpoint-aware
+ * (receive-from) when From, otherwise on the connected peer.
  */
 template <class Scheduler, class Holder, bool From>
 class udp_receive_sender {
  public:
-  /** Completes with set_value(std::error_code, std::size_t) or
-   *  set_stopped(). */
+  /** Completes with (std::error_code, std::size_t) or set_stopped(). */
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   /**
-   * Creates a sender that receives on @p socket through @p scheduler.
-   *
-   * @p holder keeps the receive storage alive until completion. With From
-   * true, @p endpoint receives the source endpoint of each datagram and
-   * its pointee must remain alive until the operation completes.
+   * @p holder keeps the receive storage alive until completion. With From,
+   * @p endpoint receives the source endpoint and must outlive the operation.
    */
   udp_receive_sender(Scheduler scheduler, async_io::datagram_socket_view socket,
                      Holder holder, ip::endpoint* endpoint, int flags)
@@ -198,9 +170,7 @@ class udp_receive_sender {
         endpoint_(endpoint),
         flags_(flags) {}
 
-  /**
-   * Connects this sender to @p receiver and returns the operation state.
-   */
+  /** Connects to @p receiver and returns the operation state. */
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return udp_receive_operation<Scheduler, Holder, From,
@@ -218,12 +188,9 @@ class udp_receive_sender {
 };
 
 /**
- * Operation state that performs one datagram send through a scheduler and
- * forwards the result to a parent receiver.
- *
- * The operation owns the buffer holder so the datagram bytes stay alive
- * until completion. With To true the child is a send-to operation targeting
- * the stored endpoint; otherwise it sends on the socket's connected peer.
+ * Operation state for one datagram send through a scheduler; owns the buffer
+ * holder until completion. With To it sends to the stored endpoint, else to
+ * the connected peer.
  */
 template <class Scheduler, class Holder, bool To, class Receiver>
 class udp_send_operation {
@@ -235,22 +202,14 @@ class udp_send_operation {
   using receiver_type = std::remove_cvref_t<Receiver>;
 
   /**
-   * Receiver adapted onto the scheduler's child sender.
-   *
-   * It exposes the parent receiver's environment and forwards the child
-   * completion to the parent receiver.
+   * Receiver adapted onto the child sender: forwards the parent environment
+   * and the child completion to the parent receiver.
    */
   class child_receiver {
    public:
-    /**
-     * Environment type forwarded from the parent receiver.
-     */
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    /** Environment type forwarded from the parent receiver. */
+    // Named explicitly so get_env's return type is available while the
+    // operation is incomplete; decltype(auto) would instantiate too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     /** Binds the child receiver to its parent operation. */
@@ -277,15 +236,13 @@ class udp_send_operation {
   };
 
   /**
-   * Creates the scheduler's child sender for this send.
+   * Creates the child sender selected by To.
    *
-   * @param[in,out] scheduler Scheduler providing the datagram send senders.
-   * @param[in]     socket    Datagram socket to send on.
-   * @param[in]     buffer    Datagram bytes to send.
-   * @param[in]     endpoint  Destination endpoint; only read when To is
-   *                          true.
-   * @param[in]     flags     Send flags passed to the scheduler.
-   * @return The child sender selected by To.
+   * @param scheduler Scheduler providing the send sender.
+   * @param socket    Datagram socket to send on.
+   * @param buffer    Datagram bytes to send.
+   * @param endpoint  Destination; read only when To is true.
+   * @param flags     Send flags.
    */
   static auto make_child_sender(scheduler_type& scheduler,
                                 async_io::datagram_socket_view socket,
@@ -309,15 +266,14 @@ class udp_send_operation {
       std::declval<child_sender_type>(), std::declval<child_receiver>()));
 
   /**
-   * Creates the operation state and connects the child sender to a child
-   * receiver.
+   * Creates the operation and connects the child sender and receiver.
    *
-   * @param[in] scheduler Scheduler used for the child send.
-   * @param[in] socket    Datagram socket to send on.
-   * @param[in] holder    Buffer holder owning the datagram bytes.
-   * @param[in] endpoint  Destination endpoint; ignored when To is false.
-   * @param[in] flags     Send flags.
-   * @param[in] receiver  Parent receiver to complete.
+   * @param scheduler Scheduler used for the child send.
+   * @param socket    Datagram socket to send on.
+   * @param holder    Buffer holder owning the send storage.
+   * @param endpoint  Destination; ignored when To is false.
+   * @param flags     Send flags.
+   * @param receiver  Parent receiver to complete.
    */
   udp_send_operation(scheduler_type scheduler,
                      async_io::datagram_socket_view socket, Holder holder,
@@ -356,24 +312,19 @@ class udp_send_operation {
 };
 
 /**
- * Sender that performs one datagram send through a scheduler.
- *
- * With To true the send targets the stored endpoint (send-to); otherwise
- * it uses the socket's connected peer.
+ * Sender for one datagram send through a scheduler: to the stored endpoint
+ * when To, otherwise on the connected peer.
  */
 template <class Scheduler, class Holder, bool To>
 class udp_send_sender {
  public:
-  /** Completes with set_value(std::error_code, std::size_t) or
-   *  set_stopped(). */
+  /** Completes with (std::error_code, std::size_t) or set_stopped(). */
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, std::size_t), bexec::set_stopped_t()>;
 
   /**
-   * Creates a sender that sends on @p socket through @p scheduler.
-   *
-   * @p holder keeps the datagram bytes alive until completion. With To
-   * true, @p endpoint is the datagram's destination.
+   * @p holder keeps the datagram bytes alive until completion. With To,
+   * @p endpoint is the destination.
    */
   udp_send_sender(Scheduler scheduler, async_io::datagram_socket_view socket,
                   Holder holder, ip::endpoint endpoint, int flags)
@@ -383,9 +334,7 @@ class udp_send_sender {
         endpoint_(endpoint),
         flags_(flags) {}
 
-  /**
-   * Connects this sender to @p receiver and returns the operation state.
-   */
+  /** Connects to @p receiver and returns the operation state. */
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return udp_send_operation<Scheduler, Holder, To,

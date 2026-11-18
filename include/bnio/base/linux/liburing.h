@@ -19,8 +19,7 @@
 
 namespace bnio::base::detail {
 
-/** Value of IORING_SETUP_COOP_TASKRUN when the kernel headers define it,
- *  or 0 when building against older headers. */
+/** IORING_SETUP_COOP_TASKRUN, or 0 when the kernel headers omit it. */
 #ifdef IORING_SETUP_COOP_TASKRUN
 inline constexpr unsigned io_uring_setup_coop_taskrun =
     IORING_SETUP_COOP_TASKRUN;
@@ -28,8 +27,7 @@ inline constexpr unsigned io_uring_setup_coop_taskrun =
 inline constexpr unsigned io_uring_setup_coop_taskrun = 0;
 #endif
 
-/** Value of IORING_SETUP_SINGLE_ISSUER when the kernel headers define it,
- *  or 0 when building against older headers. */
+/** IORING_SETUP_SINGLE_ISSUER, or 0 when the kernel headers omit it. */
 #ifdef IORING_SETUP_SINGLE_ISSUER
 inline constexpr unsigned io_uring_setup_single_issuer =
     IORING_SETUP_SINGLE_ISSUER;
@@ -37,8 +35,7 @@ inline constexpr unsigned io_uring_setup_single_issuer =
 inline constexpr unsigned io_uring_setup_single_issuer = 0;
 #endif
 
-/** Value of IORING_SETUP_R_DISABLED when the kernel headers define it,
- *  or 0 when building against older headers. */
+/** IORING_SETUP_R_DISABLED, or 0 when the kernel headers omit it. */
 #ifdef IORING_SETUP_R_DISABLED
 inline constexpr unsigned io_uring_setup_r_disabled = IORING_SETUP_R_DISABLED;
 #else

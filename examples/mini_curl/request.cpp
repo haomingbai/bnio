@@ -132,7 +132,6 @@ bool header_contains(std::string_view header, std::string_view name) noexcept {
     return false;
   }
   std::string_view header_name = header.substr(0, colon);
-  // Trim trailing whitespace
   while (!header_name.empty() && header_name.back() == ' ') {
     header_name.remove_suffix(1);
   }
@@ -214,7 +213,6 @@ int parse_status_code(std::string_view status_line) noexcept {
     return 0;
   }
   std::string_view rest = status_line.substr(first_space + 1);
-  // Skip leading spaces
   while (!rest.empty() && rest.front() == ' ') {
     rest.remove_prefix(1);
   }
@@ -249,12 +247,10 @@ std::string extract_location(std::string_view headers) {
     return {};
   }
 
-  // Skip spaces after colon
   while (value_start < headers.size() && headers[value_start] == ' ') {
     ++value_start;
   }
 
-  // Find end of line
   std::size_t value_end = headers.find('\r', value_start);
   if (value_end == std::string_view::npos) {
     value_end = headers.find('\n', value_start);

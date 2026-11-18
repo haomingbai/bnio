@@ -23,8 +23,8 @@ namespace bnio::async_io::local {
 /**
  * Protocol tag for a local (AF_UNIX) byte-stream socket.
  *
- * Protocol tags are stateless value types in the role of ip::tcp /
- * ip::udp: they carry the socket(2) triple consumed at open().
+ * Stateless value type in the role of ip::tcp; carries the socket(2) triple
+ * consumed at open().
  */
 class stream_protocol {
  public:

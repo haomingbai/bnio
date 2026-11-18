@@ -15,27 +15,15 @@
 
 namespace bnio::base {
 
-/**
- * Stores the peer address of a connected socket descriptor into @p address.
- *
- * This is a thin wrapper around getpeername(2): the return value and errno
- * handling match the raw system call.
- *
- * @see getpeername
- */
+/** getpeername(2) wrapper; stores the peer address of a connected socket in
+ *  @p address (return value/errno unchanged). */
 [[nodiscard]] inline int peer_address(int descriptor, sockaddr* address,
                                       socklen_t* size) noexcept {
   return ::getpeername(descriptor, address, size);
 }
 
-/**
- * Stores the locally bound address of a socket descriptor into @p address.
- *
- * This is a thin wrapper around getsockname(2): the return value and errno
- * handling match the raw system call.
- *
- * @see getsockname
- */
+/** getsockname(2) wrapper; stores the locally bound address of a socket in
+ *  @p address (return value/errno unchanged). */
 [[nodiscard]] inline int local_address(int descriptor, sockaddr* address,
                                        socklen_t* size) noexcept {
   return ::getsockname(descriptor, address, size);

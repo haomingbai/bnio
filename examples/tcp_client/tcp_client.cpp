@@ -1,7 +1,5 @@
-// TCP client with timeout — resolve → connect → send → receive.
-// main thread runs context.run(). steady_timer aborts on timeout (10s).
-// An op_registry keeps every operation state alive until its completion
-// has been delivered (the operations are non-movable).
+// TCP client: resolve -> connect -> send -> receive, with a 10s timeout.
+// The registry keeps the non-movable operations alive until completion.
 
 #include <bnio/bnio.h>
 

@@ -57,12 +57,11 @@ void io_uring_context::push_cpu_tasks(operation_queue& operations) noexcept {
 }
 
 io_uring_operation_base* io_uring_context::fetch_cpu_task() noexcept {
-  // 1. Worker-local queue first: fastest and preserves locality.
+  // Local queue first (locality), then shared.
   if (io_uring_operation_base* operations = local_state_.pop_cpu_all()) {
     return operations;
   }
 
-  // 2. Shared CPU queue.
   if (io_uring_operation_base* operations = global_state_->pop_cpu_all()) {
     return operations;
   }
@@ -79,10 +78,8 @@ bool io_uring_context::run_cpu_batch() noexcept {
 }
 
 void io_uring_context::unregister_local_state() noexcept {
-  // Unlink from the suspend list if the worker is still linked there (a
-  // run() that exits through the normal wait path already unlinked in
-  // end_wait()). Only the suspend list exists now: without stealing no
-  // remote thread ever touches a worker's local state while it runs.
+  // Unlink from the suspend list if still linked; the normal wait path
+  // already unlinked in end_wait().
   io_uring_worker_state_list& suspend = global_state_->workers;
   std::lock_guard<std::mutex> guard(suspend.lock);
   if (io_uring_local_state_in_list(suspend, &local_state_)) {
@@ -102,9 +99,7 @@ bool io_uring_context::is_waiting() const noexcept {
 
 void io_uring_context::begin_wait() noexcept {
   run_state_.waiting.store(true, std::memory_order_release);
-  // Link into the suspend list so a publisher can find and wake this
-  // worker. No run list exists anymore (stealing was removed), so this is
-  // a single locked insertion.
+  // Link into the suspend list so a publisher can find and wake this worker.
   {
     io_uring_worker_state_list& suspend = global_state_->workers;
     std::lock_guard<std::mutex> guard(suspend.lock);
@@ -127,10 +122,8 @@ void io_uring_context::end_wait() noexcept {
 }
 
 int io_uring_context::signal_eventfd() noexcept {
-  // Bind the shared wake-channel write to the submit lock so the
-  // io_context destructor's close (under the same lock) can never race
-  // it. Re-check after acquiring the lock: the channel may have been
-  // closed while we waited for the lock.
+  // Hold submit_lock so the destructor's close cannot race the write;
+  // re-check after acquiring it, the channel may already be closed.
   std::lock_guard guard(global_state_->submit_lock);
   if (!global_state_->wake_channel_.is_open()) {
     return -EBADF;
@@ -144,8 +137,8 @@ void io_uring_context::drain_eventfd() noexcept {
 
 int io_uring_context::arm_wake_poll(int fd, void* user_data,
                                     bool& pending_flag) noexcept {
-  // read_fd() is -1 once the channel is closed, so this also covers a
-  // channel that was torn down underneath the run loop.
+  // read_fd() is -1 once the channel is closed, covering a channel torn down
+  // underneath the run loop.
   if (!ring_.is_open() || fd < 0) {
     return -EINVAL;
   }
@@ -154,17 +147,15 @@ int io_uring_context::arm_wake_poll(int fd, void* user_data,
   }
   if (run_state_.state.load(std::memory_order_acquire) !=
       context_state::running) {
-    // Distinguishable from "already armed": the poll is NOT armed here
-    // because the context is stopping. Callers must not block on the
-    // ring without another wake source (inflight completions or a
-    // bounded timeout) after seeing this return value.
+    // 0 means "not armed because stopping": callers must not block without
+    // another wake source (inflight completions or a bounded timeout).
     return 0;
   }
 
   bnio::base::submission_queue_entry sqe = ring_.get_sqe();
   if (sqe.raw() == nullptr) {
-    // SQ is full. There is no inline retry: the caller's -EAGAIN path
-    // re-enters the run loop, which re-arms on the next pass.
+    // SQ full: the caller's -EAGAIN path re-enters the run loop, which
+    // re-arms on the next pass.
     return -EAGAIN;
   }
 

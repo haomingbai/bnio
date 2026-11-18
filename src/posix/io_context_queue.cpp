@@ -11,17 +11,8 @@
 namespace bnio {
 
 detail::native_context* io_context::running_worker_native() const noexcept {
-  // The bound-state check matters for nested run(): an outer worker's
-  // handler may post to a different context, and current_worker_native_
-  // then still points at the OUTER worker's native context. Posting to the
-  // wrong local queue would strand the operation — the inner run loop
-  // never drains the outer worker's local queue. Fall through to the
-  // shared-queue path for any context other than this one.
-  //
-  // current_worker_native_ is only non-null while this thread is inside
-  // io_context::run(), which sets it on entry and restores it on every
-  // return path, so a non-null bound pointer also guarantees the native
-  // context is alive for the duration of the caller's use of it.
+  // Nested run(): a worker native from another context must not receive the
+  // operation (its local queue is never drained here); non-null implies alive.
   if (current_worker_native_ != nullptr &&
       current_worker_native_->get_global_state() == &global_state_) {
     return current_worker_native_;
@@ -30,22 +21,8 @@ detail::native_context* io_context::running_worker_native() const noexcept {
 }
 
 bool io_context::publish_io(operation_base& operation) noexcept {
-  // Worker-local fast path: post directly to the running native context's
-  // local I/O queue, the way publish_cpu posts CPU work. The publisher is
-  // the thread that will drain that queue, so this needs no lock, no
-  // atomic, and no wakeup — and it keeps the operation on the worker that
-  // owns the connection.
-  //
-  // That same fact is why returning true here is safe even while the
-  // context is already stopping, without the shared path's life_state
-  // check: the publisher IS the draining thread. Native finish()'s Phase
-  // 3b loop keeps calling consume_io_tasks() → abort_inflight_io() until
-  // both I/O queues stay empty, and abort_inflight_io() completes the
-  // leftovers with stopped — see
-  // src/async_io/bsd/kqueue_context_run_loop.cpp and
-  // src/async_io/linux/io_uring_context_run_loop.cpp. This is exactly the
-  // guarantee publish_cpu's local path already relies on: it also skips
-  // both the lock and the life_state check.
+  // Worker-local fast path: the publisher drains it, so no lock, wakeup, or
+  // life_state check is needed; finish() completes leftovers as stopped.
   detail::native_context* worker = running_worker_native();
   if (worker != nullptr) {
     worker->publish_io(operation);
@@ -55,15 +32,8 @@ bool io_context::publish_io(operation_base& operation) noexcept {
 }
 
 bool io_context::publish_io_deferred(operation_base& operation) noexcept {
-  // defer scheduling policy: never take the worker-local fast path, even
-  // when the caller runs on a worker of this context, so I/O initiated by
-  // the defer scheduler is not pinned to the publishing worker's
-  // connection affinity. This is publish_io()'s shared path verbatim.
-  //
-  // Critical section, ordered against begin_stop() / ~io_context() by the
-  // same submit_lock. Contains only state-involving work: check the shutdown
-  // state, enqueue, and decide whether a sleeping worker must be woken.
-  // The caller executes the operation afterwards.
+  // defer policy: never use the worker-local path, so I/O is not pinned to the
+  // publisher. Under submit_lock: check state, enqueue, maybe wake.
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
   if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
     return false;
@@ -75,11 +45,8 @@ bool io_context::publish_io_deferred(operation_base& operation) noexcept {
 
 bool io_context::publish_cpu(
     detail::native_operation_base& operation) noexcept {
-  // Worker-local fast path: post directly to the running native context's
-  // local queue. The worker always drains its local queue during finish(),
-  // so the operation is guaranteed to complete even during shutdown.
-  // See running_worker_native() for the bound-state check that keeps a
-  // nested run() from posting into another worker's local queue.
+  // Worker-local fast path: the worker drains its local queue during finish(),
+  // so the operation completes even during shutdown (see the bound check).
   detail::native_context* worker = running_worker_native();
   if (worker != nullptr) {
     worker->post(operation);
@@ -90,24 +57,8 @@ bool io_context::publish_cpu(
 
 bool io_context::publish_cpu_deferred(
     detail::native_operation_base& operation) noexcept {
-  // defer scheduling policy: never take the worker-local fast path; see
-  // publish_io_deferred(). This is publish_cpu()'s shared path verbatim.
-  //
-  // Critical section, ordered against begin_stop() / ~io_context() by the
-  // same submit_lock. The critical section contains ONLY state-involving
-  // work:
-  //   1. check the shutdown state,
-  //   2. publish (enqueue) — the queue head is shared state, and the
-  //      enqueue must be atomic with the check above,
-  //   3. decide whether a sleeping worker must be woken (reads awake_workers).
-  // Operation execution (complete/execute) never happens here; the caller
-  // runs it after publish_cpu returns.
-  //
-  // publish_cpu_deferred publishes an operation ONLY while the context is
-  // not stopping; it assumes the publish happens against a running context.
-  // When the context is already stopping it does NOT enqueue (the queue may
-  // no longer be drained) and returns false — the caller must then complete
-  // the operation inline so it never strands.
+  // defer policy: see publish_io_deferred(). Under submit_lock: if stopping,
+  // do not enqueue and return false so the caller completes inline.
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
   if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
     return false;
@@ -118,11 +69,8 @@ bool io_context::publish_cpu_deferred(
 }
 
 void io_context::wake_locked() noexcept {
-  // Caller must hold global_state_.submit_lock. The shutdown-state check
-  // keeps the wake bound to the destructor's close: ~io_context() publishes
-  // the terminal state and closes the channel under the same lock, so once
-  // this sees the terminal state the channel is (or is about to be) closed
-  // and writing would touch a closed fd.
+  // Caller holds submit_lock. Skip after the terminal state is published;
+  // the destructor closes the channel under the same lock.
   if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
     return;
   }
@@ -130,29 +78,14 @@ void io_context::wake_locked() noexcept {
 }
 
 void io_context::wake_one_sleeping_locked() noexcept {
-  // Caller must hold global_state_.submit_lock. Prefer a directed wake of
-  // exactly one sleeping worker over the shared broadcast channel: each
-  // worker listens to both its per-worker wake channel and the shared one,
-  // so a single write reaches only the intended worker (no thundering
-  // herd). Falls back to the shared channel when nobody is suspended.
+  // Caller holds submit_lock. Prefer a directed wake of one sleeping worker
+  // over the shared broadcast; fall back when nobody is suspended.
   if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
     return;
   }
 
-  // Fast path: when every worker that entered run() is still awake
-  // (awake_workers >= running_workers), nobody is suspended and
-  // there is no worker to wake.  The two acquire loads are not
-  // synchronised with each other — this is a racy advisory check
-  // that only decides whether to skip the expensive suspend.lock
-  // acquisition and the fallback broadcast write.  running_workers
-  // is the run()-level counter incremented before enter_run(), so it
-  // may transiently include workers that have not yet joined the
-  // awake set — that only makes the fast path skip more often
-  // (harmless, same cost as before).  A false negative (a worker
-  // just entered begin_wait but awake_workers has not yet been
-  // decremented) merely delays the wake by one run-loop iteration,
-  // which is harmless; a false positive falls through to the
-  // existing path and finds nobody to wake — same cost as before.
+  // Advisory racy check: if every worker that entered run() is still awake,
+  // nobody is suspended; a false negative just delays the wake by one pass.
   if (global_state_.awake_workers.load(std::memory_order_acquire) >=
       global_state_.running_workers.load(std::memory_order_acquire)) {
     return;
@@ -165,16 +98,9 @@ void io_context::wake_one_sleeping_locked() noexcept {
 
 void io_context::wake_one_if_all_workers_sleeping() noexcept {
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
-  // Timer deadlines are delivered by each worker's blocking timeout: a worker
-  // blocked in io_uring_enter with a timeout wakes itself when its deadline
-  // arrives. So a new or earlier timer deadline only needs to wake a worker
-  // when every worker is already blocked (their armed timeouts would fire too
-  // late); otherwise the awake worker observes the new nearest deadline on its
-  // next run-loop pass and re-arms its own timeout. The timer entry points
-  // stage this wake only when the heap deadline moved earlier (or a wait was
-  // canceled), so reaching here with all workers sleeping implies a genuine
-  // re-arm is needed. Waking exactly one sleeping worker is sufficient: it
-  // re-arms at the earlier deadline and dispatches it when it fires.
+  // A blocked worker re-arms at its deadline, so one wake suffices when all
+  // sleep; timer entries stage this when the deadline moves earlier or a wait
+  // is canceled or completed.
   if (global_state_.awake_workers.load(std::memory_order_acquire) != 0) {
     return;
   }

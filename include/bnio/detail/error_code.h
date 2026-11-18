@@ -14,10 +14,9 @@ namespace bnio::detail {
 /**
  * Shared empty error code for async-I/O completion hot paths.
  *
- * Reuse a single empty error code on success completion paths instead of
- * default-constructing std::error_code{}, whose default constructor consults
- * system_category() on every call. This value uses the same category as the
- * default constructor, so `ec == std::error_code{}` semantics are preserved.
+ * Avoids default-constructing std::error_code{}, which consults
+ * system_category() on every call. Same category as the default
+ * constructor, so `ec == std::error_code{}` still holds.
  */
 inline const std::error_code empty_error_code{0, std::system_category()};
 

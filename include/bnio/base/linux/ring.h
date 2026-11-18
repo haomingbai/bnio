@@ -19,135 +19,74 @@ class params;
 namespace bnio::base {
 
 /**
- * RAII wrapper for an io_uring instance.
+ * RAII owner for an io_uring instance.
+ *
+ * Move-only; queue_exit() releases the ring if it is open.
  *
  * @see io_uring
  */
 class BNIO_EXPORT ring {
  public:
-  /**
-   * Creates a closed ring wrapper.
-   *
-   * @see io_uring
-   */
+  /** Creates a closed ring wrapper. */
   ring() noexcept;
 
-  /**
-   * Releases the ring if it is open.
-   *
-   * @see io_uring_queue_exit
-   */
+  /** Releases the ring if it is open. */
   ~ring() noexcept;
 
-  /**
-   * Copy construction is disabled because ring owns an io_uring instance.
-   */
+  /** Deleted: the wrapper owns an io_uring instance. */
   ring(const ring&) = delete;
 
-  /**
-   * Copy assignment is disabled because ring owns an io_uring instance.
-   */
+  /** Deleted: the wrapper owns an io_uring instance. */
   ring& operator=(const ring&) = delete;
 
-  /**
-   * Moves ownership of an open ring.
-   *
-   * @see io_uring
-   */
+  /** Moves ownership of the ring. */
   ring(ring&& other) noexcept;
 
-  /**
-   * Moves ownership of an open ring.
-   *
-   * @see io_uring
-   */
+  /** Move assigns ownership of the ring. */
   ring& operator=(ring&& other) noexcept;
 
-  /**
-   * Initializes the ring.
-   *
-   * @see io_uring_queue_init
-   */
+  /** Initializes the ring. @see io_uring_queue_init */
   int queue_init(unsigned entries, unsigned flags = 0) noexcept;
 
-  /**
-   * Initializes the ring with explicit parameters.
-   *
-   * @see io_uring_queue_init_params
-   */
+  /** Initializes the ring with explicit @p queue_params.
+   *  @see io_uring_queue_init_params */
   int queue_init_params(unsigned entries, params& queue_params) noexcept;
 
-  /**
-   * Enables a ring created with IORING_SETUP_R_DISABLED.
-   *
-   * @see io_uring_enable_rings
-   */
+  /** Enables a ring created with IORING_SETUP_R_DISABLED.
+   *  @see io_uring_enable_rings */
   int enable() noexcept;
 
-  /**
-   * Releases the ring if it is open.
-   *
-   * @see io_uring_queue_exit
-   */
+  /** Releases the ring if it is open. */
   void queue_exit() noexcept;
 
-  /**
-   * Submits queued SQEs.
-   *
-   * @see io_uring_submit
-   */
+  /** Submits queued SQEs. @see io_uring_submit */
   int submit() noexcept;
 
-  /**
-   * Submits queued SQEs and waits for completions.
-   *
-   * @see io_uring_submit_and_wait
-   */
+  /** Submits queued SQEs and waits for completions.
+   *  @see io_uring_submit_and_wait */
   int submit_and_wait(unsigned wait_nr) noexcept;
 
-  /**
-   * Returns a submission queue entry wrapper, or a null wrapper if full.
-   *
-   * @see io_uring_get_sqe
-   */
+  /** Returns an SQE wrapper, or a null wrapper when the SQ is full. */
   [[nodiscard]] submission_queue_entry get_sqe() noexcept;
 
-  /**
-   * Peeks for a completion queue entry.
-   *
-   * @see io_uring_peek_cqe
-   */
+  /** Peeks for a CQE. @see io_uring_peek_cqe */
   int peek_cqe(completion_queue_entry& cqe) noexcept;
 
-  /**
-   * Waits for a completion queue entry.
-   *
-   * @see io_uring_wait_cqe
-   */
+  /** Waits for a CQE. @see io_uring_wait_cqe */
   int wait_cqe(completion_queue_entry& cqe) noexcept;
 
-  /**
-   * Waits for a completion queue entry with a timeout.
-   *
-   * @see io_uring_wait_cqe_timeout
-   */
+  /** Waits for a CQE with a timeout. @see io_uring_wait_cqe_timeout */
   int wait_cqe_timeout(completion_queue_entry& cqe,
                        __kernel_timespec* timeout) noexcept;
 
-  /**
-   * Marks a completion queue entry as seen.
-   *
-   * @see io_uring_cqe_seen
-   */
+  /** Marks a CQE as seen. @see io_uring_cqe_seen */
   void cqe_seen(completion_queue_entry cqe) noexcept;
 
   /**
-   * Consumes up to max_count ready completion queue entries.
+   * Consumes up to @p max_count ready CQEs.
    *
-   * The callback receives each entry before the CQ head is advanced. It should
-   * copy any data it needs before returning.
-   *
-   * @see io_uring_for_each_cqe
+   * The handler runs before the CQ head is advanced, so it must copy any data
+   * it needs before returning.
    */
   template <class Handler>
   unsigned consume_ready_cqes(unsigned max_count, Handler&& handler) noexcept {
@@ -172,40 +111,20 @@ class BNIO_EXPORT ring {
     return consumed_entries;
   }
 
-  /**
-   * Returns the wrapped ring.
-   *
-   * @see io_uring
-   */
+  /** Returns the wrapped ring. */
   [[nodiscard]] io_uring* raw() noexcept;
 
-  /**
-   * Returns the wrapped ring.
-   *
-   * @see io_uring
-   */
+  /** Const overload. */
   [[nodiscard]] const io_uring* raw() const noexcept;
 
-  /**
-   * Returns the io_uring file descriptor.
-   *
-   * @see io_uring
-   */
+  /** Returns the io_uring file descriptor. */
   [[nodiscard]] int native_fd() const noexcept;
 
-  /**
-   * Waits on an io_uring file descriptor until at least wait_nr completion
-   * events are available.
-   *
-   * @see io_uring_enter
-   */
+  /** Waits on @p ring_fd for at least @p wait_nr completions.
+   *  @see io_uring_enter */
   static int wait_cqe_event(int ring_fd, unsigned wait_nr) noexcept;
 
-  /**
-   * Returns whether this wrapper currently owns an open ring.
-   *
-   * @see io_uring
-   */
+  /** Returns whether the wrapper owns an open ring. */
   [[nodiscard]] bool is_open() const noexcept;
 
  private:

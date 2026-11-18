@@ -31,10 +31,9 @@ concept dynamic_buffer_like = requires(T buffer, std::size_t size) {
  * Read-side borrow of a user-supplied buffer.
  *
  * A mutable_buffer is borrowed directly; a dynamic buffer is stored by value
- * and prepared with a fixed reserve so SSL_read can write into the prepared
- * window. Either way data()/size() expose the (pointer, size) pair SSL_read
- * needs and commit() records how many bytes were received (a no-op for a
- * static borrow, a forward to the user buffer's commit for a dynamic one).
+ * and prepared with a fixed 4096-byte reserve. data()/size() expose the window
+ * SSL_read needs; commit() records the received size (a no-op for a static
+ * borrow, a forward to the user buffer's commit for a dynamic one).
  */
 template <class Buffer>
   requires std::same_as<Buffer, mutable_buffer> || dynamic_buffer_like<Buffer>
@@ -78,9 +77,8 @@ class read_buffer_borrow {
 /**
  * Write-side borrow of a user-supplied buffer.
  *
- * Borrowed from a const_buffer or a mutable_buffer (normalized to read-only);
- * data()/size() expose the (pointer, size) pair SSL_write needs. No commit
- * exists: writes never hand ownership back.
+ * A const_buffer is borrowed directly; a mutable_buffer is normalized to
+ * read-only. No commit exists: writes never hand ownership back.
  */
 class write_buffer_borrow {
  public:

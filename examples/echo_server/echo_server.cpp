@@ -1,6 +1,5 @@
-// TCP echo server — structured concurrency with sender/receiver.
-// main thread runs context.run(). SIGINT triggers graceful shutdown.
-// Each session uses an operation_registry to keep async ops alive.
+// TCP echo server: sender/receiver structured concurrency; each session keeps
+// its operations alive in a registry. main() runs the context; SIGINT stops it.
 
 #include <bnio/bnio.h>
 
@@ -50,9 +49,7 @@ class op_registry {
 class echo_server;
 class echo_session;
 
-// ------------------------------------------------------------------
 // echo_session
-// ------------------------------------------------------------------
 class echo_session : public std::enable_shared_from_this<echo_session> {
  public:
   echo_session(bnio::io_context& c, bnio::tcp_socket so,
@@ -72,9 +69,7 @@ class echo_session : public std::enable_shared_from_this<echo_session> {
   std::size_t nw_ = 0;
 };
 
-// ------------------------------------------------------------------
 // echo_server
-// ------------------------------------------------------------------
 class echo_server : public std::enable_shared_from_this<echo_server> {
  public:
   echo_server(bnio::io_context& c, bnio::tcp_acceptor a)

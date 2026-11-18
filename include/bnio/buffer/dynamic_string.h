@@ -16,9 +16,8 @@ namespace bnio {
 
 /**
  * Dynamic buffer adapter backed by a caller-owned std::string.
- *
- * The adapter never owns the string. Copying or moving the adapter copies the
- * string pointer and prepared-region bookkeeping.
+ * Never owns the string; copies and moves copy the pointer and prepared-region
+ * bookkeeping.
  */
 class dynamic_string_buffer {
  public:

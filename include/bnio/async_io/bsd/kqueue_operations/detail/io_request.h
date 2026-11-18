@@ -34,9 +34,8 @@ template <class Receiver>
   return result == -EAGAIN || result == -EWOULDBLOCK;
 }
 
-/** Returns whether the operation must wait for readiness after @p result.
- *  Prefers the request's own should_wait() when it provides one; otherwise
- *  falls back to the errno-based check. */
+/** Returns whether the operation must wait after @p result, preferring the
+ *  request's own should_wait() when it provides one. */
 template <class Request>
 [[nodiscard]] bool should_wait(Request& request, int result) noexcept {
   if constexpr (requires { request.should_wait(result); }) {
@@ -55,47 +54,31 @@ concept has_start_io = requires(Request& req) {
 
 /** Operation for a request whose native call is attempted before readiness.
  *
- *  Per completion-semantics contract:
- *  - `stopped_` marks the stop channel: it is set by
- *    complete_submit_stopped() (io_context::stop() aborting this inflight
- *    operation) or by start() when the user's stop_token is already
- *    requested. execute() arbitrates the final signal: token canceled →
- *    set_stopped; otherwise set_value(operation_canceled, ...).
- *  - A negative `result` from perform_io() / kevent reports a recoverable
- *    errno through set_value(ec, ...).
+ * `stopped_` marks the stop channel (abort or start-time token cancel);
+ * execute() arbitrates it to set_stopped or operation_canceled. A negative
+ * `result` surfaces through set_value(ec, ...).
  */
 template <class Request, class Receiver>
 class kqueue_ready_io_operation : public kqueue_io_operation_base {
  public:
-  /**
-   * Creates the operation state bound to the context, request, and
-   * receiver.
-   */
+  /** Creates the operation bound to the context, request, and receiver. */
   kqueue_ready_io_operation(kqueue_context& context, Request request,
                             Receiver receiver)
       : context_(&context),
         request_(std::move(request)),
         receiver_(std::move(receiver)) {}
 
-  /**
-   * Copy construction is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   kqueue_ready_io_operation(const kqueue_ready_io_operation&) = delete;
 
-  /**
-   * Copy assignment is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   kqueue_ready_io_operation& operator=(const kqueue_ready_io_operation&) =
       delete;
 
-  /**
-   * Move construction is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   kqueue_ready_io_operation(kqueue_ready_io_operation&&) = delete;
 
-  /**
-   * Move assignment is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   kqueue_ready_io_operation& operator=(kqueue_ready_io_operation&&) = delete;
 
   /** Delegates native registration preparation to the request. */
@@ -119,9 +102,8 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
     return request_.perform_io();
   }
 
-  /** Starts the operation: checks the stop token, attempts an immediate
-   *  nonblocking I/O step, and otherwise publishes the operation for
-   *  passive preparation by the run loop. */
+  /** Starts: checks the stop token, tries an immediate nonblocking I/O step,
+   *  and otherwise publishes for passive preparation. */
   void start() noexcept {
     if (detail::stop_requested(receiver_)) {
       stopped_ = true;
@@ -137,19 +119,9 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
   }
 
   /**
-   * Delivers the completion.
-   *
-   * `stopped_` marks the stop channel (io_context::stop() abort, or a
-   * stop-token cancel observed at start()); execute() arbitrates the
-   * final signal: token canceled → set_stopped, otherwise
-   * set_value(operation_canceled, -1, 0). All other completions deliver
-   * the real result through set_value(ec, result, flags) untouched.
-   *
-   * The aborted result is -1 and not 0: an aborted operation produced no
-   * result at all, and a descriptor-yielding request (accept) forwards
-   * `result` verbatim, so 0 here would hand the caller ownership of a real
-   * descriptor — the process's stdin. Byte-count requests clamp with
-   * std::max(0, result) and still observe 0.
+   * Delivers the completion: `stopped_` yields set_stopped or
+   * set_value(operation_canceled, -1, 0), otherwise the real result.
+   * -1, not 0, because accept forwards `result` verbatim as a descriptor.
    */
   void execute() noexcept override {
     if (stopped_) {
@@ -170,14 +142,9 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
   }
 
  private:
-  /** Attempts nonblocking I/O before registering with kqueue for readiness.
-   *
-   *  If the request supports immediate I/O (satisfies has_start_io), this
-   *  method calls request_.start_io() immediately.  When the call does not
-   *  return EAGAIN/EWOULDBLOCK the operation is completed inline via the CPU
-   *  queue (post) and this function returns true.  Otherwise it returns false
-   *  so that the caller can register the operation with kqueue.
-   */
+  /** Attempts one nonblocking call before readiness registration; returns
+   *  true when start_io() did not return EAGAIN/EWOULDBLOCK and the
+   *  operation was posted inline, false when the caller must register it. */
   [[nodiscard]] bool try_complete_immediate() noexcept {
     if constexpr (has_start_io<Request>) {
       result = request_.start_io();
@@ -192,27 +159,17 @@ class kqueue_ready_io_operation : public kqueue_io_operation_base {
     }
   }
 
-  /**
-   * Context whose run loop drives this operation.
-   */
+  /** Context whose run loop drives this operation. */
   kqueue_context* context_;
 
-  /**
-   * Request that prepares the kqueue registration, performs the native
-   * I/O step, and translates the completion into set_value arguments.
-   */
+  /** Request that prepares the registration, performs the native I/O step,
+   *  and translates the completion into set_value arguments. */
   Request request_;
 
-  /**
-   * Receiver completed by this operation.
-   */
+  /** Receiver completed by this operation. */
   std::remove_cvref_t<Receiver> receiver_;
 
-  /**
-   * Marks the stop channel (io_context::stop() abort, or a stop-token
-   * cancel observed at start()); execute()'s token arbitration decides
-   * the final signal.
-   */
+  /** Marks the stop channel; execute() arbitrates the final signal. */
   bool stopped_ = false;
 };
 
@@ -227,16 +184,14 @@ class kqueue_ready_io_sender {
   kqueue_ready_io_sender(kqueue_context& context, Request request) noexcept
       : context_(&context), request_(std::move(request)) {}
 
-  /** Connects the sender to a receiver, moving the request into the
-   *  created operation state. */
+  /** Connects to a receiver, moving the request into the operation. */
   template <class Receiver>
   auto connect(Receiver receiver) && {
     return kqueue_ready_io_operation<Request, std::remove_cvref_t<Receiver>>(
         *context_, std::move(request_), std::move(receiver));
   }
 
-  /** Connects the sender to a receiver, copying the request into the
-   *  created operation state. */
+  /** Connects to a receiver, copying the request into the operation. */
   template <class Receiver>
     requires std::copy_constructible<Request>
   auto connect(Receiver receiver) const& {

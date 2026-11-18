@@ -15,7 +15,7 @@
 namespace bnio::base {
 
 /**
- * RAII wrapper for a native kqueue descriptor.
+ * RAII owner for a native kqueue descriptor.
  *
  * @see kqueue
  * @see kevent
@@ -48,7 +48,7 @@ class BNIO_EXPORT kqueue {
   /**
    * Opens a native kqueue descriptor.
    *
-   * Returns 0 on success, or a negative errno value on failure.
+   * @return 0 on success, or a negative errno on failure.
    */
   int open() noexcept;
 
@@ -68,10 +68,9 @@ class BNIO_EXPORT kqueue {
   [[nodiscard]] int native_fd() const noexcept;
 
   /**
-   * Calls kevent against the owned kqueue descriptor.
+   * Calls kevent on the owned descriptor.
    *
-   * Returns the native non-negative event count on success, or a negative errno
-   * value on failure.
+   * @return Non-negative event count on success, or a negative errno.
    */
   int control(const event* changelist, int nchanges, event* eventlist,
               int nevents, const timespec* timeout) noexcept;

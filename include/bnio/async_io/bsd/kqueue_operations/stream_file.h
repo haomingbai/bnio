@@ -23,10 +23,10 @@
 namespace bnio::async_io::bsd_native {
 
 /**
- * A streaming descriptor read. Regular files run ::read inline, advancing
- * the kernel file position; other descriptors are switched to O_NONBLOCK
- * and wait for kqueue readiness. The fstat classification is kept only to
- * select those two behaviors.
+ * Streaming descriptor read. Regular files run ::read inline, advancing the
+ * kernel file position; other descriptors switch to O_NONBLOCK and wait on
+ * kqueue readiness. The single fstat classification only chooses between
+ * these two paths.
  */
 class kqueue_stream_file_read_request {
  public:
@@ -89,8 +89,7 @@ class kqueue_stream_file_read_request {
     return !regular_file_ && detail::should_wait(result);
   }
 
-  /** Delivers the byte count to @p receiver, clamping negative results to
-   *  zero. */
+  /** Delivers the byte count, clamping negative results to zero. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -106,9 +105,9 @@ class kqueue_stream_file_read_request {
 };
 
 /**
- * A streaming descriptor write. Regular files run ::write inline, advancing
- * the kernel file position; other descriptors are switched to O_NONBLOCK
- * and wait for kqueue readiness.
+ * Streaming descriptor write. Regular files run ::write inline, advancing
+ * the kernel file position; other descriptors switch to O_NONBLOCK and
+ * wait on kqueue readiness.
  */
 class kqueue_stream_file_write_request {
  public:
@@ -170,8 +169,7 @@ class kqueue_stream_file_write_request {
     return !regular_file_ && detail::should_wait(result);
   }
 
-  /** Delivers the byte count to @p receiver, clamping negative results to
-   *  zero. */
+  /** Delivers the byte count, clamping negative results to zero. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -187,13 +185,11 @@ class kqueue_stream_file_write_request {
   bool resolved_ = false;
 };
 
-/** Sender returned by kqueue_context::async_read for streaming
- *  descriptors. */
+/** Sender returned by kqueue_context::async_read for streaming descriptors. */
 using kqueue_stream_file_read_sender =
     detail::kqueue_ready_io_sender<kqueue_stream_file_read_request>;
 
-/** Sender returned by kqueue_context::async_write for streaming
- *  descriptors. */
+/** Sender returned by kqueue_context::async_write for streaming descriptors. */
 using kqueue_stream_file_write_sender =
     detail::kqueue_ready_io_sender<kqueue_stream_file_write_request>;
 
@@ -266,8 +262,7 @@ class kqueue_read_operation
     : public detail::kqueue_ready_io_operation<
           kqueue_raw_stream_file_read_request, Receiver> {
  public:
-  /** Constructs the operation from its context, descriptor, buffer, and
-   *  receiver. */
+  /** Binds the context, descriptor, buffer, and receiver. */
   kqueue_read_operation(kqueue_context& context, descriptor_view descriptor,
                         buffer_view buffer, Receiver receiver)
       : detail::kqueue_ready_io_operation<kqueue_raw_stream_file_read_request,
@@ -282,8 +277,7 @@ class kqueue_write_operation
     : public detail::kqueue_ready_io_operation<
           kqueue_raw_stream_file_write_request, Receiver> {
  public:
-  /** Constructs the operation from its context, descriptor, buffer, and
-   *  receiver. */
+  /** Binds the context, descriptor, buffer, and receiver. */
   kqueue_write_operation(kqueue_context& context, descriptor_view descriptor,
                          buffer_view buffer, Receiver receiver)
       : detail::kqueue_ready_io_operation<kqueue_raw_stream_file_write_request,

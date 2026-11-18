@@ -80,9 +80,8 @@ void kqueue_context::dispatch_event_tasks(operation_queue& event_tasks,
 bool kqueue_context::try_rearm_operation(
     kqueue_io_operation_base& operation,
     kqueue_registration_state& node) noexcept {
-  // Re-link the fired node into its (ident, filter) wait queue. If the queue
-  // is empty the node is armed again as the head; otherwise it queues behind
-  // the current armed head and is armed when its turn arrives.
+  // Re-link the fired node into its (ident, filter) wait queue; append_node
+  // arms it only when it becomes the head.
   const int append_result = append_node(node);
   if (append_result >= 0) {
     return true;
@@ -93,9 +92,7 @@ bool kqueue_context::try_rearm_operation(
 
 bool kqueue_context::perform_io_step(kqueue_io_operation_base& operation,
                                      kqueue_registration_state& node) noexcept {
-  // Performs the native I/O step and returns whether the operation completed.
-  // A false return means the operation was re-armed after EAGAIN and must
-  // stay inflight.
+  // Native I/O step; false means re-armed after EAGAIN and still inflight.
   operation.result =
       operation.owns_io_step() ? operation.perform_io() : -EOPNOTSUPP;
   if (operation.result == -EAGAIN || operation.result == -EWOULDBLOCK) {
@@ -123,9 +120,6 @@ bool kqueue_context::dispatch_write_result(
 bool kqueue_context::dispatch_read_result(
     kqueue_io_operation_base& operation, kqueue_registration_state& node,
     const bnio::base::event& event) noexcept {
-  // Error and EOF are handled per-task above; any other task value
-  // performs the native I/O step, matching the original implicit-else
-  // fallback.
   if (event.has_error() && event.data() != 0) {
     operation.result = -static_cast<int>(event.data());
   } else if (!perform_io_step(operation, node)) {
@@ -140,11 +134,6 @@ bool kqueue_context::dispatch_event_result(
   const kqueue_task task = node.task;
   const unsigned poll_mask = node.poll_mask;
 
-  // Event-type dispatch:
-  //   poll: convert the kevent filter/flags into a POLL mask.
-  //   error (non-zero data): propagate the errno from the kevent.
-  //   write EOF: translate to EPIPE or fflags.
-  //   otherwise: perform the actual I/O step; retry on EAGAIN.
   switch (task) {
     case kqueue_task::poll:
       operation.result = static_cast<int>(poll_result(poll_mask, event));
@@ -165,17 +154,15 @@ bool kqueue_context::dispatch_event_result(
 bool kqueue_context::drain_wake_channel(void* udata) noexcept {
   switch (classify_udata(udata)) {
     case event_udata_kind::shared_wake:
-      // Drain the shared wake channel so edge-triggered EVFILT_READ can
-      // re-fire on the next write. This handles both the legacy
-      // EVFILT_USER path and the new shared-pipe path uniformly.
+      // Drain the shared channel so its edge-triggered EVFILT_READ can
+      // re-fire on the next write.
       if (global_state_ != nullptr) {
         (void)global_state_->wake_channel_.drain();
       }
       return true;
 
     case event_udata_kind::local_wake:
-      // Directed wake: only this worker is signalled. Drain the per-worker
-      // channel so the edge-triggered EVFILT_READ can fire again.
+      // Directed wake: drain this worker's channel so it can fire again.
       (void)local_state_.wake_channel_.drain();
       return true;
 
@@ -187,8 +174,7 @@ bool kqueue_context::drain_wake_channel(void* udata) noexcept {
 
 kqueue_registration_state* kqueue_context::find_fired_node(
     kqueue_io_operation_base& operation, std::int16_t filter) noexcept {
-  // Locate the registration node matching this event's filter (an
-  // operation owns at most two nodes: READ + WRITE).
+  // An operation owns at most two nodes: READ and WRITE.
   for (std::uint8_t index = 0; index < operation.registration_count; ++index) {
     kqueue_registration_state& candidate = operation.registrations[index];
     if (candidate.operation != nullptr && candidate.filter == filter) {
@@ -214,8 +200,7 @@ bool kqueue_context::process_event(const bnio::base::event& event,
     return false;
   }
 
-  // Explicitly EV_DELETE the level-triggered (EV_ADD) filter that delivered
-  // this event so it does not re-fire before the next waiter is armed.
+  // EV_DELETE the level-triggered filter so it cannot re-fire before re-arm.
   {
     bnio::base::event deletion(node->ident, node->filter, EV_DELETE, 0, 0,
                                operation);
@@ -223,7 +208,6 @@ bool kqueue_context::process_event(const bnio::base::event& event,
   }
   node->armed = false;
 
-  // Unlink the fired head and arm the successor that takes its place.
   arm_queue_head(unlink_node(*node));
 
   operation->flags = event.flags();
@@ -251,8 +235,7 @@ kqueue_context::event_udata_kind kqueue_context::classify_udata(
 
 unsigned kqueue_context::poll_result(
     unsigned poll_mask, const bnio::base::event& event) const noexcept {
-  // Convert kevent filter/flags to a POLL mask. Only the bits that were
-  // requested in poll_mask are set in the result.
+  // Set only the mask bits that were requested in poll_mask.
   unsigned result = 0;
   if (event.filter() == EVFILT_READ) {
     result |= poll_mask & static_cast<unsigned>(POLLIN | POLLPRI);

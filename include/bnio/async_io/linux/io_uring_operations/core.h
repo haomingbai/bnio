@@ -21,7 +21,7 @@
 namespace bnio::async_io::linux_native {
 
 /**
- * Operation that posts a receiver completion onto an io_uring_context.
+ * Posts a receiver completion onto the context run loop.
  */
 template <class Receiver>
 class io_uring_post_operation : public io_uring_operation_base {
@@ -85,7 +85,7 @@ class io_uring_post_operation : public io_uring_operation_base {
 };
 
 /**
- * Operation representing an io_uring no-op request.
+ * io_uring no-op request.
  */
 template <class Receiver>
 class io_uring_nop_operation
@@ -114,7 +114,7 @@ class io_uring_nop_operation
 };
 
 /**
- * Operation representing an io_uring timeout request.
+ * io_uring timeout request.
  */
 template <class Receiver>
 class io_uring_timeout_operation
@@ -169,7 +169,7 @@ class io_uring_timeout_operation
 };
 
 /**
- * Operation that lets a caller prepare a raw io_uring SQE.
+ * Lets the caller prepare a raw io_uring SQE.
  */
 template <class Receiver, class Prepare>
 class io_uring_raw_operation

@@ -139,9 +139,7 @@ std::optional<local::endpoint> make_local_endpoint(const sockaddr* address,
                                                    socklen_t size) noexcept {
   if (address == nullptr ||
       size < static_cast<socklen_t>(sizeof(sa_family_t))) {
-    // A zero-length address is the kernel's unnamed-peer signal on the
-    // recvfrom(2) path (no address was ever bound): the storage stays
-    // zeroed and no family is reported.
+    // Zero-length address: unnamed peer (never bound).
     if (address != nullptr && size == 0) {
       return local::endpoint();
     }
@@ -153,7 +151,7 @@ std::optional<local::endpoint> make_local_endpoint(const sockaddr* address,
 
   constexpr socklen_t path_offset =
       static_cast<socklen_t>(offsetof(sockaddr_un, sun_path));
-  // Exactly the family field: an unnamed (never bound) socket.
+  // Family field only: unnamed socket.
   if (size <= path_offset) {
     return local::endpoint();
   }
@@ -161,15 +159,13 @@ std::optional<local::endpoint> make_local_endpoint(const sockaddr* address,
   const auto* native = reinterpret_cast<const sockaddr_un*>(address);
   const std::size_t name_bytes = size - path_offset;
 
-  // Abstract form: the kernel reports the leading NUL inside the name
-  // area, and the name is the bytes after it.
+  // Abstract form: name is the bytes after the leading NUL.
   if (native->sun_path[0] == '\0') {
     return local::endpoint::abstract(
         std::string_view(native->sun_path + 1, name_bytes - 1));
   }
 
-  // Path-name form: NUL-terminated by the binder in the common case, but
-  // a full-capacity path may not carry a terminator.
+  // Path form: NUL-terminated only when the terminator fits.
   const std::size_t length = ::strnlen(native->sun_path, name_bytes);
   return local::endpoint(std::string_view(native->sun_path, length));
 }

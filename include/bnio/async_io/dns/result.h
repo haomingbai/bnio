@@ -17,8 +17,8 @@ namespace bnio::async_io {
 /**
  * Non-owning mutable view over caller-owned endpoint storage.
  *
- * The view does not track how many endpoints are written. Resolver operations
- * report that count through set_value(count) or an output count parameter.
+ * The view does not track how many endpoints were written; resolvers report
+ * that count separately (set_value(count) or an output parameter).
  */
 class dns_result_view {
  public:
@@ -28,8 +28,8 @@ class dns_result_view {
   using endpoint_type = ip::endpoint;
 
   /**
-   * Iterator type. The view is a mutable view, so even const iteration yields
-   * writable endpoints (consistent with data() and operator[]).
+   * Iterator type; const iteration still yields writable endpoints, as do
+   * data() and operator[].
    */
   using iterator = endpoint_type*;
 
@@ -70,7 +70,7 @@ class dns_result_view {
   [[nodiscard]] constexpr std::size_t size() const noexcept { return size_; }
 
   /**
-   * Returns whether this view is writable, or intentionally empty.
+   * Whether the view is writable or intentionally empty.
    */
   [[nodiscard]] constexpr bool valid() const noexcept {
     return data_ != nullptr || size_ == 0;
@@ -85,9 +85,8 @@ class dns_result_view {
   }
 
   /**
-   * Returns an iterator to the first endpoint in the viewed storage.
-   * Iteration covers the full capacity reported by size(); callers that only
-   * want the resolved subset must pair this with a count from set_value().
+   * Iterator over the full capacity reported by size(), not the resolved
+   * subset; pair it with the count returned by the resolver.
    */
   [[nodiscard]] constexpr iterator begin() const noexcept { return data_; }
 

@@ -37,9 +37,8 @@ enum class timer_completion_kind {
 
 class BNIO_EXPORT timer_operation_base : public native_operation_base {
  public:
-  /** Accepts a null context for waits started on an unregistered timer
-   *  slot; such operations must never be staged on timers_.ready and
-   *  deliver inline from start() instead. */
+  /** Accepts a null context for an unregistered timer slot; such
+   *  operations deliver inline from start(), never via timers_.ready. */
   explicit timer_operation_base(io_context* context) noexcept;
 
   timer_operation_base(const timer_operation_base&) = delete;
@@ -71,10 +70,8 @@ struct timer_slot {
   async_io::time_point expiry{};
   timer_operation_queue submitted;
 
-  // While active, previous is the parent for a first child and the previous
-  // sibling otherwise; child and next are the first-child and next-sibling
-  // links of the intrusive pairing heap. While inactive, previous and next
-  // form the intrusive doubly linked inactive list and child is null.
+  // Active: previous = parent or previous sibling, child/next = first-child
+  // and next-sibling links. Inactive: previous/next list, child is null.
   timer_slot* previous = nullptr;
   timer_slot* child = nullptr;
   timer_slot* next = nullptr;

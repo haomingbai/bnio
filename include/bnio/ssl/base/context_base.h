@@ -18,290 +18,200 @@
 namespace bnio::ssl::base {
 
 /**
- * RAII owner for an OpenSSL SSL_CTX object.
+ * RAII owner for an OpenSSL SSL_CTX; move-only, unique ownership.
  *
- * context_base owns the native context and frees it on destruction. It is
- * move-only because the native SSL_CTX ownership is unique. Moving transfers
- * only the handle; callbacks registered on the native SSL_CTX stay registered
- * and continue to point at whatever state their installers own.
- *
- * The owner also keeps the non-owning configuration and query surface for
- * callers that work with a context_base directly: every configuration and
- * query method forwards inline to view(), the non-owning context_view over
- * the same native handle. context_view is the only implementation of that
- * surface; this type and ssl::context only route to it. The owner itself
- * keeps no callback state: ssl::context layers owned callback closures on
- * top.
- *
- * The constructor accepts an OpenSSL SSL_METHOD directly. Translating bnio
- * method enumerators into SSL_METHOD values is a public-layer concern; the
- * base only receives the native OpenSSL method, which keeps this type free of
- * bnio transport vocabulary and lets future transports (e.g. QUIC) build
- * contexts from their own methods.
+ * Moving transfers only the handle: native callbacks stay registered and keep
+ * pointing at state their installers own. Config and query methods forward to
+ * view(); ssl::context layers owned callback closures on top. The constructor
+ * takes a native SSL_METHOD, keeping this layer free of transport vocabulary.
  */
 class BNIO_EXPORT context_base {
  public:
   /**
-   * Creates an SSL context from a native OpenSSL method. If SSL_CTX_new
-   * fails, the context is left invalid.
+   * Creates a context from a native method; invalid if SSL_CTX_new fails.
    */
   explicit context_base(const SSL_METHOD* method) noexcept;
 
   /**
-   * Frees the owned SSL_CTX, if any. Callbacks registered on the native
-   * SSL_CTX are not cleared here; an owner that installed closures must clear
-   * the native registrations before destroying them.
+   * Frees the owned SSL_CTX, if any. Does not clear native callback
+   * registrations; an owner that installed closures must do that first.
    */
   ~context_base() noexcept;
 
-  /**
-   * Copy construction is disabled because the context owns an SSL_CTX.
-   */
+  /** Copy construction is disabled; the SSL_CTX is uniquely owned. */
   context_base(const context_base&) = delete;
 
-  /**
-   * Copy assignment is disabled because the context owns an SSL_CTX.
-   */
+  /** Copy assignment is disabled; the SSL_CTX is uniquely owned. */
   context_base& operator=(const context_base&) = delete;
 
-  /**
-   * Moves SSL_CTX ownership from another context.
-   */
+  /** Moves SSL_CTX ownership from another context. */
   context_base(context_base&& other) noexcept;
 
-  /**
-   * Frees the current SSL_CTX and moves ownership from another context.
-   */
+  /** Frees the current SSL_CTX, then moves ownership from another context. */
   context_base& operator=(context_base&& other) noexcept;
 
-  /**
-   * Returns the owned native SSL_CTX pointer, or nullptr when invalid.
-   */
+  /** Returns the owned native SSL_CTX, or nullptr when invalid. */
   [[nodiscard]] SSL_CTX* native_handle() const noexcept { return context_; }
 
-  /**
-   * Returns whether this context owns a native SSL_CTX.
-   */
+  /** True when a native SSL_CTX is owned. */
   [[nodiscard]] bool valid() const noexcept { return context_ != nullptr; }
 
   /**
-   * Returns a non-owning view over the owned native SSL_CTX, or an invalid
-   * view when this context owns no SSL_CTX. The view is valid only while this
-   * owner keeps the handle alive.
+   * Returns a non-owning view of the owned SSL_CTX, invalid when none is
+   * owned. The view is valid only while this owner keeps the handle alive.
    */
   [[nodiscard]] context_view view() const noexcept {
     return context_view(context_);
   }
 
-  /**
-   * Native ALPN selection callback signature re-exported from context_view.
-   */
+  /** ALPN select callback signature, re-exported from context_view. */
   using alpn_select_cb = context_view::alpn_select_cb;
 
-  /**
-   * Native SNI servername callback signature re-exported from context_view.
-   */
+  /** SNI servername callback signature, re-exported from context_view. */
   using servername_cb = context_view::servername_cb;
 
-  /**
-   * Native client_hello callback signature re-exported from context_view.
-   */
+  /** client_hello callback signature, re-exported from context_view. */
   using client_hello_cb = context_view::client_hello_cb;
 
-  /**
-   * Native certificate callback signature re-exported from context_view.
-   */
+  /** Certificate callback signature, re-exported from context_view. */
   using cert_cb = context_view::cert_cb;
 
-  /**
-   * Loads a certificate chain file into the context. Forwards to view().
-   */
+  /** Loads a certificate chain file. */
   [[nodiscard]] std::error_code use_certificate_chain_file(
       const char* path) noexcept {
     return view().use_certificate_chain_file(path);
   }
 
-  /**
-   * Loads a PEM private key file into the context. Forwards to view().
-   */
+  /** Loads a PEM private key file. */
   [[nodiscard]] std::error_code use_private_key_file(
       const char* path) noexcept {
     return view().use_private_key_file(path);
   }
 
-  /**
-   * Checks whether the loaded private key matches the certificate. Forwards
-   * to view().
-   */
+  /** Checks the private key against the certificate. */
   [[nodiscard]] std::error_code check_private_key() noexcept {
     return view().check_private_key();
   }
 
-  /**
-   * Sets OpenSSL certificate verification flags for the context. Forwards to
-   * view().
-   */
+  /** Sets OpenSSL verification flags. */
   void set_verify_mode(int mode) noexcept { view().set_verify_mode(mode); }
 
   /**
-   * Installs a native ALPN selection callback. The context does not own arg;
-   * the caller must keep it alive for as long as the native SSL_CTX may
-   * invoke the callback. Forwards to view().
+   * Installs a native ALPN callback; arg stays caller-owned and must outlive
+   * the native SSL_CTX's use of it.
    */
   void set_alpn_select_cb(alpn_select_cb cb, void* arg) noexcept {
     view().set_alpn_select_cb(cb, arg);
   }
 
   /**
-   * Installs a native SNI servername callback. The context does not own cb;
-   * the caller must keep it valid for as long as the native SSL_CTX may
-   * invoke the callback. Forwards to view().
+   * Installs a native SNI servername callback; cb stays caller-owned and must
+   * outlive the native SSL_CTX's use of it.
    */
   void set_tlsext_servername_callback(servername_cb cb) noexcept {
     view().set_tlsext_servername_callback(cb);
   }
 
-  /**
-   * Sets the opaque argument OpenSSL passes to the SNI servername callback.
-   * The context does not own arg. Forwards to view().
-   */
+  /** Sets the SNI callback argument; caller-owned. */
   void set_tlsext_servername_arg(void* arg) noexcept {
     view().set_tlsext_servername_arg(arg);
   }
 
   /**
-   * Installs a native client_hello callback. The context does not own cb or
-   * arg; the caller must keep them valid for as long as the native SSL_CTX
-   * may invoke the callback. Forwards to view().
+   * Installs a native client_hello callback; cb and arg stay caller-owned and
+   * must outlive the native SSL_CTX's use of them.
    */
   void set_client_hello_cb(client_hello_cb cb, void* arg) noexcept {
     view().set_client_hello_cb(cb, arg);
   }
 
   /**
-   * Installs a native certificate callback. The context does not own cb or
-   * arg; the caller must keep them valid for as long as the native SSL_CTX
-   * may invoke the callback. Forwards to view().
+   * Installs a native certificate callback; cb and arg stay caller-owned and
+   * must outlive the native SSL_CTX's use of them.
    */
   void set_cert_cb(cert_cb cb, void* arg) noexcept {
     view().set_cert_cb(cb, arg);
   }
 
-  /**
-   * Installs an in-memory certificate on the context, mirroring
-   * SSL_CTX_use_certificate. The caller keeps ownership of cert. Forwards to
-   * view().
-   */
+  /** Installs an in-memory certificate; cert stays caller-owned. */
   [[nodiscard]] std::error_code use_certificate(X509* cert) noexcept {
     return view().use_certificate(cert);
   }
 
-  /**
-   * Installs an in-memory private key on the context, mirroring
-   * SSL_CTX_use_PrivateKey. The caller keeps ownership of key. Forwards to
-   * view().
-   */
+  /** Installs an in-memory private key; key stays caller-owned. */
   [[nodiscard]] std::error_code use_private_key(EVP_PKEY* key) noexcept {
     return view().use_private_key(key);
   }
 
   /**
-   * Loads a single certificate file (SSL_FILETYPE_PEM or SSL_FILETYPE_ASN1).
-   * Forwards to view().
+   * Loads one certificate file (SSL_FILETYPE_PEM or ASN1).
    */
   [[nodiscard]] std::error_code use_certificate_file(const char* path,
                                                      int file_type) noexcept {
     return view().use_certificate_file(path, file_type);
   }
 
-  /**
-   * Sets the maximum depth of the certificate chain verification. Forwards to
-   * view().
-   */
+  /** Sets the maximum chain verification depth. */
   void set_verify_depth(int depth) noexcept { view().set_verify_depth(depth); }
 
-  /**
-   * Sets SSL/TLS option flags (SSL_OP_*); the previous options are ignored.
-   * Forwards to view().
-   */
+  /** Adds SSL_OP_* flags to the options already set. */
   void set_options(std::uint64_t options) noexcept {
     view().set_options(options);
   }
 
-  /**
-   * Returns the current SSL/TLS option flags. Forwards to view().
-   */
+  /** Returns the current SSL_OP_* flags. */
   [[nodiscard]] std::uint64_t get_options() const noexcept {
     return view().get_options();
   }
 
-  /**
-   * Sets the cipher list for TLS 1.2 and earlier. Forwards to view().
-   */
+  /** Sets the TLS 1.2 and earlier cipher list. */
   [[nodiscard]] std::error_code set_cipher_list(const char* lists) noexcept {
     return view().set_cipher_list(lists);
   }
 
-  /**
-   * Sets the cipher suites for TLS 1.3. Forwards to view().
-   */
+  /** Sets the TLS 1.3 cipher suites. */
   [[nodiscard]] std::error_code set_ciphersuites(const char* suites) noexcept {
     return view().set_ciphersuites(suites);
   }
 
   /**
-   * Loads trusted CA certificates from a file and/or directory; either
-   * argument may be nullptr. Forwards to view().
+   * Loads trusted CAs from a file and/or directory; either may be nullptr.
    */
   [[nodiscard]] std::error_code load_verify_locations(
       const char* ca_file, const char* ca_dir) noexcept {
     return view().load_verify_locations(ca_file, ca_dir);
   }
 
-  /**
-   * Loads the default trusted CA locations. Forwards to view().
-   */
+  /** Loads the default trusted CA locations. */
   [[nodiscard]] std::error_code set_default_verify_paths() noexcept {
     return view().set_default_verify_paths();
   }
 
-  /**
-   * Sets the minimum protocol version (0 selects the automatic default).
-   * Forwards to view().
-   */
+  /** Sets the minimum protocol version; 0 selects the default. */
   [[nodiscard]] std::error_code set_min_proto_version(int version) noexcept {
     return view().set_min_proto_version(version);
   }
 
-  /**
-   * Sets the maximum protocol version (0 selects the automatic default).
-   * Forwards to view().
-   */
+  /** Sets the maximum protocol version; 0 selects the default. */
   [[nodiscard]] std::error_code set_max_proto_version(int version) noexcept {
     return view().set_max_proto_version(version);
   }
 
   /**
-   * Sets the session cache mode; the previous mode is ignored. Forwards to
-   * view().
+   * Sets the session cache mode; the previous mode is ignored.
    */
   void set_session_cache_mode(long mode) noexcept {
     view().set_session_cache_mode(mode);
   }
 
-  /**
-   * Sets the session id context used by servers to scope session resumption.
-   * Forwards to view().
-   */
+  /** Sets the server-side session resumption scope. */
   [[nodiscard]] std::error_code set_session_id_context(
       const unsigned char* sid, std::size_t length) noexcept {
     return view().set_session_id_context(sid, length);
   }
 
   /**
-   * Installs a TLS key material logging callback for SSLKEYLOGFILE-style
-   * debugging (e.g. decrypting captures in an external analyzer). Forwards to
-   * view().
+   * Installs a TLS key material logger for SSLKEYLOGFILE debugging.
    */
   void set_keylog_callback(void (*cb)(const SSL* ssl,
                                       const char* line)) noexcept {
@@ -309,9 +219,7 @@ class BNIO_EXPORT context_base {
   }
 
   /**
-   * Sets the client-side ALPN protocol list in OpenSSL wire format: a
-   * sequence of protocol names, each prefixed by a single length byte.
-   * Forwards to view().
+   * Sets the client ALPN list in OpenSSL wire format (length-prefixed names).
    */
   [[nodiscard]] std::error_code set_alpn_protos(const unsigned char* data,
                                                 unsigned int length) noexcept {

@@ -20,12 +20,9 @@
 namespace bnio::local {
 
 /**
- * RAII owner for a native local stream socket descriptor.
+ * Move-only RAII owner for a native local stream socket.
  *
- * stream_socket closes its descriptor on destruction. It is move-only
- * because duplicating ownership of one descriptor would make close
- * semantics ambiguous. Use view() when an API needs a non-owning async_io
- * local stream socket view.
+ * Use view() for a non-owning async_io::local::stream_socket_view.
  */
 class BNIO_EXPORT stream_socket {
  public:
@@ -41,10 +38,8 @@ class BNIO_EXPORT stream_socket {
   stream_socket() noexcept = default;
 
   /**
-   * Takes ownership of an existing native stream socket descriptor.
-   *
-   * The underlying descriptor is set to non-blocking mode so that the
-   * kqueue backend can skip per-operation fcntl calls.
+   * Takes ownership of @p fd and sets it non-blocking, so the kqueue backend
+   * can skip per-operation fcntl calls.
    */
   explicit stream_socket(native_handle_type fd) noexcept : fd_(fd) {
     if (fd_ >= 0) {
@@ -61,12 +56,12 @@ class BNIO_EXPORT stream_socket {
   ~stream_socket() noexcept;
 
   /**
-   * Copy construction is disabled because the socket owns a descriptor.
+   * Copy construction is disabled; the socket owns a descriptor.
    */
   stream_socket(const stream_socket&) = delete;
 
   /**
-   * Copy assignment is disabled because the socket owns a descriptor.
+   * Copy assignment is disabled; the socket owns a descriptor.
    */
   stream_socket& operator=(const stream_socket&) = delete;
 
@@ -76,8 +71,7 @@ class BNIO_EXPORT stream_socket {
   stream_socket(stream_socket&& other) noexcept;
 
   /**
-   * Closes the current descriptor and moves descriptor ownership from
-   * another socket.
+   * Closes the current descriptor, then moves ownership from @p other.
    */
   stream_socket& operator=(stream_socket&& other) noexcept;
 
@@ -89,14 +83,14 @@ class BNIO_EXPORT stream_socket {
   }
 
   /**
-   * Returns the owned native descriptor, or -1 when closed.
+   * Alias of native_handle().
    */
   [[nodiscard]] native_handle_type get_native_handle() const noexcept {
     return native_handle();
   }
 
   /**
-   * Returns whether this object currently owns a descriptor.
+   * Returns whether a descriptor is currently owned.
    */
   [[nodiscard]] bool is_open() const noexcept { return fd_ >= 0; }
 
@@ -108,48 +102,45 @@ class BNIO_EXPORT stream_socket {
   }
 
   /**
-   * Returns this stream's next layer.
+   * Returns *this; the stream is its own next layer.
    */
   [[nodiscard]] stream_socket& next_layer() noexcept { return *this; }
 
   /**
-   * Returns this stream's next layer.
+   * Const overload; returns *this.
    */
   [[nodiscard]] const stream_socket& next_layer() const noexcept {
     return *this;
   }
 
   /**
-   * Returns this stream's lowest layer.
+   * Returns *this; the stream is its own lowest layer.
    */
   [[nodiscard]] stream_socket& lowest_layer() noexcept { return *this; }
 
   /**
-   * Returns this stream's lowest layer.
+   * Const overload; returns *this.
    */
   [[nodiscard]] const stream_socket& lowest_layer() const noexcept {
     return *this;
   }
 
   /**
-   * Creates a sender for one read operation. The operation may complete with
-   * fewer bytes than the buffer size.
+   * Read-all sender: repeats until the buffer is full; completes short only
+   * on EOF/error.
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_read(Scheduler scheduler, Buffer&& buffer,
                                 int flags = 0);
 
-  /**
-   * Creates a sender for one read operation. This is the explicit read-some
-   * spelling of async_read.
-   */
+  /** One read attempt; short reads are returned as-is. */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_read_some(Scheduler scheduler, Buffer&& buffer,
                                      int flags = 0);
 
   /**
-   * Creates a sender that writes the whole buffer, retrying short writes until
-   * the buffer is fully transferred or an error/stopped signal occurs.
+   * Creates a sender that writes the whole buffer, retrying short writes
+   * until complete or an error/stopped signal occurs.
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_write(Scheduler scheduler, Buffer&& buffer,
@@ -163,8 +154,8 @@ class BNIO_EXPORT stream_socket {
                                       int flags = 0);
 
   /**
-   * Creates a sender that connects this socket to a local endpoint through
-   * the scheduler's queued submission path.
+   * Creates a sender that connects this socket to @p endpoint via
+   * @p scheduler.
    */
   template <class Scheduler>
   [[nodiscard]] auto async_connect(Scheduler scheduler,
@@ -191,16 +182,12 @@ class BNIO_EXPORT stream_socket {
    */
   void assign(native_handle_type fd) noexcept;
 
-  /**
-   * Shuts down socket send and/or receive operations.
-   *
-   * @see shutdown
-   */
+  /** Shuts down socket send and/or receive operations. */
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
   /**
-   * Stores the connected peer endpoint into @p endpoint, resetting it to
-   * the unspecified kind for an unnamed peer.
+   * Stores the connected peer endpoint; an unnamed peer is reset to the
+   * unspecified kind.
    */
   [[nodiscard]] std::error_code remote_endpoint(
       async_io::local::endpoint& endpoint) const noexcept;
@@ -212,11 +199,10 @@ class BNIO_EXPORT stream_socket {
 /**
  * Move-only RAII owner for a native local datagram socket.
  *
- * Every datagram operation transfers exactly one datagram: senders and
- * receivers preserve message boundaries and never use stream-style
- * write-all or read-all retries. Call connect(endpoint) to set a default
- * peer, then use async_send() and async_receive(); use async_send_to()
- * and async_receive_from() to address each datagram explicitly.
+ * Every async operation transfers exactly one datagram; no operation retries
+ * with write-all/read-all. connect() sets the default peer for
+ * async_send()/async_receive(); async_send_to()/async_receive_from()
+ * address each datagram explicitly.
  */
 class BNIO_EXPORT datagram_socket {
  public:
@@ -232,10 +218,8 @@ class BNIO_EXPORT datagram_socket {
   datagram_socket() noexcept = default;
 
   /**
-   * Takes ownership of an existing native datagram socket descriptor.
-   *
-   * The underlying descriptor is set to non-blocking mode so that the
-   * kqueue backend can skip per-operation fcntl calls.
+   * Takes ownership of @p fd and sets it non-blocking, so the kqueue backend
+   * can skip per-operation fcntl calls.
    */
   explicit datagram_socket(native_handle_type fd) noexcept : fd_(fd) {
     if (fd_ >= 0) {
@@ -255,14 +239,13 @@ class BNIO_EXPORT datagram_socket {
   datagram_socket& operator=(const datagram_socket&) = delete;
 
   /**
-   * Moves ownership of the descriptor from @p other, leaving @p other
-   * closed.
+   * Moves descriptor ownership from @p other, leaving @p other closed.
    */
   datagram_socket(datagram_socket&& other) noexcept;
 
   /**
-   * Moves ownership of the descriptor from @p other, closing any descriptor
-   * this socket held and leaving @p other closed.
+   * Moves descriptor ownership from @p other, closing any descriptor this
+   * socket held; @p other is left closed.
    */
   datagram_socket& operator=(datagram_socket&& other) noexcept;
 
@@ -274,14 +257,14 @@ class BNIO_EXPORT datagram_socket {
   }
 
   /**
-   * Returns the owned native descriptor, or -1 when closed.
+   * Alias of native_handle().
    */
   [[nodiscard]] native_handle_type get_native_handle() const noexcept {
     return native_handle();
   }
 
   /**
-   * Returns whether this object currently owns a descriptor.
+   * Returns whether a descriptor is currently owned.
    */
   [[nodiscard]] bool is_open() const noexcept { return fd_ >= 0; }
 
@@ -299,9 +282,8 @@ class BNIO_EXPORT datagram_socket {
       async_io::local::datagram_protocol protocol) noexcept;
 
   /**
-   * Binds the socket to a local endpoint. An endpoint that cannot be
-   * converted to sockaddr_un reports std::errc::invalid_argument without
-   * a syscall.
+   * Binds to @p endpoint; an endpoint that cannot convert to sockaddr_un
+   * reports std::errc::invalid_argument without a syscall.
    */
   [[nodiscard]] std::error_code bind(
       const async_io::local::endpoint& endpoint) noexcept;
@@ -313,23 +295,19 @@ class BNIO_EXPORT datagram_socket {
       const async_io::local::endpoint& endpoint) noexcept;
 
   /**
-   * Closes the socket and returns any error reported by ::close. The socket
-   * is left closed either way.
+   * Closes the socket and returns any ::close error; the socket is left
+   * closed either way.
    */
   [[nodiscard]] std::error_code close() noexcept;
 
   /**
-   * Releases ownership of the socket descriptor to the caller, leaving this
-   * socket closed.
+   * Releases ownership, leaving this socket closed.
    */
   [[nodiscard]] native_handle_type release() noexcept;
 
   /**
-   * Takes ownership of an existing datagram socket descriptor, closing any
-   * descriptor currently held.
-   *
-   * Like the owning constructor, the descriptor is set to non-blocking mode
-   * so that the kqueue backend can skip per-operation fcntl calls.
+   * Takes ownership of @p fd, closing any descriptor currently held, and
+   * sets it non-blocking like the owning constructor.
    */
   void assign(native_handle_type fd) noexcept;
 
@@ -339,39 +317,37 @@ class BNIO_EXPORT datagram_socket {
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
   /**
-   * Stores the locally bound endpoint into @p endpoint, resetting it to
-   * the unspecified kind for an unnamed socket.
+   * Stores the locally bound endpoint; an unnamed socket is reset to the
+   * unspecified kind.
    */
   [[nodiscard]] std::error_code local_endpoint(
       async_io::local::endpoint& endpoint) const noexcept;
 
   /**
-   * Stores the connected peer endpoint into @p endpoint, resetting it to
-   * the unspecified kind for an unnamed peer.
+   * Stores the connected peer endpoint; an unnamed peer is reset to the
+   * unspecified kind.
    */
   [[nodiscard]] std::error_code remote_endpoint(
       async_io::local::endpoint& endpoint) const noexcept;
 
   /**
-   * Creates a sender that transfers exactly one datagram from @p buffer to
-   * the socket's default peer through @p scheduler. The default peer is
-   * set with connect(endpoint).
+   * Sends exactly one datagram from @p buffer to the default peer set by
+   * connect().
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_send(Scheduler scheduler, Buffer&& buffer,
                                 int flags = 0);
 
   /**
-   * Creates a sender that receives exactly one datagram into @p buffer
-   * from the socket's default peer through @p scheduler.
+   * Receives exactly one datagram into @p buffer from the default peer.
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_receive(Scheduler scheduler, Buffer&& buffer,
                                    int flags = 0);
 
   /**
-   * Creates a sender that sends one datagram from @p buffer to @p endpoint
-   * through @p scheduler, without requiring a connected socket.
+   * Sends one datagram from @p buffer to @p endpoint without a connected
+   * socket.
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_send_to(Scheduler scheduler, Buffer&& buffer,
@@ -379,8 +355,8 @@ class BNIO_EXPORT datagram_socket {
                                    int flags = 0);
 
   /**
-   * Creates a sender that receives one datagram into @p buffer through
-   * @p scheduler and stores the source endpoint into @p endpoint.
+   * Receives one datagram into @p buffer and stores the source endpoint in
+   * @p endpoint.
    */
   template <class Scheduler, class Buffer>
   [[nodiscard]] auto async_receive_from(Scheduler scheduler, Buffer&& buffer,

@@ -1,17 +1,5 @@
-// file_cat — an asynchronous `cat`: reads a file through bnio::io_context
-// and streams it to stdout.
-//
-// The whole program is a single composed sender pipeline:
-//
-//   repeat_until(read_some(file) | let_value(write stdout) | then)
-//
-// Each round reads one chunk from the file and drains it to stdout. Both
-// ends are streaming descriptor I/O: every operation transfers from/to the
-// kernel file position and advances it, so no offsets are tracked here.
-// File reads always complete eagerly (regular files are always ready),
-// while writes to a slow stdout (tty/pipe) suspend the operation and resume
-// it from the event loop — the same pipeline transparently spans both
-// paths. EOF and errors zero the chunk, which the loop predicate observes.
+// file_cat: asynchronous `cat` as a repeat_until pipeline over streaming
+// descriptor I/O; an EOF/error round zeroes the chunk and ends the loop.
 
 #include <bnio/bnio.h>
 #include <fcntl.h>
@@ -94,13 +82,8 @@ int main(int argc, char** argv) {
   const auto file = bnio::async_io::descriptor_view(state.in_fd);
   const auto out = bnio::async_io::descriptor_view(STDOUT_FILENO);
 
-  // One round: read a chunk at the kernel file position, then stream it to
-  // stdout.
-  //
-  // bexec::let_value requires a single return-sender type, so every outcome
-  // funnels through the same async_write: EOF and error rounds request a
-  // zero-byte write, which write-all completes immediately without a system
-  // call. state.chunk == 0 afterwards makes the predicate end the loop.
+  // Read a chunk, then stream it. let_value needs one return-sender type, so
+  // EOF/error rounds use a zero-byte write, and chunk == 0 ends the loop.
   auto read_round = [&]() {
     return io.async_read_some(file, bnio::buffer(state.buf)) |
            bexec::let_value([&](std::error_code ec, std::size_t n) {
@@ -109,9 +92,8 @@ int main(int argc, char** argv) {
                n = 0;
              }
              state.chunk = n;
-             // Streaming writes are correct for every stdout kind: the
-             // kernel position of a redirected regular file advances on its
-             // own, and pipes/ttys simply take the bytes in order.
+             // Streaming writes work for every stdout kind: a regular file
+             // advances its own kernel position, pipes/tty take bytes in order.
              return io.async_write(
                  out, bnio::const_buffer(state.buf.data(), state.chunk));
            }) |

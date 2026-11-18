@@ -24,25 +24,12 @@ namespace bnio::async_io::linux_native {
 class io_uring_operation_base;
 class io_uring_io_operation_base;
 
-/** Per-worker local CPU and I/O queues, and wake channel.
+/** Per-worker local CPU and I/O queues plus directed-wake state.
  *
- * Both local queues are owned exclusively by their worker thread: they are
- * pushed only by the worker itself and popped only by the worker during
- * fetch. No remote thread ever touches them — work stealing was removed —
- * so the heads are plain pointers and push/pop need no atomics.
- *
- * The local I/O queue is safe without a wakeup for the same reason: an
- * operation reaches it only from a callback running on this worker's own
- * run loop, so the publisher is the thread that will drain it. That is
- * what distinguishes it from the shared I/O queue, which is MPSC and
- * therefore needs every publication to pair the push with a wakeup of a
- * possibly sleeping worker.
- *
- * The node is linked into the shared state's suspend list only while the
- * worker sleeps in the native poller, so a publisher can wake it.  A
- * remote thread touches the node only while holding that list's lock,
- * which also keeps the owning worker from being destroyed (UAF
- * protection).
+ * Owned exclusively by the worker thread, which alone pushes and pops them.
+ * The local I/O queue needs no wakeup because only this worker's run loop
+ * publishes to it. A sleeping node is guarded by the shared suspend list's
+ * lock, which keeps its owner alive.
  */
 struct BNIO_EXPORT io_uring_local_task_queue_state {
   /** Pushes one operation onto the local CPU queue as its new LIFO head. */
@@ -58,8 +45,7 @@ struct BNIO_EXPORT io_uring_local_task_queue_state {
   /** Head of the local CPU task queue. */
   io_uring_operation_base* cpu_head = nullptr;
 
-  /** Pushes one I/O operation onto the local I/O queue as its new LIFO
-   *  head; links through the inherited next field. */
+  /** Pushes one I/O operation onto the local I/O queue (LIFO, via next). */
   void push_io(io_uring_io_operation_base& operation) noexcept;
 
   /** Pushes a linked list of I/O tasks (the caller's order is preserved
@@ -81,12 +67,10 @@ struct BNIO_EXPORT io_uring_local_task_queue_state {
   bnio::base::wake_channel wake_channel_;
 };
 
-/** One doubly-linked list of sleeping worker local states guarded by its
- * own lock.
+/** Intrusive list of sleeping worker local states, guarded by its own lock.
  *
- * The list head and its guard lock are kept together so every operation on
- * the list takes exactly the lock that owns it; the lock also guards node
- * lifetime (a node is unlinked under it before its owner is destroyed). */
+ * The lock also guards node lifetime: a node is unlinked under it before its
+ * owner is destroyed. */
 struct BNIO_EXPORT io_uring_worker_state_list {
   /** Guards the list and the lifetime of its nodes. */
   std::mutex lock;
@@ -99,64 +83,46 @@ struct BNIO_EXPORT io_uring_worker_state_list {
 
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT io_uring_task_queue_state {
-  /** Non-blocking fetch entry point into the shared lazy timer heap.
-   *
-   *  Invoked with the opaque heap pointer stored in @p timeout_heap; the
-   *  second argument receives the earliest remaining deadline and the
-   *  third receives the linked list of operations whose timers expired,
-   *  ready to be pushed onto a CPU queue.
-   *
-   *  @return true when the fetch ran; false when another worker was
-   *          already draining the heap.
-   */
+  /** Non-blocking timer-heap fetch (heap, earliest deadline out, expired list
+   *  out); true if it ran, false if another worker is already draining. */
   using try_fetch_timeout_fn = bool (*)(void*, async_io::time_point&,
                                         io_uring_operation_base*&) noexcept;
 
-  /** Atomically pushes one operation onto the shared CPU queue as its new
-   *  head (lock-free MPSC with release publication). */
+  /** Lock-free MPSC push onto the shared CPU queue (release publication). */
   void push_cpu(io_uring_operation_base& operation) noexcept;
 
   /** Atomically removes and returns the whole shared CPU queue. */
   [[nodiscard]] io_uring_operation_base* pop_cpu_all() noexcept;
 
-  /** Atomically pushes one I/O operation onto the shared I/O queue as its
-   *  new head; the publisher must pair the push with a wakeup of a
-   *  possibly sleeping worker. */
+  /** MPSC push onto the shared I/O queue; the publisher must pair it with a
+   *  wakeup of a possibly sleeping worker. */
   void push_io(io_uring_io_operation_base& operation) noexcept;
 
   /** Atomically removes and returns the whole shared I/O queue. */
   [[nodiscard]] io_uring_io_operation_base* pop_io_all() noexcept;
 
-  /** Pops the whole shared I/O queue and delivers every operation through
-   *  the stop channel inline: result = -ECANCELED, complete_submit_stopped(),
-   *  then execute().  The caller owns the receiver-callback context; this
-   *  must never run while holding submit_lock.  Traverses with `next` —
-   *  the field push_io() links with.
-   *  @return true when at least one operation was delivered. */
+  /** Pops the shared I/O queue and completes every operation inline as
+   *  stopped: result = -ECANCELED, complete_submit_stopped(), then execute().
+   *  Must not run while holding submit_lock. @return true if any operation
+   *  was delivered. */
   [[nodiscard]] bool drain_io_stopped() noexcept;
 
-  /**
-   * Wakes exactly one sleeping worker by writing its per-worker wake
-   * channel. Takes only the suspend list's lock: a node on the suspend
-   * list is alive (the owner unregisters under the same lock before its
-   * context is destroyed), so the write cannot race a close.
-   *
-   * @return true if a worker was woken; false if nobody is sleeping.
-   */
+  /** Wakes one sleeping worker via its per-worker wake channel, taking only
+   *  the suspend-list lock. A listed node is kept alive by its owner
+   *  unregistering under that lock, so this cannot race a close.
+   *  @return false if none. */
   [[nodiscard]] bool wake_one_sleeping() noexcept;
 
   /** Head of the shared MPSC CPU task queue. */
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
   /** Head of the shared MPSC I/O task queue. */
   std::atomic<io_uring_io_operation_base*> io_head{nullptr};
-  /** Workers not blocked in the native poller (active workers). Incremented
-   *  by enter_run(), decremented by begin_wait(), restored by end_wait().
-   *  Feeds the wake fast path and the all-sleeping timer wake check. */
+  /** Workers not blocked in the native poller; incremented by enter_run(),
+   *  decremented by begin_wait(), restored by end_wait(). Feeds the wake fast
+   *  path and the all-sleeping timer check. */
   std::atomic<std::size_t> awake_workers{0};
-  /** Total workers currently inside io_context::run() (active + suspended +
-   *  entering). Incremented by io_context::run() before any check,
-   *  decremented on every run() return path; the native backends never touch
-   *  it. Feeds the wake fast path. */
+  /** Workers inside io_context::run() (active, suspended, or entering); only
+   *  run() updates it. Feeds the wake fast path. */
   std::atomic<std::size_t> running_workers{0};
 
   /** Sleeping worker local states (directed-wake targets), guarded by its
@@ -169,89 +135,51 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   /** Opaque pointer to the shared lazy timer heap; created and owned by
    *  io_context. */
   void* timeout_heap = nullptr;
-  /** Non-blocking fetch entry point for the timer heap; set by io_context
-   *  when the heap is created and cleared when it is destroyed. */
+  /** Timer-heap fetch hook; set and cleared by io_context with the heap. */
   try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
 
-  /** Shared wake channel owned by io_context.
-   *
-   * io_context creates the channel once and writes to it to wake
-   * workers during shutdown.  Each worker's io_uring_context registers
-   * read interest (IORING_POLL_ADD) before sleeping.  In normal
-   * operation a single worker is woken directly via its per-worker
-   * channel (see wake_one_sleeping()); this shared channel remains the
-   * broadcast path used by stop() and as a fallback.
-   */
+  /** Shared wake channel owned by io_context; broadcast path used by stop()
+   *  and as a fallback. Normal wakeups target one worker directly through
+   *  its per-worker channel (see wake_one_sleeping()). */
   bnio::base::wake_channel wake_channel_;
 
-  /** Submit-path lock shared by publish_cpu() and begin_stop().
-   *
-   * Both the "check state + enqueue + wake" submission critical section and
-   * the stop-path state transition run inside this lock, so an operation
-   * that observed the context as running is guaranteed to be drained by the
-   * last worker's finish(), and an operation that observes the stopping
-   * state never enqueues into a queue that may no longer be drained.
-   */
+  /** Serializes submission against the stop transition: work that saw the
+   *  context running is drained by the last worker's finish(); work that sees
+   *  stopping never enqueues into a queue that may no longer be drained. */
   std::mutex submit_lock;
 };
 
-/**
- * Base class for operations scheduled by an io_uring_context.
- */
+/** Base class for operations scheduled by an io_uring_context. */
 class BNIO_EXPORT io_uring_operation_base {
  public:
-  /**
-   * Intrusive next pointer used by context task queues.
-   */
+  /** Intrusive next pointer used by context task queues. */
   io_uring_operation_base* next = nullptr;
 
-  /**
-   * Completion result copied from the CQE.
-   *
-   * @see io_uring_cqe
-   */
+  /** Completion result copied from the CQE (see io_uring_cqe). */
   int result = 0;
 
-  /**
-   * Completion flags copied from the CQE.
-   *
-   * @see io_uring_cqe
-   */
+  /** Completion flags copied from the CQE (see io_uring_cqe). */
   unsigned flags = 0;
 
-  /**
-   * Creates an unlinked operation base.
-   */
+  /** Creates an unlinked operation base. */
   io_uring_operation_base() noexcept = default;
 
-  /**
-   * Copy construction is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   io_uring_operation_base(const io_uring_operation_base&) = delete;
 
-  /**
-   * Copy assignment is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   io_uring_operation_base& operator=(const io_uring_operation_base&) = delete;
 
-  /**
-   * Move construction is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   io_uring_operation_base(io_uring_operation_base&&) = delete;
 
-  /**
-   * Move assignment is disabled because operations are queued intrusively.
-   */
+  /** Disabled: operations are queued intrusively. */
   io_uring_operation_base& operator=(io_uring_operation_base&&) = delete;
 
-  /**
-   * Destroys the operation base.
-   */
+  /** Destroys the operation base. */
   virtual ~io_uring_operation_base() = default;
 
-  /**
-   * Completes the operation on the context run loop.
-   */
+  /** Completes the operation on the context run loop. */
   virtual void execute() noexcept = 0;
 };
 
@@ -276,12 +204,9 @@ class BNIO_EXPORT io_uring_io_operation_base : public io_uring_operation_base {
    * I/O. */
   virtual void complete_submit_stopped() noexcept = 0;
 
-  /** Returns whether a CQE carrying -EAGAIN is a transient would-block
-   *  outcome that must be re-submitted through the I/O queue instead of
-   *  being delivered as a terminal error. Read/write-class operations on
-   *  sockets and files return true, mirroring kqueue_context::
-   *  perform_io_step(); poll/nop/timeout-class operations keep the default
-   *  (false). */
+  /** True when a -EAGAIN CQE is transient and must be re-submitted through
+   *  the I/O queue instead of delivered as a terminal error. Read/write
+   *  classes opt in; poll/nop/timeout keep the default (false). */
   [[nodiscard]] virtual bool rearm_on_eagain() const noexcept { return false; }
 
   /** Next operation in the inflight doubly-linked list. */
@@ -316,9 +241,8 @@ io_uring_local_task_queue_state::pop_cpu_all() noexcept {
 
 inline void io_uring_local_task_queue_state::push_io(
     io_uring_io_operation_base& operation) noexcept {
-  // Owner-only access (no stealing), so this is a plain LIFO head insert.
-  // The I/O queue links through the inherited `next` field: `io_next` and
-  // `io_prev` belong to the inflight doubly-linked list.
+  // Owner-only access (no stealing): plain LIFO insert. Links through the
+  // inherited `next`; io_next/io_prev belong to the inflight list.
   operation.next = io_head;
   io_head = &operation;
 }
@@ -373,17 +297,15 @@ inline bool io_uring_task_queue_state::drain_io_stopped() noexcept {
   if (head == nullptr) {
     return false;
   }
-  // The shared I/O queue chains through the inherited `next` field (see
-  // push_io()); the inflight list's io_next/io_prev are unrelated here.
+  // Shared I/O queue chains through inherited `next`, not io_next/io_prev.
   while (head != nullptr) {
     io_uring_io_operation_base* next =
         static_cast<io_uring_io_operation_base*>(head->next);
     head->next = nullptr;
     head->result = -ECANCELED;
     head->complete_submit_stopped();
-    // No worker exists in the stop-drain path: deliver inline instead of
-    // re-queueing onto a local CPU queue, or the operation would never
-    // be fetched again.
+    // Stop-drain path has no worker: deliver inline, since re-queueing
+    // onto a local CPU queue would never be fetched again.
     head->execute();
     head = next;
   }

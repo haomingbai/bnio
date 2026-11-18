@@ -12,8 +12,8 @@ namespace bnio::async_io {
 /**
  * Non-owning view over a native file descriptor.
  *
- * Copying or moving this view copies only the descriptor value. The descriptor
- * remains owned and closed by the caller.
+ * Copying or moving copies only the descriptor value; the caller still owns
+ * and closes it.
  */
 class descriptor_view {
  public:
@@ -67,7 +67,7 @@ class descriptor_view {
   }
 
   /**
-   * Returns whether this view references a valid descriptor value.
+   * Whether the descriptor value is non-negative.
    */
   [[nodiscard]] constexpr bool valid() const noexcept { return fd_ >= 0; }
 

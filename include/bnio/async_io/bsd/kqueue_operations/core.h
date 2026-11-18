@@ -39,8 +39,8 @@ class kqueue_post_operation : public kqueue_operation_base {
     }
   }
 
-  /** Records whether the receiver's stop token is canceled and posts the
-   *  operation for completion on the context. */
+  /** Posts the operation, sampling the receiver's stop token now: a
+   *  canceled token yields set_stopped at completion. */
   void start() noexcept {
     auto environment = bexec::get_env(receiver_);
     auto token = bexec::query(environment, bexec::get_stop_token);
@@ -67,7 +67,7 @@ class kqueue_nop_operation
   /** Prepares a nop registration that only wakes the run loop. */
   void prepare(kqueue_helper& helper) noexcept override { helper.prep_nop(); }
 
-  /** Starts the nop through the receiver-operation start path. */
+  /** Starts the nop. */
   void start() noexcept { this->start_io(*this); }
 };
 
@@ -83,10 +83,10 @@ class kqueue_raw_operation
                                                     std::move(receiver)),
         prepare_(std::move(prepare)) {}
 
-  /** Runs the caller-supplied preparation callable on the helper. */
+  /** Applies the preparation callable to @p helper. */
   void prepare(kqueue_helper& helper) noexcept override { prepare_(helper); }
 
-  /** Starts the operation through the receiver-operation start path. */
+  /** Starts the operation. */
   void start() noexcept { this->start_io(*this); }
 
  private:

@@ -1,9 +1,5 @@
-// UDP connected mode — connect() fixes the default peer, then async_send /
-// async_receive exchange a datagram without passing an endpoint each time.
-// Counterpart to udp_echo, which uses the unconnected *_to/*_from forms.
-// main thread runs context.run(). An op_registry keeps every operation
-// state alive until its completion has been delivered (the operations
-// are non-movable).
+// UDP connected mode: connect() fixes the peer, then async_send/async_receive
+// need no endpoint. udp_echo shows the unconnected *_to/*_from forms.
 
 #include <bnio/bnio.h>
 

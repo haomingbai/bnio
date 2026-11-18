@@ -9,30 +9,19 @@
 
 namespace mini_curl {
 
-/**
- * Type-erased base for operations stored by operation_registry.
- */
+/** Type-erased base for operations stored by operation_registry. */
 struct operation_holder_base {
-  /**
-   * Destroys a stored operation holder.
-   */
+  /** Destroys the holder and its operation. */
   virtual ~operation_holder_base() = default;
 
-  /**
-   * Starts the wrapped async operation.
-   */
+  /** Starts the wrapped operation. */
   virtual void start() noexcept = 0;
 };
 
-/**
- * Thread-local registry that keeps async operations alive until they complete.
- * Operations are cleaned up by reap() after the event loop stops.
- */
+/** Thread-local registry that keeps async operations alive until clear(). */
 class operation_registry {
  public:
-  /**
-   * Connects a sender to a receiver, starts it, and keeps the operation alive.
-   */
+  /** Connects, starts, and stores the operation. */
   template <class Sender, class Receiver>
   void spawn(Sender&& sender, Receiver&& receiver) {
     using operation_type = decltype(bexec::connect(std::declval<Sender>(),
@@ -54,9 +43,7 @@ class operation_registry {
     ops_.push_back(std::move(op));
   }
 
-  /**
-   * Releases all stored async operations.
-   */
+  /** Releases all stored operations. */
   void clear() noexcept { ops_.clear(); }
 
  private:

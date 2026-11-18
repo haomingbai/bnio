@@ -27,10 +27,9 @@ namespace detail {
 /**
  * Factory used by the 2-argument async_handshake.
  *
- * The retry operation drives transport pauses itself, so this factory is
- * reached only for callback-driven pauses. The 2-argument overload has no
- * resume surface; completing with operation_not_supported terminates such a
- * handshake instead of spinning on a pause the caller cannot resume.
+ * The retry operation drives transport pauses itself, so this factory sees
+ * only callback-driven pauses. Completing with operation_not_supported
+ * terminates a handshake the caller has no way to resume.
  */
 struct handshake_default_factory {
   [[nodiscard]] auto operator()(const std::error_code&) const {
@@ -40,12 +39,8 @@ struct handshake_default_factory {
 };
 
 /**
- * Sender for the 2-argument async_handshake.
- *
- * An instance of the factory-driven retry sender whose factory performs no
- * work: transport pauses are driven internally by the retry operation, and a
- * callback-driven pause completes with std::errc::operation_not_supported
- * because this overload has no resume surface.
+ * Sender for the 2-argument async_handshake: the retry sender with a factory
+ * that completes callback-driven pauses with operation_not_supported.
  */
 template <class Scheduler, class NextLayer>
 using handshake_sender =

@@ -12,17 +12,10 @@
 namespace bnio::base {
 
 /**
- * Cross-thread wake channel backed by pipe(2).
+ * Cross-thread wake channel backed by pipe(2); io_context writes to the write
+ * end, and each worker registers EVFILT_READ | EV_CLEAR on the read end.
  *
- * On BSD, a pipe provides separate read and write file descriptors.
- * io_context writes to the write end to signal workers; each worker
- * registers EVFILT_READ | EV_CLEAR on the read end before sleeping.
- *
- * @warning A single write wakes ALL workers whose kqueues have
- * EVFILT_READ registered on the read end (minor thundering herd).
- * The per-worker overhead is one @c read() returning EAGAIN plus one
- * pop_cpu_all() CAS — negligible for typical 4–8 worker concurrency.
- * During stop(), waking all workers is the desired behaviour.
+ * @warning One write wakes all readers (the intended behaviour during stop()).
  */
 class BNIO_EXPORT wake_channel {
  public:
@@ -63,18 +56,14 @@ class BNIO_EXPORT wake_channel {
   /**
    * Writes one byte to the pipe to wake workers.
    *
-   * @return 0 on success, -EAGAIN if the pipe buffer is full and
-   *         no data was written, or another negative errno on failure.
+   * @return 0 on success or when the pipe is full (EAGAIN is treated as
+   *         success), or another negative errno on failure.
    */
   int wake() noexcept;
 
   /**
-   * Drains all pending wake bytes from the pipe.
-   *
-   * Called by a worker on waking to empty the pipe so future
-   * edge-triggered EVFILT_READ can detect new signals.
-   *
-   * @return 0 on success, or a negative errno.
+   * Drains all pending wake bytes so later edge-triggered EVFILT_READ polls
+   * detect new signals. Returns 0, or a negative errno.
    */
   int drain() noexcept;
 

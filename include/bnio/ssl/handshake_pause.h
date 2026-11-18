@@ -16,8 +16,8 @@ namespace bnio::ssl {
 /**
  * Why an SSL handshake attempt paused before completing.
  *
- * The numeric values are stable public contract and deliberately unrelated to
- * OpenSSL's SSL_ERROR_* numbers; their mapping to those results is defined in
+ * The numeric values are stable public contract and unrelated to OpenSSL's
+ * SSL_ERROR_* numbers; the mapping lives in
  * bnio/ssl/detail/handshake_pause_table.h.
  */
 enum class handshake_pause_reason : int {
@@ -49,8 +49,8 @@ enum class handshake_pause_reason : int {
 /**
  * Returns the error category used to report SSL handshake pauses.
  *
- * Named "bnio.ssl.handshake_pause". Defined out of line so every translation
- * unit and shared object sees the same category object.
+ * Named "bnio.ssl.handshake_pause"; defined out of line so all translation
+ * units and shared objects share one category object.
  */
 [[nodiscard]] BNIO_EXPORT const std::error_category&
 handshake_pause_category() noexcept;
@@ -59,17 +59,14 @@ handshake_pause_category() noexcept;
  * Creates an error_code identifying a handshake pause.
  *
  * handshake_pause_reason::none yields an empty code; every other value yields
- * a non-empty code in handshake_pause_category(). Unknown values are mapped
- * back to none by handshake_pause_reason_of(); use the helpers below instead
- * of casting the stored value.
+ * a non-empty code in handshake_pause_category(). Use
+ * handshake_pause_reason_of() instead of casting the stored value.
  */
 [[nodiscard]] BNIO_EXPORT std::error_code make_handshake_pause_error(
     handshake_pause_reason reason) noexcept;
 
 /**
- * Returns whether ec is a pause reported by a handshake attempt.
- *
- * True only for a nonzero code in handshake_pause_category().
+ * Returns whether ec is a nonzero code in handshake_pause_category().
  */
 [[nodiscard]] inline bool is_handshake_pause(
     const std::error_code& ec) noexcept {
@@ -77,9 +74,8 @@ handshake_pause_category() noexcept;
 }
 
 /**
- * Returns the pause reason carried by ec.
- *
- * Returns none when ec is not a pause or its value is not a known reason.
+ * Returns the pause reason carried by ec, or none when ec is not a pause or
+ * its value is not a known reason.
  */
 [[nodiscard]] inline handshake_pause_reason handshake_pause_reason_of(
     const std::error_code& ec) noexcept {

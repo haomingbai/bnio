@@ -20,8 +20,7 @@ namespace bnio::ssl {
 namespace detail {
 
 /**
- * One row of handshake_pause_table: an SSL_get_error() result and the pause
- * reason it represents.
+ * One row: an SSL_get_error() result and the pause reason it represents.
  */
 struct handshake_pause_entry {
   int ssl_error;
@@ -29,13 +28,10 @@ struct handshake_pause_entry {
 };
 
 /**
- * Maps SSL_get_error() results that mean "handshake paused" onto reasons.
- *
- * MAINTAINERS: keep entries in ascending ssl_error order; the static_assert
- * below enforces it and lookup_handshake_pause() binary-searches the table.
- * Optional reasons are guarded because not every OpenSSL build exposes every
- * SSL_ERROR_WANT_* macro. ZERO_RETURN, WANT_CONNECT, and WANT_ACCEPT are
- * intentionally absent: they are terminal or transport-connect states.
+ * SSL_get_error() results that mean "handshake paused", in ascending ssl_error
+ * order (enforced by static_assert) for the binary search; optional WANT_*
+ * macros are ifdef-guarded. ZERO_RETURN/WANT_CONNECT/WANT_ACCEPT are terminal
+ * or transport-connect and intentionally absent.
  */
 inline constexpr handshake_pause_entry handshake_pause_table[] = {
     {SSL_ERROR_WANT_READ, handshake_pause_reason::want_read},
@@ -81,7 +77,7 @@ static_assert(handshake_pause_table_detail::entries_sorted(
  * Classifies an SSL_get_error() result.
  *
  * Returns the matching pause reason, or std::nullopt for hard failures and
- * non-pause results. Binary search over the sorted table.
+ * non-pause results.
  */
 [[nodiscard]] constexpr std::optional<handshake_pause_reason>
 lookup_handshake_pause(int ssl_error) noexcept {

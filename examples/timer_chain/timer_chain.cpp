@@ -1,6 +1,5 @@
-// Chained timer — three timers in sequence (200ms → 100ms → 50ms).
-// Each receiver spawns the next via an operation_registry that constructs
-// the operation state in-place (the operations are non-movable).
+// Chained timers: 200ms -> 100ms -> 50ms, each receiver spawning the next.
+// The registry constructs the non-movable operation state in place.
 
 #include <bnio/bnio.h>
 

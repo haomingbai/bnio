@@ -16,46 +16,26 @@ namespace bnio::async_io::bsd_native {
  */
 struct kqueue_context_options {
   /**
-   * Capacity hint retained for parity with the io_uring context options.
-   *
-   * The context clamps it to at least 1 but does not consult it: the
-   * kevent event buffer is sized from event_batch_window, and wait queues
-   * live inside the registration nodes of inflight operations.
+   * Capacity hint retained for parity with io_uring options; clamped to at
+   * least 1 but otherwise unused.
    */
   unsigned entries = 256;
 
-  /**
-   * Maximum number of ready kevents collected in one batch.
-   */
+  /** Maximum number of ready kevents collected in one batch. */
   unsigned event_batch_window = 64;
 
-  /**
-   * Number of non-blocking event collection rounds before the run loop
-   * blocks in kevent().
-   */
+  /** Non-blocking event collection rounds before the run loop blocks. */
   unsigned wait_spin_count = 1;
 
-  /**
-   * Maximum number of ready event tasks kept on the local queue.
-   *
-   * Ready batches at or below this count are always dispatched inline to
-   * the worker's own CPU queue, whatever local_queue_threshold says.
-   */
+  /** Ready batches at or below this count are always dispatched inline to
+   *  the worker's local CPU queue, regardless of local_queue_threshold. */
   unsigned event_inline_completion_threshold = 64;
 
-  /**
-   * Upper bound for tasks dispatched to the local queue per ready-tasks
-   * pass. When the cumulative local-queue sink exceeds this value,
-   * remaining tasks are published to the shared CPU queue instead.
-   *
-   * 0 (the default) means no limit.
-   */
+  /** Upper bound for tasks dispatched to the local queue per ready-tasks
+   *  pass; remaining tasks go to the shared CPU queue. 0 means no limit. */
   unsigned local_queue_threshold = 0;
 
-  /**
-   * kevent identifier for this context's own EVFILT_USER wakeup trigger,
-   * used when no shared wake channel is available (standalone mode).
-   */
+  /** kevent ident for this context's EVFILT_USER trigger (standalone mode). */
   std::uintptr_t wakeup_ident = 1;
 };
 

@@ -21,8 +21,8 @@ int io_uring_context::wait_for_cqe_event(__kernel_timespec* timeout) noexcept {
     return ring_.wait_cqe_timeout(cqe, timeout);
   }
 
-  // Do not retry on -EINTR here: propagate it so the run loop can
-  // re-evaluate should_finish() (e.g. a signal-driven stop()).
+  // Propagate -EINTR so the run loop can re-evaluate should_finish()
+  // (e.g. a signal-driven stop()).
   return bnio::base::ring::wait_cqe_event(ring_.native_fd(), 1);
 }
 
@@ -61,29 +61,18 @@ struct io_uring_context::cqe_collector {
 
     switch (context.classify_cqe_user_data(data.user_data)) {
       case cqe_user_data_kind::eventfd:
-        // Self-pipe notification: the eventfd poll CQE arrived.
-        // Drain all queued eventfd notifications and re-arm the poll
-        // so the ring can wake us again when new work arrives.
+        // Self-pipe: drain and re-arm; failures are ignored here because
+        // wait_for_io_work() owns the retry/fatal policy.
         context.poll_state_.eventfd_poll_pending = false;
         context.drain_eventfd();
-        // Re-arm failures are deliberately not terminal here: a
-        // transient -EAGAIN under SQ pressure must not half-close the
-        // context, and a fatal failure (e.g. a closed wake channel) is
-        // handled by the single re-arm policy point in
-        // wait_for_io_work(), which retries transient failures and
-        // routes fatal ones through the finish drain. Storing
-        // finishing here used to leave the poll unarmed while the
-        // state check above kept reporting "stopping", letting the
-        // worker park in io_uring_enter with no wake source.
         (void)context.arm_wake_poll(
             context.global_state_->wake_channel_.read_fd(), eventfd_user_data(),
             context.poll_state_.eventfd_poll_pending);
         return;
 
       case cqe_user_data_kind::local_eventfd:
-        // Directed wake: only this worker is signalled. Drain the
-        // per-worker channel and re-arm its poll. Re-arm failures
-        // follow the same policy as the shared channel above.
+        // Directed wake: drain and re-arm this worker's channel; failures
+        // follow the shared-channel policy above.
         context.poll_state_.local_eventfd_poll_pending = false;
         (void)context.local_state_.wake_channel_.drain();
         (void)context.arm_wake_poll(
@@ -114,15 +103,13 @@ unsigned io_uring_context::collect_cqe_tasks(
 
 void io_uring_context::dispatch_cqe_tasks(operation_queue& cqe_tasks,
                                           unsigned task_count) noexcept {
-  // Tier 1 — inline: small batch, always push to the local queue.
+  // Tier 1: small batch, always local.
   if (task_count <= options_.cqe_inline_completion_threshold) {
     local_state_.push_cpu(cqe_tasks.pop_all());
     return;
   }
 
-  // Tier 2 — local queue: within the per-iteration budget.
-  // When local_queue_threshold is 0 (default) this tier is unlimited and
-  // CQEs never spill to the shared CPU queue on this path.
+  // Tier 2: within the per-iteration budget (threshold 0 = unlimited).
   if (options_.local_queue_threshold == 0 ||
       (scheduling_state_.local_task_budget > 0 &&
        task_count <= scheduling_state_.local_task_budget)) {
@@ -133,8 +120,7 @@ void io_uring_context::dispatch_cqe_tasks(operation_queue& cqe_tasks,
     return;
   }
 
-  // Tier 3: local budget exhausted or batch exceeds remaining budget; publish
-  // to the shared CPU queue for a later run-loop pass.
+  // Tier 3: budget exhausted or batch too large; publish to the shared queue.
   push_cpu_tasks(cqe_tasks);
 }
 
@@ -152,16 +138,9 @@ bool io_uring_context::enqueue_cqe_task(const cqe_data& data,
   operation->result = data.result;
   operation->flags = data.flags;
 
-  // Transient would-block: the kernel delivers a -EAGAIN CQE only when the
-  // request was marked REQ_F_NOWAIT (RWF_NOWAIT, or an O_NONBLOCK file that
-  // does not support nowait); socket operations are converted into an
-  // armed poll internally and never reach this point. Re-enter the
-  // submission pipeline instead of delivering EAGAIN as a terminal error,
-  // mirroring kqueue_context::perform_io_step(). The operation was
-  // unregistered above and re-runs prepare + submit + track on the next
-  // consume_io_tasks() pass; its completion state is still the pending
-  // value channel, so nothing to reset. Errors other than -EAGAIN are
-  // terminal and fall through.
+  // -EAGAIN reaches here only for REQ_F_NOWAIT requests (sockets become an
+  // armed poll internally). Re-enter the submission pipeline instead of
+  // delivering a terminal error; the operation stays in the pending state.
   if (data.result == -EAGAIN && io_op->rearm_on_eagain()) {
     local_state_.push_io(*io_op);
     return false;

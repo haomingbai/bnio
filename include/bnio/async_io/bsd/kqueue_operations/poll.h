@@ -42,20 +42,19 @@ template <class Receiver>
 class kqueue_poll_operation
     : public detail::kqueue_receiver_operation<Receiver> {
  public:
-  /** Creates the operation state bound to the context, descriptor, mask,
-   *  and receiver. */
+  /** Binds the context, descriptor, mask, and receiver. */
   kqueue_poll_operation(kqueue_context& context, descriptor_view descriptor,
                         unsigned poll_mask, Receiver receiver)
       : detail::kqueue_receiver_operation<Receiver>(context,
                                                     std::move(receiver)),
         request_(descriptor, poll_mask) {}
 
-  /** Delegates native registration preparation to the poll request. */
+  /** Prepares the underlying poll request. */
   void prepare(kqueue_helper& helper) noexcept override {
     request_.prepare(helper);
   }
 
-  /** Starts the poll through the receiver-operation start path. */
+  /** Starts the poll. */
   void start() noexcept { this->start_io(*this); }
 
  private:
@@ -66,8 +65,7 @@ class kqueue_poll_operation
 template <class Receiver>
 class kqueue_poll_sender_operation : public kqueue_io_operation_base {
  public:
-  /** Creates the operation state bound to the context, descriptor, mask,
-   *  and receiver. */
+  /** Binds the context, descriptor, mask, and receiver. */
   kqueue_poll_sender_operation(kqueue_context& context,
                                descriptor_view descriptor, unsigned poll_mask,
                                Receiver receiver)
@@ -96,12 +94,9 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
   }
 
   /**
-   * Starts the poll or posts an immediate completion.
-   *
-   * A stop-token cancel observed at start() selects the stop channel;
-   * execute()'s token arbitration then delivers set_stopped (token
-   * canceled) or set_value(operation_canceled, ...) (abort raced the
-   * token).
+   * Starts the poll, or posts immediately when the stop token is already
+   * canceled. execute() re-checks the token: canceled yields set_stopped,
+   * otherwise set_value(operation_canceled, 0).
    */
   void start() noexcept {
     if (stop_requested()) {
@@ -115,16 +110,9 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
   }
 
   /**
-   * Delivers the typed poll completion.
-   *
-   * The `value` branch preserves the `result < 0` guard: a kevent may
-   * report a negative errno while completion_ is still `value`; that
-   * errno must surface through set_value(ec, ...) rather than being lost.
-   *
-   * The ready mask is meaningful only on success; every other channel
-   * delivers `0U`. The errno is already carried by `ec`, so nothing is lost,
-   * and a negative result is never converted to `unsigned` (that would wrap
-   * to ~4.29e9 and make a caller's `mask & POLLIN` test trip on a failure).
+   * Delivers the completion. The ready mask is meaningful only on success
+   * and is 0 otherwise; a negative native result surfaces as `ec` and is
+   * never cast to unsigned.
    */
   void execute() noexcept override {
     switch (completion_) {
@@ -142,10 +130,8 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
         bexec::set_value(std::move(receiver_), error_, 0U);
         break;
       case completion_kind::stopped:
-        // Token arbitration decides the stop channel's final signal: a
-        // canceled receiver token wins → set_stopped; an abort observed
-        // without a canceled token delivers
-        // set_value(operation_canceled, 0).
+        // A canceled token wins; an abort without one reports
+        // operation_canceled via set_value.
         if (stop_requested()) {
           bexec::set_stopped(std::move(receiver_));
         } else {
@@ -181,10 +167,9 @@ class kqueue_poll_sender_operation : public kqueue_io_operation_base {
 class kqueue_poll_sender {
  public:
   /**
-   * set_value(ec, unsigned) is the universal observable exit (success,
-   * recoverable failure, and an abort observed without a canceled stop
-   * token); set_stopped is delivered when the receiver's stop token is
-   * observed canceled at the completion point.
+   * set_value(ec, mask) is the universal exit, including an abort without
+   * a canceled stop token; set_stopped fires when the token is canceled at
+   * the completion point.
    */
   using completion_signatures = bexec::completion_signatures<
       bexec::set_value_t(std::error_code, unsigned), bexec::set_stopped_t()>;
@@ -194,8 +179,7 @@ class kqueue_poll_sender {
                      unsigned poll_mask) noexcept
       : context_(&context), descriptor_(descriptor), poll_mask_(poll_mask) {}
 
-  /** Connects the sender to a receiver, creating the poll operation
-   *  state. */
+  /** Connects a receiver, creating the poll operation. */
   template <class Receiver>
   auto connect(Receiver receiver) const {
     return kqueue_poll_sender_operation<std::remove_cvref_t<Receiver>>(

@@ -12,10 +12,8 @@
 namespace bnio::detail {
 
 /**
- * State for a streaming descriptor read-all operation.
- *
- * Each step reads at the kernel file position, which the kernel advances
- * naturally on every successful read.
+ * State for a streaming descriptor read-all operation. Each step reads at
+ * the kernel file position, which the kernel advances on every success.
  */
 template <io_context::schedule_kind Kind>
 class stream_file_read_all_state {
@@ -56,8 +54,7 @@ class stream_file_read_all_state {
   mutable_buffer buffer;
   std::size_t transferred = 0;
   bool done = false;
-  // Adaptive eager probing: cleared when the previous step had a short
-  // transfer, so the next step skips the immediate-completion probe.
+  // Cleared after a short transfer, so the next step skips the eager probe.
   bool eager = true;
 };
 

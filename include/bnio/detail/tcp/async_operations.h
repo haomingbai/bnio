@@ -43,12 +43,8 @@ class tcp_read_operation {
 
   class child_receiver {
    public:
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    // Named explicitly so get_env's return type is available while the
+    // operation is incomplete; decltype(auto) would instantiate too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     explicit child_receiver(tcp_read_operation& operation) noexcept
@@ -155,12 +151,8 @@ class tcp_write_operation {
 
   class child_receiver {
    public:
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    // Named explicitly so get_env's return type is available while the
+    // operation is incomplete; decltype(auto) would instantiate too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     explicit child_receiver(tcp_write_operation& operation) noexcept
@@ -266,12 +258,8 @@ class tcp_accept_operation {
 
   class child_receiver {
    public:
-    // The env type depends only on the operation's Receiver template
-    // parameter; naming it explicitly keeps get_env's return type available
-    // while the operation class is still incomplete (child operation types
-    // are computed inside its own definition). A deduced decltype(auto)
-    // return would force the body — and its operation_->receiver_ access —
-    // to be instantiated too early.
+    // Named explicitly so get_env's return type is available while the
+    // operation is incomplete; decltype(auto) would instantiate too early.
     using env_type = decltype(bexec::get_env(std::declval<receiver_type&>()));
 
     explicit child_receiver(tcp_accept_operation& operation) noexcept

@@ -23,10 +23,9 @@
 namespace bnio::async_io::bsd_native {
 
 /**
- * A positioned read on a random access file: start performs pread at the
- * given offset without observing or advancing the kernel file position.
- * The caller guarantees a random access file, so no fstat dispatch happens
- * and the operation never waits on kqueue. Offsets beyond off_t are
+ * Positioned read on a random access file: pread at the given offset without
+ * observing or advancing the kernel file position. The caller guarantees a
+ * random access file, so it never waits on kqueue. Offsets beyond off_t are
  * rejected with EOVERFLOW before entering the kernel.
  */
 class kqueue_random_access_read_request {
@@ -53,8 +52,7 @@ class kqueue_random_access_read_request {
     return perform_io();
   }
 
-  /** Performs one positioned read at the stored offset; offsets beyond
-   *  off_t are rejected with -EOVERFLOW before entering the kernel. */
+  /** Reads at the stored offset; offsets beyond off_t yield -EOVERFLOW. */
   [[nodiscard]] int perform_io() noexcept {
     if (!detail::valid_file_offset(offset_)) {
       return -EOVERFLOW;
@@ -72,8 +70,7 @@ class kqueue_random_access_read_request {
   /** Positioned I/O is synchronous on a random access file: never wait. */
   [[nodiscard]] bool should_wait(int) const noexcept { return false; }
 
-  /** Delivers the byte count to @p receiver, clamping negative results to
-   *  zero. */
+  /** Delivers the byte count, clamping negative results to zero. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -88,10 +85,10 @@ class kqueue_random_access_read_request {
 };
 
 /**
- * A positioned write on a random access file: start performs pwrite at
- * the given offset without observing or advancing the kernel file position.
- * Never waits on kqueue; offsets beyond off_t are rejected with EOVERFLOW
- * before entering the kernel.
+ * Positioned write on a random access file: pwrite at the given offset
+ * without observing or advancing the kernel file position. Never waits on
+ * kqueue; offsets beyond off_t are rejected with EOVERFLOW before entering
+ * the kernel.
  */
 class kqueue_random_access_write_request {
  public:
@@ -118,8 +115,7 @@ class kqueue_random_access_write_request {
     return perform_io();
   }
 
-  /** Performs one positioned write at the stored offset; offsets beyond
-   *  off_t are rejected with -EOVERFLOW before entering the kernel. */
+  /** Writes at the stored offset; offsets beyond off_t yield -EOVERFLOW. */
   [[nodiscard]] int perform_io() noexcept {
     if (!detail::valid_file_offset(offset_)) {
       return -EOVERFLOW;
@@ -137,8 +133,7 @@ class kqueue_random_access_write_request {
   /** Positioned I/O is synchronous on a random access file: never wait. */
   [[nodiscard]] bool should_wait(int) const noexcept { return false; }
 
-  /** Delivers the byte count to @p receiver, clamping negative results to
-   *  zero. */
+  /** Delivers the byte count, clamping negative results to zero. */
   template <class Receiver>
   void set_value(Receiver&& receiver, std::error_code ec, int result,
                  unsigned) noexcept {
@@ -153,13 +148,11 @@ class kqueue_random_access_write_request {
   std::uint64_t offset_;
 };
 
-/** Sender returned by kqueue_context::async_read for random access files.
- */
+/** Sender returned by kqueue_context::async_read for random access files. */
 using kqueue_random_access_read_sender =
     detail::kqueue_ready_io_sender<kqueue_random_access_read_request>;
 
-/** Sender returned by kqueue_context::async_write for random access
- *  files. */
+/** Sender returned by kqueue_context::async_write for random access files. */
 using kqueue_random_access_write_sender =
     detail::kqueue_ready_io_sender<kqueue_random_access_write_request>;
 

@@ -13,10 +13,8 @@
 namespace bnio::async_io::linux_native {
 
 /**
- * Non-owning C++ view over a mutable native socket message.
- *
- * Copying or moving this view copies only the message pointer. The msghdr
- * object remains owned by the caller.
+ * Non-owning mutable socket message view. Copying or moving copies only
+ * the pointer; the msghdr stays owned by the caller.
  */
 class mutable_message_view {
  public:
@@ -60,14 +58,14 @@ class mutable_message_view {
   ~mutable_message_view() noexcept = default;
 
   /**
-   * Returns the wrapped native message pointer.
+   * Wrapped native message pointer.
    */
   [[nodiscard]] constexpr msghdr* native_handle() const noexcept {
     return message_;
   }
 
   /**
-   * Returns whether this view references a message.
+   * Whether a message is referenced.
    */
   [[nodiscard]] constexpr bool valid() const noexcept {
     return message_ != nullptr;
@@ -78,10 +76,8 @@ class mutable_message_view {
 };
 
 /**
- * Non-owning C++ view over an immutable native socket message.
- *
- * Copying or moving this view copies only the message pointer. The msghdr
- * object remains owned by the caller.
+ * Non-owning immutable socket message view. Copying or moving copies only
+ * the pointer; the msghdr stays owned by the caller.
  */
 class const_message_view {
  public:
@@ -124,14 +120,14 @@ class const_message_view {
   ~const_message_view() noexcept = default;
 
   /**
-   * Returns the wrapped native message pointer.
+   * Wrapped native message pointer.
    */
   [[nodiscard]] constexpr const msghdr* native_handle() const noexcept {
     return message_;
   }
 
   /**
-   * Returns whether this view references a message.
+   * Whether a message is referenced.
    */
   [[nodiscard]] constexpr bool valid() const noexcept {
     return message_ != nullptr;
@@ -142,10 +138,8 @@ class const_message_view {
 };
 
 /**
- * Non-owning C++ view over a native scatter/gather buffer sequence.
- *
- * Copying or moving this view copies only the iovec pointer and element count.
- * The iovec array remains owned by the caller.
+ * Non-owning view over a native iovec array. Copying or moving copies only
+ * the pointer and count; the array stays owned by the caller.
  */
 class buffer_sequence_view {
  public:
@@ -190,14 +184,14 @@ class buffer_sequence_view {
   ~buffer_sequence_view() noexcept = default;
 
   /**
-   * Returns the native scatter/gather buffer sequence.
+   * Native iovec array.
    */
   [[nodiscard]] constexpr const iovec* native_data() const noexcept {
     return buffers_;
   }
 
   /**
-   * Returns the number of native scatter/gather buffers.
+   * Number of iovec entries.
    */
   [[nodiscard]] constexpr unsigned size() const noexcept {
     return buffer_count_;

@@ -40,8 +40,6 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
   }
 
   apply_context_options(options);
-  // The wait queues live inside registration nodes embedded in inflight
-  // operations, so there is no per-registration table to allocate here.
   auto events = std::unique_ptr<bnio::base::event[]>(
       new (std::nothrow) bnio::base::event[options_.event_batch_window]);
   if (!events) {
@@ -53,10 +51,8 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
     return open_result;
   }
 
-  // The shared wake fd (an EVFILT_READ registration) is set up in run()
-  // after set_global_state() provides the fd. Per-worker EVFILT_USER is
-  // no longer created here — wake is now driven by the shared channel
-  // owned by io_context.
+  // The shared wake fd is registered in run(), once set_global_state() has
+  // provided it.
 
   // Open the per-worker wake channel used for directed wakeups.
   (void)local_state_.wake_channel_.open();
@@ -72,26 +68,13 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
 }
 
 void kqueue_context::queue_exit() noexcept {
-  // Abort-and-deliver runs only when the context did not already finish
-  // cleanly: run()/finish() drain every operation on the way out, so a
-  // finished context has nothing left to deliver and must not touch the
-  // shared queues that sibling workers still own.  A context torn down
-  // without a clean finish (never run, fatal error, forced close) still
-  // owes its receivers terminal calls.  Mirrors io_uring_context.
+  // Only an unclean teardown (never run, fatal error, forced close) still owes
+  // terminal calls; a finished context must not touch sibling workers' queues.
+  // global_state_ must stay wired until the destructor completes.
   if (run_state_.state.load(std::memory_order_acquire) !=
       context_state::finished) {
-    // Mark the context finishing (not finished) so operations completed
-    // during the abort delivery observe a coherent stopping state, then
-    // deliver every aborted completion through the same abort path
-    // finish() uses: abort_inflight_io() marks each inflight/unregistered
-    // I/O operation stopped and pushes it to the CPU queue, the drain
-    // loop executes those completions, and the consume_io_tasks() loop
-    // closes the nested-publish window when set_stopped() receivers start
-    // new I/O.  Discarding with a plain pop_cpu_all() would leave those
-    // receivers forever silent.  Receivers run synchronously on the
-    // calling thread.  The delivery assumes global_state_ is wired:
-    // io_context::run() keeps its native context bound to the shared
-    // state until the context's destructor has completed.
+    // Mark finishing (not finished) so delivery sees a coherent state; I/O
+    // published from set_stopped() is aborted and delivered below.
     run_state_.state.store(context_state::finishing, std::memory_order_release);
     abort_inflight_io();
     drain_local_cpu_tasks();

@@ -32,8 +32,7 @@
 #define BNIO_SYSTEM_WINDOWS 1
 #else
 /**
- * Fallback defined when the target platform is not recognised; bnio's
- * native I/O backends are unavailable in this configuration.
+ * Fallback for an unrecognized platform; native I/O backends are unavailable.
  */
 #define BNIO_SYSTEM_UNKNOWN 1
 #endif
