@@ -11,10 +11,11 @@ run_test() {
   echo "=== $name ==="
   if "$@"; then
     echo "  PASS"
-    ((PASS++))
+    PASS=$((PASS + 1))
   else
-    echo "  FAIL (exit=$?)"
-    ((FAIL++))
+    local status=$?
+    echo "  FAIL (exit=${status})"
+    FAIL=$((FAIL + 1))
   fi
   echo
 }
@@ -34,22 +35,25 @@ sleep 1
 
 if echo "round1" | timeout 2 nc -w1 127.0.0.1 "${PORT}" | grep -q round1; then
   echo "  round1 PASS"
+  PASS=$((PASS + 1))
 else
   echo "  round1 FAIL"
-  ((FAIL++))
+  FAIL=$((FAIL + 1))
 fi
 
 if echo "round2" | timeout 2 nc -w1 127.0.0.1 "${PORT}" | grep -q round2; then
   echo "  round2 PASS"
+  PASS=$((PASS + 1))
 else
   echo "  round2 FAIL"
-  ((FAIL++))
+  FAIL=$((FAIL + 1))
 fi
 
 # graceful shutdown
-kill -INT "${PID}"
-wait "${PID}" 2>/dev/null
-echo "  server stopped, exit=$?"
+kill -INT "${PID}" 2>/dev/null || true
+status=0
+wait "${PID}" 2>/dev/null || status=$?
+echo "  server stopped, exit=${status}"
 echo
 
 # 4. mini_curl HTTP test

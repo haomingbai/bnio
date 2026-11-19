@@ -8,7 +8,14 @@ if ! command -v clang-format >/dev/null 2>&1; then
   exit 1
 fi
 
-find "$ROOT_DIR/include" "$ROOT_DIR/src" "$ROOT_DIR/tests" "$ROOT_DIR/examples" \
+# Keep in sync with check-format.sh. The names are fixed, whitespace-free literals.
+SOURCE_DIRS="include src tests examples benchmarks"
+set --
+for dir in $SOURCE_DIRS; do
+  set -- "$@" "$ROOT_DIR/$dir"
+done
+
+find "$@" \
   -type f \
   \( -name "*.h" -o -name "*.hpp" -o -name "*.c" -o -name "*.cc" -o -name "*.cpp" -o -name "*.cxx" \) \
   -exec clang-format -i {} +
