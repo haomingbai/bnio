@@ -589,6 +589,41 @@ the underlying bytes:
 The dynamic-buffer `commit()` only runs for an operation that can consume a
 buffer (reads and receive-from); write paths take an immutable view.
 
+### Closing sockets, descriptors, and in-flight operations
+
+`close()` closes the owned descriptor and returns it to the OS. It does not
+cancel operations that are already in flight. On io_uring, an already-submitted
+request holds its own reference to the file, so it still completes through its
+CQE after `close()`; the receiver may run after the descriptor is gone, and the
+result is whatever the kernel reports. Keep the operation state and every
+buffer it references alive until that completion runs.
+
+If the context is stopped while the operation is still in flight, the
+cancellation path takes over. Keep the buffer until the `run()` call on the
+thread that owns the operation returns (or until every `run()` call has
+returned before destroying the context), not merely until the receiver's
+`set_value(operation_canceled)` runs. See "Cancellation and stop" above.
+
+On kqueue, closing a descriptor removes the kevents registered for it. An
+operation that was waiting on that descriptor may therefore never complete on
+its own. Do not call `close()` while operations are in flight on kqueue: wait
+for them, or stop the context first with `io_context::stop()`.
+
+`release()` transfers descriptor ownership to the caller and does not cancel
+in-flight operations. `assign()` adopts a descriptor; when the object already
+owns one, it closes the old descriptor first. Neither cancels outstanding
+work. `shutdown(how)` only disables one or both directions of a connected
+stream socket; it neither closes the descriptor nor cancels operations.
+
+TLS is two-layered: `ssl::tcp::stream::async_shutdown()` sends the TLS
+close_notify and leaves the transport open; close the transport afterwards
+with `lowest_layer().close()`. If the connection must be aborted instead, stop
+the context (or close the transport and let the resulting completions run).
+
+There is no per-object `cancel()` in this release. The only operation-level
+cancel is `steady_timer::cancel()`; context-wide cancellation is
+`io_context::stop()`.
+
 ### IP addresses and DNS result types
 
 `bnio::ip::address` and `bnio::ip::endpoint` are the public IP value types.

@@ -492,22 +492,33 @@ stranding them with no worker left to drain.
 ### Abnormal close delivers every completion
 
 `queue_exit()` no longer discards pending work on either platform. It marks
-the context finishing and runs the same abort-and-deliver path as
-`finish()`: inflight and shared-queued I/O is aborted with `-ECANCELED`,
-completed via the stop channel, and executed synchronously on the calling
-thread before the native backend closes; with no stop token racing, each
-completion is then delivered as `set_value(operation_canceled)`. On Linux
-this is `io_uring_context`'s existing abort-and-deliver sequence; on BSD
-`kqueue_context::queue_exit()` (`src/async_io/bsd/kqueue_context.cpp`) now
-mirrors it — guarded by a not-already-finished precondition, it marks
-finishing, aborts inflight I/O, drains local CPU tasks, and consumes I/O
-tasks (re-aborting after each batch) until both queues stay empty. Within
-the `queue_exit()` / `finish()` scope, therefore, a forced or abnormal
-close reaches a terminal receiver call for every operation that was
-published to the context — nothing is silently dropped, even when `run()`
-never drained the queues. The same delivery guarantee covers fatal
-run-loop errors, which route through the `finish_drain` phase (drain →
-abort → deliver) instead of exiting the loop directly.
+the context finishing and delivers a terminal completion for every operation
+that was published. On Linux, `io_uring_context::queue_exit()` first drains
+the completions the kernel has already posted, then closes the ring, and only
+then aborts and delivers the remaining inflight and shared-queued I/O with
+`-ECANCELED`; with no stop token racing, each aborted completion is delivered
+as `set_value(operation_canceled)`. Closing the ring first guarantees that the
+kernel no longer accesses user buffers when a receiver runs. The cost is that
+a completion not yet posted at that point is reported as
+`operation_canceled` rather than as its real result. On BSD,
+`kqueue_context::queue_exit()` (`src/async_io/bsd/kqueue_context.cpp`) keeps
+the original order — guarded by a not-already-finished precondition, it marks
+finishing, aborts inflight I/O, drains local CPU tasks, and consumes I/O tasks
+(re-aborting after each batch) until both queues stay empty, all before the
+kqueue is released. Within the `queue_exit()` / `finish()` scope, therefore, a
+forced or abnormal close reaches a terminal receiver call for every operation
+that was published to the context — nothing is silently dropped, even when
+`run()` never drained the queues. The same delivery guarantee covers fatal
+run-loop errors, which route through the `finish_drain` phase (drain → abort →
+deliver) instead of exiting the loop directly.
+
+The reordered Linux path relies on closing the ring to retire inflight
+requests. bnio submits poll-armed socket and pipe requests without
+`IOSQE_ASYNC`, for which cancellation on ring teardown is synchronous;
+io-wq-backed work is not used and would need its own guarantee. The normal
+`stop()` path is unchanged: `finish()` drains ready CQEs, aborts the remaining
+inflight I/O while the ring is still open, and the ring is closed when the
+native context is destroyed.
 
 Two boundaries keep that statement scoped. First, it covers the teardown
 paths above, not `~io_context()` itself: the destructor publishes the
