@@ -29,7 +29,6 @@
 #include <cstdint>
 #include <string_view>
 #include <system_error>
-#include <thread>
 #include <type_traits>
 #include <utility>
 
@@ -391,21 +390,13 @@ class BNIO_EXPORT io_context {
       operation& operator=(operation&&) = delete;
 
       /**
-       * Stops the context on the elected thread, or waits for the already
-       * stopping thread, then completes with set_value().
+       * Stops if needed, then waits for every worker and drains shared work.
+       * Must not run on a context worker or a stop/join drain receiver.
        */
       void start() noexcept {
-        if (context_->begin_stop()) {
-          context_->stop_internal();
-          context_->lifecycle_.stopped.store(true, std::memory_order_release);
-          bexec::set_value(std::move(receiver_));
-        } else {
-          while (
-              !context_->lifecycle_.stopped.load(std::memory_order_acquire)) {
-            std::this_thread::yield();
-          }
-          bexec::set_value(std::move(receiver_));
-        }
+        (void)context_->begin_stop();
+        context_->join_internal();
+        bexec::set_value(std::move(receiver_));
       }
 
      private:
@@ -473,20 +464,23 @@ class BNIO_EXPORT io_context {
   std::error_code run() noexcept;
 
   /**
-   * Requests the event loop to stop.
+   * Requests stop and returns immediately. The elected caller aborts pending
+   * timers, publishes the stopping state, and wakes the workers; it does not
+   * wait for run() and is not a barrier. Published work is delivered by the
+   * exiting workers, or inline here when no worker is running. Inflight I/O
+   * and queued work complete through the stop channel.
    *
-   * Work published before the stop was elected still completes. Inflight
-   * I/O, queued work not yet executed, and pending timer waits are
-   * aborted with set_value(operation_canceled), unless a cancelled
-   * receiver stop token wins with set_stopped(). The elected thread
-   * drains the shared queues, so no published work is dropped.
+   * @return Always 0.
    */
   int stop() noexcept;
 
   /**
-   * Stops the context if needed and waits for it to fully finish; of
-   * several concurrent callers exactly one stops and the rest wait.
-   * Completes with set_value() once all workers have exited.
+   * Stops if needed and waits for every run() to return, then drains the
+   * shared queues. Concurrent callers wait for the same state and may drain
+   * concurrently; every operation is still delivered exactly once.
+   *
+   * Must not run on a context worker or a stop/join drain receiver: it waits
+   * for itself and never completes.
    */
   [[nodiscard]] join_sender join() noexcept;
 
@@ -498,8 +492,7 @@ class BNIO_EXPORT io_context {
    * consults this only after the receiver's stop token.
    */
   [[nodiscard]] bool is_stopped() const noexcept {
-    return global_state_.life_state.load(std::memory_order_acquire) != 0 ||
-           lifecycle_.stopped.load(std::memory_order_acquire);
+    return global_state_.life_state.load(std::memory_order_acquire) != 0;
   }
 
   /**
@@ -848,27 +841,21 @@ class BNIO_EXPORT io_context {
    */
   void abort_pending_timer_waits() noexcept;
 
-  /**
-   * Waits for every other worker to exit, then drains the shared queues no
-   * worker will drain (see drain_shared_queues_for_stop()). Timer waits
-   * were already aborted by begin_stop().
-   */
-  int stop_internal() noexcept;
+  /** Waits for every worker, then drains shared work no worker consumed. */
+  void join_internal() noexcept;
 
   /**
-   * Drains shared queues after running_workers reaches zero. Publishes and
-   * stop() both check/enqueue under submit_lock, so this sees every earlier
-   * publish and nothing else consumes. Operations run inline on the stopping
-   * thread and report operation_canceled for aborted work.
+   * Drains shared queues after the stopping state is published. Concurrent
+   * drains are safe: queue pops are exclusive, so each operation is delivered
+   * exactly once.
    */
   void drain_shared_queues_for_stop() noexcept;
 
   /**
-   * Elects the stopping thread and publishes the stopping state under
-   * submit_lock; pending timer waits are aborted before the publish, so every
-   * worker that observes the state also sees a full timers_.ready.
+   * Elects one stop requester, aborts timer waits, publishes life_state under
+   * submit_lock, and wakes the workers. Does not wait for them.
    *
-   * @return true if this thread owns the stop; otherwise wait for stopped.
+   * @return true if this call performed the transition.
    */
   [[nodiscard]] bool begin_stop() noexcept;
 
@@ -877,8 +864,8 @@ class BNIO_EXPORT io_context {
       detail::timer_slot& timer) noexcept;
 
   /**
-   * Stages detached waits on the timer-ready list with @p completion; only
-   * a worker's passive timer check or the stopping thread drains it.
+   * Stages detached waits on the timer-ready list with @p completion; a
+   * worker's passive timer check or a stop/join drain consumes it.
    */
   void enqueue_timer_operations_locked(
       detail::timer_operation_base* operations,
@@ -908,13 +895,9 @@ class BNIO_EXPORT io_context {
 
   /** Lifecycle state shared between the run()/stop()/join() paths. */
   struct lifecycle_state {
-    /** Stop-thread election flag; the CAS winner publishes life_state under
+    /** Stop-request election flag; the CAS winner publishes life_state under
      *  the submit-path lock (see begin_stop()). */
     std::atomic<int> stop_requested{0};
-
-    /** Set when the context has fully stopped; join() waiters spin on it.
-     *  Independent from life_state to avoid torn reads. */
-    std::atomic_bool stopped{false};
   } lifecycle_;
 
   detail::timer_state_data timers_;

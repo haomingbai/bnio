@@ -231,7 +231,7 @@ TEST(LifecycleTest, join_then_stop) {
   // Give join a head start to CAS the life_state.
   std::this_thread::sleep_for(std::chrono::milliseconds(5));
 
-  // stop() should observe life_state already == stopping and spin on stopped_.
+  // stop() is a non-blocking request; join() owns the barrier and completes.
   int stop_ret = ctx->stop();
 
   worker.join();

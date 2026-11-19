@@ -38,7 +38,7 @@ bool io_uring_context::enter_run() noexcept {
     return false;
   }
   // Only the CAS winner checks state; losers must not assert on a value left
-  // by a previous run cycle (see stop_internal() ordering).
+  // by a previous run cycle (a stop may leave the state non-running).
   assert_running();
 
   if (!is_open()) {

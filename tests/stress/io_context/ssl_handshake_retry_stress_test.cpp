@@ -387,10 +387,9 @@ void add_cancellation_pair(
   const std::size_t client_index = static_cast<std::size_t>(i * 2);
   const std::size_t server_index = client_index + 1;
 
-  // The main thread owns the stop for this test. Reaching a terminal-count
-  // threshold inside a worker would call io_context::stop() from the drain
-  // that the winning stop is waiting on, which deadlocks; use an unreachable
-  // threshold so only the main thread stops the context.
+  // The main thread owns the stop for this test. A worker-side stop() is now
+  // safe (stop is a non-blocking request), but this test keeps a single
+  // stopper so its completion counts stay deterministic.
   constexpr int kNoReceiverStop = std::numeric_limits<int>::max();
 
   stop_outcome_receiver client_receiver;

@@ -70,6 +70,9 @@ std::error_code io_context::run() noexcept {
   global_state_.running_workers.fetch_add(1, std::memory_order_acq_rel);
 
   if (!can_start_run()) {
+    // No native finish() will run on this worker; deliver the shared work it
+    // would otherwise leave behind.
+    drain_shared_queues_for_stop();
     release_worker_slot();
     return std::make_error_code(std::errc::operation_canceled);
   }
@@ -90,7 +93,9 @@ std::error_code io_context::run_native_loop() noexcept {
     if (!ctx.is_open()) {
       result = std::error_code(ENOMEM, std::generic_category());
     } else if (global_state_.life_state.load(std::memory_order_acquire)) {
-      // Close requested between the initial checks and the native open.
+      // Close requested between the initial checks and the native open; the
+      // native loop will not run, so drain the shared queues here.
+      drain_shared_queues_for_stop();
       (void)ctx.stop();
       result = std::make_error_code(std::errc::operation_canceled);
     } else {
@@ -113,22 +118,17 @@ std::error_code io_context::run_native_loop() noexcept {
 }
 
 int io_context::stop() noexcept {
-  if (!begin_stop()) {
-    // Already stopping or stopped — spin until fully stopped.
-    while (!lifecycle_.stopped.load(std::memory_order_acquire)) {
-      std::this_thread::yield();
-    }
-    return 0;
+  // Non-blocking request. With no worker, this caller is the only agent that
+  // can deliver shared-queue work.
+  if (begin_stop() &&
+      global_state_.running_workers.load(std::memory_order_acquire) == 0) {
+    drain_shared_queues_for_stop();
   }
-
-  // We own the stop. Perform the actual stop work and signal completion.
-  stop_internal();
-  lifecycle_.stopped.store(true, std::memory_order_release);
   return 0;
 }
 
 bool io_context::begin_stop() noexcept {
-  // Elect exactly one stopping thread; stop() and join() share this path.
+  // Elect exactly one stop requester; stop() and join() share this path.
   int expected = 0;
   if (!lifecycle_.stop_requested.compare_exchange_strong(
           expected, 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
@@ -143,33 +143,37 @@ bool io_context::begin_stop() noexcept {
     std::lock_guard<std::mutex> guard(global_state_.submit_lock);
     global_state_.life_state.store(1, std::memory_order_release);
   }
+  // Wake unconditionally: stop() does not wait for workers, and a worker
+  // parked in the kernel may be the only thread that can observe the state.
+  // This also covers a stop() called from a worker or a signal handler.
+  (void)global_state_.wake_channel_.wake();
   return true;
 }
 
-int io_context::stop_internal() noexcept {
-  // Wake unconditionally: a signal-handler caller excludes itself from the
-  // wait (to avoid self-deadlock) but may still be blocked in the kernel; if it
-  // is the last worker, this write is the only one that wakes its run loop.
-  (void)global_state_.wake_channel_.wake();
+void io_context::join_internal() noexcept {
+  // A concurrent stop() may have won the election without publishing yet.
+  while (global_state_.life_state.load(std::memory_order_acquire) == 0) {
+    std::this_thread::yield();
+  }
 
-  const bool in_worker_context = is_in_context();
-  const std::size_t self_count = in_worker_context ? 1 : 0;
-  while (global_state_.running_workers.load(std::memory_order_acquire) >
-         self_count) {
+  // Join is the barrier. The caller is not excluded; joining from a worker or
+  // a stop/join drain receiver never completes (documented unsupported).
+  while (global_state_.running_workers.load(std::memory_order_acquire) > 0) {
     (void)global_state_.wake_channel_.wake();
     std::this_thread::yield();
   }
 
-  // With running_workers at zero nothing else drains the shared queues;
-  // deliver everything the stop was elected over, even if no worker started.
+  // Workers drain before dropping their slots; a concurrent stop() fallback
+  // or another join() may also drain. Exclusive pops keep delivery
+  // exactly-once.
   drain_shared_queues_for_stop();
-
-  return 0;
 }
 
 void io_context::drain_shared_queues_for_stop() noexcept {
-  // Exclusive owner of the shared queues: racing publishes are visible here
-  // or completed inline. Pop without submit_lock (callbacks may lock).
+  // Draining may race another drain (stop fallback, an early-exiting run(),
+  // or join), but every queue pop is exclusive: each operation is delivered
+  // exactly once. Pop without submit_lock (callbacks may lock); publishes
+  // racing the stop state either landed before the publish or complete inline.
   bool had_work = true;
   while (had_work) {
     had_work = false;

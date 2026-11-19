@@ -3,9 +3,10 @@
 // is parked in the kernel wait with in-flight I/O and no timers armed.
 //
 // Two compounding defects made this hang:
-//   1. io_context::stop_internal() excluded the calling worker from the wake
-//      set (is_in_context() self-exclusion), so a signal-handler stop()
-//      never wrote the shared wake channel.
+//   1. stop() used to wait for workers and excluded the calling worker from
+//      the wake set (is_in_context() self-exclusion), so a signal-handler
+//      stop() could both skip the wake and deadlock. stop() is now a
+//      non-blocking request that always writes the shared wake channel.
 //   2. io_uring_context::wait_for_cqe_event() retried on -EINTR internally,
 //      so the run loop never re-evaluated should_finish() after a signal.
 //

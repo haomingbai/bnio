@@ -104,8 +104,8 @@ void start_poll(test_owner& owner) {
 // them was really registered (EV_ADD) and executed.  A receiver that
 // unconditionally republishes an immediately-ready poll after every
 // completion keeps the Phase 1 loop (run_cpu_batch() ||
-// consume_io_tasks()) fed forever: finish() never returns and stop()
-// spins in stop_internal() waiting for the worker.  io_uring refuses new
+// consume_io_tasks()) fed forever: finish() never returns and a join()
+// barrier waits forever for the worker.  io_uring refuses new
 // I/O past the stop observation (teardown guard in consume_io_tasks())
 // and converges; this test pins the same contract for kqueue.
 TEST(LifecycleTest, finish_stops_executing_io_published_after_stop) {

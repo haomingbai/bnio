@@ -81,12 +81,13 @@ struct op_holder : op_holder_base {
   }
 };
 
-// Contract (docs/design/lifecycle.md, "stop() drains the shared queues"):
+// Contract (docs/design/lifecycle.md, "Shared-queue delivery after stop"):
 // stop() must deliver a terminal state to every operation that was
 // published before the stopping state was elected, even when no worker
-// ever entered run(). Queued schedule operations and shared-queued I/O
-// complete with set_value(operation_canceled); aborted timer waits staged
-// on timers_.ready complete with set_value(operation_canceled) as well.
+// ever entered run() (the no-worker stop fallback drains inline). Queued
+// schedule operations and shared-queued I/O complete with
+// set_value(operation_canceled); aborted timer waits staged on timers_.ready
+// complete with set_value(operation_canceled) as well.
 TEST(StopWithoutWorkerTest, stop_without_worker_delivers_queued_operations) {
   auto ctx = std::make_unique<bnio::io_context>();
   if (!ctx->is_open()) {

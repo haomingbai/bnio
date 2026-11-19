@@ -24,9 +24,14 @@ struct worker_entered_receiver {
   void set_stopped() noexcept { flag->store(true, std::memory_order_release); }
 };
 
+// join() is the barrier that waits for every run() to return.
+struct join_receiver {
+  void set_value() noexcept {}
+};
+
 TEST(LifecycleTest, stop_run_uaf_stress) {
-  // Verify that stop() correctly waits for workers that have entered run(),
-  // and the native context destructor doesn't access freed memory.
+  // Verify that join() waits for workers that have entered run(), and the
+  // native context destructor doesn't access freed memory.
   // Actual UAF detection is done by ASAN at runtime.
   constexpr int iterations = 100;
 
@@ -77,15 +82,15 @@ TEST(LifecycleTest, stop_run_uaf_stress) {
       continue;
     }
 
-    // Safe: the worker is inside run() with running_workers_ > 0.
-    // stop() will wait until the worker observes the closing flag
-    // and exits the run loop.
-    ctx->stop();
+    // stop() only publishes the request; join() is the barrier that waits
+    // for the worker to leave run() and for the shared-queue drain.
+    auto join_sender = ctx->join();
+    auto join_op = bexec::connect(join_sender, join_receiver{});
+    bexec::start(join_op);
 
-    // Safe: stop() is guaranteed to have waited for the worker.
-    // Safe: the native context was destroyed inside run() before
-    //       running_workers_.fetch_sub(1), so its queue_exit teardown
-    //       completed before stop() returned and ~io_context() ran.
+    // Safe: join() returned after running_workers_ reached zero, so the
+    //       native context (and its queue_exit teardown) was destroyed
+    //       inside run() before ~io_context() runs here.
     ctx.reset();
 
     worker.join();

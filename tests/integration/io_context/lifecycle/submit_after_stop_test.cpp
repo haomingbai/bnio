@@ -29,7 +29,7 @@ struct counting_recv {
 };
 
 // Issue 1 (stranded operations): a schedule() operation submitted after
-// stop() has drained the workers must still complete. publish_cpu rejects
+// stop() and the worker's exit must still complete. publish_cpu rejects
 // the enqueue when the context is stopping (documented: publish assumes a
 // non-stopped context) and the caller completes the operation inline with a
 // canceled completion. The lock-free baseline enqueues into a queue that no

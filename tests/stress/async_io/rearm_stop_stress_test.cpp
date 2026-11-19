@@ -21,13 +21,13 @@
  * single worker):
  *   - producers publish a bounded flood of async_poll operations on a
  *     never-ready pipe read end plus posted operations, occasionally
- *     writing the shared wake channel unconditionally (mirroring
- *     io_context::stop_internal()'s wake loop, which is not gated on
+ *     writing the shared wake channel unconditionally (mirroring the
+ *     wake that io_context::begin_stop() performs, which is not gated on
  *     is_waiting());
  *   - the flood keeps the 4-entry SQ full for extended periods, so
  *     eventfd poll CQEs get collected while re-arm attempts must fail;
  *   - then an io_context-style stop runs: life_state = 1 plus repeated
- *     unconditional wake-channel writes until the worker exits.
+ *     unconditional wake-channel writes while the worker exits.
  *
  * Failure detectors:
  *   - the worker fails to exit within the bounded join (worker hang), or
@@ -216,10 +216,10 @@ round_outcome run_stop_round(const io_uring_context_options& options,
             owner_ptr->started.fetch_add(1, std::memory_order_acq_rel);
             owner_ptr->ops[i]->start();
             ++published;
-            // External wake pressure: io_context::stop_internal() writes the
-            // shared wake channel unconditionally (not gated on is_waiting()),
-            // so eventfd poll CQEs must be re-armed while the submission queue
-            // is under pressure, not only while the worker happens to wait.
+            // External wake pressure: the stop path writes the shared wake
+            // channel unconditionally (not gated on is_waiting()), so eventfd
+            // poll CQEs must be re-armed while the submission queue is under
+            // pressure, not only while the worker happens to wait.
             if (wake_stride != 0 && published % wake_stride == 0) {
               (void)owner_ptr->global_tasks.wake_channel_.wake();
             }
@@ -231,9 +231,9 @@ round_outcome run_stop_round(const io_uring_context_options& options,
     producer.join();
   }
 
-  // io_context::stop() semantics: publish the closing flag first, then
-  // keep writing the shared wake channel until the worker exits —
-  // io_context::stop_internal()'s wake loop.
+  // io_context::stop() semantics: publish the closing flag, then the test
+  // keeps writing the shared wake channel until the worker exits (stop()
+  // itself wakes once; join() is the barrier that waits).
   owner->global_tasks.life_state.store(1, std::memory_order_release);
   (void)owner->context.stop();
 
