@@ -7,7 +7,7 @@ set(BNIO_BEXEC_PROVIDER
 set_property(CACHE BNIO_BEXEC_PROVIDER PROPERTY STRINGS AUTO FIND_PACKAGE SOURCE
                                                  FETCH)
 set(BNIO_BEXEC_MIN_VERSION
-    "0.0.1"
+    "0.1.0"
     CACHE STRING "Minimum accepted bexec package version")
 set(BNIO_BEXEC_SOURCE_DIR
     ""
@@ -16,7 +16,7 @@ set(BNIO_BEXEC_GIT_REPOSITORY
     "https://github.com/haomingbai/bexec.git"
     CACHE STRING "Git repository used by the FETCH provider")
 set(BNIO_BEXEC_GIT_TAG
-    "main"
+    "v0.1.0"
     CACHE STRING "Git ref used by the FETCH provider")
 
 function(bnio_resolve_bexec_dependency)
