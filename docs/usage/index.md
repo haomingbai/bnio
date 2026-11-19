@@ -126,6 +126,11 @@ Rules that follow from the table:
 - Both sources racing: when the stop token is cancelled and the context is
   stopping at the same time, the token wins — the operation completes with
   `set_stopped()`.
+- `io_context::stop()` only requests the stop and returns. The aborted
+  completions are produced by the workers as they leave `run()`, or by
+  `join()`; when no worker is running, the elected `stop()` caller drains the
+  shared queues inline before returning. Do not destroy the context or reuse
+  buffers until every `run()` has returned or `join()` has completed.
 - An unregistered timer (`context == nullptr`, observable via
   `steady_timer::has_context()`) is legal to keep using: `cancel()` and
   `expires_after()` return `0` (no pending waits to cancel; `expires_at()`
@@ -600,14 +605,16 @@ buffer it references alive until that completion runs.
 
 If the context is stopped while the operation is still in flight, the
 cancellation path takes over. Keep the buffer until the `run()` call on the
-thread that owns the operation returns (or until every `run()` call has
-returned before destroying the context), not merely until the receiver's
-`set_value(operation_canceled)` runs. See "Cancellation and stop" above.
+thread that owns the operation returns, or until `join()` has completed
+(which waits for every `run()` to return and for the shared-queue drain), not
+merely until the receiver's `set_value(operation_canceled)` runs. `stop()`
+alone is not a synchronization point for buffer reuse. See "Cancellation and
+stop" above.
 
 On kqueue, closing a descriptor removes the kevents registered for it. An
 operation that was waiting on that descriptor may therefore never complete on
 its own. Do not call `close()` while operations are in flight on kqueue: wait
-for them, or stop the context first with `io_context::stop()`.
+for them, or stop the context and wait with `join()`.
 
 `release()` transfers descriptor ownership to the caller and does not cancel
 in-flight operations. `assign()` adopts a descriptor; when the object already
@@ -683,11 +690,22 @@ Lifecycle and introspection methods:
 |--------|---------|
 | `is_open()` | Always true for the compiled POSIX backend; native backend failure is reported by `run()`, not here. |
 | `run()` | Runs the loop on the calling thread; returns empty normally, `operation_canceled` after `stop()`, or the backend entry error. |
-| `stop()` | Requests stop; published work still completes, inflight I/O and pending timers abort. |
-| `join()` | Sender that stops the context if needed and completes with `set_value()` once every worker has exited. |
+| `stop()` | Non-blocking stop request. The elected caller aborts pending timers, publishes the stopping state, and wakes the workers; it does not wait for them and is not a barrier. Published work is delivered by the exiting workers, or inline by `stop()` when no worker is running. |
+| `join()` | Barrier sender: stops the context if needed, waits for every `run()` to return, drains the shared queues, and completes with `set_value()`. |
 | `is_in_context()` | Whether the calling thread is running this context. |
 | `is_stopped()` | Whether `stop()` has been requested. |
 | `get_post_scheduler()` / `get_dispatch_scheduler()` / `get_defer_scheduler()` | Scheduler handles described above. |
+
+`stop()` is safe to call from a receiver callback: it returns immediately. It
+does not wait for `run()` to return and does not by itself guarantee that all
+completions have been delivered. Use `join()` (or join the `run()` thread)
+before destroying the context and whenever every completion must be observed.
+
+`join()` is the only barrier. Every caller waits for all workers to exit and
+for the shared queues to be drained; concurrent callers are safe and every
+operation is still delivered exactly once. Do not start a `join()` sender on a
+thread that is running this context, nor from a receiver delivered by a
+stop/join drain: such a call waits for itself and never completes.
 
 ## 4. Express scheduler capability with concepts
 

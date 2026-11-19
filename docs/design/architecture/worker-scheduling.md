@@ -111,9 +111,11 @@ whether it is actively processing work, suspended in the poller, or still
 entering the run loop. It is incremented by `io_context::run()` **before any
 check** and decremented on every run() return path (`release_worker_slot()`);
 the native backends never touch it directly. The early increment closes the
-use-after-free window in `stop()`: a worker that has entered `run()` but not
-yet `enter_run()` is still counted, so `stop_internal()` waits for it. The
-count feeds the wake fast path (`awake_workers >= running_workers`, §5).
+use-after-free window in `join()`: a worker that has entered `run()` but not
+yet `enter_run()` is still counted, so the join barrier waits for it. A
+`stop()` fallback drain only checks the count to decide whether a worker can
+still deliver shared work; it never waits. The count feeds the wake fast path
+(`awake_workers >= running_workers`, §5).
 
 ## 3. The fetch path: `fetch_cpu_task()`
 

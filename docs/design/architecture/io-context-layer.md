@@ -157,10 +157,12 @@ callback, the awake-worker count, and the group `life_state` flag (0=running, 1=
 native context must also receive externally owned state before `run()`; no
 hidden shared-state fallback is allocated.
 
-`io_context::stop()` atomically transitions the shared `life_state` from 0
-(running) to 1 (stopping) via CAS before calling `stop_internal()`, which
-aborts pending timer waits and wakes every native worker via the shared
-wake channel. Worker registration and the `run()` path both check
+`io_context::stop()` is a non-blocking request. The elected caller aborts
+pending timer waits, atomically transitions the shared `life_state` from 0
+(running) to 1 (stopping) under the submit lock, and wakes every native
+worker via the shared wake channel, then returns without waiting. `join()`
+is the barrier that waits for every `run()` to return and drains the shared
+queues. Worker registration and the `run()` path both check
 `life_state` before and after publishing a new slot, so a worker that races
 with the stop transition cannot enter a new idle run loop.
 
@@ -296,7 +298,7 @@ operation; the abort machinery itself is untouched.
   on context stop and the timer object API stage `::canceled`. `execute()`
   maps stopped → `set_stopped()` and canceled →
   `set_value(operation_canceled)`. Timer aborts do not re-check the token:
-  the kind is fixed when staged on the stopping thread.
+  the kind is fixed when staged by the stop requester.
 - **Composite layers simplified.** Under the new contract a `set_stopped()`
   arriving at a composed receiver can only originate from a token, so
   write-all's repeat receiver forwards it unconditionally

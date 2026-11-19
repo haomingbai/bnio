@@ -132,6 +132,10 @@ ready to complete. It does not own, move, or destroy operations. The operation's
 external owner must keep the operation object alive until a terminal completion
 has run, and `io_context` must also outlive all operations submitted on it.
 
+`stop()` is not a synchronization barrier: it returns without waiting for
+`run()` to return. Before destroying the context or reusing operation
+storage, wait for every `run()` call to return, or use `join()`.
+
 ```cpp
 // WRONG — ctx destroyed before operation completes
 void bad() {
@@ -473,10 +477,12 @@ stopping.
 - an in-flight submission cannot touch the shared queue or the wake channel
   after the destructor begins tearing the context down.
 
-`stop()` and `join()` share a single stopping thread, elected by the
-`stop_requested_` CAS; that thread flips `life_state` under the submit
-lock. The context remains single-shot: `run()` refuses to re-enter once
-`life_state` is non-zero.
+`stop()` is a non-blocking request. One caller is elected by the
+`stop_requested` CAS; it flips `life_state` under the submit lock and wakes
+the workers, then returns without waiting. `join()` is a separate barrier:
+every caller waits for all `run()` calls to return and then drains whatever
+shared work remains. The context remains single-shot: `run()` refuses to
+re-enter once `life_state` is non-zero.
 
 ### Timer abort ordering
 
@@ -526,14 +532,28 @@ terminal state and closes the wake channel without delivering any pending
 completion — outstanding operations are dropped, which is the caller's
 responsibility under Rule 3 (`io_context` and operation storage must both
 remain alive until terminal completion). Second, the normal `stop()` path
-has its own delivery guarantee, described next.
+delivers through the exiting workers, or through the no-worker fallback;
+`join()` is the barrier that waits for both the workers and the drain.
 
-### stop() drains the shared queues
+### Shared-queue delivery after stop
 
-`stop()` (and `join()`, which shares the stop path) never abandons work
-that was published before the stopping state was elected. After
-`stop_internal()` waits for `running_workers` to reach zero, the stopping
-thread performs one drain-and-deliver pass over the state no worker owns:
+`stop()` never abandons work that was published before the stopping state
+was elected, but delivery no longer depends on the stopping caller waiting
+for workers. Delivery happens inline on whichever of these threads gets
+there:
+
+- the elected `stop()` caller, when `running_workers` is zero at the time of
+  the request (this covers a context that never ran);
+- a worker that observes the stopping state but will not enter or execute the
+  native loop (the `can_start_run()` rejection and the post-open rejection);
+  it drains before releasing its slot;
+- workers that enter the native loop, through their final `finish()` drain
+  before releasing their slot;
+- `join()` callers, after every `running_workers` slot has dropped to zero.
+
+Every worker-side drain completes before the worker releases its slot, so
+`join()` cannot observe zero while such a drain is still running. Each drain
+performs one pass over the state no worker owns:
 
 - the shared CPU queue (`pop_cpu_all()`), executing each operation inline
   — the delivery arbitration (stop token, then `is_stopped()`) reports
@@ -542,21 +562,29 @@ thread performs one drain-and-deliver pass over the state no worker owns:
   (`result = -ECANCELED`, `complete_submit_stopped()`) and executing it
   inline — no SQE or kevent is prepared or submitted during this drain;
 - `timers_.ready`, where `abort_pending_timer_waits()` staged the aborted
-  timer waits; with no worker left, the stopping thread delivers them
-  inline as `set_value(operation_canceled)`.
+  timer waits; the draining thread delivers them inline as
+  `set_value(operation_canceled)`.
+
+Drains may overlap (a no-worker `stop()` and a concurrent `join()`, or two
+workers exiting together). That is safe: every shared-queue pop is an atomic
+`exchange` and `timers_.ready` is swapped under `timers_.mutex`, so each
+operation is owned by exactly one drain and reaches exactly one terminal
+receiver call. Overlapping drains may run different receiver callbacks on
+different threads, matching the existing rule that completions may run on any
+context or stopping thread.
 
 The normal multi-worker stop is unaffected: the last worker's `finish()`
 already drained everything, so this pass finds the queues empty and
 returns immediately.
 
-#### Why the stopping thread delivers inline
+#### Why draining happens inline
 
-Once `running_workers` reaches zero the shared queues are ownerless:
-their only consumers are workers (during the run loop and in `finish()`),
-and a late `run()` increments `running_workers` before checking
-`can_start_run()`, so it exits with `operation_canceled` without ever
-touching a queue. Delivering from the stopping thread is therefore the
-only available agent, and it mirrors the standing convention for
+Once no worker remains the shared queues are ownerless: their only
+consumers are workers (during the run loop and in `finish()`), and a late
+`run()` increments `running_workers` before checking `can_start_run()`, so
+it exits with `operation_canceled` without ever touching a queue.
+Delivering from the stopping, exiting, or joining thread is therefore
+the only available agent, and it mirrors the standing convention for
 abnormal teardown (`queue_exit()` already runs receiver callbacks
 synchronously on the calling thread). Reusing each operation's own
 `execute()` keeps the arbitration single-pointed — the same token →
@@ -575,7 +603,8 @@ The drain never runs inside `submit_lock`. This is deliberate: receiver
 callbacks may re-enter context state — `wake_one_if_all_workers_sleeping()`
 takes `submit_lock`, `queue_timer_completion()` takes `timers_.mutex` —
 and holding the lock across `execute()` would self-deadlock. Lock-free
-operation is safe because exclusive access is already established:
+operation is safe because the publish boundary and exclusive queue pops
+establish what the drain needs:
 
 1. **Publish vs. drain.** `begin_stop()` stores `life_state = 1` inside
    `submit_lock`, and the shared publish path checks the state and
@@ -585,14 +614,17 @@ operation is safe because exclusive access is already established:
    the store is rejected and completes inline at its caller. The mutex
    rules out the "in the lock but not yet enqueued" interleaving — the
    drain and the store cannot overlap a publisher's critical section.
-2. **No competing consumer.** The drain runs only after the
-   `running_workers` spin, and the pre-increment in `run()` plus the
-   in-lock state check mean a worker either fully participates (drains
-   in `finish()` before releasing its slot) or never touches the queues.
-3. **Stability.** With no producer and no competing consumer, one full
-   pass over the three sources empties them; the loop-until-a-pass-is-
-   empty shape is retained as a conservative guard, not because an
-   unstable state is reachable.
+2. **Exclusive pops.** A late `run()` observes `life_state` and exits
+   without touching the queues; a participating worker drains in `finish()`
+   before releasing its slot. The remaining candidates (stop fallback, last
+   worker before its decrement, join) may overlap, but every pop removes a
+   disjoint set: `pop_cpu_all()` and `pop_io_all()` are `exchange`
+   operations and `timers_.ready` is taken under its mutex. No operation is
+   delivered twice.
+3. **Stability.** With no producer after the publish and exclusive pops,
+   each full pass empties the sources it wins; the loop-until-empty shape
+   is retained as a conservative guard, not because an unstable state is
+   reachable.
 
 `timers_.ready` is the one source with its own lock (`timers_.mutex`):
 the drain holds it only for the pointer swap, then executes the taken
@@ -665,7 +697,7 @@ first pass, and the surrounding `while (consume_io_tasks())` loop still
 guarantees every operation published from an abort completion reaches a
 terminal receiver call. Timer aborts do not arbitrate at all:
 `abort_pending_timer_waits()` stages `timer_completion_kind::canceled` on
-the stopping thread, the kind is fixed at staging time, and `execute()`
+the elected stop caller, the kind is fixed at staging time, and `execute()`
 maps it directly to `set_value(operation_canceled)`
 (`include/bnio/detail/posix/io_context/class.h:800`,
 `include/bnio/detail/posix/io_context/timer_wait.h:40`; see
@@ -696,8 +728,9 @@ platforms symmetric here instead of leaving kqueue on its historical
    pass really registers the operation: `EV_ADD` succeeds against the
    still-open kqueue fd, the level-triggered filter fires at once, the
    completion runs the receiver, and the receiver republishes —
-   `finish()` never returns and `stop()` spins in `stop_internal()`
-   waiting for `running_workers` to drop.  With the guard, the same
+   `finish()` never returns, and a `join()` barrier would wait forever
+   for `running_workers` to drop (`stop()` itself no longer waits).
+   With the guard, the same
    republish is consumed and cancelled instead: the receiver observes
    the stop channel (`set_value(operation_canceled)` for a token-less
    receiver, `set_stopped()` for a cancelled one), the chain ends, and

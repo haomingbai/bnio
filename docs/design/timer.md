@@ -267,8 +267,8 @@ in [`lifecycle.md`](lifecycle.md).
 Timer aborts do not re-arbitrate at `execute()` time — unlike I/O
 operations, whose `execute()` arbitrates between the token and a
 context-stop abort. The kind is fixed when the completion is staged: under
-the timer mutex for object-API cancellation, and on the stopping thread for
-`abort_pending_timer_waits()`, which runs before `life_state` is
+the timer mutex for object-API cancellation, and on the elected stop caller
+for `abort_pending_timer_waits()`, which runs before `life_state` is
 published. No staging site can race a later channel decision, so the
 delivery channel is decided exactly once, at the observation point where
 the abort happened.
@@ -285,12 +285,13 @@ caller to observe it atomically:
   serialization of same-timer mutations only) promises nothing that would
   make post-move object-API calls invalid.
 - **Context stop.** `begin_stop()` calls `abort_pending_timer_waits()`,
-  which clears every slot's `context` pointer. That runs while the stopped
-  flag is only published after `stop_internal()` finishes, and the timer
-  header's concurrency contract ("concurrent operations that mutate the
-  same timer must be externally serialized") does not require
-  synchronization with `stop()`. A timer surviving across
-  `io_context::stop()` is therefore an ordinary, non-UB state.
+  which clears every slot's `context` pointer. The abort runs before the
+  stopping state is published, and `stopped` is published only by the
+  `join()` barrier (`stop()` itself does not wait). The timer header's
+  concurrency contract ("concurrent operations that mutate the same timer
+  must be externally serialized") does not require synchronization with
+  `stop()`. A timer surviving across `io_context::stop()` is therefore an
+  ordinary, non-UB state.
 
 Because the state is reachable without a defect, the guards live inside
 the object APIs rather than in a caller obligation to re-register:
