@@ -120,6 +120,8 @@ class BNIO_EXPORT socket {
   /**
    * Closes the socket and returns any ::close error; the socket is left
    * closed either way.
+   *
+   * Does not cancel operations already in flight; they complete normally.
    */
   [[nodiscard]] std::error_code close() noexcept;
 

@@ -120,11 +120,28 @@ void io_uring_context::queue_exit() noexcept {
   // Only an unclean teardown (never run, fatal error, forced close) still owes
   // terminal calls; a finished context must not touch sibling workers' queues.
   // global_state_ must stay wired until the destructor completes.
-  if (run_state_.state.load(std::memory_order_acquire) !=
-      context_state::finished) {
+  const bool unclean =
+      run_state_.state.load(std::memory_order_acquire) !=
+      context_state::finished;
+
+  if (unclean) {
     // Mark finishing (not finished) so the delivery observes a coherent
     // state. Receivers run synchronously on this thread.
     run_state_.state.store(context_state::finishing, std::memory_order_release);
+
+    // Deliver real results the kernel already posted: their buffer access is
+    // over, and the ring must stay open to collect them.
+    drain_local_tasks(/*include_cqe=*/true);
+  }
+
+  // Close the ring before delivering cancellations. queue_exit() tears down
+  // the io_uring instance and unmaps its queues, so afterwards the kernel no
+  // longer accesses user buffers; a receiver is then free to release them.
+  // During an unclean teardown the state is still finishing, so the consume
+  // path below cannot prepare or submit against the closed ring.
+  ring_.queue_exit();
+
+  if (unclean) {
     abort_and_deliver_completions();
     run_state_.state.store(context_state::finished, std::memory_order_release);
   }
@@ -133,7 +150,6 @@ void io_uring_context::queue_exit() noexcept {
   poll_state_.local_eventfd_poll_pending = false;
   local_state_.wake_channel_.close();
   run_state_.ring_disabled = false;
-  ring_.queue_exit();
   run_state_.queue_initialized = false;
 }
 
