@@ -44,12 +44,16 @@ ctx.run();
 
 The operation state must outlive the async operation. For a short program, a
 stack variable is enough. For a server, keep operation states in an owning
-object. The raw echo server example uses a small local holder for pending
-accept, read, and write operations.
+object. The raw echo server example uses a small operation registry for
+pending accept, read, and write operations.
 
-Read operations return one available chunk. Write operations send the whole
-provided buffer before completing; use `async_write_some(...)` when an example
-or application needs to observe and retry short writes manually.
+`async_read(...)` is read-all: it repeats bounded reads until the supplied
+buffer is full or EOF arrives. `async_read_some(...)` is the one-attempt
+spelling and returns one available chunk, which may be shorter than the
+buffer. `async_write(...)` is write-all and sends the whole provided buffer
+before completing; use `async_write_some(...)` when an example or application
+needs to observe and retry short writes manually. TLS streams follow the same
+naming: `async_read()` is a single `SSL_read` step, not read-all.
 
 ## mini_curl
 
@@ -210,6 +214,76 @@ datagram without passing an endpoint each time — the counterpart to
 `scheduler.async_poll(descriptor_view(STDIN_FILENO), POLLIN)` to wait for
 stdin readability. The receiver reads a line and echoes it, then stops
 the context.
+
+## file_cat
+
+`examples/file_cat/` — asynchronous `cat` built as a repeat-until pipeline over
+streaming descriptor I/O. The target is `bnio_file_cat`:
+
+```sh
+bnio_file_cat file.txt
+```
+
+The program opens the input file, then repeatedly reads up to 64 KiB with
+`async_read_some` on an `async_io::descriptor_view` and writes the chunk to
+`STDOUT_FILENO` with write-all `async_write`. A zero-byte read or an error ends
+the loop. The round is composed with `bexec::let_value` (to carry the chunk
+length and handle EOF/error uniformly) and `bexec::repeat_until`; the terminal
+receiver stops the context. `SIGPIPE` is ignored so a closed stdout reader
+(such as `bnio_file_cat big.log | head`) surfaces `EPIPE` through the completion
+error code instead of terminating the process.
+
+Expected behavior: the file contents appear on stdout, and the exit status is
+`0` on success, `1` if the file cannot be opened or an I/O error occurs (with
+the error and the byte count printed to stderr), and `2` for a usage error.
+
+## ssl_dynamic_cert
+
+`examples/ssl_dynamic_cert/` — per-SNI dynamic certificate selection with a
+paused and resumed server handshake. The directory provides two targets,
+`bnio_ssl_dynamic_cert_server` and `bnio_ssl_dynamic_cert_client`, and embeds a
+throwaway test PKI in `certs.inc`: one CA and leaf identities for
+`a.example.test` and `b.example.test`.
+
+Server usage:
+
+```sh
+bnio_ssl_dynamic_cert_server [port] [mode]
+```
+
+- `port` defaults to `9443`.
+- `mode` is optional and fixes one of four modes (`0`–`3`); when omitted, the
+  server cycles through the modes per accepted connection.
+- Bit 0 selects how the certificate is fetched during the paused handshake:
+  `0` = direct factory, `1` = posted factory (the fetched result is delivered
+  through the context rather than inline).
+- Bit 1 selects how the certificate is installed: `0` = lazy per-SNI
+  `ssl::context`, `1` = generic/shared `ssl::context`.
+
+The server installs an SNI callback that pauses the handshake, looks up the
+offered name, and resumes through `async_handshake(scheduler,
+handshake_type::server, factory)`. It switches the connection to the selected
+context with `stream.set_context()`, echoes one message, then stops. Unknown
+SNI names are rejected. A 15-second watchdog aborts a run with no completed
+connection.
+
+Client usage:
+
+```sh
+bnio_ssl_dynamic_cert_client [port] [host]
+```
+
+- `port` defaults to `9443`; the client always connects to `127.0.0.1`.
+- `host` defaults to `a.example.test` and is sent as the SNI name. The
+  embedded CA verifies the server chain, and the client checks that the peer
+  certificate covers `host`. Use `b.example.test` to select the other identity.
+
+Both processes print progress. A successful client run shows the peer common
+name, `verify=ok`, `host=ok`, the peer chain length, and finally `echo=ok`; the
+server prints the accepted mode and a line such as
+`handshake sni=a.example.test mode=0 fetch=direct install=lazy cn=a.example.test`.
+A run with no completed exchange is aborted by the 10-second client watchdog
+and the 15-second server watchdog.
 
 ## TCP Throughput Benchmark
 

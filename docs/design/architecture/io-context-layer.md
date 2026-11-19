@@ -596,15 +596,17 @@ sequenceDiagram
 (CPOs) enable generic code to call async operations on any provider:
 
 ```cpp
-// Stream call:
 auto scheduler = ctx.get_post_scheduler();
-auto s = socket.async_read(scheduler, buffer, 0);
+auto buffer = bnio::buffer(bytes);  // caller-owned byte storage
+
+// Stream call:
+auto stream_sender = socket.async_read(scheduler, buffer, 0);
 
 // Lowest-layer call:
-auto low = scheduler.async_read(socket.view(), buffer, 0);
+auto low_sender = scheduler.async_read(socket.view(), buffer, 0);
 
 // Through CPO (generic):
-auto s = bnio::async_read(scheduler, socket, buffer);
+auto cpo_sender = bnio::async_read(scheduler, socket, buffer);
 ```
 
 | CPO | Invokes | Header |
@@ -630,17 +632,33 @@ auto s = bnio::async_read(scheduler, socket, buffer);
 Provider concepts:
 
 ```cpp
-template <class Provider, class Source, class Buffer>
+template <class Scheduler, class Source, class Buffer>
 concept reads_bytes =
-    requires(Provider& p, Source& s, Buffer&& b) {
-        { async_read(p, s, std::forward<Buffer>(b)) } -> bexec::sender;
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Source& source, Buffer&& buffer) {
+      {
+        async_read(scheduler, source, std::forward<Buffer>(buffer))
+      } -> bexec::sender;
     };
 
-template <class Provider, class Sink, class Buffer>
-concept writes_bytes = /* ... */;
+template <class Scheduler, class Sink, class Buffer>
+concept writes_bytes =
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Sink& sink, Buffer&& buffer) {
+      {
+        async_write(scheduler, sink, std::forward<Buffer>(buffer))
+      } -> bexec::sender;
+    };
 
-template <class Provider, class Acceptor>
-concept accepts_connections = /* ... */;
+template <class Scheduler, class Acceptor>
+concept accepts_connections =
+    bexec::scheduler<std::remove_cvref_t<Scheduler>> &&
+    requires(Scheduler& scheduler, Acceptor& acceptor) {
+      { async_accept(scheduler, acceptor) } -> bexec::sender;
+    };
+
+// connects_stream, polls_descriptor, and resolves_dns follow the same shape;
+// see include/bnio/io_context_cpo/concepts.h.
 
 // Streaming descriptor I/O uses the same reads_bytes/writes_bytes concepts
 // with async_io::descriptor_view as the source/sink type. Positioned calls

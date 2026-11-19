@@ -6,6 +6,7 @@ graph TB
         C3_ctx["io_context<br/>(event loop + scheduler factory)"]
         C3_tcp["tcp_socket / tcp_acceptor<br/>(RAII fd owners)"]
         C3_udp["udp::socket<br/>(RAII fd owner)"]
+        C3_local["local::stream_socket / stream_acceptor / datagram_socket<br/>(RAII AF_UNIX fd owners)"]
         C3_ssl["ssl::context / ssl::tcp::stream<br/>(RAII SSL owners)"]
         C3_buf["mutable_buffer / const_buffer<br/>dynamic_string_buffer<br/>(non-owning views / adapters)"]
     end
@@ -15,6 +16,7 @@ graph TB
         C2_desc["descriptor_view<br/>(non-owning)"]
         C2_stream["stream_socket_view<br/>(non-owning)"]
         C2_datagram["datagram_socket_view<br/>(non-owning)"]
+        C2_local["local::stream_socket_view / datagram_socket_view<br/>(non-owning AF_UNIX)"]
         C2_ip["address / endpoint<br/>(value types)"]
         C2_native["linux_native::io_uring_*<br/>(platform operations)"]
     end
@@ -36,6 +38,7 @@ graph TB
     L3 --> L2
     C3_tcp -.->|"view()"| C2_stream
     C3_udp -.->|"view()"| C2_datagram
+    C3_local -.->|"view()"| C2_local
     C3_buf -.->|"view()"| C2_buf
 ```
 

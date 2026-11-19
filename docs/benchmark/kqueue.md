@@ -9,7 +9,11 @@
 | Logical CPUs | 18 |
 | Compiler | Apple clang 21 |
 | CMake | cmake 4.4 |
-| bnio | v0.2.0 |
+| bnio | v0.2.0 (data collected for v0.2.0; not re-collected for v0.4.0) |
+
+All measurements in this report were taken with bnio v0.2.0. The library has
+not been re-benchmarked for v0.4.0; the numbers below must not be read as a
+v0.4.0 performance claim.
 
 ## 2. Methodology
 

@@ -2,8 +2,10 @@
 
 Namespace `bnio::async_io`. Headers in `include/bnio/async_io/`.
 
-This layer defines **vocabulary types only**: non-owning views and value types.
-It intentionally contains **zero RAII owners**.
+The platform-neutral part of this layer defines **vocabulary types only**:
+non-owning views and value types. The native sub-namespaces
+(`linux_native`, `bsd_native`) additionally own the platform event-loop
+contexts, which hold the native `io_uring` ring or `kqueue` descriptor.
 
 ### Non-Owning Views
 
@@ -100,7 +102,7 @@ public:
     void queue_exit() noexcept;
     [[nodiscard]] bool is_open() const noexcept;
     [[nodiscard]] unsigned kernel_features() const noexcept;
-    void set_global_state(io_uring_task_queue_state& state) noexcept;
+    void set_global_state(io_uring_task_queue_state* state) noexcept;
 
     // Sender factories
     [[nodiscard]] auto async_poll(descriptor_view descriptor,

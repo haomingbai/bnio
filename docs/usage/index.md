@@ -15,9 +15,12 @@ All public types and functions are accessible through a single header:
 
 Only interfaces exposed through this header are part of the public API. All
 public types live in the `bnio` namespace (or in sub-namespaces such as
-`bnio::ip`, `bnio::tcp`, and `bnio::udp`). Internal namespaces such as
-`bnio::async_io` and `bnio::base` are implementation details and should not be
-used directly in application code.
+`bnio::ip`, `bnio::tcp`, `bnio::udp`, `bnio::local`, and `bnio::ssl`). Internal
+namespaces such as `bnio::async_io` and `bnio::base` are implementation details
+and should not be used directly in application code. The vocabulary types they
+expose in operation signatures — `bnio::async_io::buffer_view`,
+`bnio::async_io::descriptor_view`, and `bnio::async_io::local::*` — remain
+legal arguments because the public headers name them.
 
 For architecture background, see [`../design/architecture.md`](../design/architecture.md).
 For lifetime rules, see [`../design/lifecycle.md`](../design/lifecycle.md).
@@ -195,6 +198,10 @@ what work they start and what value they send on success.
 | TCP connect | `tcp_socket::async_connect(...)` | `()` |
 | UDP datagram | `udp::socket::async_send_to(...)`, `async_receive_from(...)` | `std::size_t` |
 | Connected UDP datagram | `udp::socket::async_send(...)`, `async_receive(...)` | `std::size_t` |
+| Local stream accept | `local::stream_acceptor::async_accept(...)` | `local::stream_socket` |
+| Local stream connect | `local::stream_socket::async_connect(...)` | `()` |
+| Local datagram | `local::datagram_socket::async_send_to(...)`, `async_receive_from(...)` | `std::size_t` |
+| Connected local datagram | `local::datagram_socket::async_send(...)`, `async_receive(...)` | `std::size_t` |
 | Byte reads | `async_read(...)`, `async_read_some(...)` | `std::size_t` |
 | Byte writes | `async_write(...)`, `async_write_some(...)` | `std::size_t` |
 | Descriptor polling | `async_poll(...)` | `unsigned` ready mask |
@@ -308,6 +315,14 @@ Transport progress (`handshake_pause_reason::want_read` and
 reaches the factory. The 2-argument overload has no resume surface, so a
 callback-driven pause completes with `std::errc::operation_not_supported`.
 
+Pause codes use a dedicated public error category, declared in
+`<bnio/ssl/handshake_pause.h>` and included by `<bnio/bnio.h>`:
+`handshake_pause_category()`, `make_handshake_pause_error(reason)`,
+`is_handshake_pause(ec)`, and `handshake_pause_reason_of(ec)`. The factory
+receives a plain `std::error_code`; use `handshake_pause_reason_of()` rather
+than casting the stored value. `handshake_pause_reason::none` yields an empty
+code and is also returned for unknown category values.
+
 **Copied callbacks and lifetime.** Callbacks split into two lifetime rules.
 ALPN, SNI servername, and ClientHello registrations are looked up through the
 connection's current `SSL_CTX` at invocation time, so a stream may outlive the
@@ -407,12 +422,239 @@ Use `udp::make_resolve_query(host, service, protocol)` to create a
 `dns_query` with the UDP transport and address-family filters already set, then
 pass it to the existing `async_resolve()` API.
 
+### Local (AF_UNIX) sockets
+
+`bnio::local` is a separate type family for AF_UNIX sockets, mirroring the TCP
+and UDP surface. All local owners are move-only RAII types whose `open()`,
+`bind()`, `connect()`, `listen()`, `close()`, and `shutdown()` calls return
+`std::error_code` rather than throwing.
+
+Endpoints are `bnio::async_io::local::endpoint` values:
+
+- `endpoint()` is `endpoint_kind::unspecified`; it is also the form decoded
+  from an unnamed peer.
+- `endpoint(path)` is a filesystem path (`endpoint_kind::path_name`).
+  `path()` returns the stored path without a leading NUL and without a
+  terminator byte.
+- `endpoint::abstract(name)` creates an abstract-namespace endpoint and exists
+  only on Linux (`BNIO_HAS_ASYNC_IO_LINUX`); the leading NUL is implicit.
+- `max_path_length` is `sizeof(sockaddr_un::sun_path)` — 108 on Linux, 104 on
+  BSD. An oversized path leaves the endpoint unspecified, and the consuming
+  socket call reports `std::errc::invalid_argument` without issuing a syscall.
+
+`local::stream_protocol` and `local::datagram_protocol` are the protocol tags
+passed to `open()`. Stream sockets and acceptors use
+`async_io::local::stream_socket_view`; datagram sockets use
+`async_io::local::datagram_socket_view`.
+
+```cpp
+bnio::io_context ctx;
+auto scheduler = ctx.get_post_scheduler();
+
+const bnio::async_io::local::endpoint path("/tmp/bnio-demo.sock");
+
+bnio::local::stream_acceptor acceptor;
+// Error codes omitted here for brevity; every call returns std::error_code.
+acceptor.open(bnio::async_io::local::stream_protocol{});
+acceptor.bind(path);
+acceptor.listen(16);
+
+// Completes with set_value(std::error_code, bnio::local::stream_socket).
+auto accept_sender = acceptor.async_accept(scheduler);
+
+bnio::local::stream_socket client;
+client.open(bnio::async_io::local::stream_protocol{});
+auto connect_sender = client.async_connect(scheduler, path);
+```
+
+`local::stream_socket` provides `async_read` / `async_read_some` /
+`async_write` / `async_write_some` with the same read-all, write-all, and
+one-attempt semantics as TCP. `local::stream_acceptor::async_accept()` owns the
+accepted descriptor and completes with a `local::stream_socket`; as with TCP,
+the socket is closed and `native_handle()` is `-1` when the operation fails or
+is cancelled.
+
+`local::datagram_socket` preserves message boundaries: `connect(endpoint)` sets
+the default peer for `async_send()` / `async_receive()`, and
+`async_send_to()` / `async_receive_from()` address each datagram explicitly.
+The endpoint passed to `async_receive_from()` is output storage and must stay
+alive until the sender completes.
+
+Binding over an existing socket file fails with `EADDRINUSE`; unlinking a stale
+path is the caller's job. Other common errors are `ECONNREFUSED` (connect to a
+bound-but-not-listening or stale path), `EPIPE` (peer closed on send),
+`ENOTCONN` (send without a default peer), `EAFNOSUPPORT` (wrong address family),
+and `invalid_argument` (unspecified or oversized endpoint). Endpoint decode
+failures on receive are reported as `address_family_not_supported` with the
+endpoint reset, matching the IP decoders. `SOCK_SEQPACKET`, `connect_pair`,
+credential passing, and descriptor passing are not part of this API.
+
+### TLS configuration
+
+`bnio::ssl::context` owns an `SSL_CTX`. The constructor takes a
+`bnio::ssl::context_method`:
+
+- `context_method::tls` — generic `TLS_method()` (the default);
+- `context_method::tls_client` — `TLS_client_method()`;
+- `context_method::tls_server` — `TLS_server_method()`.
+
+Load the server identity with `use_certificate_chain_file()` and
+`use_private_key_file()` (or the in-memory `use_certificate()` /
+`use_private_key()` pair), then verify it with `check_private_key()`. Peer
+verification is configured with `set_verify_mode()` using the usual OpenSSL
+`SSL_VERIFY_*` flags; `set_verify_depth()` bounds the chain.
+`load_verify_locations(ca_file, ca_dir)` loads explicit trust anchors, and
+`set_default_verify_paths()` loads the system default locations.
+
+ALPN has two directions. A client installs its wire-format preference list
+with `set_alpn_protos(data, length)`, where each protocol name is prefixed by a
+one-byte length. A server installs an `int`-returning
+`set_alpn_callback(fn, args...)` closure whose signature receives
+`(context_view, stream_view, context::alpn_out&, std::span<const unsigned char>)`;
+call `alpn_out::set(data, len)` to select a protocol or leave it untouched to
+skip ALPN. `ssl::tcp::stream::get_alpn_selected()` and
+`ssl::stream_view::alpn_selected()` report the negotiated protocol as an empty
+span when none was selected.
+
+A TLS stream wraps a connected lower layer:
+`bnio::ssl::tcp::stream<bnio::tcp_socket> stream(std::move(socket), ctx);`.
+Start the handshake with `async_handshake(scheduler, handshake_type::client)`
+or `handshake_type::server`; the two-argument overload completes with
+`set_value(std::error_code)`. The three-argument overload adds a resume factory
+for callback-driven pauses (see below). `async_shutdown()` sends
+`close_notify`. `set_context(ssl::context&)` mirrors `SSL_set_SSL_CTX` and is
+the primitive used for SNI-driven context switching before or during the
+handshake.
+
+```cpp
+bnio::io_context ctx;
+auto scheduler = ctx.get_post_scheduler();
+
+// Error codes omitted here for brevity; every call returns std::error_code.
+bnio::ssl::context server_ctx(bnio::ssl::context_method::tls_server);
+server_ctx.use_certificate_chain_file("cert.pem");
+server_ctx.use_private_key_file("key.pem");
+server_ctx.check_private_key();
+server_ctx.set_verify_mode(SSL_VERIFY_PEER | SSL_VERIFY_FAIL_IF_NO_PEER_CERT);
+server_ctx.set_default_verify_paths();
+
+bnio::ssl::context client_ctx(bnio::ssl::context_method::tls_client);
+client_ctx.set_default_verify_paths();
+const unsigned char alpn[] = {2, 'h', '2'};
+client_ctx.set_alpn_protos(alpn, sizeof alpn);
+
+bnio::tcp_socket socket;
+bnio::ssl::tcp::stream<bnio::tcp_socket> stream(std::move(socket), client_ctx);
+auto handshake =
+    stream.async_handshake(scheduler, bnio::ssl::handshake_type::client);
+auto negotiated = stream.get_alpn_selected();
+```
+
+[`examples/ssl_dynamic_cert`](../../examples/ssl_dynamic_cert) combines
+per-SNI certificate selection, a paused and resumed handshake, and embedded
+test identities; see [`../examples.md`](../examples.md#ssl_dynamic_cert).
+
 The sender model is the same across all operation levels. For example,
 `tcp_acceptor::async_accept(scheduler, flags)` completes with a `tcp_socket`,
 which owns the underlying file descriptor so users do not need to manage raw
 native handles.
 
-## 3. Express scheduler capability with concepts
+## 3. Buffers, addresses, and context control
+
+### Buffers and dynamic buffers
+
+`bnio::mutable_buffer` and `bnio::const_buffer` are non-owning
+`(pointer, size)` views. The free function `bnio::buffer(...)` builds them
+from a pointer plus size, `std::span`, `std::array`, `std::vector`,
+`std::string`, `std::string_view`, or an `bnio::async_io::buffer_view`.
+`async_io::buffer_view` is the layer-2 aggregate `{void* data; std::size_t
+size;}` and is accepted anywhere a buffer is expected.
+
+Every async operation takes an internal holder that keeps the *view* or
+*dynamic-buffer adapter* alive for the operation's lifetime. It does not own
+the underlying bytes:
+
+- For `mutable_buffer`, `const_buffer`, and `buffer_view`, the caller owns the
+  storage and must keep it valid and unmoved until the completion runs.
+- `bnio::dynamic_string_buffer` and `bnio::dynamic_byte_vector_buffer<A>`
+  (created with `bnio::dynamic_buffer(storage)`) reference the caller's
+  `std::string` or `std::vector<std::byte>`; the adapter does not own that
+  storage either. A read operation calls `prepare()` on the adapter and
+  `commit(n)` after a successful step, so the underlying container grows in
+  place and must not be destroyed or replaced while the operation is pending.
+  `consume(n)` is available for caller-side framing.
+
+`async_read` / `async_write` are read-all / write-all; use
+`async_read_some` / `async_write_some` for a single bounded native attempt.
+The dynamic-buffer `commit()` only runs for an operation that can consume a
+buffer (reads and receive-from); write paths take an immutable view.
+
+### IP addresses and DNS result types
+
+`bnio::ip::address` and `bnio::ip::endpoint` are the public IP value types.
+Endpoints provide `loopback_v4(port)`, `any_v4(port)`, `loopback_v6(port)`,
+and `any_v6(port)`, plus `address()` and `port()` accessors. When
+`BNIO_HAS_ASYNC_IO_IP_ADDRESS_PARSER` is defined (the default on both POSIX
+backends), `bnio::ip` re-exports the parsers:
+
+```cpp
+auto a = bnio::ip::make_address("127.0.0.1");   // optional<ip::address>
+auto b = bnio::ip::make_addr("::1");            // alias of make_address
+auto c = bnio::ip::make_v4_address("10.0.0.1"); // IPv4 only
+auto d = bnio::ip::make_v6_address("fe80::1");  // IPv6 only
+```
+
+Each returns `std::optional<address>` and yields `std::nullopt` for malformed
+input.
+
+The resolver API uses three public types:
+
+- `bnio::dns_query` — fixed-capacity owned query (`host`, service name or
+  decimal port string, address-version filter, transport filter, flags). An
+  over-capacity input makes `valid()` false and resolution reports
+  `std::errc::invalid_argument`.
+- `bnio::dns_result_view` — non-owning view over caller-owned
+  `bnio::ip::endpoint` storage. The view reports capacity through `size()`;
+  the number of endpoints actually written is reported separately by the
+  operation's success value (`std::size_t` count), not by the view. Iteration
+  over the view covers the full capacity.
+- `bnio::dns_transport` / `bnio::dns_query_flags` — filters
+  (`any`, `tcp`, `udp`) and flags (`passive`, `canonical_name`,
+  `numeric_host`, `numeric_service`) combinable with `operator|`.
+
+`bnio::udp::make_resolve_query(host, service, protocol)` (or the
+`std::uint16_t` port overload) builds a query with the UDP transport and the
+protocol's address version already applied.
+
+### `io_context` construction and lifecycle
+
+`bnio::io_context_options` controls context creation:
+
+```cpp
+struct io_context_options {
+  std::uint32_t concurrency_hint = 1;   // advisory; run() workers register lazily
+  bool enable_immediate_io = true;      // eager non-blocking probe; read at construction
+  platform_io_context_options platform{}; // io_uring_ or kqueue_context_options
+};
+```
+
+Pass it to `bnio::io_context ctx(options);`. `concurrency_hint` is advisory
+and does not pre-create threads. `enable_immediate_io` is immutable after
+construction and is also queryable through `ctx.enable_immediate_io()`.
+
+Lifecycle and introspection methods:
+
+| Member | Meaning |
+|--------|---------|
+| `is_open()` | Always true for the compiled POSIX backend; native backend failure is reported by `run()`, not here. |
+| `run()` | Runs the loop on the calling thread; returns empty normally, `operation_canceled` after `stop()`, or the backend entry error. |
+| `stop()` | Requests stop; published work still completes, inflight I/O and pending timers abort. |
+| `join()` | Sender that stops the context if needed and completes with `set_value()` once every worker has exited. |
+| `is_in_context()` | Whether the calling thread is running this context. |
+| `is_stopped()` | Whether `stop()` has been requested. |
+| `get_post_scheduler()` / `get_dispatch_scheduler()` / `get_defer_scheduler()` | Scheduler handles described above. |
+
+## 4. Express scheduler capability with concepts
 
 Generic code should usually talk about capabilities instead of concrete
 scheduler types. bnio provides CPOs and concepts (available through
@@ -422,16 +664,24 @@ The CPOs include:
 
 ```cpp
 bnio::async_read(scheduler, source, buffer);
+bnio::async_read_some(scheduler, source, buffer);
 bnio::async_write(scheduler, sink, buffer);
+bnio::async_write_some(scheduler, sink, buffer);
 bnio::async_accept(scheduler, acceptor);
 bnio::async_connect(scheduler, stream, endpoint);
 bnio::async_poll(scheduler, descriptor, poll_mask);
 bnio::async_resolve(scheduler, query, result_view);
+
+bnio::ssl::async_handshake(scheduler, stream, handshake_type);
+bnio::ssl::async_shutdown(scheduler, stream);
 ```
 
 For stream objects, the CPO calls the stream customization first, such as
 `stream.async_read(scheduler, buffer)`. For non-owning platform views, it falls
-back to the scheduler member function.
+back to the scheduler member function. The `ssl::` CPOs forward to the SSL
+stream's `async_handshake()` / `async_shutdown()` members and are kept for
+generic code that treats TLS streams like any other stream. Scheduling is
+expressed with `bexec::schedule(scheduler)`, not with a bnio CPO.
 
 The matching concepts describe the operations a scheduler can provide:
 
@@ -462,10 +712,11 @@ auto echo_once(Scheduler scheduler, Stream& stream,
 }
 ```
 
-This pattern works for `tcp_socket`, `ssl::tcp::stream`, descriptor views, and any
-future type that satisfies the same CPO contract.
+This pattern works for `tcp_socket`, `local::stream_socket`,
+`ssl::tcp::stream`, descriptor views, and any future type that satisfies the
+same CPO contract.
 
-## 4. Passive I/O submission
+## 5. Passive I/O submission
 
 All I/O factories use one passive submission path:
 
@@ -491,7 +742,7 @@ Submission policy is therefore no longer part of the API. The semantic suffixes
 remain: `async_write()` is write-all, while `async_write_some()` performs one
 write attempt. The same rule applies to TCP, UDP, descriptors, and TLS.
 
-## 5. Coroutine support through bexec senders
+## 6. Coroutine support through bexec senders
 
 bnio's coroutine examples are adapters over ordinary senders, not a separate
 async API. The bnio throughput benchmark shows the pattern in

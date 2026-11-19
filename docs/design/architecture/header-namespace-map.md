@@ -57,10 +57,13 @@ bnio/bnio.h  (umbrella)
 │   └── buffer/{basic, dynamic_string, dynamic_byte_vector, holders}.h
 ├── bnio/tcp.h
 │   └── tcp/{socket, acceptor, async_operations, layers}.h
+├── bnio/udp.h
+│   └── udp/{socket, async_operations}.h
 ├── bnio/local.h
 │   └── local/{socket, acceptor, async_operations}.h
 ├── bnio/ssl.h
-│   └── ssl/{base, callback, context, context_view, cpo, stream}.h
+│   └── ssl/{base, callback, context, context_view, cpo, handshake_pause,
+│           stream}.h
 │       ├── ssl/base/{alpn, bio_pair, context_base, context_view, errors}.h
 │       ├── ssl/detail/{callback_slot, owned_callback}.h
 │       └── ssl/tcp/{stream_class, stream_operations}.h
@@ -139,7 +142,8 @@ bnio
 │   ├── socket                            RAII TCP stream socket owner
 │   └── acceptor                          RAII TCP listening socket owner
 ├── udp
-│   └── socket                            RAII UDP datagram socket owner
+│   ├── socket                            RAII UDP datagram socket owner
+│   └── make_resolve_query                UDP-transport dns_query factory
 ├── local
 │   ├── stream_socket                     RAII AF_UNIX stream socket owner
 │   ├── stream_acceptor                   RAII AF_UNIX listening socket owner
@@ -155,6 +159,11 @@ bnio
 │   ├── alert_out                         callback proxy for the handshake alert code
 │   ├── sni_out                           callback proxy for SNI context switch and alert
 │   ├── cert_out                          callback proxy for per-connection identity
+│   ├── handshake_pause_reason            stable pause classification enum
+│   ├── handshake_pause_category          error category for handshake pauses
+│   ├── make_handshake_pause_error        pause-code factory
+│   ├── is_handshake_pause                pause-code predicate
+│   ├── handshake_pause_reason_of         pause-code classifier
 │   ├── tcp::stream<NextLayer>            RAII SSL + BIO + transport owner
 │   ├── detail
 │   │   ├── callback_slot                 inline closure ownership for ssl::context

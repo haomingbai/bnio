@@ -4,9 +4,12 @@
 responsibility, and layers depend strictly downward: higher layers use lower
 layers; lower layers never reference higher ones.
 
-The primary platform is Linux with `io_uring` (one-thread-one-uring model).
-BSD `kqueue` base wrappers are implemented; the full `kqueue` backend is in
-progress.
+Both native backends are implemented: Linux uses `io_uring`
+(one-thread-one-uring model), and macOS/BSD use `kqueue`. The full
+`io_context`, TCP, UDP, local-socket, DNS, timer, and TLS APIs are shared
+across the two backends; the kqueue backend is covered by the repository's
+test suites and the macOS CI job (the io_uring backend runs on the Linux CI
+job).
 
 ## Topics
 

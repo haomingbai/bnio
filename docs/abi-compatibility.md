@@ -1,53 +1,62 @@
-# bnio v0.2 ABI Compatibility Report
+# bnio v0.4 ABI Compatibility Report
 
-- **Release:** bnio v0.2 (package version 0.2.0)
-- **Library:** `libbnio.so.0.2.0` (SONAME `libbnio.so.0`, development symlink `libbnio.so`)
+- **Release:** bnio v0.4 (package version 0.4.0)
+- **Library:** `libbnio.so.0.4.0` (SONAME `libbnio.so.0`, development symlink `libbnio.so`)
 - **Scope:** Linux x86_64, glibc systems, io_uring backend, shared-library build
   (`BUILD_SHARED_LIBS=ON`, hidden symbol visibility)
-- **Supersedes:** the [bnio v0.1 report](https://github.com/haomingbai/bnio/blob/v0.1.1/docs/abi-compatibility.md), which stays in git history
+- **Supersedes:** the [bnio v0.2 report](https://github.com/haomingbai/bnio/blob/v0.2.0/docs/abi-compatibility.md), which stays in git history
 
 ## Overview
 
 bnio is a C++20 asynchronous I/O library. Every operation is a lazy sender that
-composes with the standard receiver pattern; the Linux backend runs on io_uring.
-The v0.2 binary artifacts (DEB/RPM/TGZ) were built from bnio git commit
-`24677a2d9e2824a72141122dac11690acc7d8653` in an `ubuntu:24.04` container with
-GCC 13.3.0, CMake 3.28.3, Ninja 1.11.1, OpenSSL 3.0.13 and liburing 2.5; the
-version string `0.2.0` was passed to the build as `-DBNIO_VERSION=0.2.0`.
+composes with the standard receiver pattern; the Linux backend runs on
+io_uring, and macOS/BSD use kqueue.
 
-Commits landed after `24677a2` are not part of this verification run. This report
-documents the binary that was actually packaged and tested, and records the
-distribution matrix on which that binary was verified.
+The v0.4 packages are built by the repository release workflow
+(`.github/workflows/release.yml`) from the `v0.4.0` tag. The package version is
+selected at configure time with `-DBNIO_VERSION=0.4.0`; the source-tree default
+in `CMakeLists.txt` is still `0.3.0` until the release version bump lands. The
+release job builds a Release shared library with `BUILD_SHARED_LIBS=ON` and
+generates **DEB and RPM packages only**. It does not produce TGZ archives or
+distribution packages beyond those two formats.
 
-## ABI stability
+## ABI compatibility policy
 
-**The bnio ABI is not stable across releases.** v0.2 replaces the v0.1 baseline:
+**Patch releases within one minor series are ABI compatible.** For every
+`0.4.x` release (compatibility granularity `0.0.1`), the exported symbol set,
+class layouts, and inline/template behavior are preserved. A consumer built
+against one `0.4.x` package may load another `0.4.y` package without rebuilding.
 
-- Exported symbols, class layouts, and inline/template behavior may change in
-  any release without SONAME preservation.
-- The v0.2 shared object still carries SONAME **`libbnio.so.0`**, because the
-  SONAME is derived from the major version and that is still 0. **An unchanged
-  SONAME does not mean compatibility with v0.1** — a consumer linked against
-  v0.1's `libbnio.so.0` resolves to the v0.2 object if both are present on the
-  same system. Never install v0.1 and v0.2 side by side; rebuild all dependent
-  code when upgrading.
-- This release is a 0.1 → 0.2 version change, so no cross-version compatibility
-  testing was done; the v0.1 report is reference material only.
-- The only configuration covered here is the exact unit **bexec v0.1.0 +
-  bnio v0.2.0**.
+**Different minor releases are not ABI compatible.** `0.3` → `0.4` may change
+exported symbols, class layouts, and inline/template behavior. Rebuild every
+dependent library and application when crossing a minor version, and do not
+install two minor versions side by side: their SONAMEs are both
+`libbnio.so.0`, so the loader cannot distinguish them. An unchanged SONAME is
+therefore **not** an ABI promise at this stage.
 
-**Recommendation: build from source.** The most reliable way to consume bnio at
-this stage is to compile bnio v0.2.0 together with bexec v0.1.0 as part of your
-own build — via CMake `FetchContent` / `add_subdirectory`, or a source install of
-both — with your own toolchain. The prebuilt DEB/RPM/TGZ artifacts are provided
-for evaluation on the distributions listed below: they are usable across the
-tested glibc/toolchain range, but they carry no ABI stability guarantee across
-bnio releases. Whenever bnio or bexec is upgraded, rebuild all dependent code.
+**Major releases follow SemVer.** From `1.0.0` onward, incompatible ABI changes
+require a major-version bump and a SONAME major-version bump.
 
-## Coupling with bexec v0.1 (read first)
+### Relationship to CMake `SameMajorVersion`
 
-**bnio v0.2 does not have a self-contained ABI.** Its public headers expose types
-from the header-only library **bexec v0.1** directly in the public API:
+`bnioConfigVersion.cmake` is generated with
+`COMPATIBILITY SameMajorVersion`. That rule checks that the package has the
+same major version and is at least the requested version. In the `0.x` series
+every release has major version `0`, so a request such as
+`find_package(bnio 0.4)` is accepted by `0.4`, `0.5`, or any later `0.y`
+package, regardless of ABI. That acceptance means only that the CMake package
+and its target definitions were found. It is not an ABI promise and does not
+inspect exported symbols, layouts, or compiler-generated code.
+
+Consumers that need a specific build should request an exact version
+(`find_package(bnio 0.4.0 EXACT)`) or build bnio and its dependencies from
+source. CMake configure-time acceptance must not be read as permission to swap
+minor versions in a deployed binary.
+
+## Coupling with bexec v0.1.x (read first)
+
+**bnio v0.4 does not have a self-contained ABI.** Its public headers expose
+types from the header-only library **bexec** directly in the public API:
 
 - execution concepts — `bexec::scheduler`, `bexec::sender` — constrain the
   public customization-point interfaces (e.g. `include/bnio/io_context_cpo/concepts.h`);
@@ -56,114 +65,127 @@ from the header-only library **bexec v0.1** directly in the public API:
   states that consumers instantiate;
 - consumers drive every bnio operation through `bexec::connect` / `bexec::start`.
 
-Because bexec is header-only, all of its code is compiled into the consumer's own
-translation units. Layout, ODR, and template-instantiation compatibility of any
-bnio consumer therefore depends on the **exact bexec version** in use, not only
-on the bnio binary.
+Because bexec is header-only, all of its code is compiled into the consumer's
+own translation units. Layout, ODR, and template-instantiation compatibility of
+any bnio consumer therefore depends on the **exact bexec version** in use, not
+only on the bnio binary.
 
-The bnio v0.2 ABI is therefore defined as a single unit:
+The bnio v0.4 ABI is therefore defined as a single unit:
 
-> **bexec v0.1.0 (commit `ddd9e9c5ec586ac8d6f221d6f3bce0e8fefd8ccd`) + bnio v0.2.0**
-> (built at `24677a2`).
+> **bexec v0.1.x + bnio v0.4.0**
 
 Compatibility rules for consumers:
 
-- Consumers **must** build against bexec **v0.1.x**. The released packages were
-  built and verified exclusively against bexec v0.1.0 (tag `v0.1.0`, installed
-  from source to `/usr/local`, consumed via `BNIO_BEXEC_PROVIDER=FIND_PACKAGE`).
-- Any **major or minor version change of bexec is an ABI change of bnio**, even
-  if the bnio binary is untouched. Do not move bexec past v0.1.x without
+- The documented dependency is **bexec >= 0.1.0**, and bnio v0.4 is compatible
+  only with the **v0.1.x** line. Any major or minor change of bexec is an ABI
+  change of bnio, even if the bnio binary is untouched.
+- The build system enforces the lower bound: `BNIO_BEXEC_MIN_VERSION` is
+  `0.1.0`, the FETCH provider defaults to tag `v0.1.0`, and the generated
+  package dependencies request `bexec >= 0.1.0`. It does **not** enforce the
+  upper bound, so consumers must avoid moving to a newer bexec minor without
   rebuilding and re-verifying bnio.
 - bexec ships no binary package in the Debian/Ubuntu, Fedora, openSUSE or Arch
-  repositories. The development packages declare the dependency
-  (`libbnio-dev` → `bexec`, `bnio-devel` → `bexec`), so bexec has to be installed
-  from source first.
+  repositories. The bnio development packages declare the dependency
+  (`libbnio-dev` → `bexec`, `bnio-devel` → `bexec`), so bexec has to be
+  installed from source first.
+
+## Dependency requirements
+
+| Dependency | Requirement | Enforced by the build system |
+|---|---|---|
+| bexec | >= 0.1.0, compatible within v0.1.x | Lower bound **yes** (`BNIO_BEXEC_MIN_VERSION=0.1.0`, packages require `bexec >= 0.1.0`); upper bound `v0.1.x` **no** |
+| OpenSSL | >= 1.1.1 (documented requirement) | **No** — `find_package(OpenSSL REQUIRED)` has no version bound |
+| liburing | >= 2.1 (Linux backend) | **Yes** — `pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.1)` |
+| Compiler | C++20 | Yes — `target_compile_features(bnio PUBLIC cxx_std_20)` |
 
 ## Binary identity
 
-Identical in the DEB, RPM and TGZ artifacts:
+The following data was collected from a **v0.4.0 reference build** made from the
+current tree with `-DBNIO_VERSION=0.4.0 -DBUILD_SHARED_LIBS=ON`, not from a
+published package. The release CI rebuilds and repackages the library, so the
+BuildID and the exact NEEDED list of the published artifacts will differ.
 
 | Property | Value |
 |---|---|
-| File name | `libbnio.so.0.2.0` |
+| File name | `libbnio.so.0.4.0` |
 | **SONAME** | **`libbnio.so.0`** |
-| BuildID | `602bdfb9e10a75059059d24c706f94ab936dea5f` |
-| Exported (dynamic, defined) symbols | 364 |
-| NEEDED | `libssl.so.3`, `libcrypto.so.3`, `liburing.so.2`, `libstdc++.so.6`, `libc.so.6`, `ld-linux-x86-64.so.2` |
+| Exported (dynamic, defined) symbols | 456 |
+| BuildID | `17d1e42fc26d7eec0b56bb06acee21f1715da321` |
+| Reference build environment | Fedora Linux, GCC 16.2.1, CMake 4.3.0, OpenSSL 4.0.3, liburing 2.13 |
 
-## Test methodology
+The release packages are built on Ubuntu in CI against the distribution's
+OpenSSL and liburing. For the symbol count and BuildID of a published package,
+inspect the uploaded CI artifact rather than this reference build.
 
-The released packages were verified on an eight-distribution container matrix
-(rootless `podman`, `--network=host --security-opt seccomp=unconfined` so that
-io_uring is available). Each distribution ran in its own container, on its own
-port range, and the containers were removed afterwards.
+## Release artifacts and verification
 
-Per distribution, the procedure was:
+The release workflow produces exactly two components per package format:
+
+| Format | Runtime package | Development package | File-name pattern |
+|---|---|---|---|
+| DEB | `libbnio0` | `libbnio-dev` | `bnio-<version>-Linux-{runtime,development}.deb` |
+| RPM | `bnio` | `bnio-devel` | `bnio-<version>-Linux-{runtime,development}.rpm` |
+
+No TGZ artifact is produced by the current workflow. The earlier v0.2 report's
+TGZ-based Arch Linux and Alpine rows are therefore historical and are not
+reproduced here as a support claim.
+
+### CI test job
+
+The release workflow's test job runs on Ubuntu with `CMAKE_BUILD_TYPE=Debug`,
+`BUILD_SHARED_LIBS=ON`, and examples disabled. It runs the non-stress suite,
+then repeats the stress suite with `--repeat until-fail:20`.
+
+### Packaged-binary smoke matrix (historical v0.2 data)
+
+The table below is retained from the **v0.2 report**. The data was collected on
+v0.2 DEB/RPM artifacts and has **not been re-collected for v0.4** at the time of
+writing. It documents the verification method and the distributions that were
+covered; it is not a v0.4 compatibility claim. A v0.4 matrix must be collected
+from the v0.4 packages with the same method; this report does not invent one.
+
+To re-run the method against v0.4 packages, use the current example targets
+for the functional checks: `timer_chain`, `dns_lookup`, `poll_fd`,
+`echo_server` (including SIGINT graceful shutdown), `file_cat`, and
+`mini_curl`. Per distribution, the procedure is:
 
 1. Start a clean container from the official image.
-2. Install the distribution's **native toolchain** (g++, cmake, make,
-   pkg-config, the liburing development package, the OpenSSL development package).
-3. Install bexec v0.1.0 from source to `/usr/local`.
-4. Install the bnio package with the native package manager (DEB/RPM), or unpack
-   the TGZ onto `/usr` where no native format applies.
-5. Compile the example programs from the repository `examples/` tree against the
-   **installed** bnio headers and shared library. The compiler and system headers
-   come from the target distribution; bnio itself comes from the released binary.
-6. Smoke-run six functional checks:
-   - `timer_chain` — chained steady-timer waits;
-   - `dns_lookup` — localhost name resolution;
-   - `poll_fd` — descriptor polling;
-   - `echo_server` — TCP echo round-trip;
-   - `echo_server_sigint` — clean exit within 5 s of SIGINT;
-   - `mini_curl` — HTTP fetch against a local server.
+2. Install the distribution's native toolchain, liburing development package,
+   and OpenSSL development package.
+3. Install bexec v0.1.x from source.
+4. Install the bnio DEB/RPM with the native package manager.
+5. Compile the example programs against the installed headers and shared
+   library.
+6. Smoke-run the functional checks listed above.
 
-The same six checks as in the v0.1 matrix are used, so the results stay
-comparable; `tcp_client`, `udp_echo`, `timer_cancel` and `udp_connected` are not
-part of the matrix. Ubuntu 26.04 is covered for the first time and is the newest
-environment in the set.
+The PASS counts in the table come from the v0.2 run and used the checks
+available at that tag; they are not a v0.4 result.
 
-## Compatibility matrix
+| Distribution | glibc | g++ | CMake | liburing | Result (v0.2 data) |
+|---|---|---|---|---|---|
+| Ubuntu 24.04.4 LTS | 2.39 | 13.3.0 | 3.28.3 | 2.5 | 6/6 PASS |
+| Ubuntu 26.04 | 2.43 | 15.2.0 | 4.2.3 | 2.14 | 6/6 PASS |
+| Debian 13 (trixie) | 2.41 | 14.2.0 | 3.31.6 | 2.9 | 6/6 PASS |
+| Fedora 43 | 2.42 | 15.3.1 | 3.31.11 | 2.9 | 6/6 PASS |
+| Rocky Linux 10.2 | 2.39 | 14.3.1 | 3.31.8 | 2.12 (CRB) | 6/6 PASS |
+| openSUSE Leap 16.0 | 2.40 | 15.2.0 | 3.31.7 | 2.8 | 6/6 PASS |
 
-| Distribution | glibc | g++ | CMake | liburing | Package installation | Result |
-|---|---|---|---|---|---|---|
-| Ubuntu 24.04.4 LTS | 2.39 | 13.3.0 | 3.28.3 | 2.5 | `apt` runtime.deb + `dpkg --force-depends` dev.deb | **6/6 PASS** |
-| Ubuntu 26.04 | 2.43 | 15.2.0 | 4.2.3 | 2.14 | same as Ubuntu 24.04 | **6/6 PASS** |
-| Debian 13 (trixie) | 2.41 | 14.2.0 | 3.31.6 | 2.9 | same as Ubuntu | **6/6 PASS** |
-| Fedora 43 | 2.42 | 15.3.1 | 3.31.11 | 2.9 | `dnf` runtime.rpm + `rpm --nodeps` dev.rpm | **6/6 PASS** |
-| Rocky Linux 10.2 | 2.39 | 14.3.1 | 3.31.8 | 2.12 (CRB) | same as Fedora | **6/6 PASS** |
-| openSUSE Leap 16.0 | 2.40 | 15.2.0 | 3.31.7 | 2.8 | `zypper` runtime.rpm + `rpm --nodeps --replacefiles` dev.rpm | **6/6 PASS** |
-| Arch Linux (rolling) | 2.44 | 16.2.1 | 4.4.3 | 2.15 | TGZ unpacked onto `/usr` | **6/6 PASS** |
-| Alpine 3.23 (musl) | musl 1.2.5 | 15.2.0 | 4.1.3 | 2.12 | TGZ onto `/usr` | **Expected failure** (see below) |
+The v0.2 matrix spanned GCC 13.3 → 16.2.1, glibc 2.39 → 2.44, CMake 3.28 →
+4.4.3, and liburing 2.5 → 2.15 against a single glibc-linked binary. Those
+numbers remain useful as a description of the tested range, but they were
+measured on v0.2 artifacts.
 
-Every glibc distribution passes all six checks. The matrix spans GCC 13.3 →
-16.2.1, glibc 2.39 → 2.44, CMake 3.28 → 4.4.3 and liburing 2.5 → 2.15 against the
-single bnio v0.2 binary built with GCC 13.3 on glibc 2.39, so the released
-artifacts are usable across that range. openSUSE Leap 16.0 and Arch Linux were
-each verified a second time in an independent container with the same result.
+### musl / Alpine
 
-## musl / Alpine (expected failure)
+Alpine uses musl libc and is not a supported target for the glibc-linked DEB
+and RPM packages. musl consumers must build bnio from source with their own
+toolchain; that configuration is outside the ABI baseline defined here.
 
-Alpine 3.23 uses musl libc and is **not** a supported target for the released
-glibc-linked binaries. The Alpine run exists to confirm that conclusion and does
-not count toward the pass rate:
+## Recommendation: build from source
 
-1. **Library loading fails.** `ldd /usr/lib/libbnio.so.0.2.0` reports
-   `Error loading shared library ld-linux-x86-64.so.2: No such file or directory
-   (needed by /usr/lib/libbnio.so.0.2.0)` and exits 127 — the musl loader cannot
-   resolve a glibc-linked shared object.
-2. **Example compilation fails.** The link step produces 240 `undefined
-   reference` errors against versioned glibc/libstdc++ symbols
-   (`connect@GLIBC_2.2.5`, `__errno_location@GLIBC_2.2.5`,
-   `__cxa_guard_acquire@CXXABI_1.3`, `std::__throw_logic_error@GLIBCXX_3.4`, …).
-   musl ships none of these versioned definitions, so the link cannot be
-   satisfied.
-3. **Conclusion.** The DEB/RPM/TGZ artifacts of bnio v0.2 apply to glibc-based
-   distributions only. musl consumers need to build bnio from source with their
-   own toolchain; that configuration is outside the ABI baseline defined here.
-
-One unsupported side experiment, recorded for information only: with the
-third-party `gcompat` shim installed and `-Wl,--allow-shlib-undefined` passed to
-the linker, all five examples link and the same six checks pass on Alpine 3.23.
-This shows only that the bnio code itself is portable — it needs a best-effort
-glibc emulation layer and the linker check switched off, neither of which is
-within the support contract.
+The most reliable way to consume bnio at this stage is to compile bnio v0.4.0
+together with bexec v0.1.x as part of your own build — via CMake
+`FetchContent` / `add_subdirectory`, or a source install of both — with your own
+toolchain. The prebuilt DEB/RPM artifacts are provided for evaluation on the
+distributions listed above: they carry no ABI stability guarantee across bnio
+releases. Whenever bnio or bexec is upgraded, rebuild all dependent code.

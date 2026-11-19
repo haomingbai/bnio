@@ -18,9 +18,10 @@ This repository is a CMake-based C++20 async I/O library.
 - `io_context_cpo.h` — CPO umbrella for generic scheduler/stream operations.
 - `buffer.h` — buffer types umbrella.
 - `tcp.h` — TCP socket/acceptor umbrella.
+- `udp.h` — UDP socket umbrella plus `make_resolve_query()` helpers.
 - `local.h` — local (AF_UNIX) socket/acceptor umbrella.
-- `ssl.h` — SSL context/stream umbrella.
-- `ip.h` — IP address/endpoint convenience re-exports.
+- `ssl.h` — SSL context/stream umbrella, including handshake-pause helpers.
+- `ip.h` — IP address/endpoint convenience re-exports and DNS aliases.
 
 ### Internal Layer 1 — `bnio::base`
 
@@ -140,6 +141,9 @@ High-level async runtime, stream owners, and buffer types.
 - `ssl/detail/common.h` — shared SSL operation helpers.
 - `ssl/detail/buffers.h` — borrow-level buffer adapters for SSL operations.
 - `ssl/detail/state_machine.h` — shared SSL operation state machine base.
+- `ssl/detail/handshake_concepts.h` — handshake resume-factory concepts.
+- `ssl/detail/handshake_pause_table.h` — mapping from OpenSSL pause returns
+  to `handshake_pause_reason` values.
 - `ssl/detail/handshake_retry.h` — factory-driven TLS handshake operation and
   sender (`handshake_retry_operation` / `handshake_retry_sender`); the
   2-argument handshake uses it with the default factory.
@@ -161,7 +165,8 @@ High-level async runtime, stream owners, and buffer types.
   - `basic.h` — `mutable_buffer` and `const_buffer`.
   - `dynamic_string.h` — `dynamic_string_buffer`.
   - `dynamic_byte_vector.h` — `dynamic_byte_vector_buffer`.
-  - `holders.h` — owning buffer wrappers.
+  - `holders.h` — internal operation-lifetime buffer holders (non-owning with
+    respect to caller storage).
 - `tcp/` — TCP stream owners and layers:
   - `socket.h` — `tcp::socket` class (`tcp_socket` compatibility alias).
   - `acceptor.h` — `tcp::acceptor` class (`tcp_acceptor` compatibility alias).
@@ -192,6 +197,9 @@ High-level async runtime, stream owners, and buffer types.
     `cert_result`) and the framework-built proxies (`alert_out`, `sni_out`,
     `cert_out`) passed to user callbacks.
   - `context_view.h` — public `ssl::context_view` alias for the base view.
+  - `handshake_pause.h` — public `handshake_pause_reason` enum, pause error
+    category, and classification helpers (`is_handshake_pause`,
+    `handshake_pause_reason_of`, `make_handshake_pause_error`).
   - `context.h` — `ssl::context` class (composes `base::context_base` with an
     inline `detail::callback_slot`; adds the method selector, forwarding
     configuration methods, the callback-invocability concepts, and the
@@ -230,9 +238,9 @@ High-level async runtime, stream owners, and buffer types.
 - `src/CMakeLists.txt` — library target definition.
 - `src/base/linux/` — base-layer Linux method implementations:
   - `ring.cpp`, `submission_queue_entry.cpp`, `completion_queue_entry.cpp`,
-    `params.cpp`, `probe.cpp`.
+    `params.cpp`, `probe.cpp`, `wake_channel.cpp`.
 - `src/base/bsd/` — base-layer BSD method implementations:
-  - `kqueue.cpp`, `event.cpp`, `event_list_view.cpp`.
+  - `kqueue.cpp`, `event.cpp`, `event_list_view.cpp`, `wake_channel.cpp`.
 - `src/async_io/posix/` — POSIX-shared async_io implementations:
   - `address.cpp`, `tcp_endpoint.cpp`, `local_endpoint.cpp`.
 - `src/async_io/linux/` — Linux-specific async_io implementations:
@@ -265,49 +273,75 @@ High-level async runtime, stream owners, and buffer types.
 
 ## Tests (`tests/`)
 
-- `tests/base/linux/` — base-layer Linux tests (ring, SQE, CQE, params, probe,
-  header self-containment).
-- `tests/base/bsd/` — base-layer BSD tests (kqueue, header self-containment).
-- `tests/async_io/` — async_io layer tests (buffer_view, descriptor_view,
-  socket_view, address, DNS, tcp_endpoint, time, header self-containment).
-  - `io_uring_context_test_support.h` — shared test support for io_uring_context.
-  - `io_uring_cqe_dispatch_test.cpp` — CQE dispatch tests.
-  - `io_uring_operation_traits_test.cpp` — operation trait tests.
-  - `io_uring_run_loop_test.cpp` — run loop lifecycle tests.
-  - `io_uring_sender_test.cpp` — sender-based operation tests.
-  - `kqueue_context_test_support.h` — shared test support for `kqueue_context`.
-  - `kqueue_operation_traits_test.cpp` — passive queue and operation trait tests.
-  - `kqueue_run_loop_test.cpp` — passive publication and run-loop lifecycle tests.
-  - `kqueue_sender_test.cpp` — readiness-backed sender tests.
-- `tests/io_context/` — high-level `io_context` tests:
-  - `io_context_test.cpp`, `io_context_scheduler_test.cpp`,
-    `io_context_sender_concept_test.cpp`, `io_context_accept_connect_test.cpp`,
-    `io_context_read_write_test.cpp`, `io_context_poll_test.cpp`.
-  - `tcp_test.cpp`, `buffer_test.cpp`, `dns_test.cpp`.
-  - `ssl_concept_test.cpp`, `ssl_handshake_test.cpp`, `ssl_transfer_test.cpp`,
-    `ssl_alpn_test.cpp`, `ssl_error_precedence_test.cpp`,
-    `ssl_error_queue_hygiene_test.cpp`, `ssl_sni_test.cpp`,
-    `ssl_client_hello_test.cpp`, `ssl_cert_callback_test.cpp`,
-    `ssl_callback_unit_test.cpp`, plus
-    `tests/support/io_context/ssl_test_support.h`.
-  - `ssl_callback_stress_test.cpp` (under `tests/stress/io_context/`).
-  - `steady_timer_test.cpp`.
-  - `header_self_contained_test.cpp`.
-  - Various `*_test_support.h` files for shared test infrastructure.
+The suite is organized by test weight; GoogleTest targets are registered under
+the `basic`, `integration`, and `stress` CTest labels.
+
+- `tests/basic/async_io/` — layer-2 unit tests: address, buffer_view,
+  descriptor_view, dns_query, socket_view, tcp_endpoint, time,
+  `local_endpoint`, Linux/BSD `socket_address` and `local_socket_address`,
+  io_uring/kqueue operation traits, kqueue helper, and header
+  self-containment.
+- `tests/basic/base/` — Linux base-layer unit tests: SQE, CQE, params, probe,
+  and header self-containment.
+- `tests/basic/base_bsd/` — BSD base-layer header self-containment.
+- `tests/basic/io_context/` — high-level unit tests: buffer, sender concepts,
+  timer state, header self-containment, and the SSL callback/handshake-pause/
+  handshake-retry unit and runtime tests.
+- `tests/integration/async_io/` — io_uring and kqueue run-loop, sender, CQE
+  dispatch, EAGAIN re-arm, error routing, SQ-full, UDP, and DNS tests.
+- `tests/integration/base/` — Linux ring and wake-channel integration tests.
+- `tests/integration/base_bsd/` — BSD kqueue and wake-channel integration
+  tests.
+- `tests/integration/io_context/` — `io_context` behavior: scheduler, sender
+  concepts, accept/connect, read/write, read-all, poll, UDP, TCP, DNS, random
+  access files, timers, local-socket stream/datagram/error/lifecycle tests,
+  and the full SSL suite (handshake, transfer, ALPN, SNI, ClientHello,
+  certificate callback, context switching, error precedence, error-queue
+  hygiene, handshake-retry categories).
+- `tests/integration/io_context/lifecycle/` — join, nested run, stop
+  ordering/races, submit-after-stop, no-new-I/O-after-stop, and
+  operation-leak/abort tests.
+- `tests/stress/async_io/` — re-arm/stop stress.
+- `tests/stress/base_bsd/` — wake-channel stress.
+- `tests/stress/io_context/` — TCP, UDP, read/write, shutdown-submit, timer,
+  timer-stop-race, local peer-close, SSL callback, and SSL handshake-retry
+  stress.
+- `tests/support/async_io/` — `io_uring_context_test_support.h` and
+  `kqueue_context_test_support.h`.
+- `tests/support/io_context/` — loopback, runtime, general context, and SSL
+  test support headers.
+- `tests/packaging/` — `consumer.cpp` plus `source/`, `cmake/`, and
+  `pkgconfig/` consumer projects used by packaging tests.
 
 ## Examples (`examples/`)
 
-- `examples/dns_lookup/` — DNS resolution example.
-- `examples/echo_server/` — TCP echo server with graceful shutdown.
-- `examples/mini_curl/` — full HTTP/HTTPS client with timeout support:
+All 11 example programs are defined as CMake targets:
+
+- `examples/dns_lookup/` — DNS resolution (`bnio_dns_lookup`).
+- `examples/echo_server/` — TCP echo server with graceful SIGINT shutdown
+  (`bnio_echo_server`).
+- `examples/file_cat/` — asynchronous `cat` over descriptor I/O
+  (`bnio_file_cat`).
+- `examples/mini_curl/` — full HTTP/HTTPS client with timeout support
+  (`bnio_mini_curl`):
   - `mini_curl.cpp` — `main()` and argument parsing.
   - `request.cpp` — HTTP request construction.
-  - `mini_curl/` subdirectory — client components (client, connection,
-    receivers, redirect, transfer, output, operation_registry, request).
-- `examples/poll_fd/` — descriptor polling (stdin readability).
-- `examples/tcp_client/` — TCP client with timeout (resolve→connect→send→receive).
-- `examples/timer_chain/` — chained timers (200ms→100ms→50ms).
-- `examples/udp_echo/` — UDP send-and-receive example.
+  - `mini_curl_client.hpp` — aggregate header for the client components.
+  - `mini_curl/` subdirectory — client, connection, receivers, redirect,
+    transfer, output, operation_registry, and request headers.
+- `examples/poll_fd/` — descriptor polling on stdin (`bnio_poll_fd`).
+- `examples/ssl_dynamic_cert/` — per-SNI TLS certificate selection with a
+  paused handshake (`bnio_ssl_dynamic_cert_server`,
+  `bnio_ssl_dynamic_cert_client`).
+- `examples/tcp_client/` — TCP client with timeout
+  (`bnio_tcp_client`).
+- `examples/timer_cancel/` — timer cancellation
+  (`bnio_timer_cancel`).
+- `examples/timer_chain/` — chained timers, 200ms→100ms→50ms
+  (`bnio_timer_chain`).
+- `examples/udp_connected/` — connected-mode UDP exchange
+  (`bnio_udp_connected`).
+- `examples/udp_echo/` — UDP send-and-receive (`bnio_udp_echo`).
 
 ## Benchmarks (`benchmarks/`)
 
@@ -318,6 +352,11 @@ High-level async runtime, stream owners, and buffer types.
 
 ## Docs (`docs/`)
 
+- `abi-compatibility.md` — ABI policy, dependency baseline, and release
+  verification report.
+- `maintaince.md` — naming, base-layer rules, test, and documentation
+  conventions.
+- `roadmap.md` — next milestone (QUIC).
 - `design/architecture.md` — architecture overview and layer index.
 - `design/architecture/layers.md` — layer overview and ownership model.
 - `design/architecture/base-layer.md` — Layer 1 documentation.
@@ -327,12 +366,16 @@ High-level async runtime, stream owners, and buffer types.
   namespace map.
 - `design/architecture/io-context-read-all-eager.md` — read-all semantics and
   the eager-optional (immediate-I/O) design for `io_context`.
+- `design/architecture/local-socket-split.md` — local (AF_UNIX) type-family
+  design and implementation record.
+- `design/architecture/worker-scheduling.md` — suspend list, directed wakeup,
+  and local-queue scheduling.
 - `design/lifecycle.md` — lifetime and ownership rules.
 - `design/io_uring-setup.md` — io_uring setup flags and optimization.
 - `design/timer.md` — timer subsystem design.
 - `usage.md` → redirects to `usage/index.md`.
-- `usage/index.md` — usage guide (sender/receiver, operations, CPOs, submission
-  modes, coroutines).
+- `usage/index.md` — usage guide (sender/receiver, operations, local sockets,
+  TLS, buffers, DNS, CPOs, submission modes, coroutines).
 - `examples.md` — runnable example walkthrough.
 - `build.md` — build, install, consumption, packaging (DEB/RPM), and coverage.
 - `benchmark/index.md` — benchmark overview and entry point.

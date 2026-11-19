@@ -99,14 +99,15 @@ target_link_libraries(your_app PRIVATE bnio::bnio)
 ```
 
 ```sh
-c++ app.cpp $(pkg-config --cflags --libs bnio)
+c++ -std=c++20 app.cpp $(pkg-config --cflags --libs bnio)
 ```
 
 bnio also builds DEB and RPM packages through CPack. Enable it with
 `BNIO_PACKAGE=ON` and run `cpack`:
 
 ```sh
-cmake -S . -B build-pkg -DCMAKE_BUILD_TYPE=Release -DBNIO_INSTALL=ON -DBNIO_PACKAGE=ON
+cmake -S . -B build-pkg -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=ON \
+  -DBNIO_INSTALL=ON -DBNIO_PACKAGE=ON
 cmake --build build-pkg
 (cd build-pkg && cpack -G DEB && cpack -G RPM)
 ```

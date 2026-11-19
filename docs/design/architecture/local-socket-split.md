@@ -1,12 +1,30 @@
 # Design: Separating Local (AF_UNIX) Sockets from Network Sockets
 
-Design document. Status: approved (2026-10-07); unimplemented. Nothing in
-this document is implemented yet; the repository state it describes is
-`main` as of the writing date.
+Design document and implementation record. Status: approved (2026-10-07);
+**implemented**. The type family, endpoint, protocol tags, views, owners, and
+`io_context` dispatch described below exist in:
 
-`bnio` currently routes every stream socket — TCP and AF_UNIX alike —
-through one untyped write path. This document proposes giving local sockets
-their own protocol-ized type family, mirroring how Asio separates
+- `include/bnio/async_io/local/` — `endpoint`, `stream_protocol` /
+  `datagram_protocol`, and the local socket views.
+- `include/bnio/local.h`, `include/bnio/local/{socket,acceptor,async_operations}.h`
+  — `bnio::local::stream_socket`, `stream_acceptor`, `datagram_socket`, and
+  their sender factories.
+- `src/posix/local.cpp` — POSIX owner implementations;
+  `src/async_io/posix/local_endpoint.cpp` — endpoint conversion.
+- `src/async_io/{linux,bsd}/socket_address.cpp` — native `sockaddr_un`
+  encode/decode for each backend.
+- Tests: `tests/basic/async_io/local_endpoint_test.cpp`,
+  `tests/basic/async_io/{linux,bsd}_local_socket_address_test.cpp`,
+  `tests/integration/io_context/local_*_test.cpp`, and
+  `tests/stress/io_context/local_write_peer_close_stress_test.cpp`.
+
+The body of this document is retained as the design record. Where it says
+"proposes" or "proposal", read that as the rationale that led to the
+implemented API; the normative API is the headers listed above.
+
+At the time of this design, `bnio` routed every stream socket — TCP and
+AF_UNIX alike — through one untyped write path. This document proposed giving
+local sockets their own protocol-ized type family, mirroring how Asio separates
 `asio::ip::tcp` / `asio::ip::udp` from `asio::local::stream_protocol` /
 `asio::local::datagram_protocol`, and making `io_context` model selection a
 function of socket type rather than of kernel capability alone.
@@ -46,12 +64,15 @@ Native address storage: `linux_native::socket_address`
 `AF_INET` / `AF_INET6` (`family()`), and both `make_endpoint()` converters
 return `std::nullopt` for any other family.
 
-**AF_UNIX has no representation anywhere in the address/endpoint layer.**
-No `sockaddr_un`, no path endpoint, no local protocol tag exists on `main`.
+**At the time of the proposal, AF_UNIX had no representation anywhere in the
+address/endpoint layer.** No `sockaddr_un`, path endpoint, or local protocol
+tag existed on `main`. The implemented headers now provide all three
+(`include/bnio/async_io/local/`).
 
 ### 1.2 Where type information is lost
 
-The `io_context` write path is keyed on `stream_socket_view`:
+At the time of the proposal, the `io_context` write path was keyed on
+`stream_socket_view`:
 
 - `io_context::async_read/async_read_some/async_write/async_write_some(async_io::stream_socket_view, ...)` —
   `include/bnio/detail/posix/io_context/native_io.h:37-62`

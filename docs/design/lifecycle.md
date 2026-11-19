@@ -154,11 +154,11 @@ as the owner exists.
 // RIGHT — high-level stream API keeps the owner explicit
 bnio::tcp_socket sock;                        // owner
 sock.open(bnio::ip::tcp::v4());
-sock.async_read(scheduler, buffer, 0);     // sock outlives op
+auto stream_sender = sock.async_read(scheduler, buffer, 0);  // sock outlives it
 
 // Also right — explicit low-level view, same lifetime
 auto view = sock.view();                      // non-owning
-scheduler.async_read(view, buffer, 0);     // fine: sock still alive
+auto low_sender = scheduler.async_read(view, buffer, 0);  // fine: sock still alive
 ```
 
 ### Rule 5: Read CQE fields before `cqe_seen()`, not after
@@ -309,8 +309,8 @@ imposes hard constraints:
 
 ```cpp
 auto sender = socket.async_read(scheduler, buffer, 0);
-auto op = std::move(sender).connect(my_receiver);
-op.start();
+auto op = bexec::connect(std::move(sender), my_receiver);
+bexec::start(op);
 // op must remain alive until the receiver gets set_value/set_stopped.
 ```
 

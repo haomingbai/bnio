@@ -10,6 +10,9 @@ on different platform backends.
 | [io_uring (Linux)](io_uring.md) | Linux | bnio leads in throughput (1.05×); timer churn at parity (1.00×) |
 | [kqueue (macOS/BSD)](kqueue.md) | macOS | bnio leads in throughput (1.03×); at parity in timer churn (1.02×) |
 
+Both reports contain measurements taken with bnio v0.2.0. They have not been
+re-run for v0.4.0, so the numbers describe v0.2.0, not the current release.
+
 ## Methodology
 
 Each backend report covers two independent benchmarks:

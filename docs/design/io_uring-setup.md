@@ -52,6 +52,10 @@ IORING_SETUP_COOP_TASKRUN |
     IORING_SETUP_R_DISABLED
 ```
 
+The header spells these through liburing compatibility constants so that the
+default compiles against the supported liburing baseline; the three bits are
+the same values shown above.
+
 `io_uring_context` automatically adds `R_DISABLED` whenever callers request
 `SINGLE_ISSUER`, even if it was omitted from `setup_flags`. Applications that
 need the old unrestricted-submitter behaviour can explicitly set
@@ -91,7 +95,8 @@ struct io_uring_context_options {
   /// SQPOLL idle timeout in milliseconds before the kernel thread parks.
   unsigned sqpoll_idle_ms = 1000;
 
-  /// Optional non-owning eventfd used to wake the context run loop.
+  /// Wake eventfd: negative creates and owns one; otherwise it is a borrowed
+  /// descriptor that must stay valid until queue_exit() or destruction.
   int event_fd = -1;
 };
 ```

@@ -87,8 +87,10 @@
 - Exercise production defaults in behavioral regression tests. Do not clear
   setup flags or weaken concurrency merely to make a test pass; a test that
   intentionally targets a non-default mode must name and assert that mode.
-- Keep base-layer Linux tests under `tests/base/linux/`.
-- Keep base-layer BSD tests under `tests/base/bsd/`.
+- Keep base-layer Linux tests under `tests/basic/base/` and
+  `tests/integration/base/`.
+- Keep base-layer BSD tests under `tests/basic/base_bsd/`,
+  `tests/integration/base_bsd/`, and `tests/stress/base_bsd/`.
 - Ensure each public base header can be included independently.
 - Cover runtime `ring + nop` behavior where the host supports `io_uring`.
 - Treat expected unavailable-host errors such as `-ENOSYS`, `-EPERM`, and
