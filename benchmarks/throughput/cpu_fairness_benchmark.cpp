@@ -15,9 +15,9 @@
 #include <bexec/bexec.hpp>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
-#include <csignal>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
@@ -31,10 +31,10 @@ using namespace bnio;
 namespace {
 
 constexpr unsigned k_default_workers = 4;
-constexpr unsigned k_default_tasks  = 20000;
-constexpr unsigned k_min_count      = 10000;
-constexpr unsigned k_max_count      = 1000000;
-constexpr unsigned k_max_workers    = 32;
+constexpr unsigned k_default_tasks = 20000;
+constexpr unsigned k_min_count = 10000;
+constexpr unsigned k_max_count = 1000000;
+constexpr unsigned k_max_workers = 32;
 
 // ---- argument parsing ----
 
@@ -63,15 +63,16 @@ struct worker_stats {
   std::atomic<std::uint64_t> total_work{0};
 };
 
-worker_stats*      g_stats      = nullptr;
-std::thread::id*   g_worker_ids = nullptr;
-std::mutex         g_reg_mutex;
-unsigned           g_max_workers = k_max_workers;
-unsigned           g_slot = 0;
+worker_stats* g_stats = nullptr;
+std::thread::id* g_worker_ids = nullptr;
+std::mutex g_reg_mutex;
+unsigned g_max_workers = k_max_workers;
+unsigned g_slot = 0;
 
 void register_worker_thread() {
   std::lock_guard<std::mutex> lk(g_reg_mutex);
-  if (g_slot < g_max_workers) g_worker_ids[g_slot++] = std::this_thread::get_id();
+  if (g_slot < g_max_workers)
+    g_worker_ids[g_slot++] = std::this_thread::get_id();
 }
 
 int find_worker_id() {
@@ -116,7 +117,10 @@ class detached_task {
 
  private:
   void destroy() noexcept {
-    if (handle_) { handle_.destroy(); handle_ = {}; }
+    if (handle_) {
+      handle_.destroy();
+      handle_ = {};
+    }
   }
   handle_type handle_{};
 };
@@ -128,12 +132,26 @@ enum class await_status { value, error, stopped };
 template <class T>
 class await_result {
  public:
-  static await_result value(T v) { await_result r; r.status_ = await_status::value; r.value_.emplace(std::move(v)); return r; }
-  static await_result error(std::error_code) { await_result r; r.status_ = await_status::error; return r; }
-  static await_result stopped() { await_result r; r.status_ = await_status::stopped; return r; }
+  static await_result value(T v) {
+    await_result r;
+    r.status_ = await_status::value;
+    r.value_.emplace(std::move(v));
+    return r;
+  }
+  static await_result error(std::error_code) {
+    await_result r;
+    r.status_ = await_status::error;
+    return r;
+  }
+  static await_result stopped() {
+    await_result r;
+    r.status_ = await_status::stopped;
+    return r;
+  }
   bool has_value() const noexcept { return status_ == await_status::value; }
   explicit operator bool() const noexcept { return has_value(); }
   T& value() noexcept { return *value_; }
+
  private:
   await_status status_ = await_status::stopped;
   std::optional<T> value_;
@@ -142,20 +160,46 @@ class await_result {
 template <>
 class await_result<void> {
  public:
-  static await_result value() { await_result r; r.status_ = await_status::value; return r; }
-  static await_result error(std::error_code) { await_result r; r.status_ = await_status::error; return r; }
-  static await_result stopped() { await_result r; r.status_ = await_status::stopped; return r; }
+  static await_result value() {
+    await_result r;
+    r.status_ = await_status::value;
+    return r;
+  }
+  static await_result error(std::error_code) {
+    await_result r;
+    r.status_ = await_status::error;
+    return r;
+  }
+  static await_result stopped() {
+    await_result r;
+    r.status_ = await_status::stopped;
+    return r;
+  }
   bool has_value() const noexcept { return status_ == await_status::value; }
   explicit operator bool() const noexcept { return has_value(); }
+
  private:
   await_status status_ = await_status::stopped;
 };
 
-template <class List> struct sender_value_type;
-template <class T> struct sender_value_type<bexec::type_list<std::tuple<std::error_code, T>>> { using type = T; };
-template <> struct sender_value_type<bexec::type_list<std::tuple<std::error_code>>> { using type = void; };
-template <class T> struct sender_value_type<bexec::type_list<std::tuple<T>>> { using type = T; };
-template <> struct sender_value_type<bexec::type_list<std::tuple<>>> { using type = void; };
+template <class List>
+struct sender_value_type;
+template <class T>
+struct sender_value_type<bexec::type_list<std::tuple<std::error_code, T>>> {
+  using type = T;
+};
+template <>
+struct sender_value_type<bexec::type_list<std::tuple<std::error_code>>> {
+  using type = void;
+};
+template <class T>
+struct sender_value_type<bexec::type_list<std::tuple<T>>> {
+  using type = T;
+};
+template <>
+struct sender_value_type<bexec::type_list<std::tuple<>>> {
+  using type = void;
+};
 
 template <class Sender>
 using sender_value_type_t = typename sender_value_type<
@@ -173,15 +217,19 @@ class sender_awaiter {
     explicit receiver(sender_awaiter& a) noexcept : awaiter_(&a) {}
     bexec::empty_env get_env() const noexcept { return {}; }
 
-    void set_value(std::error_code ec) noexcept requires std::is_void_v<value_type> {
+    void set_value(std::error_code ec) noexcept
+      requires std::is_void_v<value_type>
+    {
       awaiter_->result_ = ec ? result_type::error(ec) : result_type::value();
       awaiter_->resume();
     }
 
     template <class Value>
-      requires(!std::is_void_v<value_type> && std::constructible_from<value_type, Value>)
+      requires(!std::is_void_v<value_type> &&
+               std::constructible_from<value_type, Value>)
     void set_value(std::error_code ec, Value&& v) noexcept {
-      awaiter_->result_ = ec ? result_type::error(ec) : result_type::value(std::forward<Value>(v));
+      awaiter_->result_ = ec ? result_type::error(ec)
+                             : result_type::value(std::forward<Value>(v));
       awaiter_->resume();
     }
 
@@ -189,14 +237,17 @@ class sender_awaiter {
       awaiter_->result_ = result_type::stopped();
       awaiter_->resume();
     }
+
    private:
     sender_awaiter* awaiter_;
   };
 
-  using operation_type = decltype(bexec::connect(std::declval<sender_type&&>(), std::declval<receiver>()));
+  using operation_type = decltype(bexec::connect(std::declval<sender_type&&>(),
+                                                 std::declval<receiver>()));
 
   explicit sender_awaiter(Sender&& sender)
-      : operation_(bexec::connect(std::forward<Sender>(sender), receiver(*this))) {}
+      : operation_(
+            bexec::connect(std::forward<Sender>(sender), receiver(*this))) {}
 
   sender_awaiter(const sender_awaiter&) = delete;
   sender_awaiter& operator=(const sender_awaiter&) = delete;
@@ -204,7 +255,10 @@ class sender_awaiter {
   sender_awaiter& operator=(sender_awaiter&&) = delete;
 
   bool await_ready() const noexcept { return false; }
-  void await_suspend(std::coroutine_handle<> cont) noexcept { continuation_ = cont; bexec::start(operation_); }
+  void await_suspend(std::coroutine_handle<> cont) noexcept {
+    continuation_ = cont;
+    bexec::start(operation_);
+  }
   result_type await_resume() noexcept { return std::move(result_); }
 
  private:
@@ -215,15 +269,19 @@ class sender_awaiter {
 };
 
 template <class Sender>
-auto async_result(Sender&& s) { return sender_awaiter<Sender>(std::forward<Sender>(s)); }
+auto async_result(Sender&& s) {
+  return sender_awaiter<Sender>(std::forward<Sender>(s));
+}
 
 // ---- the counting coroutine (one per task, single allocation) ----
 
 detached_task counting_coro(io_context& ctx, unsigned count_to,
-                             std::atomic<unsigned>* completed) {
+                            std::atomic<unsigned>* completed) {
   // Hand off to a worker thread.
   auto result = co_await async_result(ctx.get_post_scheduler().schedule());
-  if (!result) { co_return; }
+  if (!result) {
+    co_return;
+  }
 
   int wid = find_worker_id();
 
@@ -259,13 +317,13 @@ void run_context(io_context& ctx, unsigned workers) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  const unsigned worker_count =
-      static_cast<unsigned>(parse_ulong(argc > 1 ? argv[1] : nullptr, k_default_workers));
-  const unsigned task_count =
-      static_cast<unsigned>(parse_ulong(argc > 2 ? argv[2] : nullptr, k_default_tasks));
+  const unsigned worker_count = static_cast<unsigned>(
+      parse_ulong(argc > 1 ? argv[1] : nullptr, k_default_workers));
+  const unsigned task_count = static_cast<unsigned>(
+      parse_ulong(argc > 2 ? argv[2] : nullptr, k_default_tasks));
 
   g_max_workers = std::max(worker_count + 1, k_max_workers);
-  g_stats      = new worker_stats[g_max_workers]();
+  g_stats = new worker_stats[g_max_workers]();
   g_worker_ids = new std::thread::id[g_max_workers]();
 
   // Pre-generate all workloads (sequence prepared before benchmark starts).
@@ -275,7 +333,10 @@ int main(int argc, char** argv) {
   opts.concurrency_hint = worker_count;
   opts.platform.entries = 256;
   io_context ctx(opts);
-  if (!ctx.is_open()) { std::cerr << "ctx unavailable\n"; return 1; }
+  if (!ctx.is_open()) {
+    std::cerr << "ctx unavailable\n";
+    return 1;
+  }
 
   std::atomic<unsigned> tasks_completed{0};
 
@@ -311,8 +372,8 @@ int main(int argc, char** argv) {
   std::cout << "workers:      " << worker_count << "\n";
   std::cout << "tasks:        " << task_count << "\n";
   std::cout << "count range:  " << k_min_count << " – " << k_max_count << "\n";
-  std::cout << "wall time:    " << std::fixed << std::setprecision(3)
-            << secs << " s\n\n";
+  std::cout << "wall time:    " << std::fixed << std::setprecision(3) << secs
+            << " s\n\n";
 
   std::uint64_t total_t = 0, total_w = 0;
   std::vector<std::uint64_t> per_t(worker_count), per_w(worker_count);
@@ -328,11 +389,9 @@ int main(int argc, char** argv) {
   for (unsigned i = 0; i < worker_count; ++i) {
     double tp = total_t ? 100.0 * per_t[i] / total_t : 0.0;
     double wp = total_w ? 100.0 * per_w[i] / total_w : 0.0;
-    std::cout << std::setw(4) << i << "  "
-              << std::setw(10) << per_t[i] << "  "
-              << std::setw(18) << per_w[i] << "  "
-              << std::fixed << std::setprecision(1)
-              << std::setw(6) << tp << "%  "
+    std::cout << std::setw(4) << i << "  " << std::setw(10) << per_t[i] << "  "
+              << std::setw(18) << per_w[i] << "  " << std::fixed
+              << std::setprecision(1) << std::setw(6) << tp << "%  "
               << std::setw(6) << wp << "%\n";
   }
 
@@ -347,8 +406,8 @@ int main(int argc, char** argv) {
   t_rmsd = std::sqrt(t_rmsd / worker_count);
   w_rmsd = std::sqrt(w_rmsd / worker_count);
 
-  std::cout << "\nfairness RMSD:  tasks=" << std::fixed
-            << std::setprecision(2) << t_rmsd << "pp  work=" << w_rmsd
+  std::cout << "\nfairness RMSD:  tasks=" << std::fixed << std::setprecision(2)
+            << t_rmsd << "pp  work=" << w_rmsd
             << "pp  (0 = perfect, lower is better)\n";
   std::cout << "completed:     " << tasks_completed.load() << " / "
             << task_count << "\n";
