@@ -13,10 +13,10 @@ composes with the standard receiver pattern; the Linux backend runs on
 io_uring, and macOS/BSD use kqueue.
 
 The v0.4 packages are built by the repository release workflow
-(`.github/workflows/release.yml`) from the `v0.4.0` tag. The package version is
-selected at configure time with `-DBNIO_VERSION=0.4.0`; the source-tree default
-in `CMakeLists.txt` is still `0.3.0` until the release version bump lands. The
-release job builds a Release shared library with `BUILD_SHARED_LIBS=ON` and
+(`.github/workflows/release.yml`) from the `v0.4.0` tag. The source tree now
+defaults to `BNIO_VERSION=0.4.0`; the version can still be overridden at
+configure time with `-DBNIO_VERSION=...`. The release job builds a Release
+shared library with `BUILD_SHARED_LIBS=ON` against **bexec v0.1.1** and
 generates **DEB and RPM packages only**. It does not produce TGZ archives or
 distribution packages beyond those two formats.
 
@@ -70,20 +70,32 @@ own translation units. Layout, ODR, and template-instantiation compatibility of
 any bnio consumer therefore depends on the **exact bexec version** in use, not
 only on the bnio binary.
 
-The bnio v0.4 ABI is therefore defined as a single unit:
+The bnio v0.4 ABI is therefore defined as a single fixed combination:
 
-> **bexec v0.1.x + bnio v0.4.0**
+> **bexec v0.1.1 + bnio v0.4.0** (release packages)
+
+Compatibility is guaranteed only for this fixed combination: both the bexec and
+bnio versions must be pinned. Because bexec's header-only code is compiled into
+every consumer, any change of the bexec version — even a patch release within
+v0.1.x — requires rebuilding and re-verifying bnio and its consumers. bnio
+patch releases within 0.4.x remain ABI compatible as described above, provided
+the bexec version is unchanged.
 
 Compatibility rules for consumers:
 
 - The documented dependency is **bexec >= 0.1.0**, and bnio v0.4 is compatible
-  only with the **v0.1.x** line. Any major or minor change of bexec is an ABI
-  change of bnio, even if the bnio binary is untouched.
+  only with the **v0.1.x** line. Any change of bexec — including a patch
+  release — is an ABI change of bnio, even if the bnio binary is untouched.
 - The build system enforces the lower bound: `BNIO_BEXEC_MIN_VERSION` is
-  `0.1.0`, the FETCH provider defaults to tag `v0.1.0`, and the generated
+  `0.1.0`, the FETCH provider defaults to tag `v0.1.1`, and the generated
   package dependencies request `bexec >= 0.1.0`. It does **not** enforce the
-  upper bound, so consumers must avoid moving to a newer bexec minor without
-  rebuilding and re-verifying bnio.
+  upper bound, so consumers must avoid moving to a different bexec version
+  without rebuilding and re-verifying bnio.
+- The v0.4 DEB/RPM release packages are built against **bexec v0.1.1**, so
+  consumers of those prebuilt packages must compile against bexec v0.1.1 as
+  well. Using any other bexec version locally — including v0.1.0 — requires
+  rebuilding bnio and re-verifying it; it cannot be assumed ABI compatible
+  with the prebuilt packages.
 - bexec ships no binary package in the Debian/Ubuntu, Fedora, openSUSE or Arch
   repositories. The bnio development packages declare the dependency
   (`libbnio-dev` → `bexec`, `bnio-devel` → `bexec`), so bexec has to be
@@ -93,7 +105,7 @@ Compatibility rules for consumers:
 
 | Dependency | Requirement | Enforced by the build system |
 |---|---|---|
-| bexec | >= 0.1.0, compatible within v0.1.x | Lower bound **yes** (`BNIO_BEXEC_MIN_VERSION=0.1.0`, packages require `bexec >= 0.1.0`); upper bound `v0.1.x` **no** |
+| bexec | >= 0.1.0, compatible within v0.1.x | Lower bound **yes** (`BNIO_BEXEC_MIN_VERSION=0.1.0`, packages require `bexec >= 0.1.0`); upper bound `v0.1.x` **no**. FETCH default tag `v0.1.1`; release packages built against `v0.1.1` |
 | OpenSSL | >= 1.1.1 (documented requirement) | **No** — `find_package(OpenSSL REQUIRED)` has no version bound |
 | liburing | >= 2.1 (Linux backend) | **Yes** — `pkg_check_modules(LIBURING REQUIRED IMPORTED_TARGET liburing>=2.1)` |
 | Compiler | C++20 | Yes — `target_compile_features(bnio PUBLIC cxx_std_20)` |

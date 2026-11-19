@@ -43,7 +43,7 @@ ctest --test-dir build --output-on-failure
 | `BNIO_GOOGLETEST_GIT_TAG`      | `v1.17.0`    | Git ref used by the test-only `FETCH` provider |
 | `BNIO_BEXEC_PROVIDER`          | `AUTO`       | `AUTO`, `FIND_PACKAGE`, `SOURCE`, `FETCH`     |
 | `BNIO_BEXEC_SOURCE_DIR`        | empty        | Path used by the `SOURCE` provider            |
-| `BNIO_BEXEC_GIT_TAG`           | `v0.1.0`     | Git ref used by the `FETCH` provider          |
+| `BNIO_BEXEC_GIT_TAG`           | `v0.1.1`     | Git ref used by the `FETCH` provider          |
 
 When `bnio` is included with `add_subdirectory()` or `FetchContent`, tests,
 examples, and installation rules default to off so they do not modify the
@@ -94,6 +94,13 @@ cmake -S . -B build -DBNIO_BEXEC_PROVIDER=FETCH
 `AUTO` first accepts an existing `bexec::bexec` target, then uses
 `BNIO_BEXEC_SOURCE_DIR` when set, tries `find_package(bexec CONFIG)`, and
 finally falls back to `FETCH`.
+
+The `FETCH` provider clones bexec at the pinned `v0.1.1` tag by default. The
+published DEB/RPM packages are built against bexec v0.1.1, so consumers of
+those prebuilt packages should compile with the same bexec version. Because
+bexec is header-only, its code is compiled into each consumer translation
+unit; if the versions differ, rebuild bnio and the consumer against the
+matching bexec version instead of mixing them.
 
 ### Shared library build
 

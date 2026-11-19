@@ -16,7 +16,7 @@ set(BNIO_BEXEC_GIT_REPOSITORY
     "https://github.com/haomingbai/bexec.git"
     CACHE STRING "Git repository used by the FETCH provider")
 set(BNIO_BEXEC_GIT_TAG
-    "v0.1.0"
+    "v0.1.1"
     CACHE STRING "Git ref used by the FETCH provider")
 
 function(bnio_resolve_bexec_dependency)

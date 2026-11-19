@@ -74,7 +74,7 @@ jobs:
 
       - name: Build and install bexec
         run: |
-          git clone --depth 1 https://github.com/haomingbai/bexec.git
+          git clone --depth 1 --branch v0.1.1 https://github.com/haomingbai/bexec.git
           cmake -S bexec -B bexec/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBEXEC_BUILD_TESTS=OFF \
