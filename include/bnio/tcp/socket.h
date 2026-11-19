@@ -155,6 +155,8 @@ class BNIO_EXPORT socket {
 
   /**
    * Closes the owned descriptor, if any.
+   *
+   * Does not cancel operations already in flight; they complete normally.
    */
   [[nodiscard]] std::error_code close() noexcept;
 
@@ -168,6 +170,11 @@ class BNIO_EXPORT socket {
    */
   void assign(native_handle_type fd) noexcept;
 
+  /**
+   * Binds the socket to an IP endpoint.
+   */
+  [[nodiscard]] std::error_code bind(const ip::endpoint& endpoint) noexcept;
+
   /** Shuts down socket send and/or receive operations. */
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
@@ -175,6 +182,12 @@ class BNIO_EXPORT socket {
    * Enables or disables address reuse on the socket.
    */
   [[nodiscard]] std::error_code set_reuse_address(bool enabled) noexcept;
+
+  /**
+   * Stores the locally bound endpoint into @p endpoint.
+   */
+  [[nodiscard]] std::error_code local_endpoint(
+      ip::endpoint& endpoint) const noexcept;
 
   /**
    * Stores the connected peer endpoint into @p endpoint.

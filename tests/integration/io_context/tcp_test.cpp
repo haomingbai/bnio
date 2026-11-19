@@ -1,3 +1,4 @@
+#include <bnio/io_context.h>
 #include <bnio/tcp.h>
 #include <fcntl.h>
 #include <gtest/gtest.h>
@@ -9,6 +10,8 @@
 #include <system_error>
 #include <type_traits>
 #include <utility>
+
+#include "../../support/io_context/io_context_runtime_test_support.h"
 
 namespace {
 
@@ -205,6 +208,107 @@ TEST(TcpTest, socket_remote_endpoint) {
   EXPECT_EQ(closed.remote_endpoint(stale),
             std::error_code(EBADF, std::generic_category()));
   EXPECT_EQ(stale.version(), bnio::ip::address::version::unspecified);
+}
+
+TEST(TcpTest, socket_bind_and_local_endpoint) {
+  bnio::tcp::socket socket;
+  ASSERT_FALSE(socket.open(bnio::ip::tcp::v4()));
+  ASSERT_FALSE(socket.bind(bnio::ip::endpoint::loopback_v4(0)));
+
+  bnio::ip::endpoint local;
+  ASSERT_FALSE(socket.local_endpoint(local));
+  EXPECT_TRUE(local.address().is_v4());
+  EXPECT_EQ(local.address().to_v4(), bnio::ip::address::loopback_v4().to_v4());
+  EXPECT_NE(local.port(), 0U);
+
+  // A closed socket reports EBADF and resets the output endpoint.
+  bnio::tcp::socket closed;
+  bnio::ip::endpoint stale = bnio::ip::endpoint::loopback_v4(1234);
+  EXPECT_EQ(closed.local_endpoint(stale),
+            std::error_code(EBADF, std::generic_category()));
+  EXPECT_EQ(stale.version(), bnio::ip::address::version::unspecified);
+}
+
+TEST(TcpTest, async_connect_after_bind_reports_local_endpoints) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  bnio::tcp::acceptor acceptor;
+  ASSERT_FALSE(acceptor.open(bnio::ip::tcp::v4()));
+  ASSERT_FALSE(acceptor.set_reuse_address(true));
+  ASSERT_FALSE(acceptor.bind(bnio::ip::endpoint::loopback_v4(0)));
+  ASSERT_FALSE(acceptor.listen(4));
+
+  bnio::ip::endpoint acceptor_local;
+  ASSERT_FALSE(acceptor.local_endpoint(acceptor_local));
+  EXPECT_TRUE(acceptor_local.address().is_v4());
+  EXPECT_EQ(acceptor_local.address().to_v4(),
+            bnio::ip::address::loopback_v4().to_v4());
+  ASSERT_NE(acceptor_local.port(), 0U);
+
+  bnio::tcp::socket client;
+  ASSERT_FALSE(client.open(bnio::ip::tcp::v4()));
+  ASSERT_FALSE(client.bind(bnio::ip::endpoint::loopback_v4(0)));
+
+  bnio::ip::endpoint client_bound;
+  ASSERT_FALSE(client.local_endpoint(client_bound));
+  EXPECT_EQ(client_bound.address().to_v4(),
+            bnio::ip::address::loopback_v4().to_v4());
+  ASSERT_NE(client_bound.port(), 0U);
+
+  unsigned completions = 0;
+
+  socket_receiver accept_receiver;
+  accept_receiver.context = &context;
+  accept_receiver.completions = &completions;
+  accept_receiver.target = 2;
+  auto accept_state = accept_receiver.state;
+
+  void_receiver connect_receiver;
+  connect_receiver.context = &context;
+  connect_receiver.completions = &completions;
+  connect_receiver.target = 2;
+  auto connect_state = connect_receiver.state;
+
+  auto accept_operation =
+      bexec::connect(acceptor.async_accept(scheduler, SOCK_CLOEXEC),
+                     std::move(accept_receiver));
+  auto connect_operation =
+      bexec::connect(client.async_connect(scheduler, acceptor_local),
+                     std::move(connect_receiver));
+
+  bexec::start(accept_operation);
+  bexec::start(connect_operation);
+  context.run();
+
+  ASSERT_EQ(completions, 2U);
+  ASSERT_EQ(accept_state->signal, signal_kind::value);
+  EXPECT_FALSE(accept_state->error);
+  EXPECT_GE(accept_state->fd, 0);
+  ASSERT_EQ(connect_state->signal, signal_kind::value);
+  EXPECT_FALSE(connect_state->error);
+
+  // The bound client keeps its pre-connect local endpoint.
+  bnio::ip::endpoint client_local;
+  ASSERT_FALSE(client.local_endpoint(client_local));
+  EXPECT_TRUE(client_local.address().is_v4());
+  EXPECT_EQ(client_local.address().to_v4(),
+            bnio::ip::address::loopback_v4().to_v4());
+  EXPECT_NE(client_local.port(), 0U);
+  EXPECT_EQ(client_local.port(), client_bound.port());
+
+  // The acceptor endpoint is unchanged by the completed accept.
+  bnio::ip::endpoint acceptor_after;
+  ASSERT_FALSE(acceptor.local_endpoint(acceptor_after));
+  EXPECT_EQ(acceptor_after.address().to_v4(),
+            bnio::ip::address::loopback_v4().to_v4());
+  EXPECT_EQ(acceptor_after.port(), acceptor_local.port());
+
+  EXPECT_EQ(::close(accept_state->fd), 0);
+  accept_state->fd = -1;
 }
 
 TEST(TcpTest, acceptor_owns_and_replaces_descriptors) {

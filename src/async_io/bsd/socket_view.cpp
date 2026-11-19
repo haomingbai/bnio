@@ -113,6 +113,11 @@ std::error_code stream_socket_view::set_reuse_address(bool enabled) noexcept {
       native_handle(), SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)));
 }
 
+std::error_code stream_socket_view::local_endpoint(
+    ip::endpoint& endpoint) const noexcept {
+  return get_socket_endpoint(native_handle(), false, endpoint);
+}
+
 std::error_code stream_socket_view::remote_endpoint(
     ip::endpoint& endpoint) const noexcept {
   return get_socket_endpoint(native_handle(), true, endpoint);
@@ -174,6 +179,11 @@ std::error_code local::stream_socket_view::connect(
 
 std::error_code local::stream_socket_view::shutdown(int how) noexcept {
   return result_to_error_code(::shutdown(native_handle(), how));
+}
+
+std::error_code local::stream_socket_view::local_endpoint(
+    local::endpoint& endpoint) const noexcept {
+  return get_local_socket_endpoint(native_handle(), false, endpoint);
 }
 
 std::error_code local::stream_socket_view::remote_endpoint(

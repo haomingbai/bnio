@@ -139,12 +139,20 @@ void socket::assign(native_handle_type fd) noexcept {
   }
 }
 
+std::error_code socket::bind(const ip::endpoint& endpoint) noexcept {
+  return view().bind(endpoint);
+}
+
 std::error_code socket::shutdown(int how) noexcept {
   return view().shutdown(how);
 }
 
 std::error_code socket::set_reuse_address(bool enabled) noexcept {
   return view().set_reuse_address(enabled);
+}
+
+std::error_code socket::local_endpoint(ip::endpoint& endpoint) const noexcept {
+  return view().local_endpoint(endpoint);
 }
 
 std::error_code socket::remote_endpoint(ip::endpoint& endpoint) const noexcept {
@@ -190,6 +198,11 @@ std::error_code acceptor::bind(const ip::endpoint& endpoint) noexcept {
 
 std::error_code acceptor::listen(int backlog) noexcept {
   return view().listen(backlog);
+}
+
+std::error_code acceptor::local_endpoint(
+    ip::endpoint& endpoint) const noexcept {
+  return view().local_endpoint(endpoint);
 }
 
 std::error_code acceptor::close() noexcept {

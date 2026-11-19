@@ -119,6 +119,11 @@ std::error_code stream_socket::open(
   return bnio::detail::empty_error_code;
 }
 
+std::error_code stream_socket::bind(
+    const async_io::local::endpoint& endpoint) noexcept {
+  return view().bind(endpoint);
+}
+
 std::error_code stream_socket::close() noexcept {
   const int fd = std::exchange(fd_, -1);
   return close_fd(fd);
@@ -138,6 +143,11 @@ void stream_socket::assign(native_handle_type fd) noexcept {
 
 std::error_code stream_socket::shutdown(int how) noexcept {
   return view().shutdown(how);
+}
+
+std::error_code stream_socket::local_endpoint(
+    async_io::local::endpoint& endpoint) const noexcept {
+  return view().local_endpoint(endpoint);
 }
 
 std::error_code stream_socket::remote_endpoint(
@@ -178,6 +188,11 @@ std::error_code stream_acceptor::bind(
 
 std::error_code stream_acceptor::listen(int backlog) noexcept {
   return view().listen(backlog);
+}
+
+std::error_code stream_acceptor::local_endpoint(
+    async_io::local::endpoint& endpoint) const noexcept {
+  return view().local_endpoint(endpoint);
 }
 
 std::error_code stream_acceptor::close() noexcept {

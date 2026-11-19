@@ -168,7 +168,16 @@ class BNIO_EXPORT stream_socket {
       async_io::local::stream_protocol protocol) noexcept;
 
   /**
+   * Binds to @p endpoint; an endpoint that cannot convert to sockaddr_un
+   * reports std::errc::invalid_argument without a syscall.
+   */
+  [[nodiscard]] std::error_code bind(
+      const async_io::local::endpoint& endpoint) noexcept;
+
+  /**
    * Closes the owned descriptor, if any.
+   *
+   * Does not cancel operations already in flight; they complete normally.
    */
   [[nodiscard]] std::error_code close() noexcept;
 
@@ -184,6 +193,13 @@ class BNIO_EXPORT stream_socket {
 
   /** Shuts down socket send and/or receive operations. */
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
+
+  /**
+   * Stores the locally bound endpoint; an unnamed socket is reset to the
+   * unspecified kind.
+   */
+  [[nodiscard]] std::error_code local_endpoint(
+      async_io::local::endpoint& endpoint) const noexcept;
 
   /**
    * Stores the connected peer endpoint; an unnamed peer is reset to the
@@ -297,6 +313,8 @@ class BNIO_EXPORT datagram_socket {
   /**
    * Closes the socket and returns any ::close error; the socket is left
    * closed either way.
+   *
+   * Does not cancel operations already in flight; they complete normally.
    */
   [[nodiscard]] std::error_code close() noexcept;
 

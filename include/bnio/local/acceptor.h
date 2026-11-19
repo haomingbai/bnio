@@ -127,7 +127,16 @@ class BNIO_EXPORT stream_acceptor {
   [[nodiscard]] std::error_code listen(int backlog) noexcept;
 
   /**
+   * Stores the locally bound endpoint; an unnamed socket is reset to the
+   * unspecified kind.
+   */
+  [[nodiscard]] std::error_code local_endpoint(
+      async_io::local::endpoint& endpoint) const noexcept;
+
+  /**
    * Closes the owned descriptor, if any.
+   *
+   * Does not cancel operations already in flight; they complete normally.
    */
   [[nodiscard]] std::error_code close() noexcept;
 

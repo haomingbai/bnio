@@ -116,7 +116,15 @@ class BNIO_EXPORT acceptor {
   [[nodiscard]] std::error_code listen(int backlog) noexcept;
 
   /**
+   * Stores the locally bound endpoint into @p endpoint.
+   */
+  [[nodiscard]] std::error_code local_endpoint(
+      ip::endpoint& endpoint) const noexcept;
+
+  /**
    * Closes the owned descriptor, if any.
+   *
+   * Does not cancel operations already in flight; they complete normally.
    */
   [[nodiscard]] std::error_code close() noexcept;
 

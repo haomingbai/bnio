@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cstring>
+#include <filesystem>
 #include <string>
 #include <system_error>
 
@@ -167,6 +168,82 @@ TEST(LocalStreamLifecycleTest, open_bind_listen_accept_connect_over_abstract) {
   EXPECT_EQ(peer.path(), abstract_name);
 }
 #endif
+
+TEST(LocalStreamLifecycleTest, bind_and_local_endpoint) {
+  bnio::io_context context;
+  if (!context_available(context)) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+  auto scheduler = context.get_post_scheduler();
+
+  const std::filesystem::path directory =
+      std::filesystem::temp_directory_path();
+  const std::string suffix = std::to_string(::getpid());
+  const std::string socket_path =
+      (directory / ("bnio-local-endpoint-" + suffix + ".sock")).string();
+  const std::string acceptor_path =
+      (directory / ("bnio-local-acceptor-" + suffix + ".sock")).string();
+  unlink_quietly(socket_path.c_str());
+  unlink_quietly(acceptor_path.c_str());
+
+  // A bound stream socket reports the bound path as its local endpoint.
+  bnio::local::stream_socket client;
+  ASSERT_FALSE(client.open(bnio::async_io::local::stream_protocol{}));
+  ASSERT_FALSE(client.bind(endpoint(socket_path)));
+  endpoint client_local;
+  ASSERT_FALSE(client.local_endpoint(client_local));
+  EXPECT_EQ(client_local.kind(), endpoint_kind::path_name);
+  EXPECT_EQ(client_local.path(), socket_path);
+  EXPECT_FALSE(client.close());
+  unlink_quietly(socket_path.c_str());
+
+  // The acceptor reports the same path it bound to.
+  bnio::local::stream_acceptor acceptor;
+  ASSERT_FALSE(acceptor.open(bnio::async_io::local::stream_protocol{}));
+  ASSERT_FALSE(acceptor.bind(endpoint(acceptor_path)));
+  ASSERT_FALSE(acceptor.listen(4));
+  endpoint acceptor_local;
+  ASSERT_FALSE(acceptor.local_endpoint(acceptor_local));
+  EXPECT_EQ(acceptor_local.kind(), endpoint_kind::path_name);
+  EXPECT_EQ(acceptor_local.path(), acceptor_path);
+
+  // A completed connect/accept pair leaves the acceptor endpoint unchanged.
+  bnio::local::stream_socket connected_client;
+  ASSERT_FALSE(connected_client.open(bnio::async_io::local::stream_protocol{}));
+  bnio::local::stream_socket accepted;
+
+  local_accept_receiver accept_receiver;
+  accept_receiver.context = &context;
+  accept_receiver.storage = &accepted;
+  auto accept_state = accept_receiver.state;
+
+  void_receiver connect_receiver;
+  connect_receiver.context = &context;
+  auto connect_state = connect_receiver.state;
+
+  auto accept_operation = bexec::connect(acceptor.async_accept(scheduler),
+                                         std::move(accept_receiver));
+  auto connect_operation = bexec::connect(
+      connected_client.async_connect(scheduler, endpoint(acceptor_path)),
+      std::move(connect_receiver));
+  bexec::start(accept_operation);
+  bexec::start(connect_operation);
+  run_phase(context);
+
+  ASSERT_EQ(accept_state->signal, signal_kind::value);
+  ASSERT_EQ(connect_state->signal, signal_kind::value);
+  ASSERT_TRUE(accepted.is_open());
+  EXPECT_FALSE(accept_state->error);
+  EXPECT_FALSE(connect_state->error);
+
+  endpoint acceptor_after;
+  ASSERT_FALSE(acceptor.local_endpoint(acceptor_after));
+  EXPECT_EQ(acceptor_after.kind(), endpoint_kind::path_name);
+  EXPECT_EQ(acceptor_after.path(), acceptor_path);
+
+  EXPECT_FALSE(acceptor.close());
+  unlink_quietly(acceptor_path.c_str());
+}
 
 TEST(LocalStreamLifecycleTest, full_duplex_echo) {
   bnio::io_context context;

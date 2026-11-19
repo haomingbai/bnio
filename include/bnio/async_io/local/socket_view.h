@@ -74,6 +74,12 @@ class BNIO_EXPORT stream_socket_view {
   [[nodiscard]] std::error_code shutdown(int how) noexcept;
 
   /**
+   * Stores the locally bound endpoint; unspecified kind if unnamed.
+   */
+  [[nodiscard]] std::error_code local_endpoint(
+      endpoint& endpoint) const noexcept;
+
+  /**
    * Stores the peer endpoint; unspecified kind for an unnamed peer.
    */
   [[nodiscard]] std::error_code remote_endpoint(
