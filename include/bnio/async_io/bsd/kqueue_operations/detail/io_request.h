@@ -52,6 +52,26 @@ concept has_start_io = requires(Request& req) {
   { req.start_io() } -> std::convertible_to<int>;
 };
 
+/** Concept that detects whether a request can skip its first native I/O call
+ *  and park on readiness instead. */
+template <class Request>
+concept has_start_deferred = requires(Request& req) {
+  { req.start_deferred() } -> std::convertible_to<int>;
+};
+
+/** Starts a request without the eager probe: deferrable requests return the
+ *  would-block sentinel and wait for readiness, everything else runs
+ *  perform_io() inline (regular files never become ready on kqueue, and
+ *  connect must be issued before EVFILT_WRITE can fire). */
+template <class Request>
+[[nodiscard]] int start_deferred(Request& request) noexcept {
+  if constexpr (has_start_deferred<Request>) {
+    return request.start_deferred();
+  } else {
+    return request.perform_io();
+  }
+}
+
 /** Operation for a request whose native call is attempted before readiness.
  *
  * `stopped_` marks the stop channel (abort or start-time token cancel);

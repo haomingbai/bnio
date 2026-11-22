@@ -147,8 +147,13 @@ std::optional<local::endpoint> make_local_endpoint(const sockaddr* address,
 
   const auto* native = reinterpret_cast<const sockaddr_un*>(address);
   const std::size_t name_bytes = size - path_offset;
-  // Full-capacity paths may not carry a terminator.
+  // Full-capacity paths may not carry a terminator. Darwin reports an
+  // unbound endpoint as a 16-byte sun_noname with an all-zero sun_path;
+  // BSD has no abstract namespace, so a zero-length name is always unnamed.
   const std::size_t length = ::strnlen(native->sun_path, name_bytes);
+  if (length == 0) {
+    return local::endpoint();
+  }
   return local::endpoint(std::string_view(native->sun_path, length));
 }
 

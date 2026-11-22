@@ -73,6 +73,22 @@ TEST(BsdLocalSocketAddressTest, decode_unnamed_reports_unspecified) {
   EXPECT_TRUE(decoded->path().empty());
 }
 
+TEST(BsdLocalSocketAddressTest, decode_darwin_sun_noname_reports_unspecified) {
+  // Darwin reports an unbound endpoint as sun_noname: a 16-byte AF_UNIX
+  // address whose sun_path is entirely zero.
+  constexpr socklen_t sun_noname_size = 16;
+  static_assert(sun_noname_size > path_offset);
+
+  sockaddr_un raw{};
+  raw.sun_family = AF_UNIX;
+  const auto decoded = make_local_endpoint(
+      reinterpret_cast<const sockaddr*>(&raw), sun_noname_size);
+
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->kind(), endpoint_kind::unspecified);
+  EXPECT_TRUE(decoded->path().empty());
+}
+
 TEST(BsdLocalSocketAddressTest, decode_zero_length_reports_unspecified) {
   // recvfrom(2) reports a zero-length source address for a datagram whose
   // sender never bound one.

@@ -112,12 +112,15 @@ class native_io_operation : public io_context::operation_base {
       return;
     }
 
-    // A kind with k_immediate == false skips the eager probe and calls
-    // perform_io() directly; no current kind opts out.
+    // Without the eager probe, waitable requests park on -EAGAIN and let the
+    // run loop register for readiness; files (and connect) still run their
+    // first syscall inline.
     if constexpr (schedule_policy<Kind>::k_immediate) {
-      this->result = control_() ? request_.start_io() : request_.perform_io();
+      this->result =
+          control_() ? request_.start_io()
+                     : async_io::bsd_native::detail::start_deferred(request_);
     } else {
-      this->result = request_.perform_io();
+      this->result = async_io::bsd_native::detail::start_deferred(request_);
     }
     this->flags = 0;
     if (async_io::bsd_native::detail::should_wait(request_, this->result)) {

@@ -86,7 +86,8 @@ class BNIO_EXPORT socket_address {
  *
  * @return std::nullopt when @p address is null, a non-zero size is shorter
  *         than its family, or the family is not AF_UNIX; a non-null address
- *         with no path bytes decodes to an unspecified endpoint.
+ *         with no path name (no path bytes, or an all-zero sun_path as in
+ *         Darwin's sun_noname) decodes to an unspecified endpoint.
  */
 [[nodiscard]] BNIO_EXPORT std::optional<local::endpoint> make_local_endpoint(
     const sockaddr* address, socklen_t size) noexcept;

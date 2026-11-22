@@ -68,6 +68,9 @@ class kqueue_receive_request {
   /** Attempts one immediate nonblocking receive. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
+  /** Skips the initial recv; the operation waits for read readiness. */
+  [[nodiscard]] int start_deferred() noexcept { return -EAGAIN; }
+
   /** Performs one nonblocking recv and normalizes the syscall result. */
   [[nodiscard]] int perform_io() noexcept {
     if (buffer_.size > 0 && buffer_.data == nullptr) {
@@ -111,6 +114,9 @@ class kqueue_send_request {
 
   /** Attempts one immediate nonblocking send. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
+
+  /** Skips the initial send; the operation waits for write readiness. */
+  [[nodiscard]] int start_deferred() noexcept { return -EAGAIN; }
 
   /** Performs one nonblocking send and normalizes the syscall result. */
   [[nodiscard]] int perform_io() noexcept {
@@ -158,6 +164,9 @@ class kqueue_receive_from_request {
 
   /** Attempts one immediate nonblocking receive-from. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
+
+  /** Skips the initial recvfrom; the operation waits for read readiness. */
+  [[nodiscard]] int start_deferred() noexcept { return -EAGAIN; }
 
   /** Performs one nonblocking recvfrom, capturing the peer address. */
   [[nodiscard]] int perform_io() noexcept {
@@ -234,6 +243,9 @@ class kqueue_local_receive_from_request {
 
   /** Attempts one immediate nonblocking receive-from. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
+
+  /** Skips the initial recvfrom; the operation waits for read readiness. */
+  [[nodiscard]] int start_deferred() noexcept { return -EAGAIN; }
 
   /** Performs one nonblocking recvfrom, capturing the peer address. */
   [[nodiscard]] int perform_io() noexcept {
@@ -320,6 +332,9 @@ class kqueue_send_to_request {
   /** Attempts one immediate nonblocking send-to. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
+  /** Skips the initial sendto; the operation waits for write readiness. */
+  [[nodiscard]] int start_deferred() noexcept { return -EAGAIN; }
+
   /** Performs one nonblocking sendto to the stored destination. */
   [[nodiscard]] int perform_io() noexcept {
     if (size_ > 0 && data_ == nullptr) {
@@ -371,6 +386,10 @@ class kqueue_accept_request {
   /** Attempts one immediate nonblocking accept. */
   [[nodiscard]] int start_io() noexcept { return perform_io(); }
 
+  /** Skips the initial accept; the operation waits for listener read
+   *  readiness. */
+  [[nodiscard]] int start_deferred() noexcept { return -EAGAIN; }
+
   /** Accepts one connection, applying nonblocking and close-on-exec flags
    *  to the accepted descriptor. */
   [[nodiscard]] int perform_io() noexcept {
@@ -417,7 +436,10 @@ class kqueue_accept_request {
   int flags_;
 };
 
-/** One nonblocking connect request followed by SO_ERROR after readiness. */
+/** One nonblocking connect request followed by SO_ERROR after readiness.
+ *  Not deferrable: EVFILT_WRITE only reports a connection-oriented socket as
+ *  writable once ::connect() is in progress, so perform_io() must issue the
+ *  syscall before the operation registers. */
 class kqueue_connect_request {
  public:
   /** Completion signals: set_value(ec) or set_stopped(). */
