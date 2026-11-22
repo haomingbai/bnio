@@ -16,6 +16,7 @@
 // loops); no sleeps synchronize the scenario.
 
 #include <bnio/async_io/local/socket_view.h>
+#include <fcntl.h>
 #include <gtest/gtest.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -72,6 +73,17 @@ struct pair_state {
   std::vector<unsigned char> payload;
   std::atomic<bool> reader_ok{false};
 };
+
+// kqueue send assumes a non-blocking fd; the non-owning view does not set it.
+[[nodiscard]] bool set_nonblocking_pair(int (&fds)[2]) noexcept {
+  for (int fd : fds) {
+    const int flags = ::fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
 
 // Drains exactly `quota` bytes, then closes the reader descriptor. Returns
 // false when the quota could not be drained before the deadline or an
@@ -133,6 +145,7 @@ TEST(LocalWritePeerCloseStressTest,
     auto pair = std::make_unique<pair_state>();
     ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair->fds),
               0);
+    ASSERT_TRUE(set_nonblocking_pair(pair->fds));
     pair->payload.resize(kPayloadSize);
     for (std::size_t j = 0; j < pair->payload.size(); ++j) {
       pair->payload[j] = static_cast<unsigned char>((i + j) & 0xff);

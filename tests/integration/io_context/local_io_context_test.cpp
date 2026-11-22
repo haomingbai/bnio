@@ -279,8 +279,9 @@ TEST(LocalIoContextTest, async_accept_delivers_local_stream_socket) {
       client.async_connect(scheduler,
                            bnio::async_io::local::endpoint(socket_path)),
       std::move(connect_receiver));
-  bexec::start(accept_operation);
+  // connect first so stop() cannot cancel the accept.
   bexec::start(connect_operation);
+  bexec::start(accept_operation);
   context.run();
 
   ASSERT_EQ(accept_state->signal, signal_kind::value);

@@ -2,6 +2,7 @@
 // open -> bind -> listen -> async_accept -> async_connect over a filesystem
 // path and over an abstract address, full-duplex echo, and shutdown/close
 // semantics (docs/design/architecture/local-socket-split.md §7.3).
+// connect first: kqueue connect is synchronous, so accept is not canceled.
 
 #include <bnio/io_context.h>
 #include <bnio/local.h>
@@ -94,8 +95,8 @@ TEST(LocalStreamLifecycleTest, open_bind_listen_accept_connect_over_path) {
       bexec::connect(client.async_connect(scheduler, endpoint(socket_path)),
                      std::move(connect_receiver));
 
-  bexec::start(accept_operation);
   bexec::start(connect_operation);
+  bexec::start(accept_operation);
   run_phase(context);
 
   ASSERT_EQ(accept_state->signal, signal_kind::value);
@@ -155,8 +156,8 @@ TEST(LocalStreamLifecycleTest, open_bind_listen_accept_connect_over_abstract) {
       client.async_connect(scheduler, endpoint::abstract(abstract_name)),
       std::move(connect_receiver));
 
-  bexec::start(accept_operation);
   bexec::start(connect_operation);
+  bexec::start(accept_operation);
   run_phase(context);
 
   EXPECT_EQ(accept_state->signal, signal_kind::value);
@@ -226,8 +227,8 @@ TEST(LocalStreamLifecycleTest, bind_and_local_endpoint) {
   auto connect_operation = bexec::connect(
       connected_client.async_connect(scheduler, endpoint(acceptor_path)),
       std::move(connect_receiver));
-  bexec::start(accept_operation);
   bexec::start(connect_operation);
+  bexec::start(accept_operation);
   run_phase(context);
 
   ASSERT_EQ(accept_state->signal, signal_kind::value);
@@ -279,8 +280,8 @@ TEST(LocalStreamLifecycleTest, full_duplex_echo) {
   auto connect_operation =
       bexec::connect(client.async_connect(scheduler, endpoint(socket_path)),
                      std::move(connect_receiver));
-  bexec::start(accept_operation);
   bexec::start(connect_operation);
+  bexec::start(accept_operation);
   run_phase(context);
 
   ASSERT_EQ(accept_state->signal, signal_kind::value);
@@ -376,8 +377,8 @@ TEST(LocalStreamLifecycleTest, shutdown_and_close_semantics) {
   auto connect_operation =
       bexec::connect(client.async_connect(scheduler, endpoint(socket_path)),
                      std::move(connect_receiver));
-  bexec::start(accept_operation);
   bexec::start(connect_operation);
+  bexec::start(accept_operation);
   run_phase(context);
 
   ASSERT_EQ(accept_state->signal, signal_kind::value);
