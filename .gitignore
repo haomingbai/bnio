@@ -26,3 +26,7 @@ coverage/
 # Exclude vim swap files
 *.swp
 .codebuddy/
+
+# Exclude JetBrains files
+.idea/
+.idea/*
