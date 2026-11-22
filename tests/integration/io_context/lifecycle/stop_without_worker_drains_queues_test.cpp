@@ -88,6 +88,11 @@ struct op_holder : op_holder_base {
 // schedule operations and shared-queued I/O complete with
 // set_value(operation_canceled); aborted timer waits staged on timers_.ready
 // complete with set_value(operation_canceled) as well.
+//
+// This is the legacy synchronous stop() shape and deliberately covers the
+// no-worker fallback: stop() records the request, completes the phase-2
+// transition itself, and drains synchronously on the calling thread.
+// request_stop() alone never drains.
 TEST(StopWithoutWorkerTest, stop_without_worker_delivers_queued_operations) {
   auto ctx = std::make_unique<bnio::io_context>();
   if (!ctx->is_open()) {

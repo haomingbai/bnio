@@ -3,6 +3,7 @@
  * @brief io_context construction, destruction, run loop entry.
  */
 
+#include <bnio/async_io/stop_transition.h>
 #include <bnio/detail/error_code.h>
 #include <bnio/io_context.h>
 
@@ -29,6 +30,8 @@ io_context::io_context(const io_context_options& options) noexcept
   global_state_.timeout_heap = &timers_;
   global_state_.try_fetch_timeout_operations =
       &io_context::try_fetch_timeout_operations_thunk;
+  global_state_.complete_stop = &io_context::complete_stop_thunk;
+  global_state_.complete_stop_owner = this;
   timers_.owner = this;
 }
 
@@ -42,10 +45,16 @@ io_context::~io_context() noexcept {
   }
 
   // Close the channel under submit_lock after publishing the terminal state:
-  // later submissions observe stopping, and no wake can race the close.
+  // later submissions observe stopping, and no wake can race the close. No
+  // Phase-2 work runs here: timers are already cleared above.
   {
     std::lock_guard guard(global_state_.submit_lock);
-    global_state_.life_state.store(1, std::memory_order_release);
+    global_state_.stop_requested.store(1, std::memory_order_release);
+    global_state_.life_state.store(
+        static_cast<int>(async_io::stop_transition::stopping),
+        std::memory_order_release);
+    global_state_.complete_stop = nullptr;
+    global_state_.complete_stop_owner = nullptr;
     global_state_.wake_channel_.close();
   }
 }
@@ -57,8 +66,10 @@ bool io_context::is_open() const noexcept {
 }
 
 bool io_context::can_start_run() const noexcept {
-  // A worker may enter the run loop only while the context is not stopping.
-  return global_state_.life_state.load(std::memory_order_acquire) == 0;
+  // Phase 1 alone already rejects entry; the Phase-2 states reject as well.
+  return global_state_.stop_requested.load(std::memory_order_acquire) == 0 &&
+         global_state_.life_state.load(std::memory_order_acquire) ==
+             static_cast<int>(async_io::stop_transition::none);
 }
 
 void io_context::release_worker_slot() noexcept {
@@ -92,9 +103,9 @@ std::error_code io_context::run_native_loop() noexcept {
 
     if (!ctx.is_open()) {
       result = std::error_code(ENOMEM, std::generic_category());
-    } else if (global_state_.life_state.load(std::memory_order_acquire)) {
-      // Close requested between the initial checks and the native open; the
-      // native loop will not run, so drain the shared queues here.
+    } else if (!can_start_run()) {
+      // Stop requested between the initial checks and the native open; the
+      // native loop will not run, so complete Phase 2 and drain here.
       drain_shared_queues_for_stop();
       (void)ctx.stop();
       result = std::make_error_code(std::errc::operation_canceled);
@@ -118,43 +129,74 @@ std::error_code io_context::run_native_loop() noexcept {
 }
 
 int io_context::stop() noexcept {
-  // Non-blocking request. With no worker, this caller is the only agent that
-  // can deliver shared-queue work.
-  if (begin_stop() &&
-      global_state_.running_workers.load(std::memory_order_acquire) == 0) {
+  // Phase 1 only. With no worker, this caller is the only agent that can
+  // complete Phase 2 and deliver shared-queue work, so it does so inline
+  // before returning (legacy synchronous fallback).
+  request_stop();
+  if (global_state_.running_workers.load(std::memory_order_acquire) == 0) {
     drain_shared_queues_for_stop();
   }
   return 0;
 }
 
-bool io_context::begin_stop() noexcept {
-  // Elect exactly one stop requester; stop() and join() share this path.
-  int expected = 0;
-  if (!lifecycle_.stop_requested.compare_exchange_strong(
-          expected, 1, std::memory_order_acq_rel, std::memory_order_acquire)) {
-    return false;
+void io_context::request_stop() noexcept {
+  // Phase 1: the flag and a broadcast only. No lock, no timer access, no
+  // state transition, no drain; safe from an async signal handler.
+  global_state_.stop_requested.store(1, std::memory_order_release);
+  (void)global_state_.wake_channel_.wake();
+}
+
+void io_context::complete_stop() noexcept {
+  constexpr int k_none = static_cast<int>(async_io::stop_transition::none);
+  constexpr int k_aborting =
+      static_cast<int>(async_io::stop_transition::aborting);
+  constexpr int k_stopping =
+      static_cast<int>(async_io::stop_transition::stopping);
+
+  if (global_state_.life_state.load(std::memory_order_acquire) == k_stopping) {
+    return;
   }
-  // Abort timer waits before publishing the stopping state, so a worker that
-  // observes the stop and drains timers_.ready in finish() cannot miss them.
+
+  // Elect exactly one Phase-2 transition.
+  int expected = k_none;
+  if (!global_state_.life_state.compare_exchange_strong(
+          expected, k_aborting, std::memory_order_acq_rel,
+          std::memory_order_acquire)) {
+    // Another caller is mid-transition (or already finished it); a loser
+    // returns only once stopping is visible.
+    while (global_state_.life_state.load(std::memory_order_acquire) ==
+           k_aborting) {
+      global_state_.life_state.wait(k_aborting, std::memory_order_acquire);
+    }
+    return;
+  }
+
+  // Abort timer waits before stopping is visible, so a worker entering its
+  // finish drain observes the full timers_.ready list.
   abort_pending_timer_waits();
-  // Publish stopping under the same lock as publish_cpu()'s state-check +
-  // enqueue: operations that passed the check are ordered before the drain.
+
+  // Publish under the submit lock: publishes that observed running are
+  // ordered before this store and will be drained.
   {
     std::lock_guard<std::mutex> guard(global_state_.submit_lock);
-    global_state_.life_state.store(1, std::memory_order_release);
+    global_state_.life_state.store(k_stopping, std::memory_order_release);
   }
-  // Wake unconditionally: stop() does not wait for workers, and a worker
-  // parked in the kernel may be the only thread that can observe the state.
-  // This also covers a stop() called from a worker or a signal handler.
+  global_state_.life_state.notify_all();
+
+  // A worker parked in the kernel may be the only thread that can observe the
+  // terminal state; broadcast unconditionally.
   (void)global_state_.wake_channel_.wake();
-  return true;
+}
+
+void io_context::complete_stop_thunk(void* state) noexcept {
+  static_cast<io_context*>(state)->complete_stop();
 }
 
 void io_context::join_internal() noexcept {
-  // A concurrent stop() may have won the election without publishing yet.
-  while (global_state_.life_state.load(std::memory_order_acquire) == 0) {
-    std::this_thread::yield();
-  }
+  // Join drives Phase 2 itself rather than waiting for another caller to
+  // publish stopping.
+  request_stop();
+  complete_stop();
 
   // Join is the barrier. The caller is not excluded; joining from a worker or
   // a stop/join drain receiver never completes (documented unsupported).
@@ -170,6 +212,10 @@ void io_context::join_internal() noexcept {
 }
 
 void io_context::drain_shared_queues_for_stop() noexcept {
+  // Every drain path must run after Phase 2: timer waits are aborted and
+  // stopping is published, so no worker is still consuming and no publish can
+  // land from here on.
+  complete_stop();
   // Draining may race another drain (stop fallback, an early-exiting run(),
   // or join), but every queue pop is exclusive: each operation is delivered
   // exactly once. Pop without submit_lock (callbacks may lock); publishes

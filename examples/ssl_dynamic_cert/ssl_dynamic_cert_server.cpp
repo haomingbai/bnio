@@ -157,9 +157,9 @@ class server_state {
 
   [[nodiscard]] bnio::ssl::context& bootstrap() noexcept { return bootstrap_; }
 
-  // Receiver callbacks run during io_context::stop()'s drain; re-entering
-  // stop() from that drain would wait on itself.
-  void request_stop() noexcept {
+  // Receiver callbacks also run while the context drains; route every stop
+  // through this guard so the transition is requested at most once.
+  void stop_context() noexcept {
     if (!ctx.is_stopped()) {
       (void)ctx.stop();
     }
@@ -370,7 +370,7 @@ struct accept_receiver {
     state->on_accept(ec, std::move(socket));
   }
 
-  void set_stopped() noexcept { state->request_stop(); }
+  void set_stopped() noexcept { state->stop_context(); }
 };
 
 struct watchdog_receiver {
@@ -382,7 +382,7 @@ struct watchdog_receiver {
     }
     std::cerr << "watchdog: no completed connection within 15s\n";
     state->timed_out = true;
-    state->request_stop();
+    state->stop_context();
   }
 
   void set_stopped() noexcept {}
@@ -595,7 +595,7 @@ void server_state::on_accept(std::error_code ec,
     if (!ctx.is_stopped()) {
       std::cerr << "accept: " << ec.message() << '\n';
     }
-    request_stop();
+    stop_context();
     return;
   }
 
@@ -611,7 +611,7 @@ void server_state::on_accept(std::error_code ec,
     session_->start();
   } catch (const std::bad_alloc&) {
     std::cerr << "session allocation failed\n";
-    request_stop();
+    stop_context();
   }
 }
 
@@ -681,13 +681,13 @@ void session::do_write() {
 void session::finish() noexcept {
   (void)stream_.next_layer().close();
   std::cout << "echo session closed\n";
-  state_.request_stop();
+  state_.stop_context();
 }
 
 void session::fail(std::error_code ec) noexcept {
   std::cerr << "session error: " << ec.message() << '\n';
   (void)stream_.next_layer().close();
-  state_.request_stop();
+  state_.stop_context();
 }
 
 }  // namespace

@@ -46,7 +46,8 @@ TEST(KqueueOperationTraitsTest, shared_task_queue_separates_cpu_and_io) {
   }
   EXPECT_EQ(io_count, io.size());
   EXPECT_EQ(queue.pop_io_all(), nullptr);
-  EXPECT_FALSE(queue.life_state.load(std::memory_order_acquire));
+  EXPECT_EQ(queue.life_state.load(std::memory_order_acquire),
+            static_cast<int>(bnio::async_io::bsd_native::stop_transition::none));
 }
 
 TEST(KqueueOperationTraitsTest, operation_state_concepts) {

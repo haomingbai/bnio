@@ -130,15 +130,42 @@ bnio_add_integration_io_context_test(
   lifecycle_nested_run
   lifecycle/nested_run_test.cpp
   PROPERTIES TIMEOUT 10)
+bnio_add_integration_io_context_test(
+  lifecycle_request_stop
+  lifecycle/request_stop_test.cpp
+  PROPERTIES TIMEOUT 10)
+# Fork + watchdog: a lost transition parks the child instead of the runner.
+bnio_add_integration_io_context_test(
+  lifecycle_join_stop_race
+  lifecycle/join_stop_race_test.cpp
+  PROPERTIES TIMEOUT 20)
+bnio_add_integration_io_context_test(
+  lifecycle_stop_transition_race
+  lifecycle/stop_transition_race_test.cpp
+  PROPERTIES TIMEOUT 20)
+# Fork + watchdog: publishers race the Phase-2 abort walk, which would park
+# the child rather than the runner if a transition were lost.
+bnio_add_integration_io_context_test(
+  lifecycle_aborting_publish_race
+  lifecycle/aborting_publish_race_test.cpp
+  PROPERTIES TIMEOUT 30)
+# The race body runs in a forked child and exits with _exit(), which skips
+# the gcov atexit flush. Let it dump the child's counters explicitly when the
+# target is instrumented.
+if(BNIO_ENABLE_COVERAGE)
+  target_compile_definitions(
+    bnio_integration_io_context_lifecycle_aborting_publish_race_test
+    PRIVATE BNIO_TEST_COVERAGE=1)
+endif()
 # Closes/flips fd 0 on purpose, so it must not run alongside other tests.
 bnio_add_integration_io_context_test(
   lifecycle_accept_abort_fd_zero
   lifecycle/accept_abort_fd_zero_test.cpp
   PROPERTIES RUN_SERIAL TRUE TIMEOUT 20)
 if(BNIO_PLATFORM_LINUX)
-  # Signal-driven stop() regression test: uses SIGUSR1 and a forked child,
-  # so it must not run concurrently with other tests. Linux-only because the
-  # defect lived in the io_uring wait path.
+  # Signal-driven request_stop() regression test: uses SIGUSR1 and a forked
+  # child, so it must not run concurrently with other tests. Linux-only
+  # because the defect lived in the io_uring wait path.
   bnio_add_integration_io_context_test(
     lifecycle_stop_from_signal_handler
     lifecycle/stop_from_signal_handler_test.cpp

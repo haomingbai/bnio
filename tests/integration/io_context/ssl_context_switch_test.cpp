@@ -61,8 +61,10 @@ unsigned long seed_error_queue() {
 }
 
 // Drives the context event loop. Tests assert the operation outcomes, so the
-// run() status (empty on a normal run, operation_canceled after a receiver
-// requests stop()) is intentionally discarded.
+// run() status is intentionally discarded: a run() that entered normally and
+// was later stopped returns an empty error_code; only a run() rejected at
+// entry (for example after request_stop() published the stop request) returns
+// operation_canceled.
 void run_context(bnio::io_context& context) {
   const std::error_code run_error = context.run();
   (void)run_error;

@@ -1,14 +1,19 @@
-// Regression test for the v0.1 circuit-break defect: stop() invoked from a
+// Regression test for the v0.1 circuit-break defect: a stop request from a
 // signal handler running on the worker thread must unblock a run loop that
 // is parked in the kernel wait with in-flight I/O and no timers armed.
 //
-// Two compounding defects made this hang:
+// Historical defect and fix:
 //   1. stop() used to wait for workers and excluded the calling worker from
 //      the wake set (is_in_context() self-exclusion), so a signal-handler
 //      stop() could both skip the wake and deadlock. stop() is now a
-//      non-blocking request that always writes the shared wake channel.
+//      non-blocking request, and request_stop() is its zero-lock phase-1
+//      subset: it only records the request and broadcasts the wake channel.
 //   2. io_uring_context::wait_for_cqe_event() retried on -EINTR internally,
 //      so the run loop never re-evaluated should_finish() after a signal.
+//
+// The handler therefore calls request_stop() — the only context operation
+// valid from an async signal handler. The exiting worker or join() drives
+// phase 2 (abort timers, publish stopping, drain).
 //
 // The scenario runs in a forked child so a regression hangs the child, not
 // the test process; the parent enforces a watchdog timeout and reports a
@@ -40,7 +45,7 @@ bnio::io_context* g_child_ctx = nullptr;
 
 extern "C" void on_sigusr1(int) noexcept {
   if (g_child_ctx != nullptr) {
-    g_child_ctx->stop();
+    g_child_ctx->request_stop();
   }
 }
 
@@ -71,7 +76,20 @@ struct accept_sink {
   void set_stopped() noexcept { outcome->store(2, std::memory_order_relaxed); }
 };
 
-[[noreturn]] void child_main() noexcept {
+// Same classification for a pending timer wait.
+struct timer_sink {
+  std::atomic<int>* outcome;
+  void set_value(std::error_code ec) noexcept {
+    const int result =
+        ec == std::make_error_code(std::errc::operation_canceled) ? 1 : 4;
+    outcome->store(result, std::memory_order_relaxed);
+  }
+  void set_stopped() noexcept { outcome->store(2, std::memory_order_relaxed); }
+};
+
+// arm_timer: also stage one long timer wait, so phase 2 must abort it and
+// deliver set_value(operation_canceled) after request_stop().
+[[noreturn]] void child_main(bool arm_timer) noexcept {
   bnio::io_context ctx;
   if (!ctx.is_open()) {
     _exit(3);
@@ -98,6 +116,24 @@ struct accept_sink {
       accept_sink{&accept_outcome});
   bexec::start(holder->op);
 
+  std::atomic<int> timer_outcome{0};
+  std::unique_ptr<bnio::steady_timer> timer;
+  std::unique_ptr<op_holder_base> timer_holder;
+  if (arm_timer) {
+    timer = std::make_unique<bnio::steady_timer>(ctx);
+    if (timer->expires_at(std::chrono::steady_clock::now() +
+                          std::chrono::hours(1)) != 0U) {
+      _exit(3);
+    }
+    auto timer_sender = timer->async_wait();
+    using timer_op_t = decltype(bexec::connect(
+        std::declval<decltype(timer_sender)>(), timer_sink{}));
+    auto op = std::make_unique<op_holder<timer_op_t>>(
+        timer_sender, timer_sink{&timer_outcome});
+    bexec::start(op->op);
+    timer_holder = std::move(op);
+  }
+
   g_child_ctx = &ctx;
   struct sigaction sa{};
   sa.sa_handler = &on_sigusr1;
@@ -117,20 +153,23 @@ struct accept_sink {
   signaler.detach();
 
   (void)ctx.run();
-  // run() returned: the pending accept must have been drained via
-  // set_value(operation_canceled) through finish() -> abort_inflight_io().
-  _exit(accept_outcome.load(std::memory_order_relaxed) == 1 ? 0 : 2);
+  // run() returned: phase 2 must have aborted the pending accept (and, when
+  // armed, the long timer), delivering set_value(operation_canceled).
+  const bool accept_canceled =
+      accept_outcome.load(std::memory_order_relaxed) == 1;
+  const bool timer_canceled =
+      !arm_timer || timer_outcome.load(std::memory_order_relaxed) == 1;
+  _exit(accept_canceled && timer_canceled ? 0 : 2);
 }
 
-TEST(LifecycleTest, stop_from_signal_handler_unblocks_kernel_wait) {
-  if (!bnio::io_context().is_open()) {
-    GTEST_SKIP() << "native I/O context is unavailable";
-  }
-
+[[nodiscard]] int run_child_and_watch(bool arm_timer, const char* failure) {
   const pid_t pid = ::fork();
-  ASSERT_NE(pid, -1) << "fork failed: " << std::strerror(errno);
+  EXPECT_NE(pid, -1) << "fork failed: " << std::strerror(errno);
+  if (pid == -1) {
+    return -1;
+  }
   if (pid == 0) {
-    child_main();
+    child_main(arm_timer);
   }
 
   // Watchdog: the child must exit well within this budget. A lost-wakeup
@@ -149,16 +188,53 @@ TEST(LifecycleTest, stop_from_signal_handler_unblocks_kernel_wait) {
   if (reaped == 0) {
     (void)::kill(pid, SIGKILL);
     (void)::waitpid(pid, &status, 0);
-    FAIL() << "run() did not return after stop() from a signal handler; the "
-              "worker stayed parked in the kernel wait (lost wakeup)";
+    ADD_FAILURE() << failure;
+    return -1;
   }
-  ASSERT_EQ(reaped, pid) << "waitpid failed: " << std::strerror(errno);
-  ASSERT_TRUE(WIFEXITED(status))
-      << "child terminated abnormally (status=0x" << std::hex << status << ")";
-  EXPECT_EQ(WEXITSTATUS(status), 0)
-      << "child exit " << WEXITSTATUS(status)
+  EXPECT_EQ(reaped, pid) << "waitpid failed: " << std::strerror(errno);
+  if (!WIFEXITED(status)) {
+    ADD_FAILURE() << "child terminated abnormally (status=0x" << std::hex
+                  << status << ")";
+    return -1;
+  }
+  return WEXITSTATUS(status);
+}
+
+TEST(LifecycleTest, request_stop_from_signal_handler_unblocks_kernel_wait) {
+  if (!bnio::io_context().is_open()) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  const int exit_status = run_child_and_watch(
+      /*arm_timer=*/false,
+      "run() did not return after request_stop() from a signal handler; the "
+      "worker stayed parked in the kernel wait (lost wakeup)");
+  if (exit_status < 0) {
+    return;
+  }
+  EXPECT_EQ(exit_status, 0)
+      << "child exit " << exit_status
       << " (2 = run() returned but the pending accept did not complete via "
          "set_value(operation_canceled); 3 = child setup failed)";
+}
+
+TEST(LifecycleTest, request_stop_from_signal_handler_cancels_armed_timer) {
+  if (!bnio::io_context().is_open()) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  const int exit_status = run_child_and_watch(
+      /*arm_timer=*/true,
+      "run() did not return after request_stop() from a signal handler with "
+      "an armed long timer; the worker stayed parked in the kernel wait");
+  if (exit_status < 0) {
+    return;
+  }
+  EXPECT_EQ(exit_status, 0)
+      << "child exit " << exit_status
+      << " (2 = run() returned but the pending accept and/or long timer did "
+         "not complete via set_value(operation_canceled); 3 = child setup "
+         "failed)";
 }
 
 }  // namespace

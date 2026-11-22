@@ -117,6 +117,11 @@ int io_uring_context::init_ring_params(
 }
 
 void io_uring_context::queue_exit() noexcept {
+  // Defend against an unclean teardown with no live worker to observe the
+  // stop: complete a pending phase 2 so timer waits are aborted before the
+  // drain below.
+  complete_pending_stop();
+
   // Only an unclean teardown (never run, fatal error, forced close) still owes
   // terminal calls; a finished context must not touch sibling workers' queues.
   // global_state_ must stay wired until the destructor completes.

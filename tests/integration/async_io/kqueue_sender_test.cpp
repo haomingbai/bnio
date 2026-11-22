@@ -401,8 +401,8 @@ TEST(KqueueSenderTest, queue_exit_delivers_published_but_unrun_io) {
 }
 
 // stop() racing an in-flight poll: the worker parked on the poll, the
-// caller publishes the closing state (io_context::begin_stop()'s
-// life_state = 1) and stops the native context; the wake write unblocks
+// caller publishes the stopping state (io_context's phase-2 terminal state)
+// and stops the native context; the wake write unblocks
 // the kevent wait and finish()'s abort path delivers the in-flight poll
 // through the stop channel — set_value(operation_canceled) for this
 // token-less receiver — executed on the worker thread.  Together with
@@ -432,9 +432,11 @@ TEST(KqueueSenderTest, stop_aborts_inflight_poll_reports_operation_canceled) {
                          std::chrono::milliseconds(2000)))
       << "worker never parked with the poll in flight";
 
-  // io_context::stop() semantics: publish the closing state, then stop
+  // io_context::stop() semantics: publish the stopping state, then stop
   // the native context (finishing + wake write).
-  global_tasks.life_state.store(1, std::memory_order_release);
+  global_tasks.life_state.store(
+      static_cast<int>(bnio::async_io::bsd_native::stop_transition::stopping),
+      std::memory_order_release);
   (void)context.stop();
   worker.join();
 

@@ -100,9 +100,13 @@ struct kqueue_task_queue_state {
   std::atomic<std::size_t> awake_workers;            // workers not blocked in the poller
   std::atomic<std::size_t> running_workers;          // total workers inside io_context::run() (active + suspended + entering)
   kqueue_worker_state_list workers;                  // sleeping workers (directed-wake targets)
-  std::atomic<int> life_state;                       // 0 = running, 1 = stopping
+  std::atomic<int> stop_requested;                   // Phase-1 stop request
+  using complete_stop_fn = void (*)(void*) noexcept;
+  complete_stop_fn complete_stop;                    // idempotent Phase-2 hook
+  void* complete_stop_owner;
+  std::atomic<int> life_state;                       // stop-transition state: 0 none, 1 aborting, 2 stopping
   bnio::base::wake_channel wake_channel_;            // shared broadcast (stop + native notify_one_waiter)
-  std::mutex submit_lock;                            // publish/stop serialization
+  std::mutex submit_lock;                            // publish/Phase-2 publication serialization
 };
 ```
 
@@ -114,7 +118,8 @@ the native backends never touch it directly. The early increment closes the
 use-after-free window in `join()`: a worker that has entered `run()` but not
 yet `enter_run()` is still counted, so the join barrier waits for it. A
 `stop()` fallback drain only checks the count to decide whether a worker can
-still deliver shared work; it never waits. The count feeds the wake fast path
+still deliver shared work; it never waits. `join()` waits for the count to
+reach zero. The count feeds the wake fast path
 (`awake_workers >= running_workers`, §5).
 
 ## 3. The fetch path: `fetch_cpu_task()`
@@ -197,15 +202,17 @@ void kqueue_context::end_wait() noexcept {
 ### 4.3 Lock ordering
 
 There is a single list lock (the suspend list's), so there is no lock
-ordering cycle between workers. The `submit_lock` (held by publishers and
-`stop()`) is acquired before the suspend lock in
-`wake_one_sleeping_locked()`; no path takes `submit_lock` while holding the
-suspend lock, so there is no cycle there either.
+ordering cycle between workers. The `submit_lock` (held by publishers, the
+Phase-2 stopping publication, and destruction) is acquired before the suspend
+lock in `wake_one_sleeping_locked()`; no path takes `submit_lock` while
+holding the suspend lock, so there is no cycle there either.
+`request_stop()` takes no lock at all.
 
 ## 5. Directed wakeup: `wake_one_sleeping()`
 
-The shared `wake_channel_` is the broadcast path used by `stop()` (which must
-wake every worker) and as a fallback when nobody is suspended. It is also
+The shared `wake_channel_` is the broadcast path used by the stop request
+(`request_stop()` and the tail of `complete_stop()`, which must wake every
+worker) and as a fallback when nobody is suspended. It is also
 written by the native contexts' own cross-thread publication path:
 `kqueue_context::notify_one_waiter()` / `io_uring_context::signal_eventfd()`
 (`post()`/`publish_io()` from a foreign thread) write the shared channel
@@ -251,7 +258,11 @@ the shared broadcast channel only when nobody is suspended:
 
 ```cpp
 void io_context::wake_one_sleeping_locked() noexcept {
-  if (global_state_.life_state.load(std::memory_order_acquire) != 0) return;
+  // 0 == stop_transition::none; aborting and stopping both skip the wake.
+  if (global_state_.life_state.load(std::memory_order_acquire) !=
+      static_cast<int>(async_io::stop_transition::none)) {
+    return;
+  }
 
   // Fast path: when every worker that entered run() is still awake
   // (awake_workers >= running_workers), nobody is suspended and
@@ -426,9 +437,12 @@ I/O follows the same local-then-shared order as CPU work: `consume_io_tasks()`
 pops the worker's own I/O queue first and falls back to the shared I/O queue
 only when the local one is empty. A batch the worker cannot prepare (io_uring
 SQ full) is stashed in the run-loop retry slot and retried by the next pass
-before any queue is popped, rather than retried inline. On stop,
-`abort_inflight_io()` drains the retry slot and **both** I/O
-queues and completes everything left with `-ECANCELED` /
+before any queue is popped, rather than retried inline. A worker reaches the
+stop drain only after Phase 2 published `stopping`: `should_finish()`,
+`finish()`, `queue_exit()`, and `consume_io_tasks()` all complete the pending
+transition (abort timer waits, publish `stopping`) before acting on the stop
+state. On stop, `abort_inflight_io()` drains the retry slot
+and **both** I/O queues and completes everything left with `-ECANCELED` /
 `complete_submit_stopped()`, so operations still held anywhere — including
 those a `finish()` callback published — are delivered instead of leaked.
 

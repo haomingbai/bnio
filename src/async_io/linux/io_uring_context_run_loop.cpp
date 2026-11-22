@@ -348,7 +348,24 @@ io_uring_context::run_phase io_uring_context::prepare_wait_timeout(
 }
 
 bool io_uring_context::closing_requested() const noexcept {
-  return global_state_->life_state.load(std::memory_order_acquire) != 0;
+  return global_state_->life_state.load(std::memory_order_acquire) ==
+         static_cast<int>(stop_transition::stopping);
+}
+
+void io_uring_context::complete_pending_stop() noexcept {
+  if (global_state_ == nullptr) {
+    return;
+  }
+  if (global_state_->stop_requested.load(std::memory_order_acquire) == 0) {
+    return;
+  }
+  if (global_state_->life_state.load(std::memory_order_acquire) ==
+      static_cast<int>(stop_transition::stopping)) {
+    return;
+  }
+  if (global_state_->complete_stop != nullptr) {
+    global_state_->complete_stop(global_state_->complete_stop_owner);
+  }
 }
 
 bool io_uring_context::stop_requested() const noexcept {
@@ -356,9 +373,11 @@ bool io_uring_context::stop_requested() const noexcept {
          context_state::running;
 }
 
-bool io_uring_context::should_finish() const noexcept {
-  // Closing forces finish regardless of inflight. A normal stop() waits for
-  // every inflight I/O to produce its CQE, so finish() cannot race them.
+bool io_uring_context::should_finish() noexcept {
+  // A shared-phase stop must reach stopping before any worker finishes, so
+  // complete the pending transition first. A normal stop() waits for every
+  // inflight I/O to produce its CQE, so finish() cannot race them.
+  complete_pending_stop();
   if (closing_requested()) {
     return true;
   }
@@ -398,6 +417,10 @@ void io_uring_context::abort_and_deliver_completions() noexcept {
 }
 
 void io_uring_context::finish() noexcept {
+  // Error exits reach finish() with phase 2 still pending; close it first so
+  // timer waits are aborted before the drain below.
+  complete_pending_stop();
+
   // Deliver every completion, tolerating a broken ring or closed wake channel,
   // so no operation is silently dropped.
   drain_local_tasks(/*include_cqe=*/true);

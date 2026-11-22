@@ -213,7 +213,9 @@ TEST(LifecycleTest, stop_then_join) {
 }
 
 // Test 6: join_then_stop
-// Start join() then call stop() — both should succeed.
+// Start join() on its own thread, wait until it has issued the phase-1
+// request and published the phase-2 state, then call stop() from the main
+// thread. Both must return.
 TEST(LifecycleTest, join_then_stop) {
   auto ctx = std::make_unique<bnio::io_context>();
   if (!ctx->is_open()) {
@@ -224,16 +226,39 @@ TEST(LifecycleTest, join_then_stop) {
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
   std::atomic<bool> join_done{false};
-  auto join_sender = ctx->join();
-  auto join_op = bexec::connect(join_sender, join_flag_recv{&join_done});
-  bexec::start(join_op);
+  std::atomic<bool> join_started{false};
+  std::thread joiner([&ctx, &join_done, &join_started]() {
+    join_started.store(true, std::memory_order_release);
+    auto join_sender = ctx->join();
+    auto join_op = bexec::connect(join_sender, join_flag_recv{&join_done});
+    bexec::start(join_op);
+  });
 
-  // Give join a head start to CAS the life_state.
-  std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  // Gate: join() has made the stop request and published the terminal
+  // phase before we race stop() against its wait. is_stopped() is the only
+  // observable point on that path.
+  bool gate_open = false;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (join_started.load(std::memory_order_acquire) && ctx->is_stopped()) {
+      gate_open = true;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (!gate_open) {
+    (void)ctx->stop();
+    joiner.join();
+    worker.join();
+    FAIL() << "join() never began its stop/wait phase";
+    return;
+  }
 
   // stop() is a non-blocking request; join() owns the barrier and completes.
-  int stop_ret = ctx->stop();
+  const int stop_ret = ctx->stop();
 
+  joiner.join();
   worker.join();
 
   EXPECT_TRUE(join_done.load(std::memory_order_acquire));

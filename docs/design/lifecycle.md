@@ -132,9 +132,11 @@ ready to complete. It does not own, move, or destroy operations. The operation's
 external owner must keep the operation object alive until a terminal completion
 has run, and `io_context` must also outlive all operations submitted on it.
 
-`stop()` is not a synchronization barrier: it returns without waiting for
-`run()` to return. Before destroying the context or reusing operation
-storage, wait for every `run()` call to return, or use `join()`.
+`request_stop()` and `stop()` are not synchronization barriers: both return
+without waiting for `run()`. `request_stop()` only records the request and
+broadcasts the wake channel; `stop()` additionally completes the stop inline
+only when no worker is running. Before destroying the context or reusing
+operation storage, wait for every `run()` call to return, or use `join()`.
 
 ```cpp
 // WRONG — ctx destroyed before operation completes
@@ -427,30 +429,36 @@ Before writing bnio code, verify:
       registrations, which disables those callbacks.
 - [ ] Views from `view()` do not outlive their owner.
 - [ ] Move-only types are moved, not copied.
+- [ ] Signal handlers call `io_context::request_stop()` only; `stop()` is
+      not async-signal-safe.
 
 ## Concurrent Shutdown: Submit-Path Locking
 
 Concurrent shutdown — an external thread submitting while another thread
-stops or destroys the context — is handled by one lock shared by the
-submission and the shutdown paths.
+stops or destroys the context — is handled by the two-phase stop and one
+lock shared by submission and the Phase-2 shutdown publication.
 
 ### The submit lock
 
 `global_state_.submit_lock` (a `std::mutex`) serializes the state-involving
-parts of every submission with the shutdown / destruction state
-transitions:
+parts of every submission with the Phase-2 stop publication and destruction:
 
 - `publish_cpu()` and `publish_io()` (their shared-queue path, taken whenever
   the caller is not a worker of this context) run
-  **lock → check the shutdown state → enqueue → wake** inside the critical
-  section. The critical section contains only state-involving work; the
-  caller executes the operation afterwards.
-- `begin_stop()` publishes the stopping state under the same lock;
-  `~io_context()` publishes the terminal state and closes the wake channel
-  under the same lock.
-- Every wake-channel write — publish paths, timer paths, native
-  `notify_one_waiter()` — is bound to the submit lock, so a close can never
-  race a write.
+  **lock → check `life_state == none` → enqueue → wake** inside the
+  critical section. The critical section contains only state-involving work;
+  the caller executes the operation afterwards. Only `none` accepts;
+  `aborting` and `stopping` reject and the caller completes inline. A
+  Phase-1 `request_stop()` alone does not reject publications.
+- `complete_stop()` (the Phase-2 CAS winner) aborts pending timer waits
+  first, then publishes `stopping` under the same lock. `~io_context()`
+  publishes the terminal `stopping` state and closes the wake channel under
+  the same lock.
+- Runtime wakeups — publish paths, timer paths, native
+  `notify_one_waiter()` — are bound to the submit lock, so a close can never
+  race one. The stop broadcast is deliberately lock-free: `request_stop()`
+  and the tail of `complete_stop()` write the shared wake channel without
+  `submit_lock`, and under Rule 3 they must not race destruction.
 
 `publish_cpu` / `publish_io` **assume the publish happens against a running
 (non-stopped) context**; the in-lock check makes that assumption explicit
@@ -477,23 +485,47 @@ stopping.
 - an in-flight submission cannot touch the shared queue or the wake channel
   after the destructor begins tearing the context down.
 
-`stop()` is a non-blocking request. One caller is elected by the
-`stop_requested` CAS; it flips `life_state` under the submit lock and wakes
-the workers, then returns without waiting. `join()` is a separate barrier:
-every caller waits for all `run()` calls to return and then drains whatever
-shared work remains. The context remains single-shot: `run()` refuses to
-re-enter once `life_state` is non-zero.
+Stopping has two phases:
+
+- **Phase 1 — `request_stop()`.** Lock-free and the only context operation
+  valid in an async signal handler. It stores `stop_requested = 1` and
+  broadcasts the shared wake channel. It does not abort timers, publish
+  `stopping`, drain, or wait, and it is idempotent.
+- **Phase 2 — `complete_stop()`** (internal, idempotent). One caller is
+  elected by a CAS on `life_state` through `stop_transition::none` (0) →
+  `stop_transition::aborting` (1) → `stop_transition::stopping` (2). The
+  winner aborts pending timer waits, publishes `stopping` under
+  `submit_lock`, and calls `notify_all` plus the shared-channel broadcast; a
+  loser waits until `stopping` is visible. `life_state` remains a
+  `std::atomic<int>` whose values are the three
+  `bnio::async_io::stop_transition` enumerators: `none` (no stop transition
+  has started; work is accepted), `aborting`, and `stopping`.
+
+`stop()` runs Phase 1 and, only when `running_workers == 0`, completes
+Phase 2 and drains the shared queues inline before returning; this keeps its
+legacy meaning for a context that never ran. It is **not**
+async-signal-safe. `join()` is the barrier: it requests stop, drives Phase 2
+itself, waits for all `run()` calls to return, and then drains whatever
+shared work remains. The context remains single-shot: `can_start_run()`
+requires `stop_requested == 0` and `life_state == none`, so `run()`
+refuses to enter once a stop was requested — even before Phase 2 begins —
+and drains before returning `operation_canceled`. A `run()` that entered the
+native loop returns an empty error_code when that loop ends because of the
+stop. `is_stopped()` is true as soon as `stop_requested != 0` or
+`life_state != none`.
 
 ### Timer abort ordering
 
-`begin_stop()` calls `abort_pending_timer_waits()` **before** publishing
-`life_state = 1` under `submit_lock`.  This guarantees that when any worker
-observes the stopping state and enters its final `finish()` drain, the
-aborted timer operations are already staged on `timers_.ready`.  Without
-this ordering a worker that is actively spinning (not sleeping in a syscall)
-could observe `life_state == 1`, drain the still-empty `timers_.ready` in
-`finish()`, and exit before the abort moves the operations — permanently
-stranding them with no worker left to drain.
+The Phase-2 winner (`complete_stop()`) calls `abort_pending_timer_waits()`
+**before** publishing `life_state = stopping` under `submit_lock`. This
+guarantees that when any worker observes `stopping` and enters its final
+`finish()` drain, the aborted timer operations are already staged on
+`timers_.ready`. Without this ordering a worker that is actively spinning
+(not sleeping in a syscall) could observe `stopping`, drain the still-empty
+`timers_.ready` in `finish()`, and exit before the abort moves the
+operations — permanently stranding them with no worker left to drain.
+Phase 1 (`request_stop()`) deliberately does not touch timers: the abort
+belongs to the single elected Phase-2 transition.
 
 ### Abnormal close delivers every completion
 
@@ -518,38 +550,48 @@ that was published to the context — nothing is silently dropped, even when
 run-loop errors, which route through the `finish_drain` phase (drain → abort →
 deliver) instead of exiting the loop directly.
 
-The reordered Linux path relies on closing the ring to retire inflight
-requests. bnio submits poll-armed socket and pipe requests without
-`IOSQE_ASYNC`, for which cancellation on ring teardown is synchronous;
-io-wq-backed work is not used and would need its own guarantee. The normal
-`stop()` path is unchanged: `finish()` drains ready CQEs, aborts the remaining
-inflight I/O while the ring is still open, and the ring is closed when the
-native context is destroyed.
+Both `queue_exit()` implementations complete a pending Phase 2 first, so an
+unclean teardown aborts timer waits before its delivery pass. The reordered
+Linux path relies on closing the ring to retire inflight requests. bnio
+submits poll-armed socket and pipe requests without `IOSQE_ASYNC`, for which
+cancellation on ring teardown is synchronous; io-wq-backed work is not used
+and would need its own guarantee. The normal stop path likewise completes
+Phase 2 before draining: each worker drives `complete_stop()` from
+`should_finish()`, `finish()`, `queue_exit()`, or `consume_io_tasks()`.
+`finish()` then drains ready CQEs, aborts the remaining inflight I/O while
+the ring is still open, and the ring is closed when the native context is
+destroyed.
 
 Two boundaries keep that statement scoped. First, it covers the teardown
 paths above, not `~io_context()` itself: the destructor publishes the
 terminal state and closes the wake channel without delivering any pending
 completion — outstanding operations are dropped, which is the caller's
 responsibility under Rule 3 (`io_context` and operation storage must both
-remain alive until terminal completion). Second, the normal `stop()` path
-delivers through the exiting workers, or through the no-worker fallback;
-`join()` is the barrier that waits for both the workers and the drain.
+remain alive until terminal completion). Second, the normal stop path
+delivers through the exiting workers — each completes Phase 2 before its
+final drain — or through the no-worker `stop()` fallback, which completes
+Phase 2 and drains inline; `join()` is the barrier that waits for both the
+workers and the drain.
 
 ### Shared-queue delivery after stop
 
-`stop()` never abandons work that was published before the stopping state
-was elected, but delivery no longer depends on the stopping caller waiting
-for workers. Delivery happens inline on whichever of these threads gets
-there:
+`stop()` never abandons work that was published before Phase 2 made the
+stopping state visible, but delivery does not depend on the requester
+waiting for workers. Every drain path first completes Phase 2, then delivers
+inline on whichever of these threads gets there:
 
-- the elected `stop()` caller, when `running_workers` is zero at the time of
-  the request (this covers a context that never ran);
-- a worker that observes the stopping state but will not enter or execute the
-  native loop (the `can_start_run()` rejection and the post-open rejection);
-  it drains before releasing its slot;
+- the `stop()` caller, when `running_workers` is zero at the time of the
+  request (Phase 2 and the drain run inline; this covers a context that
+  never ran);
+- a worker that observes the requested stop but will not enter or execute
+  the native loop (the initial `can_start_run()` rejection and the post-open
+  rejection); it drains before releasing its slot;
 - workers that enter the native loop, through their final `finish()` drain
-  before releasing their slot;
-- `join()` callers, after every `running_workers` slot has dropped to zero.
+  before releasing their slot — `should_finish()`, `finish()`, and
+  `consume_io_tasks()` drive the same idempotent Phase 2 first, and
+  `queue_exit()` does so during teardown;
+- `join()` callers, after driving Phase 2 themselves and after every
+  `running_workers` slot has dropped to zero.
 
 Every worker-side drain completes before the worker releases its slot, so
 `join()` cannot observe zero while such a drain is still running. Each drain
@@ -573,19 +615,19 @@ receiver call. Overlapping drains may run different receiver callbacks on
 different threads, matching the existing rule that completions may run on any
 context or stopping thread.
 
-The normal multi-worker stop is unaffected: the last worker's `finish()`
-already drained everything, so this pass finds the queues empty and
-returns immediately.
+The normal multi-worker stop leaves this fallback pass empty: the last
+worker's `finish()` already drained everything, so it finds the queues empty
+and returns immediately.
 
 #### Why draining happens inline
 
 Once no worker remains the shared queues are ownerless: their only
-consumers are workers (during the run loop and in `finish()`), and a late
-`run()` increments `running_workers` before checking `can_start_run()`, so
-it exits with `operation_canceled` without ever touching a queue.
-Delivering from the stopping, exiting, or joining thread is therefore
-the only available agent, and it mirrors the standing convention for
-abnormal teardown (`queue_exit()` already runs receiver callbacks
+consumers are workers (during the run loop and in `finish()`). A late
+`run()` increments `running_workers` before checking `can_start_run()`,
+rejects entry with `operation_canceled`, and drains before releasing its
+slot. Delivering from the stopping, exiting, rejecting, or joining thread is
+therefore the only available agent, and it mirrors the standing convention
+for abnormal teardown (`queue_exit()` already runs receiver callbacks
 synchronously on the calling thread). Reusing each operation's own
 `execute()` keeps the arbitration single-pointed — the same token →
 stop-channel logic that workers run decides the completion here, and the
@@ -606,21 +648,25 @@ and holding the lock across `execute()` would self-deadlock. Lock-free
 operation is safe because the publish boundary and exclusive queue pops
 establish what the drain needs:
 
-1. **Publish vs. drain.** `begin_stop()` stores `life_state = 1` inside
-   `submit_lock`, and the shared publish path checks the state and
-   enqueues inside the same lock, atomically. Any publish whose critical
-   section precedes the store has its operation enqueued and visible
-   (mutex ordering provides the happens-before edge); any publish after
-   the store is rejected and completes inline at its caller. The mutex
-   rules out the "in the lock but not yet enqueued" interleaving — the
-   drain and the store cannot overlap a publisher's critical section.
-2. **Exclusive pops.** A late `run()` observes `life_state` and exits
-   without touching the queues; a participating worker drains in `finish()`
-   before releasing its slot. The remaining candidates (stop fallback, last
-   worker before its decrement, join) may overlap, but every pop removes a
-   disjoint set: `pop_cpu_all()` and `pop_io_all()` are `exchange`
-   operations and `timers_.ready` is taken under its mutex. No operation is
-   delivered twice.
+1. **Publish vs. drain.** `complete_stop()` stores
+   `life_state = stopping` inside `submit_lock`, and the shared publish
+   path checks for `none` and enqueues inside the same lock, atomically.
+   Any publish whose critical section precedes the store has its operation
+   enqueued and visible (mutex ordering provides the happens-before edge);
+   any publish after the store is rejected and completes inline at its
+   caller. The mutex rules out the "in the lock but not yet enqueued"
+   interleaving — the drain and the store cannot overlap a publisher's
+   critical section. The drain begins only after `complete_stop()` returns,
+   so it never observes a pre-publication state.
+2. **Exclusive pops.** A late `run()` observes `stop_requested` or a
+   `life_state` other than `none` through `can_start_run()` and joins the
+   drain set, holding its `running_workers` slot until it finishes; a
+   participating worker drains in `finish()` before releasing its slot.
+   The remaining candidates (stop fallback, last worker before its
+   decrement, join) may overlap, but every pop removes a disjoint set:
+   `pop_cpu_all()` and `pop_io_all()` are `exchange` operations and
+   `timers_.ready` is taken under its mutex. No operation is delivered
+   twice.
 3. **Stability.** With no producer after the publish and exclusive pops,
    each full pass empties the sources it wins; the loop-until-empty shape
    is retained as a conservative guard, not because an unstable state is
@@ -635,7 +681,8 @@ list, so a receiver callback that queries timer state cannot deadlock.
 `~io_context()` publishes the terminal state and closes the wake channel
 without delivering completions. That remains a Rule 3 obligation: the
 caller must keep the context and operation storage alive until terminal
-completion, and `stop()` is the API that guarantees it.
+completion. `stop()`'s no-worker fallback and `join()` are the APIs that
+guarantee it; `request_stop()` alone does not.
 
 ### Stop-channel arbitration
 
@@ -676,12 +723,13 @@ io_context stop (`include/bnio/async_io/bsd/kqueue_operations/resolve.h:89`,
 Linux mirror `include/bnio/async_io/linux/io_uring_operations/resolve.h`),
 matching the post-operation layering difference documented below.
 
-Two teardown rules complete the picture. Both native consume loops gate on
+Two teardown rules complete the picture. Both native consume loops drive
+the shared Phase 2 first when they observe a Phase-1 request, then gate on
 `stop_requested() || closing_requested()` up front:
 `io_uring_context::consume_io_tasks()`
-(`src/async_io/linux/io_uring_context_io_tasks.cpp:59`) and
+(`src/async_io/linux/io_uring_context_io_tasks.cpp:38`) and
 `kqueue_context::consume_io_tasks()`
-(`src/async_io/bsd/kqueue_context_io_tasks.cpp:36`) route every I/O
+(`src/async_io/bsd/kqueue_context_io_tasks.cpp:35`) route every I/O
 operation consumed in that state straight through the stop channel
 (`drain_io_list_complete_stopped()`) instead of preparing it. On io_uring
 a submit failure on a dying ring (e.g. `EBADFD`) must not surface as a
@@ -689,7 +737,7 @@ generic error where the contract requires the cancellation channel; on
 kqueue an `EV_ADD` during teardown would arm a new event filter and let
 an operation published while `finish()` drains its queues run for real —
 both platforms now refuse new I/O past the stop observation, which also
-implements the not-yet-executed queued-work rule of `io_context::stop()`
+implements the not-yet-executed queued-work rule of the stop contract
 uniformly. `kqueue_context::queue_exit()` keeps its alignment with the
 io_uring abort-and-deliver pattern (see "Abnormal close delivers every
 completion"): the guard drains the queues through the stop channel on the
@@ -697,8 +745,8 @@ first pass, and the surrounding `while (consume_io_tasks())` loop still
 guarantees every operation published from an abort completion reaches a
 terminal receiver call. Timer aborts do not arbitrate at all:
 `abort_pending_timer_waits()` stages `timer_completion_kind::canceled` on
-the elected stop caller, the kind is fixed at staging time, and `execute()`
-maps it directly to `set_value(operation_canceled)`
+the Phase-2 CAS winner (`complete_stop()`), the kind is fixed at staging
+time, and `execute()` maps it directly to `set_value(operation_canceled)`
 (`include/bnio/detail/posix/io_context/class.h:800`,
 `include/bnio/detail/posix/io_context/timer_wait.h:40`; see
 [`timer.md`](timer.md)).
@@ -720,8 +768,9 @@ CPU queue, never prepared.  Three properties justify making the two
 platforms symmetric here instead of leaving kqueue on its historical
 "register anyway, abort later" path:
 
-1. **Liveness.**  `finish()` Phase 1 and Phase 3b break only when
-   `run_cpu_batch()` *and* `consume_io_tasks()` both report no work.  A
+1. **Liveness.**  The `finish()` drain loop and its nested-publish drain
+   break only when `run_cpu_batch()` *and* `consume_io_tasks()` both report
+   no work.  A
    receiver that unconditionally republishes an immediately-ready I/O
    operation (a poll on a permanently readable descriptor, a self-pipe
    read) after every completion feeds the loop forever if the consume
@@ -735,16 +784,17 @@ platforms symmetric here instead of leaving kqueue on its historical
    the stop channel (`set_value(operation_canceled)` for a token-less
    receiver, `set_stopped()` for a cancelled one), the chain ends, and
    the next pass finds both sources empty.  The convergence argument is
-   the same one Phase 3b already makes for its nested-publish window —
+   the same one the nested-publish drain already makes —
    the guard changes the *delivery channel* of republished work, not
    the loop's drain-until-empty shape.
 
-2. **One queued-work rule.**  `io_context::stop()` guarantees that work
-   published before the stopping state was elected completes, and work
-   that never ran reports `operation_canceled`.  With kqueue registering
-   during teardown, which side of that rule an operation landed on
-   depended on a scheduling race between the worker's consume pass and
-   the stop publication; both platforms now decide by state alone.
+2. **One queued-work rule.**  The stop contract guarantees that work
+   published before Phase 2 made the stopping state visible completes, and
+   work that never ran reports `operation_canceled`.  With kqueue
+   registering during teardown, which side of that rule an operation
+   landed on depended on a scheduling race between the worker's consume
+   pass and the stop publication; both platforms now decide by state
+   alone.
 
 3. **One error surface.**  A submit or registration failure during
    teardown (`EBADFD` on a dying ring, `EIO` from `EV_RECEIPT`) would
@@ -755,12 +805,13 @@ platforms symmetric here instead of leaving kqueue on its historical
 **State coverage.**  `stop_requested()` reads the native context's own
 state and holds for `finishing` (set by the native `stop()`, and by
 `queue_exit()` before its delivery pass) and `finished`.
-`closing_requested()` reads the shared `life_state` and holds from the
-moment `io_context::stop()` wins its election (`begin_stop()` publishes
-`life_state = 1` under `submit_lock`) and once `~io_context()` begins.
-Normal `io_context::stop()` therefore trips the guard through
-`closing_requested()` even while the native context still reports
-`running`; a native-only stop (no shared state, standalone context)
+`closing_requested()` reads the shared `life_state` and holds only once
+Phase 2 publishes `stop_transition::stopping` (value 2), and once
+`~io_context()` publishes the terminal state. A Phase-1
+`io_context::request_stop()` alone does not trip it. The native consume
+loops call the shared Phase-2 hook before testing the guard, so a worker
+that observes only the request completes the transition and then sees
+`stopping`; a native-only stop (no shared state, standalone context)
 trips it through `stop_requested()`.
 
 **Interaction with `queue_exit()`.**  `queue_exit()` stores

@@ -317,7 +317,14 @@ inline bool is_unsupported_ring_error(int result) {
 // Not thread-safe: callers only use this before publishing the state.
 inline void reset_task_queue_state(
     io_uring_task_queue_state& global_tasks) noexcept {
-  global_tasks.life_state.store(0, std::memory_order_relaxed);
+  // Reused static state must not carry a previous test's phase-1 request or
+  // a thunk pointing at a destroyed context.
+  global_tasks.stop_requested.store(0, std::memory_order_relaxed);
+  global_tasks.complete_stop = nullptr;
+  global_tasks.complete_stop_owner = nullptr;
+  global_tasks.life_state.store(
+      static_cast<int>(bnio::async_io::linux_native::stop_transition::none),
+      std::memory_order_relaxed);
   global_tasks.cpu_head.store(nullptr, std::memory_order_relaxed);
   global_tasks.io_head.store(nullptr, std::memory_order_relaxed);
   global_tasks.awake_workers.store(0, std::memory_order_relaxed);

@@ -78,9 +78,10 @@ an `io_uring_task_queue_state`. That state contains separate MPSC CPU and I/O
 queues, the number of workers currently published as awake, the total number
 of workers inside `io_context::run()` (`running_workers`, maintained by
 `io_context` itself), the suspend worker-state
-list (used by directed wakeup), and the stopping
-state (`life_state`) of the whole worker group. It deliberately has no I/O count, batch
-threshold, explicit-drain flag, or timer. A standalone
+list (used by directed wakeup), and the two-phase stop state of the whole
+worker group (`stop_requested`, tri-state `life_state`, Phase-2 hook). It
+deliberately has no I/O count, batch threshold, explicit-drain flag, or
+timer. A standalone
 `io_uring_context` must likewise be given an externally owned task queue state
 before `run()`.
 
@@ -196,12 +197,14 @@ retained for API compatibility but is not consulted by the implementation.
 #### Internal submission contract
 
 `post()` and `publish_io()` are internal submission APIs. They perform no
-lifecycle gating at this layer: neither consults the shared `life_state`, and
+lifecycle gating at this layer: neither consults the shared stop state, and
 both always enqueue. Gating happens one layer up, in the `io_context` queue
-(`bnio::io_context::publish_io` / `publish_cpu`): it serializes against
-`begin_stop()` / `~io_context()` with `submit_lock`, checks `life_state`, and
-refuses work once stopping begins — the caller then completes the operation
-inline, so a submission through that layer never strands.
+(`bnio::io_context::publish_io` / `publish_cpu`): it serializes against the
+Phase-2 `complete_stop()` / `~io_context()` with `submit_lock` and accepts
+only `life_state == none`. An `aborting` or `stopping` state refuses the
+operation and the caller completes it inline, so a submission through that
+layer never strands. A Phase-1 `request_stop()` does not reject publications;
+only the Phase-2 transition does.
 
 The async_io layer omits the gate because these are internal interfaces: it
 assumes a correctly driven lifecycle. Anyone calling `post()` or
@@ -227,8 +230,10 @@ errors — a failed wake-poll re-arm, a fatal `io_uring_enter` error, or a
 failed `enter_run()` setup — through `finish_drain` (or, in `enter_run()`,
 directly into `finish()`): drain ready CQEs and CPU tasks, abort remaining
 inflight and shared-queued I/O, and deliver every completion before the
-context reaches `finished`. A fatal ring or wake-channel error therefore
-cannot exit the loop with receivers left silent.
+context reaches `finished`. Both `finish()` and `queue_exit()` complete a
+pending Phase 2 first, so the timer aborts that Phase 2 stages are delivered
+by the same drain. A fatal ring or wake-channel error therefore cannot exit
+the loop with receivers left silent.
 
 Delivery through the stop path is two-stage. `complete_submit_error`
 delivers `set_value(ec, ...)` directly. `complete_submit_stopped()` only
@@ -237,7 +242,7 @@ decided by the token arbitration in each operation's `execute()` stopped
 branch: if the receiver's stop token is cancelled, the operation delivers
 `set_stopped()`; otherwise it delivers
 `set_value(operation_canceled, ...)` — the not-yet-executed queued-work
-rule of `io_context::stop()`. The `value`/`value_with_ec` branches of
+rule of the context stop contract. The `value`/`value_with_ec` branches of
 `execute()` never consult the token, so already-completed results and
 kernel-level `ECANCELED` are delivered unchanged.
 
@@ -342,18 +347,26 @@ struct io_uring_task_queue_state {
     std::atomic<std::size_t> awake_workers;
     std::atomic<std::size_t> running_workers;   // total workers inside io_context::run() (maintained by io_context)
     io_uring_worker_state_list workers;     // sleeping workers for directed wake
-    std::atomic<int> life_state{0};  // 0 = running, 1 = stopping
+    std::atomic<int> stop_requested{0};     // Phase-1 request: 0 = none, 1 = requested
+    using complete_stop_fn = void (*)(void*) noexcept;
+    complete_stop_fn complete_stop = nullptr;   // idempotent Phase-2 hook
+    void* complete_stop_owner = nullptr;
+    std::atomic<int> life_state{0};  // stop-transition state: none 0, aborting 1, stopping 2
     void* timeout_heap = nullptr;
     try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
     bnio::base::wake_channel wake_channel_;     // shared broadcast (stop + native notify_one_waiter)
-    std::mutex submit_lock;                     // publish/stop serialization
+    std::mutex submit_lock;                     // Phase-2 publication/publish serialization
 };
 ```
 
-`life_state` belongs to the worker group. Once `io_context::stop()` sets it
-to 1 (stopping) via CAS, every worker treats the run loop as finishing,
-including a worker racing with late registration. Workers check
-`closing_requested()` (life_state != 0) in `should_finish()`.
+The stop state belongs to the worker group. Phase 1 is the plain
+`stop_requested` flag; Phase 2 is the `life_state` CAS through none →
+aborting → stopping. A worker that observes either the request or a Phase-2
+state drives the hook: `should_finish()`, `finish()`, `queue_exit()`, and
+`consume_io_tasks()` call it before acting on the stop state. The gate
+`closing_requested()` is true only at `stopping` (2). Every worker treats
+`stopping` as the signal to finish, including a worker racing with late
+registration.
 
 Ready CQEs are collected at the beginning of every ready-task pass. The run
 loop then drains its local CPU list and the shared CPU queue before consuming
@@ -378,8 +391,10 @@ The BSD backend uses the same CPU/I/O publication split. A
 `kqueue_task_queue_state` owns separate MPSC heads, `awake_workers` /
 `running_workers` (the latter maintained by `io_context::run()`), the
 suspend worker-state list, and the
-worker-group `life_state` flag (std::atomic<int>, 0=running, 1=stopping). Local CPU and I/O queues are
-non-atomic in all modes — both are owned exclusively by the worker thread.
+worker-group two-phase stop state (`stop_requested` plus tri-state
+`life_state`: none 0, aborting 1, stopping 2). Local CPU and I/O queues
+are non-atomic in all modes — both are owned exclusively by the worker
+thread.
 
 ```cpp
 class kqueue_context {

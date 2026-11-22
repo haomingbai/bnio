@@ -134,9 +134,9 @@ class client_state {
   void fail(const char* stage, std::error_code ec) noexcept;
   void fail(const char* stage, std::string_view detail) noexcept;
 
-  // Receiver callbacks run during io_context::stop()'s drain; re-entering
-  // stop() from that drain would wait on itself.
-  void request_stop() noexcept {
+  // Receiver callbacks also run while the context drains; route every stop
+  // through this guard so the transition is requested at most once.
+  void stop_context() noexcept {
     if (!ctx_.is_stopped()) {
       (void)ctx_.stop();
     }
@@ -385,7 +385,7 @@ void client_state::close_and_stop() noexcept {
   if (stream_) {
     (void)stream_->next_layer().close();
   }
-  request_stop();
+  stop_context();
 }
 
 void client_state::fail(const char* stage, std::error_code ec) noexcept {
@@ -394,7 +394,7 @@ void client_state::fail(const char* stage, std::error_code ec) noexcept {
   if (stream_) {
     (void)stream_->next_layer().close();
   }
-  request_stop();
+  stop_context();
 }
 
 void client_state::fail(const char* stage, std::string_view detail) noexcept {
@@ -403,7 +403,7 @@ void client_state::fail(const char* stage, std::string_view detail) noexcept {
   if (stream_) {
     (void)stream_->next_layer().close();
   }
-  request_stop();
+  stop_context();
 }
 
 void client_state::on_timeout() noexcept {
@@ -415,7 +415,7 @@ void client_state::on_timeout() noexcept {
   if (stream_) {
     (void)stream_->next_layer().close();
   }
-  request_stop();
+  stop_context();
 }
 
 }  // namespace

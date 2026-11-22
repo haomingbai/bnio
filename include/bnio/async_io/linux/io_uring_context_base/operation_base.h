@@ -7,6 +7,7 @@
 #ifndef BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPERATION_BASE_H_
 #define BNIO_ASYNC_IO_LINUX_IO_URING_CONTEXT_BASE_OPERATION_BASE_H_
 
+#include <bnio/async_io/stop_transition.h>
 #include <bnio/async_io/time.h>
 #include <bnio/base/wake_channel.h>
 #include <bnio/export.h>
@@ -81,6 +82,9 @@ struct BNIO_EXPORT io_uring_worker_state_list {
   io_uring_local_task_queue_state* cursor = nullptr;
 };
 
+/** Shared stop-transition state (see async_io/stop_transition.h). */
+using stop_transition = bnio::async_io::stop_transition;
+
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT io_uring_task_queue_state {
   /** Non-blocking timer-heap fetch (heap, earliest deadline out, expired list
@@ -129,7 +133,21 @@ struct BNIO_EXPORT io_uring_task_queue_state {
    *  own lock. */
   io_uring_worker_state_list workers;
 
-  /** Context lifecycle state: 0 while running, 1 once stop() has begun. */
+  /** Stop request: 0 = none, 1 = requested. Set without any lock by
+   *  io_context::request_stop(); the Phase-2 transition is elected on
+   *  life_state. */
+  std::atomic<int> stop_requested{0};
+
+  /** Phase-2 transition entry: aborts pending timers, publishes stopping,
+   *  and re-broadcasts. Idempotent; installed by io_context with its owner. */
+  using complete_stop_fn = void (*)(void*) noexcept;
+  complete_stop_fn complete_stop = nullptr;
+  void* complete_stop_owner = nullptr;
+
+  /** Context lifecycle state: a stop_transition value. none (0) accepts new
+   *  work, aborting (1) while the phase-2 transition aborts timer waits,
+   *  stopping (2) once the terminal state is published. Workers may finish
+   *  only at stopping. */
   std::atomic<int> life_state{0};
 
   /** Opaque pointer to the shared lazy timer heap; created and owned by
@@ -143,9 +161,10 @@ struct BNIO_EXPORT io_uring_task_queue_state {
    *  its per-worker channel (see wake_one_sleeping()). */
   bnio::base::wake_channel wake_channel_;
 
-  /** Serializes submission against the stop transition: work that saw the
-   *  context running is drained by the last worker's finish(); work that sees
-   *  stopping never enqueues into a queue that may no longer be drained. */
+  /** Serializes the Phase-2 stopping publication against publish_*: work
+   *  that saw life_state none is drained by the last worker's finish();
+   *  work that sees aborting or stopping never enqueues into a queue that may
+   *  no longer be drained. request_stop() does not take it. */
   std::mutex submit_lock;
 };
 

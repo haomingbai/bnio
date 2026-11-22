@@ -28,11 +28,13 @@
   (`post()` / `publish_io()`) eventually reaches a terminal receiver call
   (`set_value` with an error, or `set_stopped`), regardless of ring/wake-channel
   errors or which thread shuts down. Terminal delivery is performed by a
-  worker's `run()` / `finish()` path, by the `stop()` fallback when no worker
-  is running, by the last worker leaving `run()` after a stop request, or by
-  `join()`. Fatal run-loop errors route through the finish drain
-  (drain → abort → deliver), and `queue_exit()` delivers aborted completions
-  instead of discarding them.
+  worker's `run()` / `finish()` path, by `stop()`'s no-worker fallback, by the
+  last worker leaving `run()` after it completes the stop transition, or by
+  `join()` (which drives the transition itself). A Phase-1 `request_stop()`
+  alone only requests the stop and does not deliver anything. Fatal run-loop
+  errors route through the finish drain (drain → abort → deliver), and
+  `queue_exit()` completes any pending stop transition and delivers aborted
+  completions instead of discarding them.
 - **I3 — no unbounded block without a wake source.** The run loop never enters
   an unbounded blocking `io_uring_enter` unless an eventfd poll is armed, a
   bounded timeout bounds the wait, or inflight kernel operations will wake it

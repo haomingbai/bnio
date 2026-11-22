@@ -1,7 +1,9 @@
-// Regression tests for the non-blocking stop() contract:
+// Regression tests for the non-blocking stop contract:
 //   - stop() returns without waiting for workers;
 //   - stop() called from a receiver callback returns immediately (join() from
 //     such a callback is unsupported and is not exercised here);
+//   - request_stop() (phase 1: record + wake, no locks) called from a stop
+//     drain receiver returns immediately;
 //   - the no-worker stop fallback and the join barrier each drain the shared
 //     queues exactly once.
 //
@@ -96,13 +98,29 @@ struct barrier_receiver {
   void set_stopped() noexcept { set_value(std::error_code{}); }
 };
 
-// Runs inside stop()'s own shared-queue drain and re-enters stop().
+// Runs inside stop()'s own shared-queue drain and re-enters stop(). By then
+// phase 2 has published stopping, so the re-entrant stop() observes the
+// terminal phase and returns.
 struct reentrant_receiver {
   bnio::io_context* ctx;
   std::atomic<bool>* done;
 
   void set_value(std::error_code) noexcept {
     (void)ctx->stop();
+    done->store(true, std::memory_order_release);
+  }
+
+  void set_stopped() noexcept { set_value(std::error_code{}); }
+};
+
+// Runs inside stop()'s shared-queue drain and calls the lock-free phase-1
+// request_stop(): it must return immediately without re-entering phase 2.
+struct reentrant_request_stop_receiver {
+  bnio::io_context* ctx;
+  std::atomic<bool>* done;
+
+  void set_value(std::error_code) noexcept {
+    ctx->request_stop();
     done->store(true, std::memory_order_release);
   }
 
@@ -221,7 +239,8 @@ void two_worker_callbacks_stop_body() {
 }
 
 // C: the stop() no-worker fallback delivers a queued receiver that calls
-// stop() again on the same thread.
+// stop() again on the same thread. Phase 2 has already published stopping,
+// so the re-entrant call is a no-op after the stop-request election.
 void reentrant_stop_in_stop_drain_body() {
   bnio::io_context ctx;
   std::atomic<bool> done{false};
@@ -230,6 +249,25 @@ void reentrant_stop_in_stop_drain_body() {
   auto sender = scheduler.schedule();
   auto operation =
       bexec::connect(std::move(sender), reentrant_receiver{&ctx, &done});
+  bexec::start(operation);
+
+  std::thread stopper([&ctx] { (void)ctx.stop(); });
+  if (!wait_until([&] { return done.load(std::memory_order_acquire); })) {
+    ::_exit(1);
+  }
+  ::_exit(0);
+}
+
+// C2: the same drain receiver calls request_stop() instead. Phase 1 takes
+// no lock and must return while phase 2 is still draining.
+void reentrant_request_stop_in_stop_drain_body() {
+  bnio::io_context ctx;
+  std::atomic<bool> done{false};
+
+  auto scheduler = ctx.get_post_scheduler();
+  auto sender = scheduler.schedule();
+  auto operation = bexec::connect(std::move(sender),
+                                  reentrant_request_stop_receiver{&ctx, &done});
   bexec::start(operation);
 
   std::thread stopper([&ctx] { (void)ctx.stop(); });
@@ -319,6 +357,10 @@ TEST(LifecycleStopNonblockingTest, two_worker_callbacks_stop) {
 
 TEST(LifecycleStopNonblockingTest, reentrant_stop_in_stop_drain) {
   EXPECT_TRUE(run_isolated(reentrant_stop_in_stop_drain_body));
+}
+
+TEST(LifecycleStopNonblockingTest, reentrant_request_stop_in_stop_drain) {
+  EXPECT_TRUE(run_isolated(reentrant_request_stop_in_stop_drain_body));
 }
 
 TEST(LifecycleStopNonblockingTest, stop_returns_before_callback_returns) {

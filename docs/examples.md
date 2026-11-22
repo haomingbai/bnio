@@ -163,8 +163,16 @@ Key patterns demonstrated:
 `examples/echo_server/` — TCP echo server demonstrating structured concurrency.
 The main thread runs `io_context::run()`. The `tcp_acceptor` accepts connections
 via sender/receiver callbacks. Each connection runs read→write→read in an
-`echo_session`. SIGINT triggers graceful shutdown: the acceptor closes, active
-sessions drain, then `context.stop()` returns `run()`.
+`echo_session`. The SIGINT/SIGTERM handler only saves and restores `errno` and
+calls `context.request_stop()`; it does not touch the acceptor, session
+bookkeeping, any `std::weak_ptr`, or atomic counters. The request wakes the
+run loop, pending sessions are aborted through the cancellation channel, and
+`run()` returns. The acceptor is then closed and the remaining cleanup runs
+after `run()` returns, in ordinary code rather than inside the signal handler.
+
+Every other example calls `io_context::stop()` from an ordinary completion
+receiver. `stop()` is not async-signal-safe; a signal handler should call
+`request_stop()` instead.
 
 ## dns_lookup
 

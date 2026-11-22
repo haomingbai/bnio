@@ -31,6 +31,11 @@ namespace {
 }  // namespace
 
 bool kqueue_context::consume_io_tasks() noexcept {
+  // A phase-1 request observed here must drive phase 2: a receiver that keeps
+  // republishing ready I/O would otherwise never reach should_finish(), so
+  // stopping would never be published and the loop would spin forever.
+  complete_pending_stop();
+
   // While stopping/closing, abort instead of registering: an armed EV_ADD
   // could hang stop(). complete_submit_stopped() delivers the stop channel
   // (operation_canceled, or set_stopped if the token raced).

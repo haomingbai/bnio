@@ -68,6 +68,11 @@ int kqueue_context::queue_init(const kqueue_context_options& options) noexcept {
 }
 
 void kqueue_context::queue_exit() noexcept {
+  // Complete a pending shared stop first, so the timer waits it aborts are
+  // staged for the teardown drain below. A context that never ran still owes
+  // the worker group its stop transition.
+  complete_pending_stop();
+
   // Only an unclean teardown (never run, fatal error, forced close) still owes
   // terminal calls; a finished context must not touch sibling workers' queues.
   // global_state_ must stay wired until the destructor completes.

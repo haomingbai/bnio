@@ -57,6 +57,9 @@ This repository is a CMake-based C++20 async I/O library.
 - `dns/resolve.h` — DNS resolution sender.
 - `dns/types.h` — DNS low-level types and flags.
 - `time.h` — clock, duration, and time_point aliases.
+- `stop_transition.h` — `stop_transition` tri-state: `none` (no stop
+  transition has started; work is accepted) / `aborting` / `stopping`,
+  stored in the shared task-queue `life_state`.
 - `config.h` — async_io compile-time knobs.
 - `ip/address.h` — IPv4/IPv6 address value type.
 - `ip/endpoint.h` — address + port value type.
@@ -69,7 +72,9 @@ This repository is a CMake-based C++20 async I/O library.
 - `linux/io_uring_context.h` — umbrella for the Linux native context.
 - `linux/io_uring_context_base.h` — umbrella for context, operation bases, and options.
 - `linux/io_uring_context_base/context.h` — `io_uring_context` class definition.
-- `linux/io_uring_context_base/operation_base.h` — intrusive CPU/I/O operation bases and shared queues.
+- `linux/io_uring_context_base/operation_base.h` — intrusive CPU/I/O
+  operation bases, shared queues, and the two-phase stop state
+  (`stop_requested`, `life_state`, Phase-2 hook).
 - `linux/io_uring_context_base/options.h` — `io_uring_context_options`.
 - `linux/io_uring_operations.h` — umbrella for concrete operation types.
 - `linux/io_uring_operations/core.h` — nop, timeout, and internal operations.
@@ -89,7 +94,9 @@ This repository is a CMake-based C++20 async I/O library.
 - `bsd/kqueue_context.h` — umbrella for the BSD native context.
 - `bsd/kqueue_context_base.h` — umbrella for context, operation bases, and options.
 - `bsd/kqueue_context_base/context.h` — `kqueue_context` class definition.
-- `bsd/kqueue_context_base/operation_base.h` — intrusive CPU/I/O operation bases and shared queues.
+- `bsd/kqueue_context_base/operation_base.h` — intrusive CPU/I/O operation
+  bases, shared queues, and the two-phase stop state (`stop_requested`,
+  `life_state`, Phase-2 hook).
 - `bsd/kqueue_context_base/options.h` — `kqueue_context_options`.
 - `bsd/kqueue_helper.h` — readiness registration builder used by passive I/O operations.
 - `bsd/kqueue_operations.h` — umbrella for concrete kqueue operation types.
@@ -285,8 +292,8 @@ the `basic`, `integration`, and `stress` CTest labels.
   and header self-containment.
 - `tests/basic/base_bsd/` — BSD base-layer header self-containment.
 - `tests/basic/io_context/` — high-level unit tests: buffer, sender concepts,
-  timer state, header self-containment, and the SSL callback/handshake-pause/
-  handshake-retry unit and runtime tests.
+  timer state, stop-state API, header self-containment, and the SSL
+  callback/handshake-pause/handshake-retry unit and runtime tests.
 - `tests/integration/async_io/` — io_uring and kqueue run-loop, sender, CQE
   dispatch, EAGAIN re-arm, error routing, SQ-full, UDP, and DNS tests.
 - `tests/integration/base/` — Linux ring and wake-channel integration tests.
@@ -298,14 +305,15 @@ the `basic`, `integration`, and `stress` CTest labels.
   and the full SSL suite (handshake, transfer, ALPN, SNI, ClientHello,
   certificate callback, context switching, error precedence, error-queue
   hygiene, handshake-retry categories).
-- `tests/integration/io_context/lifecycle/` — join, nested run, stop
-  ordering/races, submit-after-stop, no-new-I/O-after-stop, and
-  operation-leak/abort tests.
+- `tests/integration/io_context/lifecycle/` — join, join/stop race,
+  `request_stop()`, Phase-2 transition (`complete_stop()`) races, nested run,
+  stop transition/ordering races, submit-after-stop, no-new-I/O-after-stop,
+  stop-state API, and operation-leak/abort tests.
 - `tests/stress/async_io/` — re-arm/stop stress.
 - `tests/stress/base_bsd/` — wake-channel stress.
 - `tests/stress/io_context/` — TCP, UDP, read/write, shutdown-submit, timer,
-  timer-stop-race, local peer-close, SSL callback, and SSL handshake-retry
-  stress.
+  timer-stop-race, stop-transition race, local peer-close, SSL callback, and
+  SSL handshake-retry stress.
 - `tests/support/async_io/` — `io_uring_context_test_support.h` and
   `kqueue_context_test_support.h`.
 - `tests/support/io_context/` — loopback, runtime, general context, and SSL
@@ -315,11 +323,12 @@ the `basic`, `integration`, and `stress` CTest labels.
 
 ## Examples (`examples/`)
 
-All 11 example programs are defined as CMake targets:
+All 11 example directories build CMake targets (12 executables; the SSL
+example builds a server and a client):
 
 - `examples/dns_lookup/` — DNS resolution (`bnio_dns_lookup`).
-- `examples/echo_server/` — TCP echo server with graceful SIGINT shutdown
-  (`bnio_echo_server`).
+- `examples/echo_server/` — TCP echo server whose SIGINT/SIGTERM handler
+  calls `request_stop()` (`bnio_echo_server`).
 - `examples/file_cat/` — asynchronous `cat` over descriptor I/O
   (`bnio_file_cat`).
 - `examples/mini_curl/` — full HTTP/HTTPS client with timeout support

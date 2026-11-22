@@ -2,11 +2,13 @@
  * @file timer_stop_race_stress_test.cpp
  * @brief Stress test that amplifies the timer-stop race condition.
  *
- * Race description: When io_context::stop() calls begin_stop() before
- * abort_pending_timer_waits(), a worker that is actively spinning (not
- * sleeping in a syscall) can observe life_state == 1, enter finish(), drain
- * the still-empty timers_.ready, and exit — all before
- * abort_pending_timer_waits() moves operations to timers_.ready.
+ * Race description: When stop() publishes the terminal phase before
+ * abort_pending_timer_waits() has drained the timer waits, a worker that is
+ * actively spinning (not sleeping in a syscall) can observe the terminal
+ * state, enter finish(), drain the still-empty timers_.ready, and exit — all
+ * before abort_pending_timer_waits() moves operations to timers_.ready.
+ * The two-phase design fixes the ordering: phase 2 (aborting) aborts timer
+ * waits before publishing stopping.
  *
  * Amplification strategy:
  * 1. Use many short-lived timers to keep the worker busy in
@@ -105,9 +107,9 @@ TEST(TimerStopRaceStressTest, repeated_stop_with_pending_timers) {
       ops.push_back(std::move(h));
     }
 
-    // stop() triggers the race: begin_stop() sets life_state=1, and if
-    // the worker observes it before abort_pending_timer_waits() drains
-    // the timers, ops are stranded.
+    // stop() triggers the race: phase 1 records the request and phase 2
+    // moves through aborting to stopping; if the worker observes stopping
+    // before abort_pending_timer_waits() drains the timers, ops are stranded.
     ctx->stop();
     worker.join();
 
@@ -133,7 +135,7 @@ TEST(TimerStopRaceStressTest, repeated_stop_with_pending_timers) {
 // Test B: Burst-stop pattern — submit many far-future timers while the
 // worker is processing short-lived timers, then stop immediately.
 // This keeps the worker in the run_ready_tasks phase, maximizing the
-// chance that it sees life_state == 1 before abort_pending_timer_waits().
+// chance that it sees the stopping state before abort_pending_timer_waits().
 TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
   constexpr int kIterations = 100;
   constexpr int kBurstTimers = 50;
@@ -192,8 +194,8 @@ TEST(TimerStopRaceStressTest, burst_stop_during_active_worker) {
       burst_ops.push_back(std::move(h));
     }
 
-    // Immediate stop — worker may be in handle_run_ready_tasks when
-    // life_state flips.
+    // Immediate stop — worker may be in handle_run_ready_tasks when the
+    // terminal phase is published.
     ctx->stop();
     worker.join();
 

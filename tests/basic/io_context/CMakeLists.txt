@@ -42,6 +42,8 @@ bnio_add_basic_io_context_test(ssl_handshake_retry_runtime
                                ssl_handshake_retry_runtime_test.cpp
                                PROPERTIES TIMEOUT 20)
 bnio_add_basic_io_context_test(timer_state timer_state_test.cpp)
+bnio_add_basic_io_context_test(stop_state_api stop_state_api_test.cpp
+                               PROPERTIES TIMEOUT 10)
 
 function(bnio_add_basic_io_context_header_test name definition)
   add_executable(bnio_basic_io_context_header_${name}_test

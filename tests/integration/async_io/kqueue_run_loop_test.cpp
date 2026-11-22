@@ -223,8 +223,71 @@ TEST(KqueueRunLoopTest, shared_closing_state_finishes_the_worker) {
   context.set_global_state(&global_state);
   EXPECT_EQ(context.queue_init(), 0);
 
-  global_state.life_state.store(true, std::memory_order_release);
+  global_state.life_state.store(
+      static_cast<int>(bnio::async_io::bsd_native::stop_transition::stopping),
+      std::memory_order_release);
   context.run();
+
+  EXPECT_EQ(global_state.awake_workers.load(std::memory_order_acquire), 0);
+}
+
+// Two-phase stop: aborting (phase 2 in progress) is not yet terminal. A
+// worker that wakes while the shared state is aborting must go back to
+// waiting; only stopping may end the run loop.
+TEST(KqueueRunLoopTest, shared_aborting_state_does_not_finish_the_worker) {
+  kqueue_task_queue_state global_state;
+  ASSERT_GE(global_state.wake_channel_.open(), 0);
+  kqueue_context context;
+  context.set_global_state(&global_state);
+  EXPECT_EQ(context.queue_init(), 0);
+
+  std::atomic<bool> finished{false};
+  std::thread worker([&context, &finished] {
+    context.run();
+    finished.store(true, std::memory_order_release);
+  });
+
+  const auto park_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!context.is_waiting() &&
+         std::chrono::steady_clock::now() < park_deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  if (!context.is_waiting()) {
+    (void)context.stop();
+    worker.join();
+    FAIL() << "worker never parked in the run loop wait";
+    return;
+  }
+
+  // Wake the worker while the shared state is still aborting: phase 2 has
+  // aborted timer waits but has not published stopping yet.
+  global_state.life_state.store(
+      static_cast<int>(bnio::async_io::bsd_native::stop_transition::aborting),
+      std::memory_order_release);
+  (void)global_state.wake_channel_.wake();
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_FALSE(finished.load(std::memory_order_acquire))
+      << "worker finished while the shared state was aborting";
+
+  // Publishing stopping is what permits finish().
+  global_state.life_state.store(
+      static_cast<int>(bnio::async_io::bsd_native::stop_transition::stopping),
+      std::memory_order_release);
+  (void)global_state.wake_channel_.wake();
+
+  const auto finish_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!finished.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < finish_deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_TRUE(finished.load(std::memory_order_acquire))
+      << "worker did not finish after the stopping state was published";
+  if (!finished.load(std::memory_order_acquire)) {
+    (void)context.stop();
+  }
+  worker.join();
 
   EXPECT_EQ(global_state.awake_workers.load(std::memory_order_acquire), 0);
 }

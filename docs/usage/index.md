@@ -116,9 +116,9 @@ Which channel a cancellation fires on depends only on its source:
 | Cancellation source | Completion |
 |---------------------|------------|
 | Stop token visible in the receiver environment (user-provided, or forwarded by a composite sender algorithm) | `set_stopped()` |
-| `io_context::stop()` aborting inflight I/O or not-yet-executed queued work | `set_value(operation_canceled, ...)` |
+| `io_context::stop()` (or `request_stop()` whose Phase 2 is completed by a worker or `join()`) aborting inflight I/O or not-yet-executed queued work | `set_value(operation_canceled, ...)` |
 | `steady_timer::cancel()`, `expires_after()`, timer destruction | `set_value(operation_canceled)` |
-| `async_wait()` on an unregistered timer (moved-from `steady_timer`, or waits aborted by `io_context::stop()`) | `set_value(operation_canceled)` |
+| `async_wait()` on an unregistered timer (moved-from `steady_timer`, or waits aborted by the context-stop Phase 2) | `set_value(operation_canceled)` |
 | Kernel-level cancel (CQE / kevent reporting `ECANCELED`) | `set_value(ECANCELED, ...)` |
 
 Rules that follow from the table:
@@ -126,11 +126,15 @@ Rules that follow from the table:
 - Both sources racing: when the stop token is cancelled and the context is
   stopping at the same time, the token wins — the operation completes with
   `set_stopped()`.
-- `io_context::stop()` only requests the stop and returns. The aborted
-  completions are produced by the workers as they leave `run()`, or by
-  `join()`; when no worker is running, the elected `stop()` caller drains the
-  shared queues inline before returning. Do not destroy the context or reuse
-  buffers until every `run()` has returned or `join()` has completed.
+- `io_context::stop()` requests the stop and returns. Phase 1 only records
+  the request; Phase 2 (abort pending timers, publish `stopping`) and the
+  drain are completed by the workers as they leave `run()`, by `join()`, or —
+  when no worker is running — synchronously by the `stop()` caller, which
+  also drains the shared queues inline. `io_context::request_stop()` is the
+  async-signal-safe Phase-1-only form: it never aborts timers, publishes no
+  stopping state, and drains nothing, so after calling it from a signal
+  handler still wait for `run()` to return (or use `join()`) before
+  destroying the context or reusing buffers.
 - An unregistered timer (`context == nullptr`, observable via
   `steady_timer::has_context()`) is legal to keep using: `cancel()` and
   `expires_after()` return `0` (no pending waits to cancel; `expires_at()`
@@ -154,14 +158,16 @@ Rules that follow from the table:
 - Write-all and read-all senders report the bytes transferred so far when
   they complete with `set_value(operation_canceled, ...)`; on
   `set_stopped()` no byte count is reported.
-- `io_context::run()` keeps returning `operation_canceled` as its own
-  function result after a stop; that channel is unchanged. When the native
-  backend fails to enter its run loop on a worker — the io_uring ring could
-  not be enabled or a wake poll could not be armed — that same result
+- `io_context::run()` returns an empty error_code when it entered the run
+  loop, including when that loop ended because of a stop. An entry rejected
+  because a stop was already requested (`can_start_run()` is false) returns
+  `operation_canceled` after draining whatever was already published. When
+  the native backend fails to enter its run loop on a worker — the io_uring
+  ring could not be enabled or a wake poll could not be armed — the result
   carries the backend's error instead: `std::error_code(-errno,
-  std::generic_category())` from the failing enter step, with an empty
-  error_code for a normal run. Whatever was already published when the
-  enter failed is still delivered to its receivers before `run()` returns.
+  std::generic_category())` from the failing enter step. Whatever was already
+  published when the enter failed is still delivered to its receivers before
+  `run()` returns.
 - With `bexec::sync_wait`, token cancellation yields `std::nullopt`, while a
   context stop yields an engaged optional carrying `operation_canceled`.
 - `when_all` over children aborted by a context stop aggregates their
@@ -608,8 +614,9 @@ cancellation path takes over. Keep the buffer until the `run()` call on the
 thread that owns the operation returns, or until `join()` has completed
 (which waits for every `run()` to return and for the shared-queue drain), not
 merely until the receiver's `set_value(operation_canceled)` runs. `stop()`
-alone is not a synchronization point for buffer reuse. See "Cancellation and
-stop" above.
+alone is not a synchronization point for buffer reuse, and `request_stop()`
+is weaker still — it only records the request. See "Cancellation and stop"
+above.
 
 On kqueue, closing a descriptor removes the kevents registered for it. An
 operation that was waiting on that descriptor may therefore never complete on
@@ -629,7 +636,7 @@ the context (or close the transport and let the resulting completions run).
 
 There is no per-object `cancel()` in this release. The only operation-level
 cancel is `steady_timer::cancel()`; context-wide cancellation is
-`io_context::stop()`.
+`io_context::stop()` (or `request_stop()` followed by `join()`).
 
 ### IP addresses and DNS result types
 
@@ -689,23 +696,31 @@ Lifecycle and introspection methods:
 | Member | Meaning |
 |--------|---------|
 | `is_open()` | Always true for the compiled POSIX backend; native backend failure is reported by `run()`, not here. |
-| `run()` | Runs the loop on the calling thread; returns empty normally, `operation_canceled` after `stop()`, or the backend entry error. |
-| `stop()` | Non-blocking stop request. The elected caller aborts pending timers, publishes the stopping state, and wakes the workers; it does not wait for them and is not a barrier. Published work is delivered by the exiting workers, or inline by `stop()` when no worker is running. |
-| `join()` | Barrier sender: stops the context if needed, waits for every `run()` to return, drains the shared queues, and completes with `set_value()`. |
+| `run()` | Runs the loop on the calling thread. Empty on a normal run, including one that ends because of a stop; `operation_canceled` when entry is rejected after a stop request (published work is drained first); otherwise the backend entry error. |
+| `request_stop()` | Phase-1 stop request: records the stop and broadcasts the wake channel. Takes no lock, aborts no timer, publishes no stopping state, drains nothing, and waits for nothing. Idempotent and the only context operation valid in an async signal handler. |
+| `stop()` | Phase-1 request plus, when no worker is running, synchronous Phase 2 and an inline shared-queue drain. With workers it returns immediately and is not a barrier. Not async-signal-safe. |
+| `join()` | Barrier sender: requests stop, drives Phase 2 itself, waits for every `run()` to return, drains the shared queues, and completes with `set_value()`. |
 | `is_in_context()` | Whether the calling thread is running this context. |
-| `is_stopped()` | Whether `stop()` has been requested. |
+| `is_stopped()` | True immediately after `request_stop()` or `stop()`, or once the Phase-2 transition has begun. |
 | `get_post_scheduler()` / `get_dispatch_scheduler()` / `get_defer_scheduler()` | Scheduler handles described above. |
 
-`stop()` is safe to call from a receiver callback: it returns immediately. It
-does not wait for `run()` to return and does not by itself guarantee that all
-completions have been delivered. Use `join()` (or join the `run()` thread)
-before destroying the context and whenever every completion must be observed.
+`request_stop()` is the signal-handler entry point: it is lock-free and
+limited to setting the stop request and broadcasting the wake channel. It
+does not abort timers or wait for `run()` to return. The context must
+outlive any signal handler that can call it: destruction closes the shared
+wake channel, so a handler racing the destructor is unsupported. `stop()` is
+safe to call from a receiver callback — it returns without waiting — but it
+is not async-signal-safe. Neither call by itself guarantees that all
+completions have been delivered; use `join()` (or join the `run()` thread)
+before destroying the context and whenever every completion must be
+observed.
 
-`join()` is the only barrier. Every caller waits for all workers to exit and
-for the shared queues to be drained; concurrent callers are safe and every
-operation is still delivered exactly once. Do not start a `join()` sender on a
-thread that is running this context, nor from a receiver delivered by a
-stop/join drain: such a call waits for itself and never completes.
+`join()` is the only barrier. It completes Phase 2 itself, waits for all
+workers to exit, and then drains the shared queues; concurrent callers are
+safe and every operation is still delivered exactly once. Do not start a
+`join()` sender on a thread that is running this context, nor from a receiver
+delivered by a stop/join drain: such a call waits for itself and never
+completes.
 
 ## 4. Express scheduler capability with concepts
 

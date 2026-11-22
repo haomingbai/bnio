@@ -37,6 +37,11 @@ namespace {
 }  // namespace
 
 bool io_uring_context::consume_io_tasks() noexcept {
+  // A phase-1 request observed here must drive phase 2: a receiver that keeps
+  // republishing ready I/O would otherwise never reach should_finish(), so
+  // stopping would never be published and the loop would spin forever.
+  complete_pending_stop();
+
   // Teardown guard: while stopping or closing, abort instead of preparing —
   // the ring is going away and the completion contract requires the stop
   // channel, not a submit error. Implements stop()'s queued-work rule.

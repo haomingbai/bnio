@@ -80,10 +80,11 @@ class BNIO_EXPORT kqueue_context {
   int queue_init(const kqueue_context_options& options = {}) noexcept;
 
   /**
-   * Releases the native queue and pending storage. An unclean teardown
-   * aborts inflight and queued I/O and runs every completion synchronously
-   * on the calling thread; a finished context leaves sibling shared queues
-   * untouched.
+   * Releases the native queue and pending storage. An elected but
+   * unpublished shared stop is completed first, so its aborted timer waits
+   * are staged for the teardown drain. An unclean teardown aborts inflight
+   * and queued I/O and runs every completion synchronously on the calling
+   * thread; a finished context leaves sibling shared queues untouched.
    */
   void queue_exit() noexcept;
 
@@ -357,12 +358,24 @@ class BNIO_EXPORT kqueue_context {
       async_io::time_point& deadline, timespec& timeout,
       const timespec*& timeout_pointer) noexcept;
 
-  /** Returns whether the shared state has requested closing. */
+  /**
+   * Completes a shared stop request whose phase 2 has not run yet: invokes
+   * io_context's thunk (abort timer waits, publish stopping, broadcast).
+   * Idempotent, and a no-op without shared state or a pending request.
+   */
+  void complete_pending_stop() noexcept;
+  /**
+   * Returns whether the shared state has published the terminal stopping
+   * phase. The aborting phase is not terminal.
+   */
   [[nodiscard]] bool closing_requested() const noexcept;
-  /** Returns whether stop() has been called on this context. */
+  /** Returns whether stop() has been called on this native context. */
   [[nodiscard]] bool stop_requested() const noexcept;
-  /** Returns whether the context should leave the running state. */
-  [[nodiscard]] bool should_finish() const noexcept;
+  /**
+   * Completes any pending shared stop, then reports whether the context
+   * should leave the running state.
+   */
+  [[nodiscard]] bool should_finish() noexcept;
   /**
    * Drains ready events, CPU tasks, timers, and inflight I/O, then marks the
    * context finished; every published operation reaches a terminal receiver

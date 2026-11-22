@@ -22,12 +22,13 @@
  *   - producers publish a bounded flood of async_poll operations on a
  *     never-ready pipe read end plus posted operations, occasionally
  *     writing the shared wake channel unconditionally (mirroring the
- *     wake that io_context::begin_stop() performs, which is not gated on
- *     is_waiting());
+ *     broadcast that request_stop()/complete_stop() perform, which is not
+ *     gated on is_waiting());
  *   - the flood keeps the 4-entry SQ full for extended periods, so
  *     eventfd poll CQEs get collected while re-arm attempts must fail;
- *   - then an io_context-style stop runs: life_state = 1 plus repeated
- *     unconditional wake-channel writes while the worker exits.
+ *   - then an io_context-style stop runs: the shared lifecycle reaches the
+ *     stopping state plus repeated unconditional wake-channel writes while
+ *     the worker exits.
  *
  * Failure detectors:
  *   - the worker fails to exit within the bounded join (worker hang), or
@@ -231,10 +232,13 @@ round_outcome run_stop_round(const io_uring_context_options& options,
     producer.join();
   }
 
-  // io_context::stop() semantics: publish the closing flag, then the test
-  // keeps writing the shared wake channel until the worker exits (stop()
-  // itself wakes once; join() is the barrier that waits).
-  owner->global_tasks.life_state.store(1, std::memory_order_release);
+  // io_context::stop() semantics: phase 2 publishes the stopping state,
+  // then the test keeps writing the shared wake channel until the worker
+  // exits (request_stop()/complete_stop() broadcast unconditionally;
+  // join() is the barrier that waits).
+  owner->global_tasks.life_state.store(
+      static_cast<int>(bnio::async_io::linux_native::stop_transition::stopping),
+      std::memory_order_release);
   (void)owner->context.stop();
 
   const auto deadline = std::chrono::steady_clock::now() + kWorkerJoinBound;

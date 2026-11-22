@@ -322,14 +322,20 @@ class BNIO_EXPORT io_uring_context {
   [[nodiscard]] run_phase prepare_wait_timeout(
       __kernel_timespec& timeout, __kernel_timespec*& timeout_pointer) noexcept;
 
-  /** Returns whether the shared state has requested closing. */
+  /** Returns whether the shared state has published the terminal stopping
+   *  phase. The transient aborting phase is not a terminal state. */
   [[nodiscard]] bool closing_requested() const noexcept;
+
+  /** Completes a pending phase-2 stop transition through the shared thunk:
+   *  abort timers, publish stopping, broadcast. Idempotent; no-op unless a
+   *  stop was requested and stopping is not yet published. */
+  void complete_pending_stop() noexcept;
 
   /** Returns whether stop() has been called on this context. */
   [[nodiscard]] bool stop_requested() const noexcept;
 
   /** Returns whether the context should leave the running state. */
-  [[nodiscard]] bool should_finish() const noexcept;
+  [[nodiscard]] bool should_finish() noexcept;
 
   /** Drains work and marks the context finished.
    *

@@ -1,11 +1,13 @@
 // TCP echo server: sender/receiver structured concurrency; each session keeps
-// its operations alive in a registry. main() runs the context; SIGINT stops it.
+// its operations alive in a registry. main() runs the context; SIGINT/SIGTERM
+// request an immediate stop, so active sessions end as canceled and the
+// acceptor is closed after run() returns.
 
 #include <bnio/bnio.h>
 
 #include <array>
-#include <atomic>
 #include <bexec/bexec.hpp>
+#include <cerrno>
 #include <csignal>
 #include <cstdint>
 #include <iostream>
@@ -46,14 +48,13 @@ class op_registry {
   std::vector<std::unique_ptr<op_base>> ops_;
 };
 
-class echo_server;
 class echo_session;
 
 // echo_session
 class echo_session : public std::enable_shared_from_this<echo_session> {
  public:
-  echo_session(bnio::io_context& c, bnio::tcp_socket so,
-               std::shared_ptr<echo_server> s);
+  echo_session(bnio::io_context& c, bnio::tcp_socket so)
+      : ctx_(c), so_(std::move(so)) {}
   void start();
 
  private:
@@ -63,7 +64,6 @@ class echo_session : public std::enable_shared_from_this<echo_session> {
 
   bnio::io_context& ctx_;
   bnio::tcp_socket so_;
-  std::weak_ptr<echo_server> srv_;
   op_registry reg_;
   std::array<char, k_buf> buf_{};
   std::size_t nw_ = 0;
@@ -76,41 +76,27 @@ class echo_server : public std::enable_shared_from_this<echo_server> {
       : ctx_(c), acp_(std::move(a)) {}
 
   void start();
-  void shutdown() {
-    if (stopping_.exchange(true)) return;
-    (void)acp_.close();
-    if (n_ == 0) stop_once();
-  }
-  void on_begin() noexcept { ++n_; }
-  void on_end() noexcept {
-    if (--n_ == 0 && stopping_) stop_once();
-  }
+  // The listener outlives the loop: close it explicitly once run() returns.
+  void close_acceptor() noexcept { (void)acp_.close(); }
 
  private:
   void do_accept();
-  // ctx_.stop() is issued exactly once, either by shutdown() when no
-  // sessions are pending or by the last draining session's on_end().
-  void stop_once() {
-    if (!stopped_.exchange(true)) ctx_.stop();
-  }
+
   bnio::io_context& ctx_;
   bnio::tcp_acceptor acp_;
   op_registry reg_;
-  unsigned n_ = 0;
-  std::atomic<bool> stopping_{false};
-  std::atomic<bool> stopped_{false};
 };
 
-std::weak_ptr<echo_server> g_srv{};
-void on_signal(int) {
-  if (auto s = g_srv.lock()) s->shutdown();
+// A handler may touch only async-signal-safe state: an already-published
+// pointer and the context's lock-free stop request.
+bnio::io_context* g_ctx = nullptr;
+void on_signal(int) noexcept {
+  const int saved = errno;
+  if (g_ctx != nullptr) g_ctx->request_stop();
+  errno = saved;
 }
 
 // --- echo_session impl ---
-
-echo_session::echo_session(bnio::io_context& c, bnio::tcp_socket so,
-                           std::shared_ptr<echo_server> s)
-    : ctx_(c), so_(std::move(so)), srv_(std::move(s)) {}
 
 void echo_session::start() { do_read(); }
 
@@ -149,23 +135,21 @@ void echo_session::do_write() {
       R{shared_from_this()});
 }
 
-void echo_session::done() {
-  (void)so_.close();
-  if (auto s = srv_.lock()) s->on_end();
-}
+void echo_session::done() { (void)so_.close(); }
 
 // --- echo_server impl ---
 
 void echo_server::start() { do_accept(); }
 
 void echo_server::do_accept() {
-  if (stopping_) return;
+  if (ctx_.is_stopped()) return;
   struct R {
     std::shared_ptr<echo_server> s;
     void set_value(std::error_code ec, bnio::tcp_socket so) noexcept {
-      if (ec) return;
-      auto se = std::make_shared<echo_session>(s->ctx_, std::move(so), s);
-      s->on_begin();
+      // A connection that raced the stop carries no session; its socket closes
+      // when the receiver drops it.
+      if (ec || s->ctx_.is_stopped()) return;
+      auto se = std::make_shared<echo_session>(s->ctx_, std::move(so));
       se->start();
       s->do_accept();
     }
@@ -201,12 +185,19 @@ int main(int argc, char** argv) {
 
   std::cerr << "listening on 0.0.0.0:" << port << " (ctrl-c to stop)\n";
   auto srv = std::make_shared<echo_server>(ctx, std::move(acp));
-  g_srv = srv;
+  // Publish the context before the handlers can fire.
+  g_ctx = &ctx;
   std::signal(SIGINT, on_signal);
   std::signal(SIGTERM, on_signal);
 
   srv->start();
-  ctx.run();
+  (void)ctx.run();
+  // The worker is gone: unregister the context and restore default handlers
+  // before touching anything else.
+  g_ctx = nullptr;
+  std::signal(SIGINT, SIG_DFL);
+  std::signal(SIGTERM, SIG_DFL);
+  srv->close_acceptor();
   std::cerr << "shutdown complete.\n";
   return 0;
 }

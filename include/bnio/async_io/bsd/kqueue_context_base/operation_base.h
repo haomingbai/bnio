@@ -7,6 +7,7 @@
 #ifndef BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPERATION_BASE_H_
 #define BNIO_ASYNC_IO_BSD_KQUEUE_CONTEXT_BASE_OPERATION_BASE_H_
 
+#include <bnio/async_io/stop_transition.h>
 #include <bnio/async_io/time.h>
 #include <bnio/base/wake_channel.h>
 #include <bnio/export.h>
@@ -128,6 +129,9 @@ struct BNIO_EXPORT kqueue_worker_state_list {
   kqueue_local_task_queue_state* cursor = nullptr;
 };
 
+/** Shared stop-transition state (see async_io/stop_transition.h). */
+using stop_transition = bnio::async_io::stop_transition;
+
 /** Shared MPSC CPU/I/O queues and worker-group lifecycle state. */
 struct BNIO_EXPORT kqueue_task_queue_state {
   /** Signature of the shared timeout heap's non-blocking fetch entry:
@@ -175,7 +179,21 @@ struct BNIO_EXPORT kqueue_task_queue_state {
    *  own lock. */
   kqueue_worker_state_list workers;
 
-  /** Lifecycle flag: 0 = running, 1 = stopping. */
+  /** Stop request: 0 = none, 1 = requested. Set without any lock by
+   *  io_context::request_stop(); the Phase-2 transition is elected on
+   *  life_state. */
+  std::atomic<int> stop_requested{0};
+
+  /** Phase-2 transition entry: aborts pending timers, publishes stopping,
+   *  and re-broadcasts. Idempotent; installed by io_context with its owner. */
+  using complete_stop_fn = void (*)(void*) noexcept;
+  complete_stop_fn complete_stop = nullptr;
+  void* complete_stop_owner = nullptr;
+
+  /** Context lifecycle state: a stop_transition value. none (0) accepts new
+   *  work, aborting (1) while the phase-2 transition aborts timer waits,
+   *  stopping (2) once the terminal state is published. Workers may finish
+   *  only at stopping. */
   std::atomic<int> life_state{0};
   /** Opaque pointer to the shared lazy timer heap; created and owned by
    *  io_context. */
@@ -189,10 +207,10 @@ struct BNIO_EXPORT kqueue_task_queue_state {
    *  Normal wakeups target a single worker's channel. */
   bnio::base::wake_channel wake_channel_;
 
-  /** Submit-path lock shared by publish_cpu() and begin_stop(): the "check
-   *  state + enqueue + wake" section is atomic with the stop transition, so
-   *  accepted work is drained and stopped work never enqueues.
-   */
+  /** Serializes the Phase-2 stopping publication against publish_*: the
+   *  "check state + enqueue + wake" section is atomic with the transition, so
+   *  accepted work is drained and stopped work never enqueues. request_stop()
+   *  does not take it. */
   std::mutex submit_lock;
 };
 

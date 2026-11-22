@@ -258,9 +258,29 @@ bool kqueue_context::compute_io_wait_timeout(
   return false;
 }
 
+void kqueue_context::complete_pending_stop() noexcept {
+  if (global_state_ == nullptr) {
+    return;
+  }
+  if (global_state_->stop_requested.load(std::memory_order_acquire) == 0) {
+    return;
+  }
+  if (global_state_->life_state.load(std::memory_order_acquire) ==
+      static_cast<int>(stop_transition::stopping)) {
+    return;
+  }
+  // The thunk is installed by io_context and idempotently publishes
+  // stopping, so an observer that ran phase 2 already is harmless.
+  if (global_state_->complete_stop != nullptr) {
+    global_state_->complete_stop(global_state_->complete_stop_owner);
+  }
+}
+
 bool kqueue_context::closing_requested() const noexcept {
+  // Only the published terminal phase ends the loop; aborting still runs.
   return global_state_ != nullptr &&
-         global_state_->life_state.load(std::memory_order_acquire) != 0;
+         global_state_->life_state.load(std::memory_order_acquire) ==
+             static_cast<int>(stop_transition::stopping);
 }
 
 bool kqueue_context::stop_requested() const noexcept {
@@ -268,7 +288,10 @@ bool kqueue_context::stop_requested() const noexcept {
          context_state::running;
 }
 
-bool kqueue_context::should_finish() const noexcept {
+bool kqueue_context::should_finish() noexcept {
+  // A worker that observes phase 1 completes phase 2 itself, so a stop
+  // never strands the timer waits it must abort.
+  complete_pending_stop();
   // Closing forces finish regardless of inflight. A normal stop() waits for
   // every inflight I/O to produce its event, so finish() cannot race them.
   if (closing_requested()) {
@@ -290,6 +313,10 @@ void kqueue_context::drain_local_cpu_tasks() noexcept {
 }
 
 void kqueue_context::finish() noexcept {
+  // Complete a pending shared stop first, so the timer waits it aborts are
+  // fetched by the drain below instead of being stranded.
+  complete_pending_stop();
+
   // Drain ready kevents, CPU tasks, and expired timers.
   for (;;) {
     (void)collect_ready_events(false);

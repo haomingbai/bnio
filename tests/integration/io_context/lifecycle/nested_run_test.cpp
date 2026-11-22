@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -69,6 +70,9 @@ struct nested_run_recv {
     ops->push_back(std::move(inner_op));
 
     // 2. Run the inner context's event loop on this (outer worker) thread.
+    //    It entered normally and is stopped by the posted task, so the
+    //    final contract requires an empty error_code (operation_canceled is
+    //    reserved for a run() rejected at entry).
     std::error_code ec = inner_ctx->run();
     inner_run_returned->store(!static_cast<bool>(ec),
                               std::memory_order_release);
@@ -88,6 +92,48 @@ struct nested_run_recv {
     if (inner_run_returned)
       inner_run_returned->store(false, std::memory_order_release);
   }
+};
+
+// Terminal bookkeeping for a second context's operation.
+struct foreign_context_op_recv {
+  std::atomic<int>* terminal = nullptr;
+  std::atomic<int>* canceled = nullptr;
+
+  void set_value(std::error_code ec) noexcept {
+    terminal->fetch_add(1, std::memory_order_relaxed);
+    if (ec == std::make_error_code(std::errc::operation_canceled)) {
+      canceled->fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
+  void set_stopped() noexcept {
+    terminal->fetch_add(1, std::memory_order_relaxed);
+  }
+};
+
+// Outer-worker callback that publishes on a second, idle context. The
+// publishing worker belongs to a different context, so the operation must
+// not be pinned to that worker's local queue: it has to land on the target's
+// shared queue and be drained by the target's own stop().
+struct foreign_context_publish_recv {
+  bnio::io_context* target = nullptr;
+  std::atomic<int>* terminal = nullptr;
+  std::atomic<int>* canceled = nullptr;
+  std::atomic<bool>* done = nullptr;
+
+  void set_value(std::error_code) noexcept {
+    auto scheduler = target->get_post_scheduler();
+    auto sender = scheduler.schedule();
+    auto operation = bexec::connect(
+        sender, foreign_context_op_recv{terminal, canceled});
+    bexec::start(operation);
+
+    // No worker ever ran the target; stop() drives Phase 2 and drains inline.
+    (void)target->stop();
+    done->store(true, std::memory_order_release);
+  }
+
+  void set_stopped() noexcept { set_value(std::error_code{}); }
 };
 
 bool wait_for(const std::atomic<bool>& flag) {
@@ -137,6 +183,41 @@ TEST(LifecycleTest, nested_run) {
   EXPECT_TRUE(inner_stop_task_done.load(std::memory_order_acquire));
   EXPECT_TRUE(inner_run_returned.load(std::memory_order_acquire));
   EXPECT_TRUE(outer_resumed.load(std::memory_order_acquire));
+}
+
+// Publishing to an idle context from another context's worker takes the
+// target's deferred/shared path. If the foreign worker's local queue were
+// used instead, the target's stop() would never drain the operation and the
+// receiver would never complete.
+TEST(LifecycleTest, publish_from_foreign_worker_uses_target_shared_queue) {
+  auto outer = std::make_unique<bnio::io_context>();
+  auto inner = std::make_unique<bnio::io_context>();
+  if (!outer->is_open() || !inner->is_open()) {
+    GTEST_SKIP() << "native I/O context is unavailable";
+  }
+
+  std::atomic<int> terminal{0};
+  std::atomic<int> canceled{0};
+  std::atomic<bool> done{false};
+
+  auto sender = outer->get_post_scheduler().schedule();
+  using Op = decltype(bexec::connect(
+      sender, foreign_context_publish_recv{nullptr, nullptr, nullptr,
+                                           nullptr}));
+  auto operation = std::make_unique<op_holder<Op>>(
+      sender, foreign_context_publish_recv{inner.get(), &terminal, &canceled,
+                                           &done});
+
+  std::thread worker([&outer]() { (void)outer->run(); });
+  bexec::start(operation->op);
+
+  ASSERT_TRUE(wait_for(done));
+  outer->stop();
+  worker.join();
+
+  EXPECT_EQ(terminal.load(std::memory_order_relaxed), 1);
+  EXPECT_EQ(canceled.load(std::memory_order_relaxed), 1);
+  EXPECT_TRUE(inner->is_stopped());
 }
 
 }  // namespace

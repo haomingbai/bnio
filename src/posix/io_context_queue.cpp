@@ -3,12 +3,19 @@
  * @brief io_context I/O and CPU work queue operations and worker wakeup.
  */
 
+#include <bnio/async_io/stop_transition.h>
 #include <bnio/io_context.h>
 
 #include <atomic>
 #include <mutex>
 
 namespace bnio {
+
+namespace {
+/** Phase-2 has not begun; a Phase-1 request_stop() alone does not close. */
+constexpr int k_no_stop_transition =
+    static_cast<int>(async_io::stop_transition::none);
+}  // namespace
 
 detail::native_context* io_context::running_worker_native() const noexcept {
   // Nested run(): a worker native from another context must not receive the
@@ -33,9 +40,11 @@ bool io_context::publish_io(operation_base& operation) noexcept {
 
 bool io_context::publish_io_deferred(operation_base& operation) noexcept {
   // defer policy: never use the worker-local path, so I/O is not pinned to the
-  // publisher. Under submit_lock: check state, enqueue, maybe wake.
+  // publisher. Under submit_lock: check state, enqueue, maybe wake. Only a
+  // Phase-2 aborting/stopping state rejects; request_stop() alone accepts.
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
-  if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
+  if (global_state_.life_state.load(std::memory_order_acquire) !=
+      k_no_stop_transition) {
     return false;
   }
   global_state_.push_io(operation);
@@ -57,10 +66,11 @@ bool io_context::publish_cpu(
 
 bool io_context::publish_cpu_deferred(
     detail::native_operation_base& operation) noexcept {
-  // defer policy: see publish_io_deferred(). Under submit_lock: if stopping,
-  // do not enqueue and return false so the caller completes inline.
+  // defer policy: see publish_io_deferred(). Under submit_lock: if Phase 2
+  // has begun, do not enqueue and return false so the caller completes inline.
   std::lock_guard<std::mutex> guard(global_state_.submit_lock);
-  if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
+  if (global_state_.life_state.load(std::memory_order_acquire) !=
+      k_no_stop_transition) {
     return false;
   }
   global_state_.push_cpu(operation);
@@ -69,9 +79,10 @@ bool io_context::publish_cpu_deferred(
 }
 
 void io_context::wake_locked() noexcept {
-  // Caller holds submit_lock. Skip after the terminal state is published;
-  // the destructor closes the channel under the same lock.
-  if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
+  // Caller holds submit_lock. Skip after Phase 2 is published; the destructor
+  // closes the channel under the same lock.
+  if (global_state_.life_state.load(std::memory_order_acquire) !=
+      k_no_stop_transition) {
     return;
   }
   (void)global_state_.wake_channel_.wake();
@@ -80,7 +91,8 @@ void io_context::wake_locked() noexcept {
 void io_context::wake_one_sleeping_locked() noexcept {
   // Caller holds submit_lock. Prefer a directed wake of one sleeping worker
   // over the shared broadcast; fall back when nobody is suspended.
-  if (global_state_.life_state.load(std::memory_order_acquire) != 0) {
+  if (global_state_.life_state.load(std::memory_order_acquire) !=
+      k_no_stop_transition) {
     return;
   }
 

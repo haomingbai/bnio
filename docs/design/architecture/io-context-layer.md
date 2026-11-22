@@ -21,7 +21,7 @@ cohesive `detail` state objects rather than defining all internal data inline:
 | State / Detail Type | Header | Responsibility |
 |---------------------|--------|----------------|
 | `detail::native_context` and related aliases | `detail/posix/io_context/native_context.h` | Select the native context, options, operation bases, and shared task state. |
-| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake/running worker counts, suspend worker-state list, submit lock, and worker-group stopping state (`life_state`). |
+| platform task queue state | `async_io/{linux,bsd}/.../operation_base.h` | Shared CPU/I/O queues, passive-timer callback, awake/running worker counts, suspend worker-state list, submit lock, and the two-phase stop state (`stop_requested`, tri-state `life_state`, Phase-2 completion hook). |
 | `detail::timer_state_data` | `detail/posix/io_context/timer_types.h` | Intrusive timer heap/list and the non-blocking passive-timer callback state. |
 
 The aggregate `detail/posix/io_context/native_io.h` is included after the complete
@@ -64,14 +64,15 @@ routes that publication to the shared queue instead of stranding it.
 `publish_io()` and `publish_cpu()` are each split into the local fast path and
 a deferred variant, `publish_io_deferred()` / `publish_cpu_deferred()`, which
 is the shared path verbatim: a `submit_lock` critical section that re-checks
-`life_state`, enqueues on the shared queue, and calls
+`life_state == none`, enqueues on the shared queue, and calls
 `wake_one_sleeping_locked()`. The defer scheduler kind routes every submission
 it initiates — `schedule()` and all I/O operations — through these variants and
 never takes the worker-local fast path, even when `start()` runs on a worker of
 this context, so accept re-arms and similar work rotate across all workers
 instead of staying pinned to the publishing worker's connection affinity. A
-`life_state` rejection (the context is already stopping) returns `false` and
-the caller completes the operation inline. Eager immediate completion is
+Phase-2 `life_state` (`aborting` or `stopping`) returns `false` and the caller
+completes the operation inline; a Phase-1 `request_stop()` alone still
+accepts. Eager immediate completion is
 unchanged: a deferred operation still probes with a direct syscall at
 `start()`, and its completion is published through `publish_cpu_deferred()`.
 
@@ -137,7 +138,9 @@ and to the shared CPU queue otherwise. The deferred variants
 queue and carry the defer scheduler kind's traffic. Wakeup targets one sleeping
 worker
 through its per-worker wake channel (`wake_one_sleeping`), falling back to the
-shared broadcast channel when nobody is suspended. I/O uses the worker-local
+shared broadcast channel when nobody is suspended. A stop is different: Phase 1
+and the Phase-2 transition always broadcast the shared channel so every
+worker, including one parked in the kernel, can observe it. I/O uses the worker-local
 I/O queue when the caller is a worker of this context and the lower-priority
 shared I/O queue otherwise. The worker that removes an I/O batch owns all SQ
 preparation and submission for that batch, so high-level queue code does not
@@ -153,18 +156,25 @@ documented in
 The shared state is owned by `io_context`, not by any native context. Worker
 registration calls `set_global_state()` before publishing the new worker at the
 list head. `run()` uses that state for CPU work, I/O work, the passive timer
-callback, the awake-worker count, and the group `life_state` flag (0=running, 1=stopping). A standalone
-native context must also receive externally owned state before `run()`; no
-hidden shared-state fallback is allocated.
+callback, the awake-worker count, and the group's two-phase stop state
+(`stop_requested` and the tri-state `life_state`: none 0, aborting 1,
+stopping 2). A standalone native context must also receive externally owned
+state before `run()`; no hidden shared-state fallback is allocated.
 
-`io_context::stop()` is a non-blocking request. The elected caller aborts
-pending timer waits, atomically transitions the shared `life_state` from 0
-(running) to 1 (stopping) under the submit lock, and wakes every native
-worker via the shared wake channel, then returns without waiting. `join()`
-is the barrier that waits for every `run()` to return and drains the shared
-queues. Worker registration and the `run()` path both check
-`life_state` before and after publishing a new slot, so a worker that races
-with the stop transition cannot enter a new idle run loop.
+`io_context::request_stop()` is Phase 1: it stores the request and broadcasts
+the shared wake channel without taking a lock. `io_context::stop()` adds the
+no-worker fallback: when `running_workers == 0` it completes Phase 2 and
+drains inline. Phase 2 (`complete_stop()`) is elected by a CAS on
+`life_state` none → aborting → stopping; the winner aborts pending timer
+waits, publishes `stopping` under the submit lock, and re-broadcasts, while a
+loser waits until `stopping` is visible. Workers drive the same transition
+from `should_finish()`, `finish()`, `queue_exit()`, and `consume_io_tasks()`.
+`join()` is the barrier that drives Phase 2 itself, waits for every `run()`
+to return, and drains the shared queues. `run()` entry requires
+`stop_requested == 0` and `life_state == none`, so a worker that races the
+stop request cannot enter a new idle run loop; it drains and returns
+`operation_canceled`. A worker that entered the loop returns an empty
+error_code when the stop ends it.
 
 Before a worker blocks, it publishes sleeping in two stages: first its local
 waiting flag, then a decrement of the shared awake-worker count. It then

@@ -46,8 +46,9 @@ Each `steady_timer` owns one `detail::timer_slot`.
 | `active` | `true` only while the slot belongs to the active time heap. |
 
 `timer_state_data::ready` is a separate intrusive list of waits that have
-already selected value, canceled, or stopped completion. It is drained only
-by a native worker's passive timer check.
+already selected value, canceled, or stopped completion. It is drained by a
+native worker's passive timer check, or by a stop drain after Phase 2 has
+staged the context-stop aborts.
 
 The topology metadata is three pointers and one Boolean:
 
@@ -215,30 +216,38 @@ pending waits on the timer-ready list with canceled completion
 submit a native timer operation merely to recompute a deadline, because
 passive deadline selection happens naturally on the next worker loop check.
 
-When `io_context::stop()` is called, `begin_stop()` first calls
+A Phase-1 `io_context::request_stop()` does **not** abort timer waits: it
+only records the request and broadcasts the wake channel. Timer aborts
+belong to Phase 2. The `complete_stop()` CAS winner first calls
 `abort_pending_timer_waits()` — **before** taking `submit_lock` and
-publishing `life_state = 1`.  The abort iterates every active and
-inactive timer slot, detaches each slot's pending submitted waits, marks
-them `timer_completion_kind::canceled`, and enqueues them into
-`timers_.ready`.  Only then is the stopping state published, so every
-native worker that later observes `life_state != 0` and enters its
-`finish()` path sees a fully populated `timers_.ready` and drains those
-canceled completions via `consume_timeout_operations()` during its Phase 1
-drain loop.  Every receiver waiting on a timer receives
-`set_value(operation_canceled)` — a context-stop abort is not token
-cancellation.
+publishing `life_state = stopping` (value 2). The abort iterates every
+active and inactive timer slot, detaches each slot's pending submitted
+waits, marks them `timer_completion_kind::canceled`, and enqueues them into
+`timers_.ready`. Only then is the stopping state published, so every native
+worker that later observes `stopping` and enters its `finish()` path sees a
+fully populated `timers_.ready` and drains those canceled completions via
+`consume_timeout_operations()` during its drain loop. Every receiver
+waiting on a timer receives `set_value(operation_canceled)` — a context-stop
+abort is not token cancellation.
+
+Phase 2 is driven by `join()`, by `stop()`'s no-worker fallback, by a
+rejected `run()` entry, or by a worker through `should_finish()`,
+`finish()`, `queue_exit()`, and `consume_io_tasks()`, so a requested stop is
+converted to `stopping` even when the requester does not wait. The
+`life_state` CAS elects exactly one winner; losers wait until `stopping` is
+visible before they proceed.
 
 This ordering — abort before the stopping-state publication — is the
-happens-before guarantee: the release store of `life_state` on the stop
-thread is sequenced after `abort_pending_timer_waits()` in program order,
-and any worker's acquire load of `life_state` that observes the non-zero
-value synchronizes-with that store.  Workers that are actively spinning
+happens-before guarantee: the release store of `life_state = stopping` on
+the Phase-2 winner is sequenced after `abort_pending_timer_waits()` in
+program order, and any worker's acquire load of `life_state` that observes
+`stopping` synchronizes-with that store. Workers that are actively spinning
 (not sleeping in a syscall) are therefore guaranteed to see the aborted
-operations on `timers_.ready` before they enter their final drain,
-closing the window where a worker could observe the stopping state,
-drain the still-empty `timers_.ready`, and exit before the abort staged
-the operations — which would permanently strand them with no worker left
-to drain.
+operations on `timers_.ready` before they enter their final drain, closing
+the window where a worker could observe the stopping state, drain the
+still-empty `timers_.ready`, and exit before the abort staged the
+operations — which would permanently strand them with no worker left to
+drain.
 
 ## Completion Kinds and Channels
 
@@ -249,7 +258,7 @@ call (`include/bnio/detail/posix/io_context/timer_wait.h:40`):
 | Kind | Staged by | Delivered as |
 |---|---|---|
 | `stopped` | `start()` token pre-check: the receiver's stop token is already cancelled (`include/bnio/detail/posix/io_context/timer_wait.h:24`) | `set_stopped()` |
-| `canceled` | `cancel()`, expiry replacement, destruction unregistration, and the context-stop abort `abort_pending_timer_waits()` | `set_value(operation_canceled)` |
+| `canceled` | `cancel()`, expiry replacement, destruction unregistration, and the Phase-2 context-stop abort `abort_pending_timer_waits()` | `set_value(operation_canceled)` |
 | `value` | expiry processing | `set_value({})` |
 
 On an unregistered timer (`context == nullptr`) no completion is staged at
@@ -267,11 +276,11 @@ in [`lifecycle.md`](lifecycle.md).
 Timer aborts do not re-arbitrate at `execute()` time — unlike I/O
 operations, whose `execute()` arbitrates between the token and a
 context-stop abort. The kind is fixed when the completion is staged: under
-the timer mutex for object-API cancellation, and on the elected stop caller
-for `abort_pending_timer_waits()`, which runs before `life_state` is
-published. No staging site can race a later channel decision, so the
-delivery channel is decided exactly once, at the observation point where
-the abort happened.
+the timer mutex for object-API cancellation, and on the Phase-2 CAS winner
+for `abort_pending_timer_waits()`, which runs before
+`stop_transition::stopping` is published. No staging site can race a later
+channel decision, so the delivery channel is decided exactly once, at the
+observation point where the abort happened.
 
 ## Unregistered Slots (`context == nullptr`)
 
@@ -284,14 +293,16 @@ caller to observe it atomically:
   has `context == nullptr`, and the public type's contract (external
   serialization of same-timer mutations only) promises nothing that would
   make post-move object-API calls invalid.
-- **Context stop.** `begin_stop()` calls `abort_pending_timer_waits()`,
-  which clears every slot's `context` pointer. The abort runs before the
-  stopping state is published, and `stopped` is published only by the
-  `join()` barrier (`stop()` itself does not wait). The timer header's
-  concurrency contract ("concurrent operations that mutate the same timer
-  must be externally serialized") does not require synchronization with
-  `stop()`. A timer surviving across `io_context::stop()` is therefore an
-  ordinary, non-UB state.
+- **Context stop.** Phase 2 (`complete_stop()`) calls
+  `abort_pending_timer_waits()`, which clears every slot's `context`
+  pointer. The abort runs before `stopping` is published, and Phase 2 is
+  driven by whichever of `join()`, `stop()`'s no-worker fallback, a
+  rejected `run()` entry, or a worker gets there first; `request_stop()`
+  alone never aborts timers. The timer header's concurrency contract
+  ("concurrent operations that mutate the same timer must be externally
+  serialized") does not require synchronization with `stop()`. A timer
+  surviving across the transition is therefore an ordinary, non-UB
+  state.
 
 Because the state is reachable without a defect, the guards live inside
 the object APIs rather than in a caller obligation to re-register:
@@ -307,11 +318,10 @@ the object APIs rather than in a caller obligation to re-register:
 `async_wait()` on an unregistered slot delivers **inline** from
 `start()`, never through `timers_.ready`:
 
-- The ready list is drained exclusively by workers of the owning context
-  (passive timer fetch) — or, since the stop-drain change, by the stopping
-  thread. A wait whose `timer_context_` is null has no owner that will
-  ever drain on its behalf; staging a completion there would strand the
-  operation forever.
+- The ready list is drained by workers of the owning context (passive
+  timer fetch) or by a stop-drain thread after Phase 2. A wait whose
+  `timer_context_` is null has no owner that will ever drain on its
+  behalf; staging a completion there would strand the operation forever.
 - The delivery channel follows the same arbitration as the staged path:
   a receiver stop token already cancelled at `start()` wins with
   `set_stopped()`; otherwise the wait reports the unregistered state as
@@ -326,7 +336,7 @@ the object APIs rather than in a caller obligation to re-register:
 - `active == false` and `context != nullptr` means the slot is reachable from
   `timer_state_data::inactive`.
 - A `context == nullptr` slot (unregistered — moved-from, or waits aborted by
-  `io_context::stop()`) is a legal state. Its object APIs are null-safe
+  the context-stop Phase 2) is a legal state. Its object APIs are null-safe
   no-ops: `cancel()` and `expires_at()` return `0` (no pending waits can be
   canceled; `expires_at()` still writes the saved `expiry`), `expiry()`
   returns the saved `expiry`, `has_context()` reports `false`, and
