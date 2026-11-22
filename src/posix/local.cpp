@@ -34,21 +34,20 @@ namespace {
 }
 
 #if !defined(SOCK_CLOEXEC) || !defined(SOCK_NONBLOCK)
-// Fallback for platforms without the combined socket() flags: applies
-// close-on-exec and non-blocking mode by hand, closing on failure.
+// Fallback for platforms lacking the combined socket() flags. Callers create
+// the socket without flags, so both close-on-exec and non-blocking mode are
+// applied unconditionally; on failure the descriptor is closed and errno
+// restored.
 [[nodiscard]] int set_nonblocking_cloexec(int descriptor) noexcept {
   if (descriptor < 0) {
     return -1;
   }
-#if defined(SOCK_CLOEXEC)
   if (::fcntl(descriptor, F_SETFD, FD_CLOEXEC) != 0) {
     const int error = errno;
     (void)::close(descriptor);
     errno = error;
     return -1;
   }
-#endif
-#if defined(SOCK_NONBLOCK)
   if (::fcntl(descriptor, F_SETFL,
               ::fcntl(descriptor, F_GETFL, 0) | O_NONBLOCK) != 0) {
     const int error = errno;
@@ -56,7 +55,6 @@ namespace {
     errno = error;
     return -1;
   }
-#endif
   return descriptor;
 }
 #endif
