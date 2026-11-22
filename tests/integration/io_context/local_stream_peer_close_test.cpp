@@ -24,6 +24,7 @@
 // loops); no sleeps synchronize the scenario.
 
 #include <bnio/async_io/local/socket_view.h>
+#include <fcntl.h>
 #include <gtest/gtest.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -86,6 +87,18 @@ struct write_contract_receiver {
   return std::chrono::steady_clock::now() + seconds;
 }
 
+// Sets both ends non-blocking: the kqueue backend assumes driven descriptors
+// are already non-blocking, and the non-owning views do not configure the fd.
+[[nodiscard]] bool set_nonblocking_pair(int (&fds)[2]) noexcept {
+  for (int fd : fds) {
+    const int flags = ::fcntl(fd, F_GETFL, 0);
+    if (flags < 0 || ::fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Waits until the record is published or the deadline passes.
 [[nodiscard]] bool wait_done(const completion_record& record,
                              std::chrono::steady_clock::time_point deadline) {
@@ -138,6 +151,7 @@ void run_peer_close_midway(bool eager) {
 
   int fds[2] = {-1, -1};
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds), 0);
+  ASSERT_TRUE(set_nonblocking_pair(fds));
   const bnio::async_io::local::stream_socket_view writer(fds[0]);
 
   // 1 MiB payload far exceeds the AF_UNIX send buffer, so the write-all is
@@ -225,6 +239,7 @@ TEST(LocalStreamPeerCloseTest,
 
   int fds[2] = {-1, -1};
   ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds), 0);
+  ASSERT_TRUE(set_nonblocking_pair(fds));
   const bnio::async_io::local::stream_socket_view writer(fds[0]);
 
   constexpr std::size_t kPayloadSize = 1U << 20;
