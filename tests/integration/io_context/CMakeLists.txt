@@ -127,6 +127,10 @@ bnio_add_integration_io_context_test(
   lifecycle/stop_nonblocking_test.cpp
   PROPERTIES TIMEOUT 15)
 bnio_add_integration_io_context_test(
+  lifecycle_stop_wakes_all_workers
+  lifecycle/stop_wakes_all_workers_test.cpp
+  PROPERTIES TIMEOUT 60)
+bnio_add_integration_io_context_test(
   lifecycle_nested_run
   lifecycle/nested_run_test.cpp
   PROPERTIES TIMEOUT 10)

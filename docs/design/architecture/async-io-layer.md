@@ -189,10 +189,14 @@ This supplies low-load progress while busy workloads form batches naturally.
 
 Wake channels come from two places: a per-worker channel opened by
 `queue_init()` (`local_state()->wake_channel_`) for directed wakeups, and the
-shared broadcast channel owned by the task queue state
-(`io_uring_task_queue_state::wake_channel_`), used for stop and native
-cross-thread publication. The `io_uring_context_options::event_fd` field is
-retained for API compatibility but is not consulted by the implementation.
+shared channel owned by the task queue state
+(`io_uring_task_queue_state::wake_channel_`). `wake_all_sleeping()` is the
+single eventfd broadcast: one write fans out to every armed
+`IORING_POLL_ADD`, so each sleeping worker receives its own completion and no
+per-worker loop is needed. The shared channel also carries native
+cross-thread publication (`notify_one_waiter()`). The
+`io_uring_context_options::event_fd` field is retained for API compatibility
+but is not consulted by the implementation.
 
 #### Internal submission contract
 
@@ -354,7 +358,7 @@ struct io_uring_task_queue_state {
     std::atomic<int> life_state{0};  // stop-transition state: none 0, aborting 1, stopping 2
     void* timeout_heap = nullptr;
     try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
-    bnio::base::wake_channel wake_channel_;     // shared broadcast (stop + native notify_one_waiter)
+    bnio::base::wake_channel wake_channel_;     // wake_all_sleeping() eventfd fanout + native notify_one_waiter
     std::mutex submit_lock;                     // Phase-2 publication/publish serialization
 };
 ```
@@ -380,7 +384,7 @@ increments `awake_workers`, reopens locally, and resumes. A producer that sees
 a waiting worker writes that worker's eventfd, closing the lost-wakeup window
 without a timer. Each worker owns a **per-worker** wake channel for directed
 wakeup (one sleeping worker is enough for a single publication), plus the
-shared channel used for broadcast (stop) and as a fallback when nobody is
+shared channel used for the stop hint and as a fallback when nobody is
 suspended. CPU-task fetching (`fetch_cpu_task()` → local → shared) and
 the suspend worker-state list are shared with the kqueue backend;
 see [`worker-scheduling.md`](worker-scheduling.md).
@@ -425,9 +429,10 @@ CPU completions run before I/O publication is consumed. Immediately before a
 blocking `kevent()` call, the worker marks itself waiting, updates the shared
 awake count, and rechecks events, CPU work, I/O work, and shutdown. Producers
 that observe a waiting worker wake exactly one sleeping worker through its
-per-worker wake channel (falling back to the shared broadcast channel); no
-active submission timer is involved. Worker sleep/wake and
-the suspend worker-state list are shared with the io_uring backend — see
+per-worker wake channel (falling back to the shared wake channel, a
+best-effort hint on kqueue); no active submission timer is involved.
+Worker sleep/wake and the suspend worker-state list are shared with the
+io_uring backend — see
 [`worker-scheduling.md`](worker-scheduling.md).
 
 The reactor-specific completion path remains distinct from io_uring: after a

@@ -138,12 +138,15 @@ and to the shared CPU queue otherwise. The deferred variants
 queue and carry the defer scheduler kind's traffic. Wakeup targets one sleeping
 worker
 through its per-worker wake channel (`wake_one_sleeping`), falling back to the
-shared broadcast channel when nobody is suspended. A stop is different: Phase 1
-and the Phase-2 transition always broadcast the shared channel so every
-worker, including one parked in the kernel, can observe it. I/O uses the worker-local
-I/O queue when the caller is a worker of this context and the lower-priority
-shared I/O queue otherwise. The worker that removes an I/O batch owns all SQ
-preparation and submission for that batch, so high-level queue code does not
+shared wake channel when nobody is suspended. A stop is different: Phase 1
+writes the shared channel as a stop hint; Phase 2 publishes stopping and calls
+the backend `wake_all_sleeping()` uniformly — io_uring writes the shared
+eventfd once (a fanout to every armed poll), while kqueue writes the shared
+hint plus each suspended worker's channel. I/O uses the
+worker-local I/O queue when the caller is a worker of this context and the
+lower-priority shared I/O queue otherwise. The worker that removes an I/O
+batch owns all SQ preparation and submission for that batch, so high-level
+queue code does not
 need native ring synchronization. Timer bookkeeping remains on the high-level
 context, but native workers consume its deadline passively
 while choosing their blocking timeout. Timer-ready completions bypass the
@@ -161,13 +164,16 @@ callback, the awake-worker count, and the group's two-phase stop state
 stopping 2). A standalone native context must also receive externally owned
 state before `run()`; no hidden shared-state fallback is allocated.
 
-`io_context::request_stop()` is Phase 1: it stores the request and broadcasts
-the shared wake channel without taking a lock. `io_context::stop()` adds the
+`io_context::request_stop()` is Phase 1: it stores the request and writes the
+shared wake channel without taking a lock. `io_context::stop()` adds the
 no-worker fallback: when `running_workers == 0` it completes Phase 2 and
 drains inline. Phase 2 (`complete_stop()`) is elected by a CAS on
 `life_state` none → aborting → stopping; the winner aborts pending timer
-waits, publishes `stopping` under the submit lock, and re-broadcasts, while a
-loser waits until `stopping` is visible. Workers drive the same transition
+waits, publishes `stopping` under the submit lock, and calls the backend
+`wake_all_sleeping()` uniformly: io_uring writes the shared eventfd once (each
+armed poll receives its own completion), kqueue writes the shared hint plus
+each suspended worker's channel. A loser waits until `stopping` is visible.
+Workers drive the same transition
 from `should_finish()`, `finish()`, `queue_exit()`, and `consume_io_tasks()`.
 `join()` is the barrier that drives Phase 2 itself, waits for every `run()`
 to return, and drains the shared queues. `run()` entry requires

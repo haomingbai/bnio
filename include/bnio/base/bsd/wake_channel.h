@@ -15,7 +15,9 @@ namespace bnio::base {
  * Cross-thread wake channel backed by pipe(2); io_context writes to the write
  * end, and each worker registers EVFILT_READ | EV_CLEAR on the read end.
  *
- * @warning One write wakes all readers (the intended behaviour during stop()).
+ * @warning One write is a hint, not a reliable broadcast: a reader that
+ *          drains the pipe can consume a wake intended for another reader.
+ *          kqueue stop therefore also writes each worker's own channel.
  */
 class BNIO_EXPORT wake_channel {
  public:

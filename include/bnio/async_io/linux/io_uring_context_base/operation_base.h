@@ -117,6 +117,10 @@ struct BNIO_EXPORT io_uring_task_queue_state {
    *  @return false if none. */
   [[nodiscard]] bool wake_one_sleeping() noexcept;
 
+  /** Wakes every sleeping worker with one shared eventfd write; each
+   *  already-armed IORING_POLL_ADD receives its own completion. */
+  void wake_all_sleeping() noexcept;
+
   /** Head of the shared MPSC CPU task queue. */
   std::atomic<io_uring_operation_base*> cpu_head{nullptr};
   /** Head of the shared MPSC I/O task queue. */
@@ -139,9 +143,12 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   std::atomic<int> stop_requested{0};
 
   /** Phase-2 transition entry: aborts pending timers, publishes stopping,
-   *  and re-broadcasts. Idempotent; installed by io_context with its owner. */
+   *  and wakes sleeping workers. Idempotent; installed by io_context with its
+   *  owner. */
   using complete_stop_fn = void (*)(void*) noexcept;
+  /** Phase-2 transition hook installed and cleared by the owning io_context. */
   complete_stop_fn complete_stop = nullptr;
+  /** Opaque owner passed to complete_stop; nulled with the hook. */
   void* complete_stop_owner = nullptr;
 
   /** Context lifecycle state: a stop_transition value. none (0) accepts new
@@ -156,9 +163,9 @@ struct BNIO_EXPORT io_uring_task_queue_state {
   /** Timer-heap fetch hook; set and cleared by io_context with the heap. */
   try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
 
-  /** Shared wake channel owned by io_context; broadcast path used by stop()
-   *  and as a fallback. Normal wakeups target one worker directly through
-   *  its per-worker channel (see wake_one_sleeping()). */
+  /** Shared wake channel owned by io_context: one write from
+   *  wake_all_sleeping() fans out to every already-armed poll. Normal wakeups
+   *  use a per-worker channel (see wake_one_sleeping()). */
   bnio::base::wake_channel wake_channel_;
 
   /** Serializes the Phase-2 stopping publication against publish_*: work
@@ -392,6 +399,10 @@ inline bool io_uring_task_queue_state::wake_one_sleeping() noexcept {
   (void)start->wake_channel_.wake();
   suspend.cursor = start->next;
   return true;
+}
+
+inline void io_uring_task_queue_state::wake_all_sleeping() noexcept {
+  (void)wake_channel_.wake();
 }
 
 }  // namespace bnio::async_io::linux_native

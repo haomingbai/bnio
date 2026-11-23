@@ -164,6 +164,10 @@ struct BNIO_EXPORT kqueue_task_queue_state {
    *  @return true if a worker was woken, false if none is sleeping. */
   [[nodiscard]] bool wake_one_sleeping() noexcept;
 
+  /** Wakes every sleeping worker: a shared-channel hint, then one directed
+   *  write per suspended worker (the authoritative broadcast). */
+  void wake_all_sleeping() noexcept;
+
   /** Head of the shared MPSC CPU queue; nodes chain through next. */
   std::atomic<kqueue_operation_base*> cpu_head{nullptr};
   /** Head of the shared MPSC I/O queue; nodes chain through io_next. */
@@ -185,9 +189,12 @@ struct BNIO_EXPORT kqueue_task_queue_state {
   std::atomic<int> stop_requested{0};
 
   /** Phase-2 transition entry: aborts pending timers, publishes stopping,
-   *  and re-broadcasts. Idempotent; installed by io_context with its owner. */
+   *  and wakes sleeping workers. Idempotent; installed by io_context with its
+   *  owner. */
   using complete_stop_fn = void (*)(void*) noexcept;
+  /** Phase-2 transition hook installed and cleared by the owning io_context. */
   complete_stop_fn complete_stop = nullptr;
+  /** Opaque owner passed to complete_stop; nulled with the hook. */
   void* complete_stop_owner = nullptr;
 
   /** Context lifecycle state: a stop_transition value. none (0) accepts new
@@ -202,9 +209,9 @@ struct BNIO_EXPORT kqueue_task_queue_state {
    *  together with timeout_heap. */
   try_fetch_timeout_fn try_fetch_timeout_operations = nullptr;
 
-  /** Shared wake channel owned by io_context, used to broadcast shutdown;
-   *  each worker registers EVFILT_READ | EV_CLEAR on it before sleeping.
-   *  Normal wakeups target a single worker's channel. */
+  /** Shared wake channel owned by io_context: carries the stop hint and
+   *  native notify_one_waiter wakes. Not a reliable stop broadcast on kqueue:
+   *  Phase 2 also writes each sleeping worker's own channel. */
   bnio::base::wake_channel wake_channel_;
 
   /** Serializes the Phase-2 stopping publication against publish_*: the
@@ -450,6 +457,19 @@ inline bool kqueue_task_queue_state::wake_one_sleeping() noexcept {
   (void)start->wake_channel_.wake();
   suspend.cursor = start->next;
   return true;
+}
+
+inline void kqueue_task_queue_state::wake_all_sleeping() noexcept {
+  // The shared write is only a hint on kqueue; directed writes are
+  // authoritative.
+  (void)wake_channel_.wake();
+  // The list lock also guards node lifetime, so a write cannot race a
+  // channel close/destroy.
+  std::lock_guard<std::mutex> guard(workers.lock);
+  for (kqueue_local_task_queue_state* node = workers.head; node != nullptr;
+       node = node->next) {
+    (void)node->wake_channel_.wake();
+  }
 }
 
 }  // namespace bnio::async_io::bsd_native

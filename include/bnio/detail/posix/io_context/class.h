@@ -464,11 +464,12 @@ class BNIO_EXPORT io_context {
   std::error_code run() noexcept;
 
   /**
-   * Phase 1 of the two-phase stop: records the stop request and broadcasts
-   * the wake channel. Takes no lock (not timers_.mutex, not submit_lock),
-   * aborts no timer, publishes no stopping state, drains nothing, and waits
-   * for nothing. Idempotent, and the only context operation valid from an
-   * async signal handler.
+   * Phase 1 of the two-phase stop: records the stop request and writes the
+   * shared wake channel as a best-effort stop hint (on kqueue it may not
+   * reach every sleeper; one woken worker drives Phase 2). Takes no lock
+   * (not timers_.mutex, not submit_lock), aborts no timer, publishes no
+   * stopping state, drains nothing, and waits for nothing. Idempotent, and
+   * the only context operation valid from an async signal handler.
    *
    * The abort/publish/drain half (phase 2) is driven by join(), stop()'s
    * no-worker fallback, run()'s rejected entry, or an exiting worker.
@@ -881,7 +882,10 @@ class BNIO_EXPORT io_context {
   /**
    * Phase 2 of the two-phase stop, idempotent. The life_state CAS winner
    * aborts pending timer waits, publishes stopping under submit_lock, and
-   * re-broadcasts; a losing caller waits until stopping is published.
+   * calls the backend wake_all_sleeping() to wake every sleeping worker
+   * (io_uring: one shared eventfd write that fans out to armed polls;
+   * kqueue: shared hint plus per-worker directed writes); a losing caller
+   * waits until stopping is published.
    *
    * Only valid on a worker, join, or stop caller: never a signal handler.
    */

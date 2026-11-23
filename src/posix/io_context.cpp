@@ -23,8 +23,8 @@ io_context::io_context() noexcept : io_context(io_context_options{}) {}
 io_context::io_context(const io_context_options& options) noexcept
     : native_options_(options.platform),
       immutable_flags_(options.enable_immediate_io) {
-  // Shared wake channel: each worker registers read interest before
-  // sleeping; one write wakes all of them, which is what stop() wants.
+  // Shared wake channel: one write is a broadcast hint (true fanout on the
+  // io_uring eventfd; best-effort on kqueue, where Phase 2 wakes each worker).
   (void)global_state_.wake_channel_.open();
 
   global_state_.timeout_heap = &timers_;
@@ -184,8 +184,9 @@ void io_context::complete_stop() noexcept {
   global_state_.life_state.notify_all();
 
   // A worker parked in the kernel may be the only thread that can observe the
-  // terminal state; broadcast unconditionally.
-  (void)global_state_.wake_channel_.wake();
+  // terminal state, so every sleeping worker is woken through the
+  // backend-native mechanism.
+  global_state_.wake_all_sleeping();
 }
 
 void io_context::complete_stop_thunk(void* state) noexcept {

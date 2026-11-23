@@ -27,8 +27,8 @@ worker goes idle. Measurements on 8 workers showed a single worker consuming
 ### 1.2 Thundering herd
 
 The original wake path wrote the shared `wake_channel_` once; every worker
-with read interest registered on that fd woke up and raced to pop the queue,
-even though only one task was published.
+with read interest registered on that fd could wake up and race to pop the
+queue, even though only one task was published.
 
 ### 1.3 Use-after-free
 
@@ -105,7 +105,7 @@ struct kqueue_task_queue_state {
   complete_stop_fn complete_stop;                    // idempotent Phase-2 hook
   void* complete_stop_owner;
   std::atomic<int> life_state;                       // stop-transition state: 0 none, 1 aborting, 2 stopping
-  bnio::base::wake_channel wake_channel_;            // shared broadcast (stop + native notify_one_waiter)
+  bnio::base::wake_channel wake_channel_;            // stop hint + native notify_one_waiter
   std::mutex submit_lock;                            // publish/Phase-2 publication serialization
 };
 ```
@@ -210,20 +210,32 @@ holding the suspend lock, so there is no cycle there either.
 
 ## 5. Directed wakeup: `wake_one_sleeping()`
 
-The shared `wake_channel_` is the broadcast path used by the stop request
-(`request_stop()` and the tail of `complete_stop()`, which must wake every
-worker) and as a fallback when nobody is suspended. It is also
-written by the native contexts' own cross-thread publication path:
+The shared `wake_channel_` carries the Phase-1 stop request and, inside the
+backend `wake_all_sleeping()` of §5.1, the Phase-2 shared stop write; it also
+serves as the fallback when nobody is suspended. Both backends expose that
+Phase-2 wake as `kqueue_task_queue_state::wake_all_sleeping()` (BSD) and
+`io_uring_task_queue_state::wake_all_sleeping()` (Linux), and
+`io_context::complete_stop()` calls it unconditionally. On kqueue that stop
+write is only a best-effort hint, not a reliable broadcast: every worker
+registers the same read fd with `EVFILT_READ | EV_CLEAR`, so the first worker
+to drain the pipe can cause another sleeper's pending `EV_CLEAR` event to be
+dropped when its `kevent()` returns to an empty pipe. The authoritative
+kqueue stop broadcast is the directed part of `wake_all_sleeping()` (§5.1),
+which Phase 2 calls after publishing `stopping`; on io_uring the shared write
+alone is the whole broadcast. The shared channel is also written by the
+native contexts' own cross-thread publication path:
 `kqueue_context::notify_one_waiter()` / `io_uring_context::signal_eventfd()`
 (`post()`/`publish_io()` from a foreign thread) write the shared channel
-directly, waking every suspended worker rather than just one. Directed wakeup
-targets the `io_context`-level publish paths (`publish_cpu()`, `publish_io()`,
-their deferred variants, timer wakeups), where exactly one sleeping worker is
-enough. Each worker
-therefore listens to **two** wake sources:
+directly, targeting every suspended worker rather than just one; a publish
+only needs one worker to drain the queue, so best-effort delivery is
+sufficient there. Directed wakeup targets the `io_context`-level publish paths
+(`publish_cpu()`, `publish_io()`, their deferred variants, timer wakeups),
+where exactly one sleeping worker is enough. Each worker therefore listens to
+**two** wake sources:
 
-1. its **per-worker** `wake_channel_` (directed wake);
-2. the **shared** `wake_channel_` (broadcast wake — stop, fallback, and native
+1. its **per-worker** `wake_channel_` (directed wake, and the Phase-2 stop
+   broadcast);
+2. the **shared** `wake_channel_` (stop hint, fallback, and native
    `notify_one_waiter`).
 
 On kqueue both fds are registered with `EVFILT_READ | EV_CLEAR` in
@@ -254,7 +266,7 @@ bool kqueue_task_queue_state::wake_one_sleeping() noexcept {
 
 `io_context::wake_one_sleeping_locked()` (called from `publish_cpu()`,
 `publish_io()`, and timer wakeups) prefers the directed wake and falls back to
-the shared broadcast channel only when nobody is suspended:
+the shared wake channel only when nobody is suspended:
 
 ```cpp
 void io_context::wake_one_sleeping_locked() noexcept {
@@ -306,7 +318,62 @@ worker unregisters under the suspend list lock before its context is
 destroyed: `wake_one_sleeping()` holds that lock for the whole write, so it
 can never write a channel that is about to be closed.
 
-### 5.1 Timer wakeups: `wake_one_if_all_workers_sleeping()`
+### 5.1 Stop broadcast: `wake_all_sleeping()`
+
+Both backends expose the stop broadcast on their shared backend state:
+`kqueue_task_queue_state::wake_all_sleeping()` (BSD) and
+`io_uring_task_queue_state::wake_all_sleeping()` (Linux).
+`io_context::complete_stop()` calls it unconditionally after publishing
+`stopping`; only the implementations differ.
+
+The authoritative stop broadcast on kqueue is directed. Its implementation
+writes the shared channel first as a hint, then holds the suspend list lock
+and writes every sleeping worker's per-worker channel exactly once:
+
+```cpp
+void kqueue_task_queue_state::wake_all_sleeping() noexcept {
+  // The shared write is only a hint on kqueue; directed writes are
+  // authoritative.
+  (void)wake_channel_.wake();
+  // The list lock also guards node lifetime, so a write cannot race a
+  // channel close/destroy.
+  std::lock_guard<std::mutex> guard(workers.lock);
+  for (kqueue_local_task_queue_state* node = workers.head; node != nullptr;
+       node = node->next) {
+    (void)node->wake_channel_.wake();
+  }
+}
+```
+
+It takes only `workers.lock` and runs outside `submit_lock`: the Phase-2
+critical section that stores `stopping` has already been released, so the two
+locks are never nested. The walk starts at `workers.head` and never touches
+`workers.cursor`; rotation belongs to `wake_one_sleeping()`, and a stop
+broadcast must not disturb the publish-path fairness. There is no retry
+around `wake()`: `EAGAIN` means the pipe is already full, so the worker is
+already awake or has a pending wake, and the result is ignored.
+
+Phase 1 (`request_stop()`) keeps writing only the shared channel because it
+must stay lock-free and async-signal-safe. Any worker that the hint wakes
+elects Phase 2 through the `life_state` CAS (`complete_stop()` is
+idempotent), and that elected caller issues the per-worker writes above; a
+worker the hint misses is woken by them instead.
+
+io_uring needs no per-worker loop:
+
+```cpp
+void io_uring_task_queue_state::wake_all_sleeping() noexcept {
+  (void)wake_channel_.wake();
+}
+```
+
+One eventfd write is true fanout: every already-armed `IORING_POLL_ADD` on
+that fd receives its own completion at write time, and a later drain of the
+shared eventfd cannot retract an already-posted completion. The io_uring
+suspend list is not consulted on the stop path at all; that single write is
+the whole Linux broadcast.
+
+### 5.2 Timer wakeups: `wake_one_if_all_workers_sleeping()`
 
 Timer deadlines are delivered by each worker's blocking timeout: a worker
 blocked in `io_uring_enter` / `kevent()` with a timeout wakes itself when its
@@ -375,7 +442,7 @@ always enqueue on the shared queue inside the `submit_lock` critical section.
 The wakeup protocol is unchanged: the global publication is paired with
 `io_context::wake_one_sleeping_locked()`, which directs a wake to exactly one
 sleeping worker through its per-worker wake channel and falls back to the
-shared broadcast channel when nobody is suspended.
+shared wake channel when nobody is suspended.
 
 Standalone kqueue contexts (no `global_state_`) always take the local path; the
 io_uring backend has no standalone mode. When the io_uring submission queue is

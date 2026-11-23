@@ -134,9 +134,10 @@ has run, and `io_context` must also outlive all operations submitted on it.
 
 `request_stop()` and `stop()` are not synchronization barriers: both return
 without waiting for `run()`. `request_stop()` only records the request and
-broadcasts the wake channel; `stop()` additionally completes the stop inline
-only when no worker is running. Before destroying the context or reusing
-operation storage, wait for every `run()` call to return, or use `join()`.
+signals the shared wake channel as a stop hint; `stop()` additionally
+completes the stop inline only when no worker is running. Before destroying
+the context or reusing operation storage, wait for every `run()` call to
+return, or use `join()`.
 
 ```cpp
 // WRONG — ctx destroyed before operation completes
@@ -456,9 +457,13 @@ parts of every submission with the Phase-2 stop publication and destruction:
   the same lock.
 - Runtime wakeups — publish paths, timer paths, native
   `notify_one_waiter()` — are bound to the submit lock, so a close can never
-  race one. The stop broadcast is deliberately lock-free: `request_stop()`
-  and the tail of `complete_stop()` write the shared wake channel without
-  `submit_lock`, and under Rule 3 they must not race destruction.
+  race one. The stop broadcast runs outside `submit_lock`: `request_stop()`
+  writes the shared wake channel lock-free, and `complete_stop()` delegates
+  its broadcast to the backend `wake_all_sleeping()`, also outside
+  `submit_lock`; under Rule 3 neither may race destruction. On kqueue the
+  shared stop write is lock-free and the per-worker stop writes take only
+  the suspend-list lock; on io_uring the single shared eventfd write is
+  lock-free.
 
 `publish_cpu` / `publish_io` **assume the publish happens against a running
 (non-stopped) context**; the in-lock check makes that assumption explicit
@@ -489,14 +494,21 @@ Stopping has two phases:
 
 - **Phase 1 — `request_stop()`.** Lock-free and the only context operation
   valid in an async signal handler. It stores `stop_requested = 1` and
-  broadcasts the shared wake channel. It does not abort timers, publish
-  `stopping`, drain, or wait, and it is idempotent.
+  writes the shared wake channel as a stop hint: on kqueue that write is not
+  a reliable broadcast, because the first worker to drain the pipe can drop
+  another sleeper's pending `EV_CLEAR` event. One woken worker is enough —
+  it elects Phase 2. It does not abort timers, publish `stopping`, drain, or
+  wait, and it is idempotent.
 - **Phase 2 — `complete_stop()`** (internal, idempotent). One caller is
   elected by a CAS on `life_state` through `stop_transition::none` (0) →
   `stop_transition::aborting` (1) → `stop_transition::stopping` (2). The
   winner aborts pending timer waits, publishes `stopping` under
-  `submit_lock`, and calls `notify_all` plus the shared-channel broadcast; a
-  loser waits until `stopping` is visible. `life_state` remains a
+  `submit_lock`, calls `notify_all`, and calls the backend
+  `wake_all_sleeping()`: io_uring writes the shared eventfd once, completing
+  every armed `IORING_POLL_ADD` (fanout, no per-worker loop), while kqueue
+  writes the shared pipe as a hint and then each suspended worker's own
+  channel (outside `submit_lock`, under only the suspend-list lock). A loser
+  waits until `stopping` is visible. `life_state` remains a
   `std::atomic<int>` whose values are the three
   `bnio::async_io::stop_transition` enumerators: `none` (no stop transition
   has started; work is accepted), `aborting`, and `stopping`.
