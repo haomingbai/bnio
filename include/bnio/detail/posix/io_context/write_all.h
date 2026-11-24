@@ -133,9 +133,32 @@ class local_socket_write_all_state {
 
 namespace bnio::detail {
 
+// Default: report the backend's errno unchanged.
+template <class State>
+[[nodiscard]] std::error_code normalize_step_error(const State&,
+                                                   std::error_code ec) noexcept {
+  return ec;
+}
+
+// XNU/FreeBSD uipc_send checks SS_ISCONNECTED before SS_CANTSENDMORE, so an
+// AF_UNIX send racing the peer's close can return ENOTCONN. Bytes already
+// transferred prove the stream was connected: that is a lost peer and must
+// read as EPIPE. At zero progress ENOTCONN still means "not connected" and
+// passes through.
+template <io_context::schedule_kind Kind>
+[[nodiscard]] std::error_code normalize_step_error(
+    const local_socket_write_all_state<Kind>& state,
+    std::error_code ec) noexcept {
+  if (ec == std::errc::not_connected && state.transferred > 0) {
+    return std::make_error_code(std::errc::broken_pipe);
+  }
+  return ec;
+}
+
 template <class State>
 [[nodiscard]] auto write_all_step_complete(State* state, std::error_code ec,
                                            std::size_t bytes) noexcept {
+  ec = normalize_step_error(*state, ec);
   if (ec) {
     // Failure/cancellation: set done so repeat_until exits instead of
     // retrying the same failed operation forever.

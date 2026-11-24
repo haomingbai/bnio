@@ -527,6 +527,11 @@ proposal; they are listed to show the split is what unblocks them.
   unchanged from the kernel: `ECONNREFUSED` (connect to a bound-but-not-
   listening or stale path), `EADDRINUSE` (bind over an existing socket
   file), `EAFNOSUPPORT`, `EPIPE` (peer closed on send), `ENOTCONN`.
+  - Sole exception: write-all reports `EPIPE` for a stream send that fails
+    with `ENOTCONN` after some bytes were already transferred — the
+    XNU/FreeBSD `uipc_send` peer-close race, where `SS_ISCONNECTED` is
+    checked before `SS_CANTSENDMORE`. At zero progress `ENOTCONN` still
+    passes through unchanged.
 - **Endpoint decode failures** reuse the established pattern:
   `make_local_endpoint` returns `nullopt`, and receive-from-style
   completions report `std::errc::address_family_not_supported` with the
