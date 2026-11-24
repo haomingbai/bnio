@@ -363,6 +363,7 @@ example builds a server and a client):
 
 - `abi-compatibility.md` — ABI policy, dependency baseline, and release
   verification report.
+- `release-signing.md` — RPM signing, release secrets, and key management.
 - `maintaince.md` — naming, base-layer rules, test, and documentation
   conventions.
 - `roadmap.md` — next milestone (QUIC).

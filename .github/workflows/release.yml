@@ -52,7 +52,7 @@ jobs:
           -L stress --repeat until-fail:20
 
   package:
-    name: Package (deb + rpm via CPack)
+    name: Package (deb + signed rpm via CPack)
     needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -61,11 +61,29 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6.0.2
 
+      - name: Verify tag matches BNIO_VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          cmake_version="$(sed -n 's/^set(BNIO_VERSION "\([^"]*\)".*/\1/p' CMakeLists.txt | head -n 1)"
+          if [[ -z "$cmake_version" ]]; then
+            echo "::error::could not read BNIO_VERSION from CMakeLists.txt"
+            exit 1
+          fi
+          if [[ "$tag_version" != "$cmake_version" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match BNIO_VERSION=${cmake_version}"
+            exit 1
+          fi
+          echo "Tag ${GITHUB_REF_NAME} matches BNIO_VERSION=${cmake_version}"
+
       - name: Install build and packaging dependencies
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
             cmake \
+            gnupg \
             libssl-dev \
             liburing-dev \
             ninja-build \
@@ -97,6 +115,9 @@ jobs:
       - name: Build
         run: cmake --build package-build
 
+      # DEB packages are intentionally unsigned: apt does not verify
+      # per-package signatures, and this workflow publishes release files
+      # rather than an apt repository. See docs/release-signing.md.
       - name: Generate DEB packages
         working-directory: package-build
         run: cpack -G DEB
@@ -110,7 +131,70 @@ jobs:
           mkdir -p artifacts
           cp package-build/*.deb artifacts/ 2>/dev/null || true
           cp package-build/*.rpm artifacts/ 2>/dev/null || true
+          sha256sum artifacts/*.deb > artifacts/SHA256SUMS.deb
           ls -la artifacts/
+
+      - name: Sign RPM packages
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          RPM_GPG_PRIVATE_KEY: ${{ secrets.RPM_GPG_PRIVATE_KEY }}
+          RPM_GPG_PASSPHRASE: ${{ secrets.RPM_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${RPM_GPG_PRIVATE_KEY:-}" ]]; then
+            echo "::error::RPM_GPG_PRIVATE_KEY is not configured; refusing to publish unsigned RPMs"
+            exit 1
+          fi
+
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          printf 'allow-preset-passphrase\n' > "$GNUPGHOME/gpg-agent.conf"
+          gpgconf --kill gpg-agent 2>/dev/null || true
+          trap 'gpgconf --kill gpg-agent 2>/dev/null || true; rm -rf "$GNUPGHOME"' EXIT
+
+          printf '%s' "$RPM_GPG_PRIVATE_KEY" | gpg --batch --import
+
+          key_id="$(gpg --batch --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
+          if [[ -z "$key_id" ]]; then
+            echo "::error::no secret key found after import"
+            exit 1
+          fi
+          fingerprint="$(gpg --batch --with-colons --fingerprint "$key_id" | awk -F: '/^fpr:/ {print $10; exit}')"
+
+          if [[ -n "${RPM_GPG_PASSPHRASE:-}" ]]; then
+            preset_cmd="$(command -v gpg-preset-passphrase || echo /usr/lib/gnupg/gpg-preset-passphrase)"
+            if [[ ! -x "$preset_cmd" ]]; then
+              echo "::error::gpg-preset-passphrase not found; cannot unlock the signing key"
+              exit 1
+            fi
+            gpgconf --launch gpg-agent
+            while IFS= read -r keygrip; do
+              printf '%s' "$RPM_GPG_PASSPHRASE" | "$preset_cmd" --preset "$keygrip"
+            done < <(gpg --batch --with-colons --with-keygrip --list-secret-keys | awk -F: '/^grp:/ {print $10}')
+          fi
+
+          rpmsign --addsign \
+            --define "_gpg_name $key_id" \
+            --define "__gpg /usr/bin/gpg" \
+            --define "_gpg_digest_algo sha256" \
+            artifacts/*.rpm
+
+          gpg --armor --export "$key_id" > artifacts/bnio-rpm-signing-key.asc
+          version="${GITHUB_REF_NAME#v}"
+          {
+            echo "bnio RPM signing key"
+            echo
+            echo "Fingerprint: $fingerprint"
+            echo
+            echo "Verify:"
+            echo "  rpm --import bnio-rpm-signing-key.asc"
+            echo "  rpmkeys --checksig bnio-${version}-Linux-runtime.rpm"
+          } > artifacts/RPM-SIGNING.txt
+
+          sudo rpm --import artifacts/bnio-rpm-signing-key.asc
+          rpmkeys --checksig artifacts/*.rpm
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@v7.0.1
