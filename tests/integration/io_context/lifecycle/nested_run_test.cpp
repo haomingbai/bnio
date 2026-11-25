@@ -124,8 +124,8 @@ struct foreign_context_publish_recv {
   void set_value(std::error_code) noexcept {
     auto scheduler = target->get_post_scheduler();
     auto sender = scheduler.schedule();
-    auto operation = bexec::connect(
-        sender, foreign_context_op_recv{terminal, canceled});
+    auto operation =
+        bexec::connect(sender, foreign_context_op_recv{terminal, canceled});
     bexec::start(operation);
 
     // No worker ever ran the target; stop() drives Phase 2 and drains inline.
@@ -201,12 +201,12 @@ TEST(LifecycleTest, publish_from_foreign_worker_uses_target_shared_queue) {
   std::atomic<bool> done{false};
 
   auto sender = outer->get_post_scheduler().schedule();
-  using Op = decltype(bexec::connect(
-      sender, foreign_context_publish_recv{nullptr, nullptr, nullptr,
-                                           nullptr}));
+  using Op =
+      decltype(bexec::connect(sender, foreign_context_publish_recv{
+                                          nullptr, nullptr, nullptr, nullptr}));
   auto operation = std::make_unique<op_holder<Op>>(
-      sender, foreign_context_publish_recv{inner.get(), &terminal, &canceled,
-                                           &done});
+      sender,
+      foreign_context_publish_recv{inner.get(), &terminal, &canceled, &done});
 
   std::thread worker([&outer]() { (void)outer->run(); });
   bexec::start(operation->op);

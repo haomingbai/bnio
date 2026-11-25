@@ -125,9 +125,8 @@ void io_uring_context::queue_exit() noexcept {
   // Only an unclean teardown (never run, fatal error, forced close) still owes
   // terminal calls; a finished context must not touch sibling workers' queues.
   // global_state_ must stay wired until the destructor completes.
-  const bool unclean =
-      run_state_.state.load(std::memory_order_acquire) !=
-      context_state::finished;
+  const bool unclean = run_state_.state.load(std::memory_order_acquire) !=
+                       context_state::finished;
 
   if (unclean) {
     // Mark finishing (not finished) so the delivery observes a coherent

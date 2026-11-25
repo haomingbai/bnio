@@ -135,8 +135,8 @@ namespace bnio::detail {
 
 // Default: report the backend's errno unchanged.
 template <class State>
-[[nodiscard]] std::error_code normalize_step_error(const State&,
-                                                   std::error_code ec) noexcept {
+[[nodiscard]] std::error_code normalize_step_error(
+    const State&, std::error_code ec) noexcept {
   return ec;
 }
 
